@@ -24,6 +24,8 @@ It does **not** duplicate psychometric numerical kernels, identity credentials, 
 - [Bounded AI Governance](docs/AI_GOVERNANCE.md) — optional AI use, deterministic fallback, provider/privacy boundaries, LLM-as-a-Judge treatment, and prohibited score/decision mutation.
 - [Research Commons Governance](docs/RESEARCH_GOVERNANCE.md) — research consent, identity separation, staging/privacy/scientific review, immutable release bundles, access classes, withdrawal/correction, and reproducibility.
 - [Quality Attribute Scenarios](docs/QUALITY_ATTRIBUTES.md) — measurable scientific, reliability, availability, security, privacy, accessibility, performance, portability, maintainability, observability, and recovery scenarios.
+- [Compliance Readiness](docs/COMPLIANCE_READINESS.md) — SOC 2/CSAP readiness evidence model, control/evidence matrix, separation of duties, and explicit certification non-claim.
+- [Risk Register](docs/RISK_REGISTER.md) — material scientific, product, security, privacy, operational, integration, and commercial risks with treatment/evidence state.
 - [Glossary](docs/GLOSSARY.md) — canonical product, scientific, identity, research, integration, deployment, and evidence terminology.
 - [Architecture](ARCHITECTURE.md) — bounded contexts, dependency direction, runtime modules, data domains, integration consistency, and architecture fitness functions.
 - [Architecture Decision Records](docs/adr/README.md) — authoritative material decisions and the required ADR quality contract.
