@@ -73,9 +73,7 @@ impl From<postgres::Error> for PersistenceError {
 /// # Errors
 ///
 /// Returns the PostgreSQL error if the migration cannot be applied.
-pub fn apply_integration_migration(
-    client: &mut impl GenericClient,
-) -> Result<(), postgres::Error> {
+pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
     client.batch_execute(INTEGRATION_MIGRATION)
 }
 
@@ -99,7 +97,8 @@ pub fn enqueue_outbox_event(
         return Err(PersistenceError::InvalidAttemptLimit);
     }
     let occurred_at_unix_ms = postgres_bigint(event.occurred_at_unix_ms())?;
-    let max_attempts = i64::try_from(max_attempts).map_err(|_| PersistenceError::ValueOutOfRange)?;
+    let max_attempts =
+        i64::try_from(max_attempts).map_err(|_| PersistenceError::ValueOutOfRange)?;
     let causation_ref = event.causation_ref();
 
     let inserted = client.execute(
@@ -170,7 +169,8 @@ pub fn accept_inbox_event(
     event: &IntegrationEvent,
     received_at_unix_ms: u64,
 ) -> Result<InboxDisposition, PersistenceError> {
-    let consumer_ref = normalized_reference(consumer_ref).ok_or(PersistenceError::InvalidReference)?;
+    let consumer_ref =
+        normalized_reference(consumer_ref).ok_or(PersistenceError::InvalidReference)?;
     if received_at_unix_ms == 0 {
         return Err(PersistenceError::InvalidTimestamp);
     }
