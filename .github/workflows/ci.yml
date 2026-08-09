@@ -83,6 +83,12 @@ jobs:
         run: cargo check --all-targets
       - name: Require committed Cargo lockfile
         run: git diff --exit-code -- Cargo.lock
+      - name: Emit resolved Cargo lock evidence when the lock gate fails
+        if: failure()
+        run: |
+          printf 'RESOLVED_CARGO_LOCK_BASE64='
+          base64 -w0 Cargo.lock
+          printf '\n'
       - name: Preserve resolved lockfile when the lock gate fails
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
