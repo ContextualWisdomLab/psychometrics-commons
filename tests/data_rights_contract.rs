@@ -20,20 +20,35 @@ fn export_request_requires_verified_identity_before_processing() {
     assert_eq!(request.scope_ref(), "account_data_scope");
     assert_eq!(request.kind(), DataRightsRequestKind::Export);
     assert_eq!(request.state(), DataRightsState::Requested);
+    assert_eq!(request.requested_at_unix_ms(), 1_000);
+    assert_eq!(request.verification_evidence_ref(), None);
+    assert_eq!(request.operation_ref(), None);
+    assert_eq!(request.completion_evidence_ref(), None);
     assert_eq!(
         request.start_processing("operation_ref", 1_100),
         Err(DataRightsError::IdentityVerificationRequired)
     );
 
     request
-        .verify_identity("verification_evidence_ref", 1_050)
+        .verify_identity(" verification_evidence_ref ", 1_050)
         .unwrap();
     assert_eq!(request.state(), DataRightsState::IdentityVerified);
-    request.start_processing("operation_ref", 1_100).unwrap();
+    assert_eq!(
+        request.verification_evidence_ref(),
+        Some("verification_evidence_ref")
+    );
+    request.start_processing(" operation_ref ", 1_100).unwrap();
     assert_eq!(request.state(), DataRightsState::Processing);
-    request.complete("completion_evidence_ref", &[], 1_200).unwrap();
+    assert_eq!(request.operation_ref(), Some("operation_ref"));
+    request
+        .complete(" completion_evidence_ref ", &[], 1_200)
+        .unwrap();
     assert_eq!(request.state(), DataRightsState::Completed);
-    assert_eq!(request.retained_scope_refs(), &[] as &[String]);
+    assert_eq!(
+        request.completion_evidence_ref(),
+        Some("completion_evidence_ref")
+    );
+    assert!(request.retained_scope_refs().is_empty());
 }
 
 #[test]
@@ -46,8 +61,12 @@ fn deletion_completion_preserves_legal_retention_exceptions() {
         2_000,
     )
     .unwrap();
-    request.verify_identity("identity_evidence_ref", 2_050).unwrap();
-    request.start_processing("deletion_operation_ref", 2_100).unwrap();
+    request
+        .verify_identity("identity_evidence_ref", 2_050)
+        .unwrap();
+    request
+        .start_processing("deletion_operation_ref", 2_100)
+        .unwrap();
     request
         .complete(
             "deletion_completion_ref",
@@ -59,7 +78,10 @@ fn deletion_completion_preserves_legal_retention_exceptions() {
     assert_eq!(request.state(), DataRightsState::PartiallyCompleted);
     assert_eq!(
         request.retained_scope_refs(),
-        &["tax_record_retention".to_owned(), "audit_evidence_retention".to_owned()]
+        &[
+            "tax_record_retention".to_owned(),
+            "audit_evidence_retention".to_owned()
+        ]
     );
 }
 
@@ -77,11 +99,7 @@ fn export_completion_rejects_deletion_retention_exceptions() {
     request.start_processing("operation_ref", 3_100).unwrap();
 
     assert_eq!(
-        request.complete(
-            "completion_ref",
-            &["legal_retention_scope"],
-            3_200,
-        ),
+        request.complete("completion_ref", &["legal_retention_scope"], 3_200),
         Err(DataRightsError::RetentionExceptionNotAllowed)
     );
 }
@@ -98,13 +116,49 @@ fn lifecycle_is_monotonic_and_terminal_states_are_fail_closed() {
     .unwrap();
 
     assert_eq!(
+        request.verify_identity("verification_ref", 0),
+        Err(DataRightsError::InvalidTimestamp)
+    );
+    assert_eq!(
         request.verify_identity("verification_ref", 3_999),
         Err(DataRightsError::NonMonotonicTimestamp)
     );
     request.verify_identity("verification_ref", 4_000).unwrap();
+    assert_eq!(
+        request.verify_identity("second_verification_ref", 4_001),
+        Err(DataRightsError::InvalidTransition)
+    );
+    assert_eq!(
+        request.start_processing(" ", 4_001),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request.start_processing("operation_ref", 3_999),
+        Err(DataRightsError::NonMonotonicTimestamp)
+    );
     request.start_processing("operation_ref", 4_000).unwrap();
+    assert_eq!(
+        request.complete("completion_ref", &[], 0),
+        Err(DataRightsError::InvalidTimestamp)
+    );
+    assert_eq!(
+        request.complete("completion_ref", &[], 3_999),
+        Err(DataRightsError::NonMonotonicTimestamp)
+    );
+    assert_eq!(
+        request.complete(" ", &[], 4_000),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request.complete("completion_ref", &["12345"], 4_000),
+        Err(DataRightsError::InvalidReference)
+    );
     request.complete("completion_ref", &[], 4_000).unwrap();
     assert_eq!(request.state(), DataRightsState::Completed);
+    assert_eq!(
+        request.complete("second_completion_ref", &[], 4_100),
+        Err(DataRightsError::InvalidTransition)
+    );
     assert_eq!(
         request.start_processing("second_operation_ref", 4_100),
         Err(DataRightsError::InvalidTransition)
@@ -138,22 +192,63 @@ fn invalid_or_numeric_only_public_references_fail_closed() {
             "request_ref",
             "participant_ref",
             DataRightsRequestKind::Export,
+            "12345",
+            5_000,
+        ),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        DataRightsRequest::new(
+            "request_ref",
+            "participant_ref",
+            DataRightsRequestKind::Export,
             "account_data_scope",
             0,
         ),
         Err(DataRightsError::InvalidTimestamp)
+    );
+
+    let mut request = DataRightsRequest::new(
+        "request_ref",
+        "participant_ref",
+        DataRightsRequestKind::Deletion,
+        "participant_data_scope",
+        5_000,
+    )
+    .unwrap();
+    assert_eq!(
+        request.verify_identity("12345", 5_100),
+        Err(DataRightsError::InvalidReference)
     );
 }
 
 #[test]
 fn public_error_messages_are_stable() {
     let cases = [
-        (DataRightsError::InvalidReference, "data-rights references must be opaque non-numeric values"),
-        (DataRightsError::InvalidTimestamp, "data-rights timestamps must be greater than zero"),
-        (DataRightsError::NonMonotonicTimestamp, "data-rights event time must not move backwards"),
-        (DataRightsError::IdentityVerificationRequired, "identity verification is required before data-rights processing"),
-        (DataRightsError::RetentionExceptionNotAllowed, "retention exceptions are valid only for deletion requests"),
-        (DataRightsError::InvalidTransition, "data-rights request transition is not allowed from the current state"),
+        (
+            DataRightsError::InvalidReference,
+            "data-rights references must be opaque non-numeric values",
+        ),
+        (
+            DataRightsError::InvalidTimestamp,
+            "data-rights timestamps must be greater than zero",
+        ),
+        (
+            DataRightsError::NonMonotonicTimestamp,
+            "data-rights event time must not move backwards",
+        ),
+        (
+            DataRightsError::IdentityVerificationRequired,
+            "identity verification is required before data-rights processing",
+        ),
+        (
+            DataRightsError::RetentionExceptionNotAllowed,
+            "retention exceptions are valid only for deletion requests",
+        ),
+        (
+            DataRightsError::InvalidTransition,
+            "data-rights request transition is not allowed from the current state",
+        ),
     ];
     for (error, expected) in cases {
         assert_eq!(error.to_string(), expected);
