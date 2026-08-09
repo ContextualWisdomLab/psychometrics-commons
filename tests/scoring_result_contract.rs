@@ -186,12 +186,7 @@ fn score_observations_fail_closed_for_invalid_numeric_or_reference_input() {
     assert_eq!(score_error, ScoringContractError::InvalidScore);
     assert_eq!(score_error.to_string(), "score values must be finite");
 
-    for invalid_standard_error in [
-        -0.1,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NAN,
-    ] {
+    for invalid_standard_error in [-0.1, f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
         let error = ScoreObservation::scored("construct_ref", 1.0, Some(invalid_standard_error))
             .unwrap_err();
         assert_eq!(error, ScoringContractError::InvalidStandardError);
