@@ -59,7 +59,7 @@ pub enum SessionCommand {
     Activate,
     /// Pause an active session, or confirm that it is already paused.
     Pause,
-    /// Resume a paused session.
+    /// Resume a paused session, or confirm that it is already active.
     Resume,
     /// Close response collection and freeze the response set for snapshotting.
     Complete,
@@ -137,7 +137,7 @@ pub const fn transition(
     };
 
     let next = match (state, command) {
-        (Created | Active, Activate) | (Paused, Resume) => Active,
+        (Created | Active, Activate) | (Paused | Active, Resume) => Active,
         (Active | Paused, Pause) => Paused,
         (Active | Completed, Complete) => Completed,
         (Completed | Scoring, BeginScoring) => Scoring,
