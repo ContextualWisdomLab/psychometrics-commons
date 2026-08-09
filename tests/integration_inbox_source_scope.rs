@@ -1,11 +1,11 @@
 //! Regression tests for source-scoped integration inbox deduplication.
 
-use psychometrics_commons_runtime::integration::{InboxDisposition, IntegrationError, IntegrationInbox};
+use psychometrics_commons_runtime::integration::{
+    InboxDisposition, IntegrationError, IntegrationInbox,
+};
 
-const DIGEST_A: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const DIGEST_B: &str =
-    "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 #[test]
 fn identical_event_refs_from_different_sources_do_not_collide() {
