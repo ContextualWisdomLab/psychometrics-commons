@@ -40,11 +40,10 @@ flowchart TD
     Result --> Longitudinal
     Result --> Research
     Result --> Account
-    Research --> Research
     Workbench --> Admin
 ```
 
-Public navigation may expose only the participant/research surfaces. Workbench/Admin are role-gated and may be separate applications while consuming the same product APIs.
+Public navigation may expose only the participant/research surfaces. Workbench/Admin are role-gated and may be separate applications while consuming the same product APIs. Research Commons catalog/discovery is provided through the semantic-data-portal integration boundary rather than a recursive product-navigation relationship.
 
 ## 3. Public Assessment journey
 
