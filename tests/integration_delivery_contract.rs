@@ -5,10 +5,8 @@ use psychometrics_commons_runtime::integration::{
     OutboxEntry, OutboxState,
 };
 
-const DIGEST_A: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const DIGEST_B: &str =
-    "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn event() -> IntegrationEvent {
     IntegrationEvent::new(
@@ -193,12 +191,7 @@ fn outbox_retries_are_bounded_and_quarantine_poison_delivery() {
     assert_eq!(entry.attempts()[0].cause_code(), Some("provider_timeout"));
 
     assert_eq!(
-        entry.record_attempt(
-            "attempt_three",
-            DeliveryOutcome::Delivered,
-            10_300,
-            None
-        ),
+        entry.record_attempt("attempt_three", DeliveryOutcome::Delivered, 10_300, None),
         Err(IntegrationError::TerminalOutboxState)
     );
 }
@@ -357,33 +350,15 @@ fn inbox_rejects_invalid_identity_digest_and_timestamp() {
     let mut inbox = IntegrationInbox::new();
 
     assert_eq!(
-        inbox.accept(
-            "12345",
-            "source_alpha",
-            "event_alpha",
-            DIGEST_A,
-            20_000
-        ),
+        inbox.accept("12345", "source_alpha", "event_alpha", DIGEST_A, 20_000),
         Err(IntegrationError::InvalidReference)
     );
     assert_eq!(
-        inbox.accept(
-            "consumer_alpha",
-            "12345",
-            "event_alpha",
-            DIGEST_A,
-            20_000
-        ),
+        inbox.accept("consumer_alpha", "12345", "event_alpha", DIGEST_A, 20_000),
         Err(IntegrationError::InvalidReference)
     );
     assert_eq!(
-        inbox.accept(
-            "consumer_alpha",
-            "source_alpha",
-            "12345",
-            DIGEST_A,
-            20_000
-        ),
+        inbox.accept("consumer_alpha", "source_alpha", "12345", DIGEST_A, 20_000),
         Err(IntegrationError::InvalidReference)
     );
     assert_eq!(
@@ -397,13 +372,7 @@ fn inbox_rejects_invalid_identity_digest_and_timestamp() {
         Err(IntegrationError::InvalidDigest)
     );
     assert_eq!(
-        inbox.accept(
-            "consumer_alpha",
-            "source_alpha",
-            "event_alpha",
-            DIGEST_A,
-            0
-        ),
+        inbox.accept("consumer_alpha", "source_alpha", "event_alpha", DIGEST_A, 0),
         Err(IntegrationError::InvalidTimestamp)
     );
 }
