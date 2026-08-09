@@ -197,7 +197,15 @@ impl ScoreObservation {
         standard_error: Option<f64>,
     ) -> Result<Self, ScoringContractError> {
         let construct_ref = construct_ref.into();
-        let construct_ref = required_reference(&construct_ref)?;
+        Self::scored_from_reference(&construct_ref, score, standard_error)
+    }
+
+    fn scored_from_reference(
+        construct_ref: &str,
+        score: f64,
+        standard_error: Option<f64>,
+    ) -> Result<Self, ScoringContractError> {
+        let construct_ref = required_reference(construct_ref)?;
         if !score.is_finite() {
             return Err(ScoringContractError::InvalidScore);
         }
