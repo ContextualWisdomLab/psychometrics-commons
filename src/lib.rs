@@ -12,6 +12,7 @@ pub mod consent;
 pub mod data_rights;
 pub mod instrument;
 pub mod item_delivery;
+pub mod participant;
 mod reference;
 pub mod response;
 pub mod result;
