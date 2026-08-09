@@ -81,6 +81,27 @@ jobs:
         run: cargo llvm-cov --json --summary-only --output-path coverage.json
       - name: Enforce complete line coverage
         run: python3 scripts/check_coverage.py coverage.json --kind lines
+      - name: Diagnose missing line coverage
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("coverage.json").read_text(encoding="utf-8"))
+          entry = payload["data"][0]
+          kind = "lines"
+          for file_entry in entry.get("files", []):
+              summary = file_entry.get("summary", {})
+              metric = summary.get(kind)
+              if isinstance(metric, dict) and metric.get("covered") != metric.get("count"):
+                  print(
+                      "INCOMPLETE_FILE "
+                      f"{kind} {metric.get('covered')}/{metric.get('count')} "
+                      f"{file_entry.get('filename')}"
+                  )
+          PY
+          cargo llvm-cov report --text --show-missing-lines --show-instantiations
 
   branch-coverage:
     name: Production branch coverage
@@ -102,3 +123,36 @@ jobs:
         run: cargo +nightly-2026-08-01 llvm-cov --branch --json --summary-only --output-path coverage-branches.json
       - name: Enforce complete branch coverage
         run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
+      - name: Diagnose missing branch coverage
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("coverage-branches.json").read_text(encoding="utf-8"))
+          entry = payload["data"][0]
+          kind = "branches"
+          for file_entry in entry.get("files", []):
+              summary = file_entry.get("summary", {})
+              metric = summary.get(kind)
+              if isinstance(metric, dict) and metric.get("covered") != metric.get("count"):
+                  print(
+                      "INCOMPLETE_FILE "
+                      f"{kind} {metric.get('covered')}/{metric.get('count')} "
+                      f"{file_entry.get('filename')}"
+                  )
+          PY
+          cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = None
+          for raw_line in Path("coverage-branches.lcov").read_text(encoding="utf-8").splitlines():
+              if raw_line.startswith("SF:"):
+                  source = raw_line[3:]
+              elif raw_line.startswith("BRDA:"):
+                  line, block, branch, taken = raw_line[5:].split(",", 3)
+                  if taken in {"0", "-"}:
+                      print(f"UNCOVERED_BRANCH {source}:{line}:{block}:{branch}")
+          PY
