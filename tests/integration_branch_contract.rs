@@ -8,19 +8,24 @@ use psychometrics_commons_runtime::integration::{
 const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-fn event() -> IntegrationEvent {
+fn event_with(event_ref: &str, digest: &str) -> IntegrationEvent {
     IntegrationEvent::new(
-        "event_alpha",
+        event_ref,
         "assessment.session.completed",
         "v1",
         "psychometrics_commons",
+        "tenant_alpha",
         "session_alpha",
         1_000,
         "correlation_alpha",
         None,
-        DIGEST_A,
+        digest,
     )
     .unwrap()
+}
+
+fn event() -> IntegrationEvent {
+    event_with("event_alpha", DIGEST_A)
 }
 
 #[test]
@@ -83,29 +88,17 @@ fn replay_conflict_checks_outcome_time_and_cause_independently() {
 }
 
 #[test]
-fn inbox_identity_comparison_covers_same_consumer_and_source_with_distinct_events() {
+fn inbox_identity_comparison_covers_same_consumer_source_and_tenant_with_distinct_events() {
     let mut inbox = IntegrationInbox::new();
     assert_eq!(
         inbox
-            .accept(
-                "consumer_alpha",
-                "psychometrics_commons",
-                "event_alpha",
-                DIGEST_A,
-                2_000,
-            )
+            .accept_event("consumer_alpha", &event_with("event_alpha", DIGEST_A), 2_000)
             .unwrap(),
         InboxDisposition::Accepted
     );
     assert_eq!(
         inbox
-            .accept(
-                "consumer_alpha",
-                "psychometrics_commons",
-                "event_beta",
-                DIGEST_B,
-                2_100,
-            )
+            .accept_event("consumer_alpha", &event_with("event_beta", DIGEST_B), 2_100)
             .unwrap(),
         InboxDisposition::Accepted
     );
