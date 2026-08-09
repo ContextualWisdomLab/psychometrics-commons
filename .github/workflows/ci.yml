@@ -122,4 +122,17 @@ jobs:
         run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
       - name: Diagnose missing branch coverage
         if: failure()
-        run: cargo +nightly-2026-08-01 llvm-cov report --branch --show-missing-lines || true
+        run: |
+          cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = None
+          for raw_line in Path("coverage-branches.lcov").read_text(encoding="utf-8").splitlines():
+              if raw_line.startswith("SF:"):
+                  source = raw_line[3:]
+              elif raw_line.startswith("BRDA:"):
+                  line, block, branch, taken = raw_line[5:].split(",", 3)
+                  if taken in {"0", "-"}:
+                      print(f"UNCOVERED_BRANCH {source}:{line}:{block}:{branch}")
+          PY
