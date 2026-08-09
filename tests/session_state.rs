@@ -26,6 +26,7 @@ const COMMANDS: [SessionCommand; 10] = [
     SessionCommand::Invalidate,
 ];
 
+#[rustfmt::skip]
 const VALID: [(SessionState, SessionCommand, SessionState); 28] = [
     (SessionState::Created, SessionCommand::Activate, SessionState::Active),
     (SessionState::Created, SessionCommand::Cancel, SessionState::Cancelled),
