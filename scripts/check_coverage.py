@@ -28,7 +28,7 @@ def validate_kind(totals: Mapping[str, Any], kind: str) -> str:
         raise ValueError(f"coverage totals do not contain {kind}")
     count = summary.get("count")
     covered = summary.get("covered")
-    if not isinstance(count, int) or not isinstance(covered, int):
+    if type(count) is not int or type(covered) is not int:
         raise ValueError(f"{kind} count and covered values must be integers")
     if count < 0 or covered < 0 or covered > count:
         raise ValueError(f"{kind} coverage counts are invalid")
