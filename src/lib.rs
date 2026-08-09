@@ -7,4 +7,5 @@
 //! computation remains in `fast-mlsirm` and is consumed through versioned
 //! contracts rather than reimplemented here.
 
+pub mod response;
 pub mod session;
