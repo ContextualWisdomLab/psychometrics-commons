@@ -361,6 +361,10 @@ fn contribution_withdrawal_is_monotonic_idempotent_and_irreversible() {
         Err(ResearchContributionError::AlreadyWithdrawn)
     );
     assert_eq!(
+        withdrawn.withdraw("withdrawal_event", 8_201),
+        Err(ResearchContributionError::AlreadyWithdrawn)
+    );
+    assert_eq!(
         contribution.withdraw("withdrawal_event", 8_000),
         Err(ResearchContributionError::InvalidWithdrawalTime)
     );
