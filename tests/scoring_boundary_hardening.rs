@@ -43,19 +43,28 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
     let unbound = ledger_with_one_response()
         .freeze(SessionState::Completed)
         .unwrap();
-    assert_eq!(
+    let unbound_error =
         ScoringRequest::from_snapshot(&unbound, scoring_input("response_snapshot_ref"))
-            .unwrap_err(),
+            .unwrap_err();
+    assert_eq!(
+        unbound_error,
         ScoringContractError::UnboundResponseSnapshot
+    );
+    assert_eq!(
+        unbound_error.to_string(),
+        "scoring requires a durable response snapshot reference"
     );
 
     let empty_bound = ResponseLedger::new("session_ref")
         .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
-    assert_eq!(
+    let empty_error =
         ScoringRequest::from_snapshot(&empty_bound, scoring_input("response_snapshot_ref"))
-            .unwrap_err(),
-        ScoringContractError::EmptyResponseSnapshot
+            .unwrap_err();
+    assert_eq!(empty_error, ScoringContractError::EmptyResponseSnapshot);
+    assert_eq!(
+        empty_error.to_string(),
+        "scoring requires at least one response event"
     );
 }
 
@@ -66,9 +75,15 @@ fn scoring_dispatch_rejects_snapshot_reference_substitution() {
         .unwrap();
 
     assert_eq!(snapshot.snapshot_ref(), Some("response_snapshot_ref"));
+    let mismatch_error =
+        ScoringRequest::from_snapshot(&snapshot, scoring_input("other_snapshot_ref")).unwrap_err();
     assert_eq!(
-        ScoringRequest::from_snapshot(&snapshot, scoring_input("other_snapshot_ref")).unwrap_err(),
+        mismatch_error,
         ScoringContractError::ResponseSnapshotMismatch
+    );
+    assert_eq!(
+        mismatch_error.to_string(),
+        "scoring response snapshot reference does not match supplied snapshot"
     );
 }
 
