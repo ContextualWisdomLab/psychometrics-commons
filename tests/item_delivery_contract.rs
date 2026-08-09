@@ -136,6 +136,32 @@ fn exact_delivery_replay_is_idempotent_but_conflicting_reuse_fails_closed() {
 }
 
 #[test]
+fn exact_replay_remains_idempotent_after_session_stops_accepting_new_deliveries() {
+    let mut ledger = ledger();
+    let original = request(
+        "delivery_event_001",
+        "item_version_001",
+        "presentation_standard_v1",
+        Some("selection_fixed_order_v1"),
+    );
+    let accepted = ledger.deliver(SessionState::Active, original).unwrap();
+
+    for state in [
+        SessionState::Paused,
+        SessionState::Completed,
+        SessionState::Scoring,
+        SessionState::Scored,
+        SessionState::Released,
+        SessionState::Expired,
+        SessionState::Cancelled,
+        SessionState::Invalidated,
+    ] {
+        assert_eq!(ledger.deliver(state, original), Ok(accepted.clone()));
+    }
+    assert_eq!(ledger.len(), 1);
+}
+
+#[test]
 fn same_item_cannot_be_delivered_twice_under_a_new_identity() {
     let mut ledger = ledger();
     ledger
