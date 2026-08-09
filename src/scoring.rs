@@ -34,7 +34,7 @@ pub struct ScoringRequestInput<'a> {
 /// Immutable scoring request derived from a completed response snapshot.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScoringRequest {
-    scoring_request_ref: String,
+    request_ref: String,
     session_ref: String,
     response_snapshot_ref: String,
     assessment_spec_ref: String,
@@ -73,7 +73,7 @@ impl ScoringRequest {
         }
 
         Ok(Self {
-            scoring_request_ref: input.scoring_request_ref.to_owned(),
+            request_ref: input.scoring_request_ref.to_owned(),
             session_ref: snapshot.session_ref().to_owned(),
             response_snapshot_ref: input.response_snapshot_ref.to_owned(),
             assessment_spec_ref: input.assessment_spec_ref.to_owned(),
@@ -88,7 +88,7 @@ impl ScoringRequest {
     /// Return the opaque idempotent scoring-request reference.
     #[must_use]
     pub fn scoring_request_ref(&self) -> &str {
-        &self.scoring_request_ref
+        &self.request_ref
     }
 
     /// Return the session whose completed response snapshot is being scored.
@@ -247,7 +247,7 @@ impl ScoreObservation {
 /// Immutable accepted scoring result bound to one scoring request.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoringResult {
-    scoring_result_ref: String,
+    result_ref: String,
     scoring_request_ref: String,
     response_snapshot_ref: String,
     engine_artifact_digest: String,
@@ -286,7 +286,7 @@ impl ScoringResult {
         }
 
         Ok(Self {
-            scoring_result_ref,
+            result_ref: scoring_result_ref,
             scoring_request_ref: request.scoring_request_ref().to_owned(),
             response_snapshot_ref: request.response_snapshot_ref().to_owned(),
             engine_artifact_digest,
@@ -297,7 +297,7 @@ impl ScoringResult {
     /// Return the opaque scoring-result reference.
     #[must_use]
     pub fn scoring_result_ref(&self) -> &str {
-        &self.scoring_result_ref
+        &self.result_ref
     }
 
     /// Return the scoring request that produced this result.
