@@ -100,7 +100,10 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
                 ),
             )
             .unwrap();
-        assert_eq!(replay, original, "exact replay must survive state {state:?}");
+        assert_eq!(
+            replay, original,
+            "exact replay must survive state {state:?}"
+        );
     }
     assert_eq!(ledger.len(), 1);
 }
