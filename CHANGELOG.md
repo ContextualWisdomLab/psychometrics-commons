@@ -12,3 +12,5 @@ All notable product and architecture changes are recorded here. Releases use imm
 - Authoritative architecture map linking product modules to their owning CWL bounded contexts and defining failure-degradation behavior and architecture fitness functions.
 - Rust hosted-runtime session lifecycle primitives with fail-closed server-authoritative transitions for activation, pause/resume, completion, scoring, release, expiry, cancellation, and invalidation.
 - Idempotent response-event ledger semantics with monotonic server sequencing, conflicting replay rejection, and deterministic immutable response snapshots frozen only after session completion.
+- Version-pinned scoring-dispatch contracts that consume completed immutable response snapshots without reimplementing psychometric numerics, preserve scored/abstained/failed/excluded outcomes, and reject ambiguous or non-finite scoring evidence.
+- Immutable result snapshots that copy score observations and exact AssessmentSpec, instrument, scoring, calibration, norm, narrative, consent, engine-artifact, and supersession provenance without silently recomputing historical results.
