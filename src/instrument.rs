@@ -83,15 +83,27 @@ pub enum InstrumentReleaseError {
 impl Display for InstrumentReleaseError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "instrument release references must be opaque non-numeric values",
+            Self::InvalidReference => {
+                "instrument release references must be opaque non-numeric values"
+            }
             Self::EmptyItemSet => "instrument release must contain at least one item version",
-            Self::DuplicateItemReference => "instrument release item-version references must be unique",
+            Self::DuplicateItemReference => {
+                "instrument release item-version references must be unique"
+            }
             Self::InvalidLocale => "instrument release locale must be a valid BCP 47-style tag",
-            Self::InvalidDigest => "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits",
+            Self::InvalidDigest => {
+                "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits"
+            }
             Self::InvalidTimestamp => "instrument publication timestamps must be greater than zero",
-            Self::NonMonotonicTimestamp => "instrument publication event time must not move backwards",
-            Self::ConflictingReplay => "instrument publication event reference was replayed with conflicting evidence",
-            Self::InvalidTransition => "instrument publication command is not allowed from the current state",
+            Self::NonMonotonicTimestamp => {
+                "instrument publication event time must not move backwards"
+            }
+            Self::ConflictingReplay => {
+                "instrument publication event reference was replayed with conflicting evidence"
+            }
+            Self::InvalidTransition => {
+                "instrument publication command is not allowed from the current state"
+            }
         })
     }
 }
@@ -151,7 +163,8 @@ impl InstrumentReleaseManifest {
             return Err(InstrumentReleaseError::EmptyItemSet);
         }
         let item_version_refs = normalize_unique_references(item_version_refs, true)?;
-        let consent_requirement_refs = normalize_unique_references(consent_requirement_refs, false)?;
+        let consent_requirement_refs =
+            normalize_unique_references(consent_requirement_refs, false)?;
         let locale = locale.trim();
         if !valid_locale(locale) {
             return Err(InstrumentReleaseError::InvalidLocale);
@@ -185,49 +198,93 @@ impl InstrumentReleaseManifest {
 
     /// Return the opaque release reference.
     #[must_use]
-    pub fn release_ref(&self) -> &str { &self.release_ref }
+    pub fn release_ref(&self) -> &str {
+        &self.release_ref
+    }
+
     /// Return the stable instrument family reference.
     #[must_use]
-    pub fn instrument_ref(&self) -> &str { &self.instrument_ref }
+    pub fn instrument_ref(&self) -> &str {
+        &self.instrument_ref
+    }
+
     /// Return the exact instrument-version reference.
     #[must_use]
-    pub fn instrument_version_ref(&self) -> &str { &self.instrument_version_ref }
+    pub fn instrument_version_ref(&self) -> &str {
+        &self.instrument_version_ref
+    }
+
     /// Return the construct definition reference.
     #[must_use]
-    pub fn construct_ref(&self) -> &str { &self.construct_ref }
+    pub fn construct_ref(&self) -> &str {
+        &self.construct_ref
+    }
+
     /// Return the ordered immutable item-version references.
     #[must_use]
-    pub fn item_version_refs(&self) -> &[String] { &self.item_version_refs }
+    pub fn item_version_refs(&self) -> &[String] {
+        &self.item_version_refs
+    }
+
     /// Return the locale pinned by the release.
     #[must_use]
-    pub fn locale(&self) -> &str { &self.locale }
+    pub fn locale(&self) -> &str {
+        &self.locale
+    }
+
     /// Return the AssessmentSpec reference.
     #[must_use]
-    pub fn assessment_spec_ref(&self) -> &str { &self.assessment_spec_ref }
+    pub fn assessment_spec_ref(&self) -> &str {
+        &self.assessment_spec_ref
+    }
+
     /// Return the scoring-version reference.
     #[must_use]
-    pub fn scoring_version_ref(&self) -> &str { &self.scoring_version_ref }
+    pub fn scoring_version_ref(&self) -> &str {
+        &self.scoring_version_ref
+    }
+
     /// Return the calibration artifact reference.
     #[must_use]
-    pub fn calibration_reference(&self) -> &str { &self.calibration_reference }
+    pub fn calibration_reference(&self) -> &str {
+        &self.calibration_reference
+    }
+
     /// Return the optional norm-version reference.
     #[must_use]
-    pub fn norm_version_ref(&self) -> Option<&str> { self.norm_version_ref.as_deref() }
+    pub fn norm_version_ref(&self) -> Option<&str> {
+        self.norm_version_ref.as_deref()
+    }
+
     /// Return the narrative-rule version reference.
     #[must_use]
-    pub fn narrative_version_ref(&self) -> &str { &self.narrative_version_ref }
+    pub fn narrative_version_ref(&self) -> &str {
+        &self.narrative_version_ref
+    }
+
     /// Return the purpose-specific consent requirement references.
     #[must_use]
-    pub fn consent_requirement_refs(&self) -> &[String] { &self.consent_requirement_refs }
+    pub fn consent_requirement_refs(&self) -> &[String] {
+        &self.consent_requirement_refs
+    }
+
     /// Return the intended-use metadata reference.
     #[must_use]
-    pub fn intended_use_ref(&self) -> &str { &self.intended_use_ref }
+    pub fn intended_use_ref(&self) -> &str {
+        &self.intended_use_ref
+    }
+
     /// Return the limitations metadata reference.
     #[must_use]
-    pub fn limitations_ref(&self) -> &str { &self.limitations_ref }
+    pub fn limitations_ref(&self) -> &str {
+        &self.limitations_ref
+    }
+
     /// Return the canonical content digest.
     #[must_use]
-    pub fn content_digest(&self) -> &str { &self.content_digest }
+    pub fn content_digest(&self) -> &str {
+        &self.content_digest
+    }
 }
 
 /// Durable idempotency evidence for one accepted publication command.
@@ -241,13 +298,21 @@ pub struct PublicationEvent {
 impl PublicationEvent {
     /// Return the opaque event reference used as the idempotency key.
     #[must_use]
-    pub fn event_ref(&self) -> &str { &self.event_ref }
+    pub fn event_ref(&self) -> &str {
+        &self.event_ref
+    }
+
     /// Return the accepted publication command.
     #[must_use]
-    pub const fn command(&self) -> PublicationCommand { self.command }
+    pub const fn command(&self) -> PublicationCommand {
+        self.command
+    }
+
     /// Return the server-authoritative event time.
     #[must_use]
-    pub const fn occurred_at_unix_ms(&self) -> u64 { self.occurred_at_unix_ms }
+    pub const fn occurred_at_unix_ms(&self) -> u64 {
+        self.occurred_at_unix_ms
+    }
 }
 
 /// Product-owned publication lifecycle for one immutable instrument-release manifest.
@@ -285,19 +350,33 @@ impl InstrumentRelease {
 
     /// Return the immutable release manifest.
     #[must_use]
-    pub const fn manifest(&self) -> &InstrumentReleaseManifest { &self.manifest }
+    pub const fn manifest(&self) -> &InstrumentReleaseManifest {
+        &self.manifest
+    }
+
     /// Return the current publication state.
     #[must_use]
-    pub const fn state(&self) -> PublicationState { self.state }
+    pub const fn state(&self) -> PublicationState {
+        self.state
+    }
+
     /// Return the server-authoritative creation time.
     #[must_use]
-    pub const fn created_at_unix_ms(&self) -> u64 { self.created_at_unix_ms }
+    pub const fn created_at_unix_ms(&self) -> u64 {
+        self.created_at_unix_ms
+    }
+
     /// Return accepted publication events in server-authoritative order.
     #[must_use]
-    pub fn events(&self) -> &[PublicationEvent] { &self.events }
+    pub fn events(&self) -> &[PublicationEvent] {
+        &self.events
+    }
+
     /// Return whether this release may begin new assessment sessions.
     #[must_use]
-    pub const fn accepts_new_sessions(&self) -> bool { self.state.accepts_new_sessions() }
+    pub const fn accepts_new_sessions(&self) -> bool {
+        self.state.accepts_new_sessions()
+    }
 
     /// Apply one publication command using `event_ref` as its idempotency key.
     ///
@@ -316,8 +395,14 @@ impl InstrumentRelease {
         occurred_at_unix_ms: u64,
     ) -> Result<PublicationState, InstrumentReleaseError> {
         let event_ref = required_reference(event_ref)?;
-        if let Some(existing) = self.events.iter().find(|event| event.event_ref == event_ref) {
-            return if existing.command == command && existing.occurred_at_unix_ms == occurred_at_unix_ms {
+        if let Some(existing) = self
+            .events
+            .iter()
+            .find(|event| event.event_ref == event_ref)
+        {
+            return if existing.command == command
+                && existing.occurred_at_unix_ms == occurred_at_unix_ms
+            {
                 Ok(self.state)
             } else {
                 Err(InstrumentReleaseError::ConflictingReplay)
@@ -382,14 +467,22 @@ fn required_reference(reference: &str) -> Result<&str, InstrumentReleaseError> {
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {
-    let Some(hex) = digest.strip_prefix("sha256:") else { return false; };
-    hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn valid_locale(locale: &str) -> bool {
     let mut subtags = locale.split('-');
-    let Some(primary) = subtags.next() else { return false; };
-    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+    let Some(primary) = subtags.next() else {
+        return false;
+    };
+    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
+    {
         return false;
     }
     subtags.all(|subtag| {
