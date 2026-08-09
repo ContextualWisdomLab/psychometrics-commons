@@ -1,6 +1,6 @@
 # CLAUDE.md — Psychometrics Commons
 
-This file is a concise agent-facing index. `AGENTS.md`, accepted ADRs, `docs/PRD.md`, and `docs/TRD.md` are the normative repository instructions.
+This file is a concise agent-facing index. `AGENTS.md`, accepted ADRs, `docs/PRD.md`, and `docs/TRD.md` are the normative repository instructions; measurement, AI, and research governance documents further constrain their respective domains.
 
 ## Repository role
 
@@ -31,10 +31,14 @@ No service may read/write another service's normal application database directly
 1. `AGENTS.md`
 2. `docs/PRD.md`
 3. `docs/TRD.md`
-4. `ARCHITECTURE.md`
-5. `docs/adr/README.md` and relevant ADRs
-6. `docs/TRACEABILITY.md`
-7. relevant architecture view under `docs/architecture/`
+4. `docs/MEASUREMENT_GOVERNANCE.md` when measurement/scoring/instrument evidence changes
+5. `docs/AI_GOVERNANCE.md` when AI/judge/narrative/provider behavior changes
+6. `docs/RESEARCH_GOVERNANCE.md` when contribution/staging/release/access changes
+7. `ARCHITECTURE.md`
+8. `docs/adr/README.md` and relevant ADRs
+9. `docs/TRACEABILITY.md`
+10. relevant architecture view under `docs/architecture/`
+11. `docs/ROADMAP.md` for dependency-ordered delivery
 
 A change that contradicts an accepted ADR requires a superseding ADR in the same or a prerequisite PR.
 
@@ -46,23 +50,31 @@ A change that contradicts an accepted ADR requires a superseding ADR in the same
 - `docs/architecture/SECURITY_AND_DATA.md` — trust/data/privacy boundaries
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` — profiles, failure, recovery
 - `docs/DOCUMENTATION_ASSESSMENT.md` — completeness/gap assessment
+- `docs/TRACEABILITY.md` — target versus named protected-main implementation/evidence
 - `docs/ROADMAP.md` — dependency-ordered product delivery
 
 Diagrams describe target semantics; they do not prove implementation. `docs/TRACEABILITY.md` distinguishes implemented protected-main code from target architecture.
+
+## Continuation discipline
+
+Do not stop work merely because one useful artifact is complete. A design/doc/diagram, commit, CI start, review request, merge, or blocked branch is intermediate while another safe repository action exists. After a material action, return to the PR/issue/backlog queue. Documentation/design must continue into implementation in the same run when the writer lease and run budget permit.
 
 ## Scientific boundary
 
 Psychometric arithmetic and scientific measurement contracts remain in `fast-mlsirm`. Product application code may validate, orchestrate, persist references, and marshal outputs but must not recreate likelihoods, scoring kernels, calibration, DIF, linking, uncertainty, model selection, or other owned numerical behavior.
 
-LLMs are optional bounded helpers. They cannot change numeric scores, norms, uncertainty, calibration, DIF, or scientific gates. Core scoring/result access must work without AI.
+Measurement publication rules are in `docs/MEASUREMENT_GOVERNANCE.md`. Correlation alone is insufficient evidence of estimation accuracy; use model/intended-use appropriate recovery, uncertainty, fairness/invariance, and scoreability evidence.
 
-## Data and identity boundary
+LLMs are optional bounded helpers. They cannot change numeric scores, norms, uncertainty, calibration, DIF, or scientific gates. Core scoring/result access must work without AI. See `docs/AI_GOVERNANCE.md`.
+
+## Data, research, and identity boundary
 
 - Keyverse owns authentication/federation/credentials.
 - Anonymous assessment is first-class.
 - Product authorization is server-side and resource/tenant scoped.
 - Operational identity and research pseudonym identity are separate namespaces.
 - Public research releases contain no Keyverse subject, operational participant reference, or restricted linkage key.
+- Research release governance, staging/privacy/scientific review, access class, withdrawal, correction, and reproducibility are defined in `docs/RESEARCH_GOVERNANCE.md`.
 - Do not solve privacy by blanket masking that removes data required for authorized work; use purpose-bound schemas, access controls, encryption, restricted linkage, retention policy, and audit.
 
 ## Development quality
@@ -74,6 +86,7 @@ LLMs are optional bounded helpers. They cannot change numeric scores, norms, unc
 - Public identifiers are opaque and non-numeric.
 - Preserve idempotency, immutable snapshots, exact version/digest provenance, tenant isolation, and fail-closed unknown semantics.
 - Use current primary standards/official docs/peer-reviewed research where material and record APA 7 references in authoritative doctoring/ADRs.
+- Material ownership/lifecycle/API/event/data/security/deployment changes update affected architecture views and `docs/TRACEABILITY.md` or explicitly prove they are unaffected.
 
 ## Automation and model tests
 
@@ -84,4 +97,4 @@ LLMs are optional bounded helpers. They cannot change numeric scores, norms, unc
 
 ## Release
 
-Do not release from a feature branch merely because its tests pass. Release only from the exact integrated protected head after required CI, security, coverage, accessibility, packaging, SBOM/provenance, reproducibility, compatibility, independent review, migration/rollback, backup/restore (when applicable), scientific/instrument, and product-acceptance gates pass.
+Do not release from a feature branch merely because its tests pass. Release only from the exact integrated protected head after required CI, security, coverage, accessibility, packaging, SBOM/provenance, reproducibility, compatibility, independent review, migration/rollback, backup/restore (when applicable), scientific/instrument, and product-acceptance gates pass. GA/SLO/RPO/RTO claims additionally require measured deployment-profile evidence under ADR-0017.
