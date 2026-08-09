@@ -7,11 +7,17 @@ use psychometrics_commons_runtime::integration::{
 const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-fn event(tenant_ref: &str, subject_ref: &str, digest: &str) -> IntegrationEvent {
+fn event_with_contract(
+    tenant_ref: &str,
+    subject_ref: &str,
+    event_type: &str,
+    schema_version: &str,
+    digest: &str,
+) -> IntegrationEvent {
     IntegrationEvent::new(
         "event_shared",
-        "assessment.scoring.requested",
-        "v1",
+        event_type,
+        schema_version,
         "psychometrics_commons",
         tenant_ref,
         subject_ref,
@@ -21,6 +27,16 @@ fn event(tenant_ref: &str, subject_ref: &str, digest: &str) -> IntegrationEvent 
         digest,
     )
     .unwrap()
+}
+
+fn event(tenant_ref: &str, subject_ref: &str, digest: &str) -> IntegrationEvent {
+    event_with_contract(
+        tenant_ref,
+        subject_ref,
+        "assessment.scoring.requested",
+        "v1",
+        digest,
+    )
 }
 
 #[test]
@@ -71,7 +87,7 @@ fn identical_source_event_refs_are_independent_across_tenants() {
 }
 
 #[test]
-fn same_tenant_source_event_identity_cannot_change_subject_or_digest() {
+fn same_tenant_source_event_identity_cannot_change_immutable_evidence() {
     let mut inbox = IntegrationInbox::new();
     let original = event("tenant_alpha", "session_alpha", DIGEST_A);
     assert_eq!(
@@ -79,6 +95,30 @@ fn same_tenant_source_event_identity_cannot_change_subject_or_digest() {
             .accept_event("scoring_worker", &original, 20_000)
             .unwrap(),
         InboxDisposition::Accepted
+    );
+
+    let changed_type = event_with_contract(
+        "tenant_alpha",
+        "session_alpha",
+        "assessment.scoring.completed",
+        "v1",
+        DIGEST_A,
+    );
+    assert_eq!(
+        inbox.accept_event("scoring_worker", &changed_type, 20_100),
+        Err(IntegrationError::ConflictingReplay)
+    );
+
+    let changed_schema = event_with_contract(
+        "tenant_alpha",
+        "session_alpha",
+        "assessment.scoring.requested",
+        "v2",
+        DIGEST_A,
+    );
+    assert_eq!(
+        inbox.accept_event("scoring_worker", &changed_schema, 20_100),
+        Err(IntegrationError::ConflictingReplay)
     );
 
     let changed_subject = event("tenant_alpha", "session_other", DIGEST_A);
