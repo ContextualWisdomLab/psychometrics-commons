@@ -231,8 +231,7 @@ impl DataRightsRequest {
     /// # Errors
     ///
     /// Returns a [`DataRightsError`] when evidence is invalid, event time moves
-    /// backwards, an existing verification is replayed with different evidence,
-    /// or a non-replay transition is attempted outside `Requested`.
+    /// backwards, or an existing verification is replayed with different evidence.
     pub fn verify_identity(
         &mut self,
         verification_evidence_ref: &str,
@@ -248,9 +247,6 @@ impl DataRightsRequest {
             } else {
                 Err(DataRightsError::ConflictingReplay)
             };
-        }
-        if self.state != DataRightsState::Requested {
-            return Err(DataRightsError::InvalidTransition);
         }
         self.validate_event_time(verified_at_unix_ms)?;
         self.verification_evidence_ref = Some(evidence_ref.to_owned());
@@ -269,7 +265,7 @@ impl DataRightsRequest {
     /// Returns [`DataRightsError::IdentityVerificationRequired`] when processing
     /// begins before identity verification, [`DataRightsError::ConflictingReplay`]
     /// when an existing operation reference is replayed with different evidence,
-    /// or another [`DataRightsError`] for invalid evidence, time, or state.
+    /// or another [`DataRightsError`] for invalid evidence or event time.
     pub fn start_processing(
         &mut self,
         operation_ref: &str,
@@ -288,9 +284,6 @@ impl DataRightsRequest {
         }
         if self.state == DataRightsState::Requested {
             return Err(DataRightsError::IdentityVerificationRequired);
-        }
-        if self.state != DataRightsState::IdentityVerified {
-            return Err(DataRightsError::InvalidTransition);
         }
         let operation_ref = required_reference(operation_ref)?;
         self.validate_event_time(started_at_unix_ms)?;
