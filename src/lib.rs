@@ -13,6 +13,7 @@ pub mod data_rights;
 pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
+pub mod participant;
 mod reference;
 pub mod response;
 pub mod result;
