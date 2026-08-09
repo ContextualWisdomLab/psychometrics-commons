@@ -24,6 +24,10 @@ fn resource_kind_rejects_the_wrong_ownership_shape() {
         ),
         Err(AuthorizationError::ResourceOwnershipMismatch)
     );
+    assert_eq!(
+        AuthorizationError::ResourceOwnershipMismatch.to_string(),
+        "resource kind is not valid for this ownership scope"
+    );
 }
 
 #[test]
