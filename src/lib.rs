@@ -10,6 +10,7 @@
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
+pub mod instrument;
 mod reference;
 pub mod response;
 pub mod result;
