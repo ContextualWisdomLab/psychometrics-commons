@@ -33,7 +33,7 @@ pub enum PersistenceError {
     InvalidTimestamp,
     /// The configured outbox delivery-attempt limit was zero.
     InvalidAttemptLimit,
-    /// An unsigned runtime value cannot be represented by PostgreSQL `BIGINT`.
+    /// A runtime value cannot be represented by the bounded PostgreSQL column.
     ValueOutOfRange,
     /// An idempotency identity already exists with different immutable evidence.
     ConflictingReplay,
@@ -47,7 +47,7 @@ impl Display for PersistenceError {
             Self::InvalidReference => "persistence references must be opaque non-numeric values",
             Self::InvalidTimestamp => "persistence timestamps must be greater than zero",
             Self::InvalidAttemptLimit => "outbox maximum attempts must be greater than zero",
-            Self::ValueOutOfRange => "persistence value exceeds PostgreSQL BIGINT range",
+            Self::ValueOutOfRange => "persistence value exceeds the supported PostgreSQL range",
             Self::ConflictingReplay => {
                 "persistence idempotency identity was replayed with conflicting evidence"
             }
@@ -87,7 +87,7 @@ pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<()
 /// # Errors
 ///
 /// Returns [`PersistenceError`] for an invalid attempt limit, a value outside the
-/// PostgreSQL `BIGINT` range, conflicting replay, or a database failure.
+/// supported PostgreSQL integer range, conflicting replay, or a database failure.
 pub fn enqueue_outbox_event(
     client: &mut impl GenericClient,
     event: &IntegrationEvent,
@@ -98,7 +98,7 @@ pub fn enqueue_outbox_event(
     }
     let occurred_at_unix_ms = postgres_bigint(event.occurred_at_unix_ms())?;
     let max_attempts =
-        i64::try_from(max_attempts).map_err(|_| PersistenceError::ValueOutOfRange)?;
+        i32::try_from(max_attempts).map_err(|_| PersistenceError::ValueOutOfRange)?;
     let causation_ref = event.causation_ref();
 
     let inserted = client.execute(
@@ -142,7 +142,7 @@ pub fn enqueue_outbox_event(
         && existing.get::<_, String>(6) == event.correlation_ref()
         && existing_causation.as_deref() == causation_ref
         && existing.get::<_, String>(8) == event.payload_digest()
-        && existing.get::<_, i64>(9) == max_attempts;
+        && existing.get::<_, i32>(9) == max_attempts;
 
     if exact_replay {
         Ok(PersistenceDisposition::Duplicate)
