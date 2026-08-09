@@ -4,7 +4,9 @@
 //! consumes authenticated identity claims and makes its own domain authorization
 //! decisions. Tenant context is server-derived, cross-tenant access fails closed,
 //! and research approval remains separated from instrument publication and tenant
-//! administration.
+//! administration. Permission checks are also bound to explicit resource kinds so
+//! a valid role or participant identity cannot be reused against a different domain
+//! resource through an incorrectly constructed generic scope.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -22,6 +24,37 @@ pub enum ProductRole {
     ResearchSteward,
     /// May administer tenant-scoped product configuration.
     TenantAdministrator,
+}
+
+/// Product-owned resource category at an authorization boundary.
+///
+/// Resource kind is part of the authorization input, not merely descriptive
+/// metadata. This prevents a permission intended for one domain object from being
+/// reused against another object that happens to share the same tenant or owner.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ResourceKind {
+    /// Immutable or superseding participant result resource.
+    Result,
+    /// Participant-owned assessment session resource.
+    AssessmentSession,
+    /// Participant-owned export/deletion request resource.
+    DataRightsRequest,
+    /// Tenant-scoped immutable instrument release resource.
+    InstrumentRelease,
+    /// Tenant-scoped research release approval resource.
+    ResearchRelease,
+    /// Tenant-scoped product configuration resource.
+    TenantConfiguration,
+}
+
+impl ResourceKind {
+    const fn requires_participant_owner(self) -> bool {
+        matches!(
+            self,
+            Self::Result | Self::AssessmentSession | Self::DataRightsRequest
+        )
+    }
 }
 
 /// Product permission checked at a resource authorization boundary.
@@ -42,6 +75,19 @@ pub enum ProductPermission {
     ManageTenant,
 }
 
+impl ProductPermission {
+    const fn resource_kind(self) -> ResourceKind {
+        match self {
+            Self::ReadOwnResult => ResourceKind::Result,
+            Self::ManageOwnSession => ResourceKind::AssessmentSession,
+            Self::ManageOwnDataRights => ResourceKind::DataRightsRequest,
+            Self::PublishInstrument => ResourceKind::InstrumentRelease,
+            Self::ApproveResearchRelease => ResourceKind::ResearchRelease,
+            Self::ManageTenant => ResourceKind::TenantConfiguration,
+        }
+    }
+}
+
 /// Fail-closed product authorization error.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -50,6 +96,10 @@ pub enum AuthorizationError {
     InvalidReference,
     /// The requested resource belongs to a different tenant.
     CrossTenantDenied,
+    /// The resource kind was constructed with an invalid ownership shape.
+    ResourceOwnershipMismatch,
+    /// The requested permission does not apply to the supplied resource kind.
+    ResourceKindMismatch,
     /// A participant-owned action was requested without a participant identity.
     ParticipantIdentityRequired,
     /// The authenticated participant does not own the requested resource.
@@ -67,6 +117,10 @@ impl Display for AuthorizationError {
             Self::CrossTenantDenied => {
                 "resource tenant does not match the authenticated tenant"
             }
+            Self::ResourceOwnershipMismatch => {
+                "resource kind is not valid for this ownership scope"
+            }
+            Self::ResourceKindMismatch => "permission is not valid for this resource kind",
             Self::ParticipantIdentityRequired => {
                 "participant identity is required for participant-owned authorization"
             }
@@ -164,6 +218,7 @@ impl AuthorizationContext {
 /// Tenant-scoped target resource used by the authorization decision.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResourceScope {
+    kind: ResourceKind,
     tenant_ref: String,
     resource_ref: String,
     owner_participant_ref: Option<String>,
@@ -172,37 +227,68 @@ pub struct ResourceScope {
 impl ResourceScope {
     /// Create a tenant-scoped resource without participant ownership semantics.
     ///
+    /// Only tenant-owned resource kinds are accepted. Participant-owned result,
+    /// session, and data-rights resources must be constructed with
+    /// [`Self::participant_owned`] so ownership cannot be omitted accidentally.
+    ///
     /// # Errors
     ///
     /// Returns [`AuthorizationError::InvalidReference`] for an invalid tenant or
-    /// resource reference.
+    /// resource reference and [`AuthorizationError::ResourceOwnershipMismatch`]
+    /// when `kind` requires an explicit participant owner.
     pub fn tenant_scoped(
+        kind: ResourceKind,
         tenant_ref: &str,
         resource_ref: &str,
     ) -> Result<Self, AuthorizationError> {
+        let tenant_ref = required_reference(tenant_ref)?;
+        let resource_ref = required_reference(resource_ref)?;
+        if kind.requires_participant_owner() {
+            return Err(AuthorizationError::ResourceOwnershipMismatch);
+        }
         Ok(Self {
-            tenant_ref: required_reference(tenant_ref)?.to_owned(),
-            resource_ref: required_reference(resource_ref)?.to_owned(),
+            kind,
+            tenant_ref: tenant_ref.to_owned(),
+            resource_ref: resource_ref.to_owned(),
             owner_participant_ref: None,
         })
     }
 
     /// Create a participant-owned resource inside one tenant.
     ///
+    /// Only participant-owned result, assessment-session, and data-rights kinds are
+    /// accepted. Tenant-scoped instrument, research-release, and configuration
+    /// resources must use [`Self::tenant_scoped`].
+    ///
     /// # Errors
     ///
     /// Returns [`AuthorizationError::InvalidReference`] for an invalid tenant,
-    /// participant, or resource reference.
+    /// participant, or resource reference and
+    /// [`AuthorizationError::ResourceOwnershipMismatch`] when `kind` is tenant-only.
     pub fn participant_owned(
+        kind: ResourceKind,
         tenant_ref: &str,
         owner_participant_ref: &str,
         resource_ref: &str,
     ) -> Result<Self, AuthorizationError> {
+        let tenant_ref = required_reference(tenant_ref)?;
+        let owner_participant_ref = required_reference(owner_participant_ref)?;
+        let resource_ref = required_reference(resource_ref)?;
+        if !kind.requires_participant_owner() {
+            return Err(AuthorizationError::ResourceOwnershipMismatch);
+        }
         Ok(Self {
-            tenant_ref: required_reference(tenant_ref)?.to_owned(),
-            resource_ref: required_reference(resource_ref)?.to_owned(),
-            owner_participant_ref: Some(required_reference(owner_participant_ref)?.to_owned()),
+            kind,
+            tenant_ref: tenant_ref.to_owned(),
+            resource_ref: resource_ref.to_owned(),
+            owner_participant_ref: Some(owner_participant_ref.to_owned()),
         })
+    }
+
+    /// Return the resource kind that constrains applicable permissions.
+    #[must_use]
+    pub const fn kind(&self) -> ResourceKind {
+        self.kind
     }
 
     /// Return the resource tenant reference.
@@ -226,16 +312,19 @@ impl ResourceScope {
 
 /// Authorize one product operation against an authenticated resource context.
 ///
-/// Tenant mismatch is rejected before role or ownership checks, preventing a
-/// privileged role or participant identity from being reused across tenants.
-/// Participant-owned permissions require an exact operational participant match.
-/// Instrument publication, research release approval, and tenant administration use
-/// distinct product roles to preserve separation of duties.
+/// Tenant mismatch is rejected before resource-kind, role, or ownership checks,
+/// preventing a privileged role or participant identity from being reused across
+/// tenants. The requested permission must then match the exact resource kind before
+/// ownership or role evaluation, preventing confused-deputy authorization caused by
+/// a generic resource reference. Participant-owned permissions require an exact
+/// operational participant match. Instrument publication, research release approval,
+/// and tenant administration use distinct product roles to preserve separation of
+/// duties.
 ///
 /// # Errors
 ///
-/// Returns [`AuthorizationError`] when tenant, ownership, or product-role checks
-/// fail.
+/// Returns [`AuthorizationError`] when tenant, resource-kind, ownership, or
+/// product-role checks fail.
 pub fn authorize(
     actor: &AuthorizationContext,
     resource: &ResourceScope,
@@ -243,6 +332,9 @@ pub fn authorize(
 ) -> Result<(), AuthorizationError> {
     if actor.tenant_ref != resource.tenant_ref {
         return Err(AuthorizationError::CrossTenantDenied);
+    }
+    if resource.kind != permission.resource_kind() {
+        return Err(AuthorizationError::ResourceKindMismatch);
     }
 
     match permission {
@@ -258,7 +350,9 @@ pub fn authorize(
             }
             Ok(())
         }
-        ProductPermission::PublishInstrument => require_role(actor, ProductRole::InstrumentPublisher),
+        ProductPermission::PublishInstrument => {
+            require_role(actor, ProductRole::InstrumentPublisher)
+        }
         ProductPermission::ApproveResearchRelease => {
             require_role(actor, ProductRole::ResearchSteward)
         }
