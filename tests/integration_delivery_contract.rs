@@ -252,7 +252,10 @@ fn permanent_failure_quarantines_immediately() {
 
 #[test]
 fn invalid_attempt_evidence_and_time_fail_closed() {
-    assert_eq!(OutboxEntry::new(event(), 0), Err(IntegrationError::InvalidAttemptLimit));
+    assert_eq!(
+        OutboxEntry::new(event(), 0),
+        Err(IntegrationError::InvalidAttemptLimit)
+    );
     let mut entry = OutboxEntry::new(event(), 2).unwrap();
 
     assert_eq!(
@@ -284,7 +287,7 @@ fn invalid_attempt_evidence_and_time_fail_closed() {
 }
 
 #[test]
-fn inbox_deduplicates_per_consumer_and_rejects_digest_conflicts() {
+fn inbox_deduplicates_per_consumer_and_source_and_rejects_digest_conflicts() {
     let mut inbox = IntegrationInbox::new();
     assert!(inbox.is_empty());
 
@@ -292,9 +295,10 @@ fn inbox_deduplicates_per_consumer_and_rejects_digest_conflicts() {
         inbox
             .accept(
                 "scoring_worker",
+                "psychometrics_commons",
                 "event_scoring_requested",
                 DIGEST_A,
-                20_000
+                20_000,
             )
             .unwrap(),
         InboxDisposition::Accepted
@@ -304,9 +308,10 @@ fn inbox_deduplicates_per_consumer_and_rejects_digest_conflicts() {
         inbox
             .accept(
                 "scoring_worker",
+                "psychometrics_commons",
                 "event_scoring_requested",
                 DIGEST_A,
-                20_000
+                20_000,
             )
             .unwrap(),
         InboxDisposition::Duplicate
@@ -316,9 +321,10 @@ fn inbox_deduplicates_per_consumer_and_rejects_digest_conflicts() {
     assert_eq!(
         inbox.accept(
             "scoring_worker",
+            "psychometrics_commons",
             "event_scoring_requested",
             DIGEST_B,
-            20_000
+            20_000,
         ),
         Err(IntegrationError::ConflictingReplay)
     );
@@ -327,15 +333,17 @@ fn inbox_deduplicates_per_consumer_and_rejects_digest_conflicts() {
         inbox
             .accept(
                 "research_worker",
+                "psychometrics_commons",
                 "event_scoring_requested",
                 DIGEST_A,
-                20_100
+                20_100,
             )
             .unwrap(),
         InboxDisposition::Accepted
     );
     assert_eq!(inbox.len(), 2);
     assert_eq!(inbox.receipts()[0].consumer_ref(), "scoring_worker");
+    assert_eq!(inbox.receipts()[0].source_ref(), "psychometrics_commons");
     assert_eq!(
         inbox.receipts()[0].source_event_ref(),
         "event_scoring_requested"
@@ -349,19 +357,53 @@ fn inbox_rejects_invalid_identity_digest_and_timestamp() {
     let mut inbox = IntegrationInbox::new();
 
     assert_eq!(
-        inbox.accept("12345", "event_alpha", DIGEST_A, 20_000),
+        inbox.accept(
+            "12345",
+            "source_alpha",
+            "event_alpha",
+            DIGEST_A,
+            20_000
+        ),
         Err(IntegrationError::InvalidReference)
     );
     assert_eq!(
-        inbox.accept("consumer_alpha", "12345", DIGEST_A, 20_000),
+        inbox.accept(
+            "consumer_alpha",
+            "12345",
+            "event_alpha",
+            DIGEST_A,
+            20_000
+        ),
         Err(IntegrationError::InvalidReference)
     );
     assert_eq!(
-        inbox.accept("consumer_alpha", "event_alpha", "sha256:bad", 20_000),
+        inbox.accept(
+            "consumer_alpha",
+            "source_alpha",
+            "12345",
+            DIGEST_A,
+            20_000
+        ),
+        Err(IntegrationError::InvalidReference)
+    );
+    assert_eq!(
+        inbox.accept(
+            "consumer_alpha",
+            "source_alpha",
+            "event_alpha",
+            "sha256:bad",
+            20_000
+        ),
         Err(IntegrationError::InvalidDigest)
     );
     assert_eq!(
-        inbox.accept("consumer_alpha", "event_alpha", DIGEST_A, 0),
+        inbox.accept(
+            "consumer_alpha",
+            "source_alpha",
+            "event_alpha",
+            DIGEST_A,
+            0
+        ),
         Err(IntegrationError::InvalidTimestamp)
     );
 }
