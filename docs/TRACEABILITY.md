@@ -25,17 +25,19 @@ A future implementation-status change must be supported by source/test evidence;
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs`; live fast-mlsirm integration is Target |
 | Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result serving transport is Target |
-| Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010 | Target |
+| Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010, ADR-0018 | Target |
+| Continuous scores remain source of truth; Personality Style is presentation | PRD §3.2 | Measurement Governance; AI Governance | ADR-0018 | Target product narrative mapping; numeric source remains External fast-mlsirm contract |
+| Instrument publication requires intended-use scientific/right/locale evidence | PRD §9.8, §10 | Measurement Governance; instrument publication state | ADR-0004, ADR-0013, ADR-0019 | Target; publication domain is under active development but not Implemented on evaluated baseline |
 | Optional Keyverse linking | PRD §3.1, §9.7 | TRD §10 | ADR-0003 | External identity dependency + Target product adapter |
 | Purpose-specific consent | PRD §5, §9.6 | TRD §12 | ADR-0006 | **Implemented** domain contract in `src/consent.rs`; transport/persistence is Target |
 | Explicit research contribution + withdrawal | PRD §5 | TRD §12, §14–15 | ADR-0006, ADR-0007 | **Implemented** product-domain lifecycle in `src/consent.rs`; dataset snapshot/release integration is Target |
 | Participant export/deletion | PRD §3.1, §9, §11 | TRD §13 | ADR-0006 | **Implemented** domain lifecycle in `src/data_rights.rs`; dependent-system execution is Target |
 | Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
 | Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
-| Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; UML/ERD instrument version | ADR-0013 | Target |
+| Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; UML/ERD instrument version | ADR-0013, ADR-0019 | Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
 | EMA/ESM longitudinal flow | PRD §4 | TRD §16 | ADR-0008 | External Gyeot/TEPP dependencies + Target product ingestion adapter |
-| Measurement Workbench | PRD §6 | C4/component view; Measurement Governance | ADR-0001, ADR-0002, ADR-0004 | Target; Inkspan/RankWeave are External dependencies |
+| Measurement Workbench | PRD §6 | C4/component view; Measurement Governance | ADR-0001, ADR-0002, ADR-0004, ADR-0019 | Target; Inkspan/RankWeave are External dependencies |
 | Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Architecture established; public transport is Target |
 | Community/Hosted/Enterprise profiles | PRD §7, §13 | TRD deployment sections; Deployment/Operations | ADR-0011, ADR-0017 | Target deployment packaging/evidence |
 
@@ -50,6 +52,8 @@ A future implementation-status change must be supported by source/test evidence;
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` | live adapter + retry/outbox integration |
 | Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
+| Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + fallback/no-score-mutation tests |
+| Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | architecture policy | instrument publication evidence manifest + state-machine tests |
 | Research consent separate from service consent | TRD §12; Research Governance | `src/consent.rs` | public API/UI negative test |
 | Research withdrawal preserves evidence | TRD §12–15; Research Governance | `src/consent.rs` | release-pipeline exclusion test |
 | Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs` | Keyverse/account/anonymous transport integration |
@@ -59,7 +63,7 @@ A future implementation-status change must be supported by source/test evidence;
 | Transactional outbox/inbox | TRD §19–20; ADR-0015 | target architecture | persistence, crash, duplicate, poison-message tests |
 | No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
-| AI cannot mutate numeric scientific result | AI Governance; ADR-0009 | architecture policy | product adapter/adversarial mutation tests |
+| AI cannot mutate numeric scientific result | AI Governance; ADR-0009, ADR-0018 | architecture policy | product adapter/adversarial mutation tests |
 | Exact locale no silent assessment fallback | TRD §28; ADR-0013 | architecture policy | instrument publication/client tests |
 | GA claims require measured profile recovery/availability evidence | ADR-0017; Deployment/Operations | architecture policy | deployed SLO/RPO/RTO/restore/incident evidence |
 | Architecture mitigation is not risk closure/certification | Compliance Readiness; Risk Register | documentation fitness only | control-specific implementation and independent assessment where claimed |
@@ -102,6 +106,8 @@ The architecture expects additional logical modules (`instrument_publication`, `
 | Persistence/transaction boundaries | ADR-0015 |
 | Architecture views/traceability | ADR-0016 |
 | Operational recovery/GA evidence | ADR-0017 |
+| Continuous score / narrative separation | ADR-0018 |
+| Scientific publication evidence gate | ADR-0019 |
 
 ## 6. Governance and evidence artifact traceability
 
@@ -110,6 +116,8 @@ The architecture expects additional logical modules (`instrument_publication`, `
 | Product intent | `docs/PRD.md` | Existing protected-main document |
 | Technical contract | `docs/TRD.md` | Existing protected-main document |
 | Measurement/scientific publication | `docs/MEASUREMENT_GOVERNANCE.md` | Target governance added by documentation-baseline PR; numerical implementation remains fast-mlsirm-owned |
+| Continuous score/narrative interpretation | ADR-0018 + `docs/AI_GOVERNANCE.md` | Target product mapping/fallback; numeric result domain exists but narrative mapping does not |
+| Instrument scientific publication gate | ADR-0019 + `docs/MEASUREMENT_GOVERNANCE.md` | Target product policy; instrument publication feature not Implemented on evaluated baseline |
 | AI/judge/provider authority | `docs/AI_GOVERNANCE.md` | Target product governance added by documentation-baseline PR |
 | Research contribution/release | `docs/RESEARCH_GOVERNANCE.md` | Target governance added by documentation-baseline PR; partial domain lifecycle exists in `src/consent.rs` |
 | Nonfunctional measurable scenarios | `docs/QUALITY_ATTRIBUTES.md` | Target/evidence contract; scenarios become verified only as implementations exist |
