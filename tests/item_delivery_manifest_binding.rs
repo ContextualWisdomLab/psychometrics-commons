@@ -30,7 +30,7 @@ fn manifest() -> InstrumentReleaseManifest {
     .unwrap()
 }
 
-fn request<'a>(item_version_ref: &'a str) -> ItemDeliveryRequest<'a> {
+fn request(item_version_ref: &str) -> ItemDeliveryRequest<'_> {
     ItemDeliveryRequest {
         delivery_ref: "delivery_event_001",
         item_version_ref,
@@ -48,7 +48,10 @@ fn ledger_derives_release_identity_locale_and_item_set_from_exact_manifest() {
     assert_eq!(ledger.instrument_release_ref(), manifest.release_ref());
     assert_eq!(ledger.release_content_digest(), manifest.content_digest());
     assert_eq!(ledger.locale(), manifest.locale());
-    assert_eq!(ledger.allowed_item_version_refs(), manifest.item_version_refs());
+    assert_eq!(
+        ledger.allowed_item_version_refs(),
+        manifest.item_version_refs()
+    );
 }
 
 #[test]
@@ -57,7 +60,10 @@ fn item_not_present_in_exact_release_manifest_cannot_be_delivered() {
     let mut ledger = ItemDeliveryLedger::from_manifest("session_big_five_001", &manifest).unwrap();
 
     assert_eq!(
-        ledger.deliver(SessionState::Active, request("item_version_outside_release")),
+        ledger.deliver(
+            SessionState::Active,
+            request("item_version_outside_release")
+        ),
         Err(ItemDeliveryError::ItemNotInRelease)
     );
     assert!(ledger.is_empty());
