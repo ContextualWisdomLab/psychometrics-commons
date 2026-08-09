@@ -72,9 +72,23 @@ provenance requirements
 
 The model is not allowed to broaden its own purpose, data projection, provider class, tool list, or retry budget.
 
-## 5. Provider and routing policy
+## 5. Provider, routing, and egress policy
 
-Psychometrics Commons does not implement a second generic model router. Real-time orchestration uses `contextual-orchestrator`; high-volume asynchronous model work may use `pg-llm-batch`. External network calls pass through EgressWeave or an equivalent reviewed exact-authority boundary for the deployment.
+Psychometrics Commons does not implement a second generic model router. Real-time orchestration uses `contextual-orchestrator`; high-volume asynchronous model work may use `pg-llm-batch`. External network calls pass through EgressWeave or an equivalent reviewed **exact-authority** boundary for the deployment.
+
+An alternative boundary is equivalent only when reviewed evidence proves all of the following for the exact deployed configuration:
+
+- destinations are restricted to explicitly approved hosts/ports or stronger service identities; DNS resolution, redirects, proxying, and connection authority cannot silently widen the approved destination set;
+- redirects are disabled by default or every redirect target is re-authorized under the same exact-authority policy;
+- the task's allowed data classes, provider/deployment privacy class, residency, retention, and contractual restrictions are enforced before payload transmission;
+- application/model code cannot bypass the boundary with a direct network client, ambient proxy, alternate socket path, or unreviewed provider SDK escape hatch;
+- request/response sizes, connect/request deadlines, total task timeout, and retry count/backoff are finite and compatible with the task's declared budget;
+- credentials are scoped to the approved provider operation and are absent from client/model-visible payloads and routine logs;
+- audit evidence records policy identity, authorized destination/provider class, safe outcome/failure class, timing, and correlation/provenance references without logging prohibited payloads or secrets;
+- deny-by-default tests prove unknown hosts, redirect escape, unauthorized data class/residency/retention combinations, oversized traffic, and unapproved direct-egress paths fail closed;
+- replacement-boundary reviews demonstrate security guarantees at least equivalent to the EgressWeave contract used by the product rather than relying on a product label such as “private provider.”
+
+A deployment may therefore replace EgressWeave only with a boundary that provides the same verified authorization, egress, resource-bounding, and audit guarantees. A replacement that only filters a hostname string or relies on provider SDK defaults is not equivalent.
 
 Provider/model selection respects the task's privacy/security class. A task may not downgrade from a private/local/zero-retention requirement to an arbitrary public provider merely because the preferred provider is slow, unavailable, or more expensive.
 
@@ -197,6 +211,7 @@ Required tests evolve with implemented tasks and include:
 - duplicate JSON keys and non-finite values;
 - invalid result/provenance reference injection;
 - unapproved provider/host request denied by egress policy;
+- redirect and direct-egress bypass attempts denied by the exact-authority boundary;
 - cross-tenant task/result reference access denied;
 - sensitive input omitted when task policy does not allow it;
 - secrets absent from model payloads, client payloads, error bodies, and logs;
