@@ -2,8 +2,13 @@
 
 - Status: Accepted
 - Date: 2026-08-09
+- Deciders: ContextualWisdomLab Psychometrics Commons maintainers
 - Scope: instrument publication, scoring/calibration/norm references, locale/intended-use evidence, scoreability, DIF/invariance, suspension/retirement triggers
 - Supersedes: none
+- Superseded by: none
+- Current/as-built status: protected main implements an immutable instrument-release manifest and publication lifecycle, but publication does not yet enforce the full scientific/content/rights evidence manifest defined here
+- Target status: `Review -> Published` is impossible unless the exact version bundle satisfies its versioned, intended-use-specific evidence policy; blocking evidence can suspend/retire new-session eligibility without mutating historical results
+- Migration status: pre-gate releases, if any exist when persistence lands, require explicit review/classification; synthetic passing evidence or silent grandfathering is forbidden
 
 ## Context
 
@@ -16,7 +21,7 @@ Without an explicit evidence gate, a product could publish a form because its fi
 1. Transitioning an instrument release to `Published` requires an **approved scientific publication evidence record** appropriate to the instrument's exact intended use, locale, population, administration mode, scoring/calibration/norm bundle, and claimed comparisons.
 2. Psychometrics Commons stores/references the evidence and enforces publication state. It does not recompute psychometric evidence owned by `fast-mlsirm`.
 3. Mandatory evidence requirements are versioned by an `evidence_policy_ref` or equivalent policy artifact. Different intended uses may require different evidence, but a less demanding use may not silently inherit a stronger comparison/decision claim.
-4. A mandatory failed/unknown gate blocks publication. A product operator cannot convert it to passing by editing a label, narrative, or free-text note. Any policy exception must be explicit, authorized, risk-assessed, and cannot contradict non-waivable product/safety constraints.
+4. A mandatory failed/unknown gate blocks publication. A product operator cannot convert it to passing by editing a label, narrative, or free-text note. Any policy exception must be explicit, authorized, risk-assessed, versioned, and cannot contradict non-waivable product/safety constraints.
 5. Published releases are monitored. Material evidence invalidation may cause `Suspended`/`Retired` state for new sessions without mutating historical results or release bytes.
 6. Publication evidence is exact-version bound. Evidence from a predecessor item set, scoring model, norm, locale, or calibration does not automatically transfer.
 
@@ -28,6 +33,7 @@ Without an explicit evidence gate, a product could publish a form because its fi
 | Instrument content/translation/right review evidence | psychometrics-commons workflow + accountable reviewer/owner | versioned evidence references | treating LLM/generated content as automatically approved |
 | Instrument publication lifecycle | psychometrics-commons | publication commands/state | downstream client directly changing release state |
 | Research catalog/release | semantic-data-portal + product release workflow | separate research release contract | treating product publication as research-data approval |
+| Identity and reviewer authentication | Keyverse plus product authorization | identity assertion + product role/resource policy | identity administration implicitly granting scientific approval |
 
 ## Contract details
 
@@ -50,15 +56,15 @@ recovery_evidence_refs
 fit/model_selection_evidence_refs
 scoreability_evidence_refs
 DIF/invariance/fairness_evidence_refs
-linking/equating evidence refs where applicable
-translation/content-review refs where applicable
-rights/license refs
+linking/equating_evidence_refs where applicable
+translation/content_review_refs where applicable
+rights/license_refs
 known_limitations_ref
-review/approval refs
+review/approval_refs
 created_at / evidence time window
 ```
 
-The physical representation may use a manifest with digests rather than one row. All referenced artifacts are immutable/versioned or themselves provenance-bound.
+The physical representation may use a manifest with digests rather than one row. All referenced artifacts are immutable/versioned or themselves provenance-bound. The publication command binds the exact `evidence_policy_ref` and publication-evidence identity/digest; changing required evidence after publication creates new review evidence and, where release semantics change, a new/superseding release rather than mutating historical justification invisibly.
 
 ## Minimum evidence classes
 
@@ -117,6 +123,8 @@ The logical instrument publication model must store/reference:
 
 Published result snapshots remain tied to the exact release/scoring/norm evidence used at administration time. Later evidence policy changes do not retroactively relabel historical results as validated under the new policy.
 
+When physical persistence is implemented, publication evidence may be stored as normalized records or an immutable manifest plus references, but the database must enforce exact release/evidence identity and prevent an operator from changing a published release's bound evidence in place.
+
 ## Invariants
 
 1. `Published` requires all mandatory policy gates known and passing for the exact version bundle.
@@ -127,32 +135,40 @@ Published result snapshots remain tied to the exact release/scoring/norm evidenc
 6. A suspended/retired release cannot start new sessions; historical results remain readable with their original limitations/provenance.
 7. Evidence review/approval is auditable and distinct from Keyverse identity administration.
 8. A critical scientific/privacy/security finding can block/suspend publication even when aggregate quality metrics are high.
+9. A policy version or evidence digest mismatch is a publication conflict, not an implicit policy upgrade.
+10. Evidence from a different locale, calibration, norm, item set, model, or response mode is non-transferable unless the policy explicitly references validated linking/compatibility evidence.
 
 ## Failure and degraded modes
 
 - Missing/unresolvable evidence artifact: publication fails closed.
-- fast-mlsirm evidence service unavailable: publication/republication waits; already published historical results remain intact unless a separate incident policy suspends new sessions.
+- fast-mlsirm evidence path unavailable: publication/republication waits; already published historical results remain intact unless a separate incident policy suspends new sessions.
 - Evidence becomes invalid due to drift/new finding: enter review and, when policy requires, suspend new sessions; do not mutate past results.
 - Norm becomes obsolete: new normative interpretation requires a new norm/result version; do not silently swap norms for historical results.
 - Locale-specific evidence fails: block only the unsupported locale/version or comparison claim where scientifically appropriate; do not automatically disable unrelated validated forms.
+- Rights/license status becomes invalid for new administrations: suspend/retire affected new-session eligibility while preserving lawful historical provenance and applying the governing content/legal process.
+- Evidence conflict or unverifiable approval: publication remains blocked and safe operator diagnostics identify the missing evidence class/reference without exposing sensitive calibration data.
 
 ## Security, privacy, and tenancy
 
 Scientific evidence may contain sensitive research/sample information. Product publication paths use safe evidence references and role-scoped views. Participant-level calibration datasets are not exposed to public clients merely because an evidence record is public/internal.
 
-Tenant-specific instruments/evidence remain tenant-scoped. A tenant cannot approve another tenant's evidence or reuse private calibration data by reference without explicit authorization.
+Tenant-specific instruments/evidence remain tenant-scoped. A tenant cannot approve another tenant's evidence or reuse private calibration data by reference without explicit authorization. Approval identities are authenticated but product-scoped authorization determines who may approve scientific/content/rights gates.
+
+Evidence manifests and operator error surfaces expose safe identifiers/digests/statuses rather than participant-level data, raw restricted evidence, provider secrets, or unbounded reviewer notes.
 
 ## Deployment and operations impact
 
 Publication is an operational gate with observable failure reasons safe for operators. Evidence resolution/validation health is separate from participant result-read availability.
 
-Monitoring should detect published releases whose referenced evidence artifact becomes unavailable, compromised, revoked, or superseded by a blocking finding.
+Monitoring should detect published releases whose referenced evidence artifact becomes unavailable, compromised, revoked, or superseded by a blocking finding. The Hosted and Enterprise profiles require runbooks for publication suspension/retirement and evidence-registry outage; the Community profile may use a local evidence registry but must enforce the same publication semantics.
 
 ## Migration and rollback
 
-Existing pre-gate releases cannot be automatically marked compliant. A migration must classify them as needing evidence review, grandfathered under an explicit time-bounded policy, suspended, or retired. Synthetic “passed” evidence is forbidden.
+Existing pre-gate releases cannot be automatically marked compliant. A migration must classify them as needing evidence review, grandfathered only under an explicit time-bounded policy approved before use, suspended, or retired. Synthetic “passed” evidence is forbidden.
 
 Rolling back publication-policy code must not make a release eligible if its current mandatory evidence is unknown/failed under the stored policy version. Prefer roll-forward/compatibility adapters for persisted policy semantics.
+
+A new stricter evidence policy applies to new/reviewed publication decisions according to its explicit compatibility/effective policy; historical results keep the policy/evidence provenance under which they were administered.
 
 ## Architecture-view impact
 
@@ -163,7 +179,7 @@ Rolling back publication-policy code must not make a release eligible if its cur
 - `docs/architecture/SECURITY_AND_DATA.md`: evidence datasets remain classified and purpose-bound.
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`: publication-evidence health and suspension are operator concerns.
 - `docs/MEASUREMENT_GOVERNANCE.md`: detailed evidence requirements remain authoritative policy guidance.
-- `docs/TRACEABILITY.md`: publication requirement maps to this ADR once implementation lands.
+- `docs/TRACEABILITY.md`: publication requirement maps to this ADR and remains partial until code enforces it.
 - `docs/RISK_REGISTER.md`: weak/unvalidated consumer instrument is a material open risk until evidence exists.
 
 ## Validation and release evidence
@@ -176,7 +192,8 @@ Rolling back publication-policy code must not make a release eligible if its cur
 - suspension/retirement behavior when evidence is invalidated;
 - tenant/role negative authorization tests;
 - migration tests for legacy release evidence state;
-- product acceptance proving result views expose relevant limitations/provenance.
+- product acceptance proving result views expose relevant limitations/provenance;
+- consumer instrument fixtures proving the exact published form's evidence policy is complete before new-session eligibility.
 
 ## Alternatives considered
 
@@ -219,6 +236,15 @@ Costs:
 - integrate fast-mlsirm calibration/recovery/scoreability artifacts;
 - extend the instrument-release domain/persistence to bind evidence policy and approved evidence manifest before `Publish` succeeds;
 - add operator UX for missing/failed evidence without allowing bypass.
+
+## Traceability
+
+- Product requirements: `docs/PRD.md` consumer MVP, Measurement Workbench, measurement acceptance and release policy.
+- Technical requirements: `docs/TRD.md` instrument publication, scoring, multilingual, security/privacy and release gates.
+- Scientific policy: `docs/MEASUREMENT_GOVERNANCE.md`.
+- Current source baseline: `src/instrument.rs` implements immutable release/lifecycle mechanics but not this full evidence gate; `docs/TRACEABILITY.md` must classify that distinction explicitly.
+- Architecture: `ARCHITECTURE.md`, `docs/architecture/UML.md`, `docs/architecture/ERD.md`, `docs/architecture/SECURITY_AND_DATA.md`.
+- Delivery/risk: `docs/ROADMAP.md`, `docs/RISK_REGISTER.md`, `docs/DOCUMENTATION_ASSESSMENT.md`.
 
 ## Reversal conditions
 
