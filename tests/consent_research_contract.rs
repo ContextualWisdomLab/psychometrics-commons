@@ -25,6 +25,7 @@ fn grant<'a>(
 #[test]
 fn service_and_research_consent_are_independent_purposes() {
     let mut ledger = ConsentLedger::new(" participant_ref ").unwrap();
+    assert!(ledger.is_empty());
     ledger
         .record(grant(
             "service_grant",
@@ -37,10 +38,17 @@ fn service_and_research_consent_are_independent_purposes() {
 
     let snapshot = ledger.snapshot_as(" consent_snapshot_1 ").unwrap();
 
+    assert!(!ledger.is_empty());
     assert_eq!(snapshot.snapshot_ref(), "consent_snapshot_1");
     assert_eq!(snapshot.participant_ref(), "participant_ref");
+    assert_eq!(snapshot.event_count(), 1);
     assert!(snapshot.is_granted(ConsentPurpose::ServiceOperation));
     assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
+    assert_eq!(
+        snapshot.active_form_version(ConsentPurpose::ResearchContribution),
+        None
+    );
+    assert_eq!(snapshot.active_research_scope(), None);
     assert_eq!(
         ResearchContribution::from_snapshot(
             "research_contribution_1",
@@ -85,6 +93,7 @@ fn explicit_research_grant_requires_scope_and_enables_contribution() {
     assert_eq!(contribution.research_scope_ref(), "study_scope_v3");
     assert_eq!(contribution.state(), ResearchContributionState::Active);
     assert_eq!(contribution.started_at_unix_ms(), 2_100);
+    assert_eq!(contribution.withdrawal_event_ref(), None);
     assert_eq!(contribution.withdrawn_at_unix_ms(), None);
 }
 
@@ -115,6 +124,10 @@ fn research_revocation_is_append_only_and_blocks_new_contributions() {
 
     assert_eq!(ledger.len(), 2);
     assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
+    assert_eq!(
+        snapshot.active_form_version(ConsentPurpose::ResearchContribution),
+        None
+    );
     assert_eq!(snapshot.active_research_scope(), None);
     assert_eq!(
         ResearchContribution::from_snapshot(
@@ -141,6 +154,12 @@ fn repeated_identical_consent_event_is_idempotent_but_conflicts_fail_closed() {
     let first = ledger.record(event).unwrap();
     let replay = ledger.record(event).unwrap();
     assert_eq!(first, replay);
+    assert_eq!(first.event_ref(), "research_grant");
+    assert_eq!(first.purpose(), ConsentPurpose::ResearchContribution);
+    assert_eq!(first.decision(), ConsentDecision::Granted);
+    assert_eq!(first.consent_form_version_ref(), "research_form_v1");
+    assert_eq!(first.research_scope_ref(), Some("research_scope_v1"));
+    assert_eq!(first.occurred_at_unix_ms(), 4_000);
     assert_eq!(ledger.len(), 1);
 
     assert_eq!(
@@ -376,4 +395,63 @@ fn contribution_rejects_invalid_identity_and_start_time() {
         ),
         Err(ResearchContributionError::InvalidStartTime)
     );
+}
+
+#[test]
+fn public_error_messages_are_stable_and_readable() {
+    let consent_errors = [
+        (
+            ConsentWriteError::EmptyReference,
+            "consent references must not be empty",
+        ),
+        (
+            ConsentWriteError::ResearchScopeRequired,
+            "research consent requires a research scope",
+        ),
+        (
+            ConsentWriteError::ResearchScopeNotAllowed,
+            "research scope is allowed only for research-contribution consent",
+        ),
+        (
+            ConsentWriteError::InvalidTimestamp,
+            "consent event timestamp must be greater than zero",
+        ),
+        (
+            ConsentWriteError::EventReferenceConflict,
+            "consent event reference was already used for different evidence",
+        ),
+        (
+            ConsentWriteError::NonMonotonicTimestamp,
+            "consent event timestamp must not precede the latest accepted event",
+        ),
+    ];
+    for (error, expected) in consent_errors {
+        assert_eq!(error.to_string(), expected);
+    }
+
+    let research_errors = [
+        (
+            ResearchContributionError::EmptyReference,
+            "research contribution references must not be empty",
+        ),
+        (
+            ResearchContributionError::ResearchConsentRequired,
+            "research contribution requires active explicit research consent",
+        ),
+        (
+            ResearchContributionError::InvalidStartTime,
+            "research contribution start time must be greater than zero",
+        ),
+        (
+            ResearchContributionError::InvalidWithdrawalTime,
+            "research withdrawal time must be later than contribution start",
+        ),
+        (
+            ResearchContributionError::AlreadyWithdrawn,
+            "research contribution has already been withdrawn with different evidence",
+        ),
+    ];
+    for (error, expected) in research_errors {
+        assert_eq!(error.to_string(), expected);
+    }
 }
