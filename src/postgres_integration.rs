@@ -119,7 +119,7 @@ pub fn enqueue_outbox_event(
              event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,\
              occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest,\
              max_attempts, current_state, latest_event_at_unix_ms\
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $7)\
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $7) \
          ON CONFLICT (event_ref) DO NOTHING",
         params,
     )?;
@@ -130,11 +130,11 @@ pub fn enqueue_outbox_event(
     let exact_replay: bool = client
         .query_one(
             "SELECT EXISTS (\
-                 SELECT 1 FROM integration_outbox\
-                 WHERE event_ref = $1 AND event_type = $2 AND schema_version = $3\
-                   AND source_ref = $4 AND tenant_ref = $5 AND subject_ref = $6\
-                   AND occurred_at_unix_ms = $7 AND correlation_ref = $8\
-                   AND causation_ref IS NOT DISTINCT FROM $9\
+                 SELECT 1 FROM integration_outbox \
+                 WHERE event_ref = $1 AND event_type = $2 AND schema_version = $3 \
+                   AND source_ref = $4 AND tenant_ref = $5 AND subject_ref = $6 \
+                   AND occurred_at_unix_ms = $7 AND correlation_ref = $8 \
+                   AND causation_ref IS NOT DISTINCT FROM $9 \
                    AND payload_digest = $10 AND max_attempts = $11\
              )",
             params,
@@ -187,7 +187,7 @@ pub fn accept_inbox_event(
         "INSERT INTO integration_inbox (\
              consumer_ref, source_ref, tenant_ref, source_event_ref, event_type, schema_version,\
              subject_ref, payload_digest, received_at_unix_ms\
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          ON CONFLICT (consumer_ref, source_ref, tenant_ref, source_event_ref) DO NOTHING",
         params,
     )?;
@@ -198,9 +198,9 @@ pub fn accept_inbox_event(
     let exact_replay: bool = client
         .query_one(
             "SELECT EXISTS (\
-                 SELECT 1 FROM integration_inbox\
-                 WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3\
-                   AND source_event_ref = $4 AND event_type = $5 AND schema_version = $6\
+                 SELECT 1 FROM integration_inbox \
+                 WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
+                   AND source_event_ref = $4 AND event_type = $5 AND schema_version = $6 \
                    AND subject_ref = $7 AND payload_digest = $8\
              )",
             params,
