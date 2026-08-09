@@ -60,9 +60,7 @@ pub enum DataRightsError {
 impl Display for DataRightsError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => {
-                "data-rights references must be opaque non-numeric values"
-            }
+            Self::InvalidReference => "data-rights references must be opaque non-numeric values",
             Self::InvalidTimestamp => "data-rights timestamps must be greater than zero",
             Self::NonMonotonicTimestamp => "data-rights event time must not move backwards",
             Self::IdentityVerificationRequired => {
