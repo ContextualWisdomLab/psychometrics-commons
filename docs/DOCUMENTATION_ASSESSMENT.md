@@ -3,61 +3,79 @@
 - Status: Architecture baseline assessment
 - Date: 2026-08-09
 - Evaluated protected-main baseline: `8b1f410fc16ec4c867d28a1cd26c12fc495b8de5`
-- Scope: the product, architecture, psychometric, longitudinal, research, privacy, integration, and operational decisions established in the Psychometrics Commons design discussions
+- Scope: the product, architecture, psychometric, longitudinal, research, AI, privacy, integration, and operational decisions established in the Psychometrics Commons design discussions
 
 ## Executive assessment
 
-The repository already had a **strong textual baseline**: a product requirements document, a detailed technical requirements document, an architecture map, thirteen implementation-ready ADRs, and executable Rust domain contracts for session, response, scoring, result, consent, research-contribution, and data-rights behavior.
+The repository already had a **strong textual baseline** before this assessment: a product requirements document, a detailed technical requirements document, an architecture map, thirteen implementation-ready ADRs, and executable Rust domain contracts for session, response, scoring, result, consent, research-contribution, and data-rights behavior.
 
-It was **not yet sufficient as a complete architecture description for commercial due diligence or multi-team implementation** because several architecture views existed only as prose. In particular, there was no explicit C4-style context/container/component view, no UML-aligned domain/state/sequence model set, no logical ERD with cardinalities and ownership, no dedicated security/privacy data-flow model, no requirements-to-code traceability matrix, and no operations/recovery evidence model.
+It was **not yet sufficient as a complete architecture description for commercial due diligence or multi-team implementation** because several critical viewpoints existed only as prose. In particular, there was no explicit C4-style context/container/component view, no UML-aligned domain/state/sequence model set, no logical ERD with cardinalities and ownership, no dedicated security/privacy data-flow model, no requirements-to-code traceability matrix, no operations/recovery evidence model, and no durable consolidated governance documents covering the psychometric, AI, and Research Commons rules developed throughout the design discussion.
 
-This update closes those architecture-description gaps while deliberately separating **normative target architecture** from **as-built implementation**. It does not pretend that future API transports, database migrations, integrations, or deployment infrastructure already exist.
+This change closes those architecture-description and governance gaps while deliberately separating **normative target architecture** from **as-built implementation**. It does not pretend that future API transports, database migrations, integrations, deployment infrastructure, SLA commitments, or certifications already exist.
 
 ## Artifact assessment
 
-| Artifact | Pre-update assessment | Gap | Required action |
+| Artifact | Pre-update assessment | Gap | Action in this update |
 |---|---|---|---|
-| PRD | Strong implementation baseline | Requirement identifiers and downstream traceability were implicit | Keep PRD authoritative; add cross-artifact traceability |
-| TRD | Strong and unusually detailed | API/event contracts were prose-only; physical topology and diagram views were absent | Keep TRD authoritative; add architecture views and future machine-readable contract gate |
-| ADR set | Strong: ownership, failure modes, validation, rollback, reversal conditions are explicit | API/event representation, persistence transaction boundaries, architecture-view governance, and GA recovery evidence were not dedicated decisions | Add focused ADRs without duplicating existing decisions |
-| `ARCHITECTURE.md` | Strong bounded-context and failure-degradation map | Stakeholders/viewpoints, logical containers, UML/ERD links, and as-built/target distinction were incomplete | Add a governed architecture-view index |
-| UML | Missing | No class, state, or sequence model suitable for implementation/review | Add UML-aligned Mermaid model set |
+| PRD | Strong implementation baseline | Requirement identifiers and downstream traceability were implicit | Keep PRD authoritative and add cross-artifact traceability instead of duplicating requirement prose |
+| TRD | Strong and unusually detailed | API/event contracts were prose-only; physical topology and diagram views were absent | Keep TRD authoritative; add architecture views and machine-readable contract gate through ADR/traceability |
+| Measurement governance | Distributed across PRD/TRD/conversation/upstream fast-mlsirm research | Model selection, recovery, scoreability, multilevel/time/facet, rubric/item-bank rules were not consolidated | Add `MEASUREMENT_GOVERNANCE.md` while keeping numerical ownership in fast-mlsirm |
+| AI governance | Distributed across ADR-0009/TRD/conversation | Judge-as-rater, provider/privacy, deterministic fallback, artificial-crowd and prohibited mutation rules were not consolidated | Add `AI_GOVERNANCE.md` |
+| Research governance | Distributed across PRD/TRD/ADR-0006/0007 | Release access classes, staging/privacy/scientific review, withdrawal/correction and reproducibility were not one governed lifecycle | Add `RESEARCH_GOVERNANCE.md` |
+| ADR set | Strong: ownership, failure modes, validation, rollback, reversal conditions explicit | API/event representation, persistence transaction boundaries, architecture-view governance, and GA recovery evidence lacked dedicated decisions | Add ADR-0014 through ADR-0017 and strengthen ADR template view/data/operations impact requirements |
+| `ARCHITECTURE.md` | Strong bounded-context and failure-degradation map | Stakeholders/viewpoints, logical containers, UML/ERD links, and as-built/target distinction incomplete | Add governed architecture-view index and target/as-built rule |
+| UML | Missing | No class, state, or sequence model suitable for implementation/review | Add UML-aligned Mermaid class/state/sequence model set |
 | ERD | Missing | Entity names existed in TRD but cardinalities, restricted linkage, snapshot membership, and ownership were not explicit | Add logical ERD and persistence invariants |
 | C4/context views | Missing as formal view set | Existing ASCII dependency map did not separate context/container/component concerns | Add context, container, and component views |
 | Security/privacy architecture | Distributed across ADR/TRD | No single threat/data-classification/trust-boundary model | Add security/privacy architecture document |
 | Deployment/operations | Partial prose in ADR-0011/TRD | No deployment topology, recovery gate, observability/runbook evidence matrix | Add deployment/operations architecture document |
 | Requirements traceability | Missing | PRD/TRD/ADR/code/test relationships could drift silently | Add traceability matrix and maintenance rule |
 | Roadmap | Scheduler prompt only / implicit | Product delivery order was not durable repository documentation | Add bounded product roadmap with exit criteria |
-| Machine-readable HTTP API | Not implemented | Prose routes are not yet an executable OpenAPI contract | Require OpenAPI when the transport layer is introduced; do not fabricate an as-built API now |
-| Machine-readable event API | Not implemented | Prose events are not yet an executable AsyncAPI contract | Require AsyncAPI when durable event transport is introduced |
-| Physical database DDL | Not implemented | A logical ERD must not be mistaken for a deployed schema | Keep ERD logical until migrations are implemented and reviewed |
-| As-built deployment diagram | Not yet meaningful | Current repository is a domain/runtime core rather than a deployed hosted stack | Add target deployment views now; add exact as-built topology at first deployable profile |
+| Agent guidance | `AGENTS.md` existed, `CLAUDE.md` absent | Architecture-view maintenance and no-early-stop continuation were not durable repo rules | Strengthen AGENTS and add concise CLAUDE entry point |
+| Documentation fitness test | Missing | Required view set/ADR index could silently regress | Add repository integration test for required artifacts, ADR index, and traceability markers |
+| Machine-readable HTTP API | Not implemented | Prose routes are not yet executable OpenAPI contract | ADR-0014 requires OpenAPI only when transport exists; do not fabricate an as-built API now |
+| Machine-readable event API | Not implemented | Prose events are not yet executable AsyncAPI contract | ADR-0014 requires AsyncAPI when durable event transport exists |
+| Physical database DDL | Not implemented | Logical ERD must not be mistaken for deployed schema | Keep ERD logical until migrations are implemented/reviewed; ADR-0015 governs persistence |
+| As-built deployment diagram | Not yet meaningful | Current repo is domain/runtime core rather than deployed hosted stack | Add target deployment views now; require exact as-built topology/evidence at deployable/GA profiles |
+| Operational SLO/RPO/RTO | Not defined | Values without topology/load/recovery evidence would be invented | ADR-0017 explicitly blocks GA/SLA claims until profile-specific measured evidence exists |
 
 ## Sufficiency decision after this update
 
-After the linked architecture-view documents and ADR additions in this change are merged, the repository is considered **sufficient as an implementation architecture baseline**, but **not sufficient as GA operational evidence**.
+After the linked governance/view documents, ADR additions, traceability, and architecture fitness test in this change are merged, the repository is considered **sufficient as an implementation architecture baseline**, but **not sufficient as GA operational or scientific release evidence**.
 
-Implementation-baseline sufficiency means a new engineer or reviewer can determine:
+Implementation-baseline sufficiency means a new engineer, reviewer, buyer-side architect, or security/data reviewer can determine:
 
 1. what the product owns and explicitly does not own;
 2. which CWL repository is system of record for each cross-service capability;
 3. the allowed dependency direction and forbidden database coupling;
-4. the principal domain aggregates and their lifecycle states;
-5. the logical data model, cardinalities, identity separation, and immutable snapshot boundaries;
-6. the principal user/system sequences including degraded modes;
-7. the security/privacy trust boundaries and prohibited data flows;
-8. the target deployment profiles and failure-scoped capability model;
+4. the principal domain aggregates, cardinalities, immutable boundaries, and lifecycle states;
+5. the participant, scoring, account-linking, data-rights, and research-release sequences including failure/degraded behavior;
+6. the logical data model, identity separation, research linkage restriction, and outbox/inbox transaction design;
+7. the security/privacy trust boundaries, data classifications, major threats, and prohibited flows;
+8. the target deployment profiles, capability-scoped failure model, recovery/observability expectations, and truthful pre-GA/GA distinction;
 9. how PRD requirements trace to TRD sections, ADRs, source modules, and future verification;
-10. which architecture artifacts describe target intent versus current implementation.
+10. which architecture artifacts describe target intent versus current protected-main implementation;
+11. what psychometric evidence is required before instrument/score publication without duplicating fast-mlsirm numerics;
+12. what AI may and may not do and why a model/judge output cannot override deterministic scientific/product gates;
+13. how research contribution becomes a privacy/scientifically reviewed immutable release without exposing operational identity;
+14. what implementation sequence closes the remaining product gaps without inventing new repositories or duplicating existing CWL bounded contexts.
 
-GA evidence remains incomplete until the product has, on one exact integrated protected head:
+## Remaining evidence before GA
 
-- machine-readable OpenAPI and AsyncAPI contracts generated/validated against implemented transports;
-- reviewed physical database migrations matching the logical ERD and migration/rollback contract;
-- a deployed topology with environment-specific data residency, network, secret, backup, and restore evidence;
-- profile-specific SLO, RPO, and RTO commitments with measured evidence;
-- protected-main end-to-end security, accessibility, tenancy, failure-injection, migration, backup/restore, and release-acceptance results;
-- instrument rights, translation, calibration, norm, DIF/invariance, and intended-use evidence for each consumer assessment release.
+The documentation set intentionally does **not** claim GA completion. GA evidence remains incomplete until the product has, on one exact integrated protected head/release architecture:
+
+- machine-readable OpenAPI contract validated against implemented HTTP transport;
+- AsyncAPI contract validated against implemented durable event channels/messages;
+- reviewed physical database migrations matching logical ERD, transaction, uniqueness, tenancy, and rollback/recovery contracts;
+- a deployed topology with environment-specific network, secret, encryption, residency, retention, backup, restore, and observability evidence;
+- profile-specific SLO, RPO, and RTO commitments derived from measured workload/recovery evidence;
+- protected-main end-to-end functional, security, privacy, tenancy, accessibility, failure-injection, migration, backup/restore, packaging, SBOM/provenance, and release-acceptance results;
+- real fast-mlsirm scoring integration and deterministic fallback behavior;
+- Keyverse identity/account-linking integration tests where the authenticated feature is enabled;
+- research pseudonymization, privacy/scientific review, immutable release, and semantic-data-portal registration end-to-end evidence;
+- instrument rights, translation/content review, calibration, norm, recovery, DIF/invariance, scoreability, intended-use, and narrative-rule evidence for every consumer assessment release;
+- reference-client accessibility evidence, including WCAG 2.2 AA target acceptance and assistive-technology tests;
+- current runbooks and incident/recovery exercises for every enabled GA capability.
 
 ## Architecture-description governance
 
@@ -70,6 +88,8 @@ accepted/superseding ADR
         ↓
 PRD intended product behavior + TRD technical contract
         ↓
+measurement / AI / research governance
+        ↓
 ARCHITECTURE.md and architecture view documents
         ↓
 machine-readable API/event/schema contracts when implemented
@@ -77,7 +97,24 @@ machine-readable API/event/schema contracts when implemented
 code, migrations, tests and operational evidence
 ```
 
-A lower layer that contradicts a higher layer is a defect; it must not be rationalized as implementation detail.
+A lower layer that contradicts a higher layer is a defect; it must not be rationalized as implementation detail. A material change to product ownership, lifecycle, public interface, event, logical entity/cardinality, transaction, trust/privacy boundary, deployment/recovery, or release acceptance must update affected views/traceability or explicitly prove the mappings remain valid.
+
+## What “sufficient” does not mean
+
+“Sufficient as an implementation architecture baseline” does **not** mean:
+
+- all target product functionality is implemented;
+- diagrams prove a deployed service exists;
+- a logical ERD proves physical migrations exist;
+- prose APIs are usable endpoints;
+- accepted ADRs prove their controls are tested;
+- architecture readiness equals SOC 2 or CSAP certification;
+- a research release is safe merely because identifiers are pseudonymized;
+- a psychometric score is valid merely because a model fit or correlation is high;
+- an LLM narrative/judge is a scientific source of truth;
+- a recovery architecture constitutes an SLA.
+
+These distinctions are deliberate due-diligence controls rather than documentation caveats.
 
 ## References
 
