@@ -8,19 +8,24 @@ use psychometrics_commons_runtime::integration::{
 const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-fn event() -> IntegrationEvent {
+fn event_with(event_ref: &str, digest: &str) -> IntegrationEvent {
     IntegrationEvent::new(
-        "event_scoring_requested",
+        event_ref,
         "assessment.scoring.requested",
         "v1",
         "psychometrics_commons",
+        "tenant_alpha",
         "session_alpha",
         10_000,
         "correlation_alpha",
         Some("command_complete_alpha"),
-        DIGEST_A,
+        digest,
     )
     .unwrap()
+}
+
+fn event() -> IntegrationEvent {
+    event_with("event_scoring_requested", DIGEST_A)
 }
 
 #[test]
@@ -30,6 +35,7 @@ fn integration_event_preserves_versioned_audit_metadata() {
     assert_eq!(event.event_type(), "assessment.scoring.requested");
     assert_eq!(event.schema_version(), "v1");
     assert_eq!(event.source(), "psychometrics_commons");
+    assert_eq!(event.tenant_ref(), "tenant_alpha");
     assert_eq!(event.subject_ref(), "session_alpha");
     assert_eq!(event.occurred_at_unix_ms(), 10_000);
     assert_eq!(event.correlation_ref(), "correlation_alpha");
@@ -53,6 +59,7 @@ fn malformed_event_references_fail_closed() {
             event_type,
             schema_version,
             source,
+            "tenant_alpha",
             subject_ref,
             occurred_at,
             correlation_ref,
@@ -110,6 +117,7 @@ fn malformed_event_metadata_fails_closed() {
             event_type,
             schema_version,
             source,
+            "tenant_alpha",
             subject_ref,
             occurred_at,
             correlation_ref,
@@ -306,43 +314,30 @@ fn invalid_attempt_evidence_and_time_fail_closed() {
 }
 
 #[test]
-fn inbox_deduplicates_per_consumer_and_source_and_rejects_digest_conflicts() {
+fn inbox_deduplicates_per_consumer_source_tenant_and_rejects_evidence_conflicts() {
     let mut inbox = IntegrationInbox::new();
     assert!(inbox.is_empty());
+    let source_event = event();
 
     assert_eq!(
         inbox
-            .accept(
-                "scoring_worker",
-                "psychometrics_commons",
-                "event_scoring_requested",
-                DIGEST_A,
-                20_000,
-            )
+            .accept_event("scoring_worker", &source_event, 20_000)
             .unwrap(),
         InboxDisposition::Accepted
     );
     assert_eq!(inbox.len(), 1);
     assert_eq!(
         inbox
-            .accept(
-                "scoring_worker",
-                "psychometrics_commons",
-                "event_scoring_requested",
-                DIGEST_A,
-                20_000,
-            )
+            .accept_event("scoring_worker", &source_event, 20_000)
             .unwrap(),
         InboxDisposition::Duplicate
     );
     assert_eq!(inbox.len(), 1);
 
     assert_eq!(
-        inbox.accept(
+        inbox.accept_event(
             "scoring_worker",
-            "psychometrics_commons",
-            "event_scoring_requested",
-            DIGEST_B,
+            &event_with("event_scoring_requested", DIGEST_B),
             20_000,
         ),
         Err(IntegrationError::ConflictingReplay)
@@ -350,55 +345,39 @@ fn inbox_deduplicates_per_consumer_and_source_and_rejects_digest_conflicts() {
 
     assert_eq!(
         inbox
-            .accept(
-                "research_worker",
-                "psychometrics_commons",
-                "event_scoring_requested",
-                DIGEST_A,
-                20_100,
-            )
+            .accept_event("research_worker", &source_event, 20_100)
             .unwrap(),
         InboxDisposition::Accepted
     );
     assert_eq!(inbox.len(), 2);
     assert_eq!(inbox.receipts()[0].consumer_ref(), "scoring_worker");
     assert_eq!(inbox.receipts()[0].source_ref(), "psychometrics_commons");
+    assert_eq!(inbox.receipts()[0].tenant_ref(), "tenant_alpha");
     assert_eq!(
         inbox.receipts()[0].source_event_ref(),
         "event_scoring_requested"
     );
+    assert_eq!(
+        inbox.receipts()[0].event_type(),
+        "assessment.scoring.requested"
+    );
+    assert_eq!(inbox.receipts()[0].schema_version(), "v1");
+    assert_eq!(inbox.receipts()[0].subject_ref(), "session_alpha");
     assert_eq!(inbox.receipts()[0].payload_digest(), DIGEST_A);
     assert_eq!(inbox.receipts()[0].received_at_unix_ms(), 20_000);
 }
 
 #[test]
-fn inbox_rejects_invalid_identity_digest_and_timestamp() {
+fn inbox_rejects_invalid_consumer_identity_and_timestamp() {
     let mut inbox = IntegrationInbox::new();
+    let source_event = event();
 
     assert_eq!(
-        inbox.accept("12345", "source_alpha", "event_alpha", DIGEST_A, 20_000),
+        inbox.accept_event("12345", &source_event, 20_000),
         Err(IntegrationError::InvalidReference)
     );
     assert_eq!(
-        inbox.accept("consumer_alpha", "12345", "event_alpha", DIGEST_A, 20_000),
-        Err(IntegrationError::InvalidReference)
-    );
-    assert_eq!(
-        inbox.accept("consumer_alpha", "source_alpha", "12345", DIGEST_A, 20_000),
-        Err(IntegrationError::InvalidReference)
-    );
-    assert_eq!(
-        inbox.accept(
-            "consumer_alpha",
-            "source_alpha",
-            "event_alpha",
-            "sha256:bad",
-            20_000
-        ),
-        Err(IntegrationError::InvalidDigest)
-    );
-    assert_eq!(
-        inbox.accept("consumer_alpha", "source_alpha", "event_alpha", DIGEST_A, 0),
+        inbox.accept_event("consumer_alpha", &source_event, 0),
         Err(IntegrationError::InvalidTimestamp)
     );
 }
