@@ -97,10 +97,14 @@ impl Display for ItemDeliveryError {
                 formatter.write_str("item delivery locale must be a valid BCP 47-style tag")
             }
             Self::SessionNotActive(state) => {
-                write!(formatter, "session {state:?} cannot deliver assessment items")
+                write!(
+                    formatter,
+                    "session {state:?} cannot deliver assessment items"
+                )
             }
-            Self::IdempotencyConflict => formatter
-                .write_str("delivery reference was already used for different evidence"),
+            Self::IdempotencyConflict => {
+                formatter.write_str("delivery reference was already used for different evidence")
+            }
             Self::DuplicateItemDelivery => {
                 formatter.write_str("item version was already delivered in this session")
             }
