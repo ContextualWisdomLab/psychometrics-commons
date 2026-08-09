@@ -41,13 +41,22 @@ fn manifest_pins_every_release_critical_reference_without_mutators() {
         ["item_version_001", "item_version_002"]
     );
     assert_eq!(manifest.locale(), "ko-KR");
-    assert_eq!(manifest.assessment_spec_ref(), "assessment_spec_big_five_v1");
-    assert_eq!(manifest.scoring_version_ref(), "scoring_version_big_five_v1");
+    assert_eq!(
+        manifest.assessment_spec_ref(),
+        "assessment_spec_big_five_v1"
+    );
+    assert_eq!(
+        manifest.scoring_version_ref(),
+        "scoring_version_big_five_v1"
+    );
     assert_eq!(
         manifest.calibration_reference(),
         "calibration_big_five_ko_v1"
     );
-    assert_eq!(manifest.norm_version_ref(), Some("norm_version_big_five_ko_v1"));
+    assert_eq!(
+        manifest.norm_version_ref(),
+        Some("norm_version_big_five_ko_v1")
+    );
     assert_eq!(
         manifest.narrative_version_ref(),
         "narrative_version_big_five_v1"
@@ -66,8 +75,7 @@ fn manifest_pins_every_release_critical_reference_without_mutators() {
 
 #[test]
 fn malformed_release_contracts_fail_closed() {
-    let valid_digest =
-        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let valid_digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let base = |release_ref: &str, items: &[&str], locale: &str, digest: &str| {
         InstrumentReleaseManifest::new(
             release_ref,
@@ -157,11 +165,7 @@ fn publication_requires_review_and_controls_new_session_eligibility() {
     assert!(!release.accepts_new_sessions());
 
     release
-        .apply_command(
-            "reactivate_event",
-            PublicationCommand::Reactivate,
-            10_400,
-        )
+        .apply_command("reactivate_event", PublicationCommand::Reactivate, 10_400)
         .unwrap();
     assert_eq!(release.state(), PublicationState::Published);
     assert!(release.accepts_new_sessions());
@@ -197,19 +201,11 @@ fn event_replay_is_idempotent_and_never_reopens_later_state() {
     assert_eq!(release.state(), PublicationState::Suspended);
 
     assert_eq!(
-        release.apply_command(
-            "publish_event",
-            PublicationCommand::Publish,
-            20_201,
-        ),
+        release.apply_command("publish_event", PublicationCommand::Publish, 20_201,),
         Err(InstrumentReleaseError::ConflictingReplay)
     );
     assert_eq!(
-        release.apply_command(
-            "publish_event",
-            PublicationCommand::Retire,
-            20_200,
-        ),
+        release.apply_command("publish_event", PublicationCommand::Retire, 20_200,),
         Err(InstrumentReleaseError::ConflictingReplay)
     );
 }
@@ -218,19 +214,11 @@ fn event_replay_is_idempotent_and_never_reopens_later_state() {
 fn event_time_is_server_monotonic_and_retirement_is_terminal() {
     let mut release = InstrumentRelease::new(manifest(), 30_000).unwrap();
     assert_eq!(
-        release.apply_command(
-            "zero_time_event",
-            PublicationCommand::SubmitReview,
-            0,
-        ),
+        release.apply_command("zero_time_event", PublicationCommand::SubmitReview, 0,),
         Err(InstrumentReleaseError::InvalidTimestamp)
     );
     assert_eq!(
-        release.apply_command(
-            "backward_event",
-            PublicationCommand::SubmitReview,
-            29_999,
-        ),
+        release.apply_command("backward_event", PublicationCommand::SubmitReview, 29_999,),
         Err(InstrumentReleaseError::NonMonotonicTimestamp)
     );
 
