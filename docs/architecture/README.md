@@ -1,6 +1,10 @@
 # Psychometrics Commons Architecture Views
 
-This directory contains repository-native architecture views for different stakeholder concerns. The views are normative explanations of accepted ADR/PRD/TRD contracts, but they are not a substitute for executable code, migrations, API schemas, or release evidence.
+This directory contains repository-native architecture views for different stakeholder concerns. **Normative** means the document describes a rule or target behavior that implementations are expected to follow; it does not mean the behavior is already deployed. An **ADR** records an architecture decision and its rationale. The **PRD** defines intended product behavior and acceptance. The **TRD** defines technical contracts and constraints. These views explain those contracts, but they are not substitutes for executable code, migrations, API schemas, or release evidence.
+
+## Start here
+
+If you are new to the repository, read [`../GLOSSARY.md`](../GLOSSARY.md) first for canonical terminology, then [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) for the overall map. Continue with the PRD/TRD for product and technical requirements, review relevant ADRs for the decisions behind them, and finally use the architecture view below that matches the question you are investigating. `TRACEABILITY.md` tells you which target contracts are actually implemented on the named protected-main baseline.
 
 ## View index
 
