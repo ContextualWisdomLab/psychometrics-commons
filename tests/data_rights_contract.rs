@@ -22,8 +22,11 @@ fn export_request_requires_verified_identity_before_processing() {
     assert_eq!(request.state(), DataRightsState::Requested);
     assert_eq!(request.requested_at_unix_ms(), 1_000);
     assert_eq!(request.verification_evidence_ref(), None);
+    assert_eq!(request.verified_at_unix_ms(), None);
     assert_eq!(request.operation_ref(), None);
+    assert_eq!(request.processing_started_at_unix_ms(), None);
     assert_eq!(request.completion_evidence_ref(), None);
+    assert_eq!(request.completed_at_unix_ms(), None);
     assert_eq!(
         request.start_processing("operation_ref", 1_100),
         Err(DataRightsError::IdentityVerificationRequired)
@@ -37,9 +40,11 @@ fn export_request_requires_verified_identity_before_processing() {
         request.verification_evidence_ref(),
         Some("verification_evidence_ref")
     );
+    assert_eq!(request.verified_at_unix_ms(), Some(1_050));
     request.start_processing(" operation_ref ", 1_100).unwrap();
     assert_eq!(request.state(), DataRightsState::Processing);
     assert_eq!(request.operation_ref(), Some("operation_ref"));
+    assert_eq!(request.processing_started_at_unix_ms(), Some(1_100));
     request
         .complete(" completion_evidence_ref ", &[], 1_200)
         .unwrap();
@@ -48,6 +53,7 @@ fn export_request_requires_verified_identity_before_processing() {
         request.completion_evidence_ref(),
         Some("completion_evidence_ref")
     );
+    assert_eq!(request.completed_at_unix_ms(), Some(1_200));
     assert!(request.retained_scope_refs().is_empty());
 }
 
@@ -105,7 +111,7 @@ fn export_completion_rejects_deletion_retention_exceptions() {
 }
 
 #[test]
-fn lifecycle_is_monotonic_and_terminal_states_are_fail_closed() {
+fn lifecycle_is_monotonic_and_invalid_transitions_fail_closed() {
     let mut request = DataRightsRequest::new(
         "deletion_request_ref",
         "participant_ref",
@@ -124,10 +130,6 @@ fn lifecycle_is_monotonic_and_terminal_states_are_fail_closed() {
         Err(DataRightsError::NonMonotonicTimestamp)
     );
     request.verify_identity("verification_ref", 4_000).unwrap();
-    assert_eq!(
-        request.verify_identity("second_verification_ref", 4_001),
-        Err(DataRightsError::InvalidTransition)
-    );
     assert_eq!(
         request.start_processing(" ", 4_001),
         Err(DataRightsError::InvalidReference)
@@ -155,14 +157,95 @@ fn lifecycle_is_monotonic_and_terminal_states_are_fail_closed() {
     );
     request.complete("completion_ref", &[], 4_000).unwrap();
     assert_eq!(request.state(), DataRightsState::Completed);
+
+    let mut not_processing = DataRightsRequest::new(
+        "second_request_ref",
+        "participant_ref",
+        DataRightsRequestKind::Deletion,
+        "participant_data_scope",
+        4_100,
+    )
+    .unwrap();
     assert_eq!(
-        request.complete("second_completion_ref", &[], 4_100),
+        not_processing.complete("completion_ref", &[], 4_200),
         Err(DataRightsError::InvalidTransition)
     );
+}
+
+#[test]
+fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
+    let mut request = DataRightsRequest::new(
+        "deletion_request_ref",
+        "participant_ref",
+        DataRightsRequestKind::Deletion,
+        "participant_data_scope",
+        6_000,
+    )
+    .unwrap();
+
+    request.verify_identity("verification_ref", 6_100).unwrap();
+    request.verify_identity(" verification_ref ", 6_100).unwrap();
     assert_eq!(
-        request.start_processing("second_operation_ref", 4_100),
-        Err(DataRightsError::InvalidTransition)
+        request.verify_identity("verification_ref", 6_101),
+        Err(DataRightsError::ConflictingReplay)
     );
+    assert_eq!(
+        request.verify_identity("different_verification_ref", 6_100),
+        Err(DataRightsError::ConflictingReplay)
+    );
+
+    request.start_processing("operation_ref", 6_200).unwrap();
+    request.start_processing(" operation_ref ", 6_200).unwrap();
+    assert_eq!(
+        request.start_processing("operation_ref", 6_201),
+        Err(DataRightsError::ConflictingReplay)
+    );
+    assert_eq!(
+        request.start_processing("different_operation_ref", 6_200),
+        Err(DataRightsError::ConflictingReplay)
+    );
+
+    request
+        .complete(
+            "completion_ref",
+            &["legal_retention_scope"],
+            6_300,
+        )
+        .unwrap();
+    request
+        .complete(
+            " completion_ref ",
+            &[" legal_retention_scope "],
+            6_300,
+        )
+        .unwrap();
+    assert_eq!(
+        request.complete(
+            "completion_ref",
+            &["different_retention_scope"],
+            6_300,
+        ),
+        Err(DataRightsError::ConflictingReplay)
+    );
+    assert_eq!(
+        request.complete(
+            "different_completion_ref",
+            &["legal_retention_scope"],
+            6_300,
+        ),
+        Err(DataRightsError::ConflictingReplay)
+    );
+    assert_eq!(
+        request.complete(
+            "completion_ref",
+            &["legal_retention_scope"],
+            6_301,
+        ),
+        Err(DataRightsError::ConflictingReplay)
+    );
+
+    request.verify_identity("verification_ref", 6_100).unwrap();
+    request.start_processing("operation_ref", 6_200).unwrap();
 }
 
 #[test]
@@ -244,6 +327,10 @@ fn public_error_messages_are_stable() {
         (
             DataRightsError::RetentionExceptionNotAllowed,
             "retention exceptions are valid only for deletion requests",
+        ),
+        (
+            DataRightsError::ConflictingReplay,
+            "data-rights lifecycle reference was replayed with conflicting evidence",
         ),
         (
             DataRightsError::InvalidTransition,
