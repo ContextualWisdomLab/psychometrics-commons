@@ -16,7 +16,7 @@ Waiting is local to the affected branch/action. CI, reviewer latency, provider c
 
 ## Documentation and architecture completeness contract
 
-The repository uses multiple architecture and governance viewpoints so product intent, measurement evidence, implementation, AI, research, security, data, and operations do not collapse into one stale document.
+The repository uses multiple architecture and governance viewpoints so product intent, measurement evidence, implementation, AI, research, quality, risk, compliance-readiness, security, data, and operations do not collapse into one stale document.
 
 Required architecture/documentation artifacts are:
 
@@ -25,6 +25,10 @@ Required architecture/documentation artifacts are:
 - `docs/MEASUREMENT_GOVERNANCE.md`
 - `docs/AI_GOVERNANCE.md`
 - `docs/RESEARCH_GOVERNANCE.md`
+- `docs/QUALITY_ATTRIBUTES.md`
+- `docs/COMPLIANCE_READINESS.md`
+- `docs/RISK_REGISTER.md`
+- `docs/GLOSSARY.md`
 - `ARCHITECTURE.md`
 - `docs/adr/README.md` and applicable ADRs
 - `docs/architecture/C4.md`
@@ -37,9 +41,9 @@ Required architecture/documentation artifacts are:
 - `docs/DOCUMENTATION_ASSESSMENT.md`
 - `CHANGELOG.md`
 
-A material change to bounded-context ownership, lifecycle states, public/admin operation families, events, logical entities/cardinalities, transaction boundaries, psychometric publication criteria, AI authority, research-release policy, identity/privacy/trust boundaries, deployment/recovery semantics, or product acceptance must update the affected artifacts or explicitly demonstrate why their mappings are unchanged.
+A material change to bounded-context ownership, lifecycle states, public/admin operation families, events, logical entities/cardinalities, transaction boundaries, psychometric publication criteria, AI authority, research-release policy, quality attribute/release scenario, material risk, identity/privacy/trust boundaries, deployment/recovery semantics, or product acceptance must update the affected artifacts or explicitly demonstrate why their mappings are unchanged.
 
-Architecture diagrams may describe target semantics, but diagrams are not as-built proof. `docs/TRACEABILITY.md` distinguishes current protected-main implementation from targets. Do not fabricate OpenAPI, AsyncAPI, physical DDL, deployed topology, SLO/RPO/RTO, certification, or integration evidence before the corresponding implementation/operation exists.
+Architecture diagrams may describe target semantics, but diagrams are not as-built proof. `docs/TRACEABILITY.md` distinguishes current protected-main implementation from targets. `docs/RISK_REGISTER.md` distinguishes architecture mitigation from evidence-backed risk closure. `docs/COMPLIANCE_READINESS.md` distinguishes architecture, implementation, verification, and independent external assessment. Do not fabricate OpenAPI, AsyncAPI, physical DDL, deployed topology, SLO/RPO/RTO, certification, or integration evidence before the corresponding implementation/operation exists.
 
 Documentation work is support for implementation, not a reason to stop. When documentation gaps are fixed and executable product work remains, continue into implementation in the same run when the writer lease and run budget permit.
 
@@ -57,7 +61,7 @@ An ADR is not complete when it only names a technology or gives a one-paragraph 
 8. fail-closed, degraded-mode, recovery, and poison-message behavior;
 9. authentication, authorization, tenancy, privacy, residency, encryption, retention, and audit consequences;
 10. deployment/operations impact, migration, compatibility window, rollback/roll-forward mechanics;
-11. affected architecture views and traceability;
+11. affected architecture views, risk/quality/evidence artifacts, and traceability;
 12. measurable scientific, security, privacy, accessibility, contract, recovery, and operational release evidence;
 13. rejected alternatives, accepted risks, concrete follow-up work, and objective reversal conditions.
 
@@ -80,5 +84,7 @@ Use `docs/adr/0000-template.md`. One-line ADRs, aspirational prose without owner
 - Exact owned-production statement and branch coverage target: 100%, with realistic tests rather than exclusions.
 - Database object names use descriptive two-or-more-word `snake_case` by default; public IDs are opaque and non-numeric.
 - Psychometric features require true-parameter recovery, bias/RMSE, interval coverage, invariance/DIF, numerical-boundary, and backend-parity evidence as applicable; correlation alone is insufficient.
+- Quality goals use measurable scenarios and current evidence rather than unsupported adjectives or invented SLA values.
+- Critical/high risks remain visible until evidence-backed closure or explicit accepted risk; architecture intent alone does not close a risk.
 - Use current primary standards, official documentation, and peer-reviewed research. Record APA 7 references in authoritative doctoring/ADRs when they materially support a decision.
 - Never bypass branch protection, synthesize approval, invent credentials, weaken gates, or use `COPILOT_GITHUB_TOKEN`. Model-backed tests use `NVIDIA_NIM_API_KEY` and preferably contextual-orchestrator when applicable.
