@@ -101,7 +101,7 @@ jobs:
                       f"{file_entry.get('filename')}"
                   )
           PY
-          cargo llvm-cov report --text --show-missing-lines
+          cargo llvm-cov report --text --show-missing-lines --show-instantiations
 
   branch-coverage:
     name: Production branch coverage
