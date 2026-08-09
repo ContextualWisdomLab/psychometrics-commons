@@ -96,7 +96,7 @@ Splitting a module into a separate service later must not change its domain sema
 draft -> review -> published -> suspended -> retired
 ```
 
-Published content is immutable. Any semantic content change creates a new instrument version. Suspension prevents new sessions without erasing historical result provenance. Retirement is permanent for that version.
+Published content is immutable. Any semantic content change creates a new instrument version. Suspension prevents new sessions without erasing historical result provenance. Retirement is permanent for that version. ADR-0019 additionally requires exact-version scientific/content/rights evidence before review can transition to publication.
 
 ### Assessment session
 
@@ -172,6 +172,9 @@ The measured Big Five/facet profile is continuous. Personality Style is a separa
 fast-mlsirm ScoreProfile
         |
         v
+canonical style-assignment key
+        |
+        v
 approved interpretation rules
         |
         +--> deterministic localized narrative
@@ -179,7 +182,7 @@ approved interpretation rules
         +--> optional contextual-orchestrator prose rendering
 ```
 
-AI text is replaceable and optional. If AI is unavailable or rejected, deterministic approved output still permits result retrieval. Narrative versions may change without mutating historical numeric results.
+AI text is replaceable and optional. If AI is unavailable or rejected, deterministic approved output still permits result retrieval. Narrative versions may change without mutating historical numeric results. ADR-0018 defines the exact behavior-affecting references/digests that make a style assignment deterministic and replayable.
 
 ## Research-release boundary
 
@@ -209,18 +212,26 @@ Cross-service state changes use versioned APIs/events and transactional outbox/i
 
 ```text
 local domain transaction
-   = resource mutation + outbox record
+   = resource mutation + tenant-bound outbox event
                      |
                      v
               at-least-once transport
                      |
                      v
-                consumer inbox
+        validate schema/digest/tenant binding
                      |
-              deduplicate + apply
+                     v
+              consumer inbox: pending
+                     |
+             processing + durable work
+                     |
+          idempotent local/external effect
+                     |
+                     v
+          completion evidence + completed
 ```
 
-Consumers must be idempotent. Poison messages are quarantined after bounded retries. A downstream outage cannot roll back a valid local participant action already committed by the owning domain.
+ADR-0014 defines canonical payload digests, tenant-bound event identity, deduplication scope, replay and quarantine. ADR-0015 defines local transaction, inbox processing, crash recovery, and PostgreSQL persistence semantics. Receipt alone is never considered successful completion of a required non-local side effect. Poison/unverifiable messages are quarantined after bounded handling; a downstream outage cannot roll back a valid local participant action already committed by the owning domain.
 
 ## Versioning and provenance
 
@@ -236,19 +247,19 @@ Supported reference clients target WCAG 2.2 AA. Accessibility behavior that may 
 
 ## Deployment profiles
 
-### Community / Research
+### Community profile
 
-Requires only the Psychometrics Commons runtime, operational persistence, a fast-mlsirm-compatible scoring path, and a standalone client. AI, TEPP, semantic-data-portal, g7, and other optional integrations can be absent.
+Requires only the Psychometrics Commons runtime, upstream PostgreSQL 18.x operational persistence, a fast-mlsirm-compatible scoring path, and a standalone client. AI, TEPP, semantic-data-portal, g7, and other optional integrations can be absent.
 
-### CWL Hosted
+### Hosted profile
 
-Composes CWL bounded contexts as individually observable capabilities. Optional capability failure is scoped to that capability.
+CWL-operated composition of CWL bounded contexts as individually observable capabilities. Optional capability failure is scoped to that capability. Upstream PostgreSQL 18.x is the initial supported relational store.
 
-### Enterprise / Self-hosted
+### Enterprise profile
 
-Adds deployment-specific federation, data residency, retention, encryption, networking, provider, and audit controls without changing core domain contracts or historical result portability.
+Customer/self-hosted or contracted deployment adding deployment-specific federation, data residency, retention, encryption, networking, provider, and audit controls without changing core domain contracts or historical result portability. Responsibility for database/network/backup/observability is explicit per contract.
 
-Operational recovery, profile-specific SLO/RPO/RTO evidence, backup/restore, and GA release requirements are detailed in [`docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) and ADR-0017. No universal SLA value is assumed without measured deployment evidence.
+Canonical profile terminology is defined in `docs/GLOSSARY.md` and ADR-0011. Operational recovery, profile-specific SLO/RPO/RTO evidence, backup/restore, and GA release requirements are detailed in [`docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) and ADR-0017. No universal SLA value is assumed without measured deployment evidence.
 
 ## Security and privacy principles
 
@@ -275,7 +286,8 @@ Failure is capability-scoped whenever scientifically and securely possible.
 | contextual-orchestrator | deterministic narrative fallback; numeric result remains available |
 | semantic-data-portal | personal result unaffected; release registration remains queued |
 | TEPP | longitudinal observation persists; analysis waits |
-| external provider denied by EgressWeave | optional AI capability fails closed with no bypass |
+| external provider denied by EgressWeave/equivalent reviewed boundary | optional AI capability fails closed with no bypass |
+| unsupported/unverified database engine | deployment readiness/installation fails closed; no compatibility-by-label claim |
 
 ## Architecture fitness functions
 
@@ -285,13 +297,14 @@ The architecture is enforced by tests and release controls, not diagrams alone. 
 - exact-head validation rather than synthetic-merge-only evidence for repository-owned gates;
 - exhaustive/fail-closed lifecycle transition behavior;
 - idempotent command, response, outbox, and inbox handling;
-- cross-tenant denial tests;
+- tenant-bound integration event identity and cross-tenant denial tests;
+- crash-recoverable pending/processing/completed inbox semantics;
 - immutable provenance and supersession behavior;
 - no operational identity in public release fixtures;
 - deterministic fallback when optional AI is unavailable;
 - locale no-silent-fallback behavior;
 - accessibility acceptance for supported clients;
-- migration and rollback compatibility;
+- PostgreSQL 18.x migration/concurrency/recovery compatibility while it is the supported persistence target;
 - exact owned-production coverage targets defined by repository policy;
 - architecture-view and traceability links remain valid;
 - as-built OpenAPI/AsyncAPI/schema contracts exist when the corresponding transports/persistence are implemented.
