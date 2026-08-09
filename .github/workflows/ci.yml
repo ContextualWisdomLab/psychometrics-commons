@@ -83,7 +83,25 @@ jobs:
         run: python3 scripts/check_coverage.py coverage.json --kind lines
       - name: Diagnose missing line coverage
         if: failure()
-        run: cargo llvm-cov report --text --show-missing-lines
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("coverage.json").read_text(encoding="utf-8"))
+          entry = payload["data"][0]
+          kind = "lines"
+          for file_entry in entry.get("files", []):
+              summary = file_entry.get("summary", {})
+              metric = summary.get(kind)
+              if isinstance(metric, dict) and metric.get("covered") != metric.get("count"):
+                  print(
+                      "INCOMPLETE_FILE "
+                      f"{kind} {metric.get('covered')}/{metric.get('count')} "
+                      f"{file_entry.get('filename')}"
+                  )
+          PY
+          cargo llvm-cov report --text --show-missing-lines
 
   branch-coverage:
     name: Production branch coverage
@@ -108,6 +126,23 @@ jobs:
       - name: Diagnose missing branch coverage
         if: failure()
         run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("coverage-branches.json").read_text(encoding="utf-8"))
+          entry = payload["data"][0]
+          kind = "branches"
+          for file_entry in entry.get("files", []):
+              summary = file_entry.get("summary", {})
+              metric = summary.get(kind)
+              if isinstance(metric, dict) and metric.get("covered") != metric.get("count"):
+                  print(
+                      "INCOMPLETE_FILE "
+                      f"{kind} {metric.get('covered')}/{metric.get('count')} "
+                      f"{file_entry.get('filename')}"
+                  )
+          PY
           cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
           python3 - <<'PY'
           from pathlib import Path
