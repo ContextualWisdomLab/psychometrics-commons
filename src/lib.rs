@@ -7,6 +7,7 @@
 //! computation remains in `fast-mlsirm` and is consumed through versioned
 //! contracts rather than reimplemented here.
 
+mod reference;
 pub mod response;
 pub mod result;
 pub mod scoring;
