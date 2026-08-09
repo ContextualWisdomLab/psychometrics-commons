@@ -2,12 +2,14 @@
 
 - Status: Normative target architecture view
 - Date: 2026-08-09
-- Scope: Community/Research, CWL Hosted, and Enterprise/Self-hosted deployment profiles
+- Scope: Community, Hosted, and Enterprise deployment profiles
 - Important: environment-specific SLO/RPO/RTO values are not yet product commitments; GA is blocked until each supported profile defines and verifies them
+
+The canonical profile names are **Community profile**, **Hosted profile**, and **Enterprise profile**. “Community/research,” “CWL hosted,” and “enterprise/self-hosted” may describe examples or operating modes in explanatory prose, but they are not separate domain profiles.
 
 ## 1. Deployment profiles
 
-### Community / Research
+### Community profile
 
 Minimum deployable capability:
 
@@ -15,7 +17,7 @@ Minimum deployable capability:
 flowchart LR
     client[Standalone client]
     runtime[Psychometrics Commons runtime]
-    db[(PostgreSQL-compatible operational store)]
+    db[(PostgreSQL 18.x operational store)]
     fast[(fast-mlsirm local/co-located scoring)]
 
     client --> runtime
@@ -28,16 +30,17 @@ Properties:
 - anonymous core assessment available;
 - no mandatory g7, TEPP, semantic-data-portal, contextual-orchestrator, or external model provider;
 - scoring uses a contract-compatible fast-mlsirm path;
+- initial supported relational store is upstream PostgreSQL 18.x per ADR-0015; forks/managed compatibility layers are not implicitly supported;
 - local/self-managed operators remain responsible for their own backup and security posture unless a packaged distribution explicitly includes those services.
 
-### CWL Hosted
+### Hosted profile
 
 ```mermaid
 flowchart TB
     edge[Public edge / ingress]
     runtime[Runtime API]
     worker[Background worker]
-    db[(Operational database)]
+    db[(PostgreSQL 18.x operational database)]
     artifacts[(Approved artifact store)]
     keyverse[(Keyverse)]
     fast[(fast-mlsirm)]
@@ -66,11 +69,12 @@ Properties:
 - CWL services remain independently observable and deployable;
 - optional dependency outage degrades only the capability it owns;
 - product-owned state remains in the Psychometrics Commons operational store;
+- the initial validated relational persistence target is upstream PostgreSQL 18.x; adding a managed/forked alternative requires the ADR-0015 capability/conformance evidence;
 - artifact and database backups are independently recoverable and provenance-bound.
 
-### Enterprise / Self-hosted
+### Enterprise profile
 
-Enterprise adds policy/configuration rather than a second domain model:
+Enterprise adds policy/configuration rather than a second domain model and may be customer/self-hosted or contractually CWL-operated:
 
 - federation through Keyverse-compatible claims or approved identity integration;
 - tenant-specific data residency and network policy;
@@ -78,18 +82,19 @@ Enterprise adds policy/configuration rather than a second domain model:
 - private/local scoring and model paths where contracted;
 - customer-controlled retention and backup policies that still preserve product invariants;
 - outbound provider policy can disable external AI without disabling deterministic assessment/scoring;
-- stable API/event contracts allow customer-owned clients and CI/CD.
+- stable API/event contracts allow customer-owned clients and CI/CD;
+- responsibility for database operation, backup, recovery, networking, and observability is explicitly assigned rather than inferred from the profile name.
 
 ## 2. Capability dependency matrix
 
-| Capability | Mandatory for Community | Mandatory for CWL Hosted | Failure behavior |
+| Capability | Mandatory for Community | Mandatory for Hosted | Failure behavior |
 |---|---:|---:|---|
 | Product runtime | yes | yes | product unavailable |
-| Operational database | yes | yes | fail state-changing commands; no partial success |
+| Upstream PostgreSQL 18.x operational database | yes | yes | fail state-changing commands; no partial success |
 | fast-mlsirm-compatible scoring | yes for scoring | yes | completed response snapshot remains durable; result pending |
 | Keyverse | no | for authenticated/federated flow | anonymous and already-valid product session path remains where safe |
 | contextual-orchestrator | no | optional | deterministic narrative fallback |
-| EgressWeave | only when external egress exists | required for governed external provider calls | provider capability fails closed; no bypass |
+| EgressWeave | only when external egress exists | required for governed external provider calls unless an equivalently reviewed exact-authority boundary satisfies AI governance | provider capability fails closed; no bypass |
 | TEPP | no | optional longitudinal analytics | observations remain durable; analysis waits |
 | semantic-data-portal | no | optional Research Commons publication | personal results unaffected; registration waits |
 | Gyeot | no | optional client | other clients remain available |
@@ -152,7 +157,7 @@ Minimum signals:
 ### Async/integration
 - scoring job age/state/failure class;
 - outbox oldest age, publish attempts, quarantine count;
-- inbox duplicate suppression and consumer failures;
+- inbox pending/processing/completed/quarantined counts and duplicate suppression;
 - export/deletion request age and state;
 - research-release registration reconciliation age/state;
 - TEPP/AI/report integration capability state.
@@ -184,7 +189,7 @@ Retry budgets must be bounded, observable, and compatible with the deployment's 
 
 ## 7. Backup and restore
 
-GA release is blocked until every supported hosted/enterprise profile proves backup and restore for product-owned durable state.
+GA release is blocked until every supported Hosted/Enterprise deployment proves backup and restore for product-owned durable state; the Community profile must at minimum ship explicit operator guidance and a tested distribution-level restore procedure appropriate to its packaging.
 
 Backup scope includes, as applicable:
 
@@ -198,7 +203,7 @@ Restore acceptance must prove:
 
 1. tenant and authorization boundaries survive restore;
 2. immutable snapshot/release digests still verify;
-3. outbox/inbox deduplication state does not cause silent duplicate side effects;
+3. outbox/inbox deduplication and pending/processing state do not cause silent duplicate or missing side effects;
 4. result provenance and supersession chains remain intact;
 5. restricted research linkage remains restricted;
 6. deletion/retention evidence is not resurrected into an invalid user-visible state;
@@ -206,11 +211,11 @@ Restore acceptance must prove:
 
 ## 8. RPO, RTO, and SLO governance
 
-The architecture intentionally does not invent commercial SLA values before the hosted deployment topology and load profile exist.
+The architecture intentionally does not invent commercial SLA values before the deployment topology and load profile exist.
 
 The rule is concrete:
 
-> No deployment profile may be called GA or sold with availability/recovery commitments until that profile has version-controlled SLO, RPO, and RTO values, synthetic/real workload measurement, alert thresholds, backup frequency, restore evidence, and incident runbooks on the exact release architecture.
+> No deployment profile may be called GA or sold with availability/recovery commitments until that exact profile has version-controlled SLO, RPO, and RTO values, synthetic/real workload measurement, alert thresholds, backup frequency, restore evidence, and incident runbooks on the exact release architecture.
 
 Until those values exist, the product may be labelled development, preview, beta, research, or another truthful pre-GA status.
 
@@ -222,6 +227,7 @@ Until those values exist, the product may be labelled development, preview, beta
 - New required immutable references are deterministically backfilled or the migration fails closed.
 - Rollback is used only when the storage/operation semantics are genuinely reversible; otherwise a tested roll-forward/compensation procedure is documented.
 - Migration completion includes post-migration invariant/tenant/provenance verification.
+- PostgreSQL major-version expansion/upgrade requires the ADR-0015 real-database compatibility suite before support is declared.
 
 ## 10. Release topology evidence
 
@@ -233,6 +239,7 @@ build provenance
 SBOM
 container/package digests
 schema migration version
+supported database engine/major versions
 supported contract versions
 runtime configuration schema version
 dependency capability versions
@@ -262,13 +269,13 @@ Before GA, the repository must contain or link authoritative runbooks for:
 
 ## 12. Operational acceptance matrix
 
-| Evidence | Community | CWL Hosted | Enterprise/Self-hosted |
+| Evidence | Community | Hosted | Enterprise |
 |---|---:|---:|---:|
 | clean install/start | required | required | required |
 | health/readiness capability state | required | required | required |
 | anonymous end-to-end assessment | required | required | required unless deployment explicitly disables anonymous by policy |
 | authenticated federation | optional | required for account feature | required when contracted |
-| backup/restore | distribution guidance | required for GA | required for GA/contract |
+| backup/restore | distribution guidance + tested packaged procedure | required for GA | required for GA/contract |
 | tenant isolation | single-tenant mode may be used | required | required |
 | failure injection | core dependencies | all enabled capabilities | all contracted capabilities |
 | accessibility | supported reference client | supported reference client | supplied reference client / customer responsibility explicitly separated |
@@ -280,8 +287,10 @@ CI/release automation should eventually enforce:
 
 - no direct dependency database credentials;
 - no optional dependency required for core Community profile startup;
+- unsupported database engines/major versions fail readiness/installation rather than being silently accepted;
 - migration rollback/restore test suite presence when migrations change;
 - capability-scoped health schema compatibility;
 - log fixtures contain no raw secrets/responses/restricted linkage;
 - release manifest references exact artifact digests;
-- backup/restore acceptance remains tied to current schema/application version.
+- backup/restore acceptance remains tied to current schema/application version;
+- canonical Community/Hosted/Enterprise profile terminology remains synchronized across ADRs, glossary, TRD, architecture, and release documents.
