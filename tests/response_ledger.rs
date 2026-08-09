@@ -56,7 +56,12 @@ fn duplicate_client_event_is_idempotent_when_content_matches() {
     let replay = ledger
         .record(
             SessionState::Active,
-            write("ignored_new_server_ref", "client_a", "item_v1", "sha256:aaa"),
+            write(
+                "ignored_new_server_ref",
+                "client_a",
+                "item_v1",
+                "sha256:aaa",
+            ),
         )
         .unwrap();
 
@@ -108,10 +113,7 @@ fn non_active_session_cannot_accept_response_events() {
         SessionState::Invalidated,
     ] {
         let error = ledger
-            .record(
-                state,
-                write("event_a", "client_a", "item_v1", "sha256:aaa"),
-            )
+            .record(state, write("event_a", "client_a", "item_v1", "sha256:aaa"))
             .unwrap_err();
         assert_eq!(error, WriteError::SessionNotActive(state));
     }
