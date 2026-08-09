@@ -40,3 +40,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 - Immutable locale-specific instrument release manifests that pin ordered item versions, AssessmentSpec, scoring, calibration, norms, narrative, consent, intended-use, limitations, and content digest provenance, with a fail-closed review/publish/suspend/reactivate/retire lifecycle controlling new-session eligibility.
 - Session-bound item-delivery evidence that pins the immutable instrument release, content digest, locale, presentation context, optional selection provenance, server order, idempotent replay, and duplicate-item protection without duplicating psychometric selection logic.
 - Anonymous-first participant records with stable product-owned identity and optional Keyverse subject linking that requires distinct proof references for independent anonymous-session and authenticated-subject control, preserves exact replay idempotency, and rejects proof reuse or silent in-place rebinding of historical participant identity.
+
+### Fixed
+
+- Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
