@@ -30,7 +30,7 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
 fn request(
     assessment_spec_ref: &str,
     norm_version_ref: Option<&str>,
-    requested_output_schema_version: u16,
+    scoring_version_ref: &str,
 ) -> ScoringRequest {
     ScoringRequest::from_snapshot(
         &completed_snapshot(),
@@ -39,10 +39,10 @@ fn request(
             response_snapshot_ref: "response_snapshot_ref",
             assessment_spec_ref,
             instrument_version_ref: "instrument_version_ref",
-            scoring_version_ref: "scoring_version_ref",
+            scoring_version_ref,
             calibration_reference: "calibration_reference",
             norm_version_ref,
-            requested_output_schema_version,
+            requested_output_schema_version: 1,
         },
     )
     .unwrap()
@@ -71,8 +71,8 @@ fn result_input<'a>() -> ResultSnapshotInput<'a> {
 
 #[test]
 fn result_snapshot_rejects_same_request_reference_with_different_assessment_spec() {
-    let expected_request = request("assessment_spec_a", Some("norm_version_ref"), 1);
-    let conflicting_request = request("assessment_spec_b", Some("norm_version_ref"), 1);
+    let expected_request = request("assessment_spec_a", Some("norm_version_ref"), "scoring_version_ref");
+    let conflicting_request = request("assessment_spec_b", Some("norm_version_ref"), "scoring_version_ref");
     let result = result_for(&conflicting_request);
 
     let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
@@ -82,8 +82,8 @@ fn result_snapshot_rejects_same_request_reference_with_different_assessment_spec
 
 #[test]
 fn result_snapshot_rejects_same_request_reference_with_different_optional_norm() {
-    let expected_request = request("assessment_spec_ref", Some("norm_version_ref"), 1);
-    let conflicting_request = request("assessment_spec_ref", None, 1);
+    let expected_request = request("assessment_spec_ref", Some("norm_version_ref"), "scoring_version_ref");
+    let conflicting_request = request("assessment_spec_ref", None, "scoring_version_ref");
     let result = result_for(&conflicting_request);
 
     let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
@@ -92,9 +92,9 @@ fn result_snapshot_rejects_same_request_reference_with_different_optional_norm()
 }
 
 #[test]
-fn result_snapshot_rejects_same_request_reference_with_different_output_schema() {
-    let expected_request = request("assessment_spec_ref", Some("norm_version_ref"), 1);
-    let conflicting_request = request("assessment_spec_ref", Some("norm_version_ref"), 2);
+fn result_snapshot_rejects_same_request_reference_with_different_scoring_version() {
+    let expected_request = request("assessment_spec_ref", Some("norm_version_ref"), "scoring_version_a");
+    let conflicting_request = request("assessment_spec_ref", Some("norm_version_ref"), "scoring_version_b");
     let result = result_for(&conflicting_request);
 
     let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
