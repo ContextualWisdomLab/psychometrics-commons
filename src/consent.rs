@@ -147,11 +147,17 @@ impl ConsentSnapshot {
     /// Return the active research scope only while research consent is granted.
     #[must_use]
     pub fn active_research_scope(&self) -> Option<&str> {
+        self.active_research_authorization()
+            .map(|(scope_ref, _)| scope_ref)
+    }
+
+    fn active_research_authorization(&self) -> Option<(&str, u64)> {
         self.latest_event(ConsentPurpose::ResearchContribution)
             .and_then(|event| {
                 (event.decision == ConsentDecision::Granted)
                     .then_some(event.research_scope_ref.as_deref())
                     .flatten()
+                    .map(|scope_ref| (scope_ref, event.occurred_at_unix_ms))
             })
     }
 
@@ -347,7 +353,8 @@ impl ResearchContribution {
     ///
     /// Returns [`ResearchContributionError::ResearchConsentRequired`] unless the
     /// supplied snapshot contains an active research grant, an empty-reference
-    /// error for invalid new identities, or an invalid-start-time error for zero.
+    /// error for invalid new identities, or an invalid-start-time error when the
+    /// contribution start is zero or predates the authorizing research consent.
     pub fn from_snapshot(
         contribution_ref: &str,
         research_participant_ref: &str,
@@ -356,12 +363,12 @@ impl ResearchContribution {
     ) -> Result<Self, ResearchContributionError> {
         let contribution_ref = research_reference(contribution_ref)?;
         let research_participant_ref = research_reference(research_participant_ref)?;
-        if started_at_unix_ms == 0 {
+        let (research_scope_ref, research_granted_at_unix_ms) = snapshot
+            .active_research_authorization()
+            .ok_or(ResearchContributionError::ResearchConsentRequired)?;
+        if started_at_unix_ms == 0 || started_at_unix_ms < research_granted_at_unix_ms {
             return Err(ResearchContributionError::InvalidStartTime);
         }
-        let research_scope_ref = snapshot
-            .active_research_scope()
-            .ok_or(ResearchContributionError::ResearchConsentRequired)?;
 
         Ok(Self {
             contribution_ref: contribution_ref.to_owned(),
@@ -468,7 +475,7 @@ pub enum ResearchContributionError {
     EmptyReference,
     /// The supplied consent snapshot has no active explicit research grant.
     ResearchConsentRequired,
-    /// Contribution start time is zero.
+    /// Contribution start time is zero or predates the authorizing consent.
     InvalidStartTime,
     /// Withdrawal time is not later than the contribution start.
     InvalidWithdrawalTime,
