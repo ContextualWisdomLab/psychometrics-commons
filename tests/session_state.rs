@@ -1,3 +1,5 @@
+//! Integration tests for the hosted assessment-session lifecycle contract.
+
 use psychometrics_commons_runtime::session::{transition, SessionCommand, SessionState};
 
 const STATES: [SessionState; 10] = [
