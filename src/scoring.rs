@@ -351,16 +351,19 @@ impl Display for ScoringContractError {
             Self::EmptyReference => {
                 formatter.write_str("scoring contract references must not be empty")
             }
-            Self::UnsupportedOutputSchemaVersion => formatter
-                .write_str("requested scoring output schema version must be positive"),
+            Self::UnsupportedOutputSchemaVersion => {
+                formatter.write_str("requested scoring output schema version must be positive")
+            }
             Self::InvalidScore => formatter.write_str("score values must be finite"),
-            Self::InvalidStandardError => formatter
-                .write_str("score standard errors must be finite and non-negative"),
+            Self::InvalidStandardError => {
+                formatter.write_str("score standard errors must be finite and non-negative")
+            }
             Self::ScoredDispositionRequiresScore => {
                 formatter.write_str("scored observations require a numeric score")
             }
-            Self::EmptyObservationSet => formatter
-                .write_str("scoring results must contain at least one observation"),
+            Self::EmptyObservationSet => {
+                formatter.write_str("scoring results must contain at least one observation")
+            }
             Self::DuplicateConstruct => formatter
                 .write_str("scoring results must not contain duplicate construct references"),
         }
