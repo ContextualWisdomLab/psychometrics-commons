@@ -93,13 +93,12 @@ fn adr_index_lists_every_numbered_decision_file() {
 }
 
 #[test]
-fn repository_entry_points_link_traceability_and_view_index() {
+fn repository_entry_points_expose_traceability_and_architecture_views() {
     let root = repository_root();
     let readme = read_required(&root.join("README.md"));
     let architecture = read_required(&root.join("ARCHITECTURE.md"));
 
     for required_link in [
-        "docs/architecture/README.md",
         "docs/TRACEABILITY.md",
         "docs/DOCUMENTATION_ASSESSMENT.md",
     ] {
@@ -110,6 +109,23 @@ fn repository_entry_points_link_traceability_and_view_index() {
         assert!(
             architecture.contains(required_link),
             "ARCHITECTURE.md must expose {required_link}"
+        );
+    }
+
+    assert!(
+        readme.contains("docs/architecture/README.md"),
+        "README must expose the architecture view index"
+    );
+    for view_link in [
+        "docs/architecture/C4.md",
+        "docs/architecture/UML.md",
+        "docs/architecture/ERD.md",
+        "docs/architecture/SECURITY_AND_DATA.md",
+        "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
+    ] {
+        assert!(
+            architecture.contains(view_link),
+            "ARCHITECTURE.md must expose architecture view {view_link}"
         );
     }
 
