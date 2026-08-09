@@ -41,7 +41,7 @@ fn identical_event_refs_from_different_sources_do_not_collide() {
         inbox
             .accept_event(
                 "consumer_alpha",
-                &event("source_beta", "event_shared", DIGEST_B),
+                &event("source_beta", "event_shared", DIGEST_A),
                 20_100,
             )
             .unwrap(),
