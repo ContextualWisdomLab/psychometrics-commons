@@ -111,12 +111,8 @@ pub enum AuthorizationError {
 impl Display for AuthorizationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => {
-                "authorization references must be opaque non-numeric values"
-            }
-            Self::CrossTenantDenied => {
-                "resource tenant does not match the authenticated tenant"
-            }
+            Self::InvalidReference => "authorization references must be opaque non-numeric values",
+            Self::CrossTenantDenied => "resource tenant does not match the authenticated tenant",
             Self::ResourceOwnershipMismatch => {
                 "resource kind is not valid for this ownership scope"
             }
@@ -124,9 +120,7 @@ impl Display for AuthorizationError {
             Self::ParticipantIdentityRequired => {
                 "participant identity is required for participant-owned authorization"
             }
-            Self::OwnerMismatch => {
-                "resource owner does not match the authenticated participant"
-            }
+            Self::OwnerMismatch => "resource owner does not match the authenticated participant",
             Self::MissingRole => "authenticated product roles do not permit this operation",
         })
     }
@@ -360,10 +354,7 @@ pub fn authorize(
     }
 }
 
-fn require_role(
-    actor: &AuthorizationContext,
-    role: ProductRole,
-) -> Result<(), AuthorizationError> {
+fn require_role(actor: &AuthorizationContext, role: ProductRole) -> Result<(), AuthorizationError> {
     if actor.has_role(role) {
         Ok(())
     } else {
