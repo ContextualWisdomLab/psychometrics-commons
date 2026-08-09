@@ -289,11 +289,7 @@ fn malformed_or_numeric_references_fail_closed() {
         Err(AuthorizationError::InvalidReference)
     );
     assert_eq!(
-        ResourceScope::tenant_scoped(
-            ResourceKind::InstrumentRelease,
-            "tenant_alpha",
-            "12345"
-        ),
+        ResourceScope::tenant_scoped(ResourceKind::InstrumentRelease, "tenant_alpha", "12345"),
         Err(AuthorizationError::InvalidReference)
     );
 }
