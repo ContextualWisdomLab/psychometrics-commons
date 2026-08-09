@@ -1,17 +1,11 @@
 //! Contract tests for anonymous-first participant identity and account linking.
 
-use psychometrics_commons_runtime::participant::{
-    AccountLinkError, ParticipantRecord,
-};
+use psychometrics_commons_runtime::participant::{AccountLinkError, ParticipantRecord};
 
 #[test]
 fn participant_is_anonymous_by_default_and_keeps_product_identity_stable() {
-    let participant = ParticipantRecord::new_anonymous(
-        "participant_alpha",
-        "tenant_alpha",
-        10_000,
-    )
-    .unwrap();
+    let participant =
+        ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 10_000).unwrap();
 
     assert_eq!(participant.participant_ref(), "participant_alpha");
     assert_eq!(participant.tenant_ref(), "tenant_alpha");
@@ -25,12 +19,8 @@ fn participant_is_anonymous_by_default_and_keeps_product_identity_stable() {
 
 #[test]
 fn linking_requires_both_anonymous_and_authenticated_proof() {
-    let mut participant = ParticipantRecord::new_anonymous(
-        "participant_alpha",
-        "tenant_alpha",
-        10_000,
-    )
-    .unwrap();
+    let mut participant =
+        ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 10_000).unwrap();
 
     participant
         .link_account(
@@ -62,12 +52,8 @@ fn linking_requires_both_anonymous_and_authenticated_proof() {
 
 #[test]
 fn exact_link_replay_is_idempotent_without_rewriting_product_identity() {
-    let mut participant = ParticipantRecord::new_anonymous(
-        "participant_alpha",
-        "tenant_alpha",
-        20_000,
-    )
-    .unwrap();
+    let mut participant =
+        ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 20_000).unwrap();
 
     for _ in 0..2 {
         participant
@@ -87,12 +73,8 @@ fn exact_link_replay_is_idempotent_without_rewriting_product_identity() {
 
 #[test]
 fn replay_with_changed_link_evidence_fails_closed() {
-    let mut participant = ParticipantRecord::new_anonymous(
-        "participant_alpha",
-        "tenant_alpha",
-        30_000,
-    )
-    .unwrap();
+    let mut participant =
+        ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 30_000).unwrap();
     participant
         .link_account(
             "link_event_alpha",
@@ -147,12 +129,8 @@ fn replay_with_changed_link_evidence_fails_closed() {
 
 #[test]
 fn already_linked_participant_cannot_be_rebound_under_new_event_identity() {
-    let mut participant = ParticipantRecord::new_anonymous(
-        "participant_alpha",
-        "tenant_alpha",
-        40_000,
-    )
-    .unwrap();
+    let mut participant =
+        ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 40_000).unwrap();
     participant
         .link_account(
             "link_event_alpha",
@@ -187,12 +165,8 @@ fn already_linked_participant_cannot_be_rebound_under_new_event_identity() {
 
 #[test]
 fn account_link_time_is_server_monotonic() {
-    let mut participant = ParticipantRecord::new_anonymous(
-        "participant_alpha",
-        "tenant_alpha",
-        50_000,
-    )
-    .unwrap();
+    let mut participant =
+        ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 50_000).unwrap();
 
     assert_eq!(
         participant.link_account(
@@ -244,18 +218,34 @@ fn malformed_participant_and_link_references_fail_closed() {
     );
 
     let invalid_cases = [
-        ("12345", "keyverse_subject_alpha", "anonymous_proof_alpha", "authenticated_proof_alpha"),
-        ("link_event_alpha", "12345", "anonymous_proof_alpha", "authenticated_proof_alpha"),
-        ("link_event_alpha", "keyverse_subject_alpha", "12345", "authenticated_proof_alpha"),
-        ("link_event_alpha", "keyverse_subject_alpha", "anonymous_proof_alpha", "12345"),
+        (
+            "12345",
+            "keyverse_subject_alpha",
+            "anonymous_proof_alpha",
+            "authenticated_proof_alpha",
+        ),
+        (
+            "link_event_alpha",
+            "12345",
+            "anonymous_proof_alpha",
+            "authenticated_proof_alpha",
+        ),
+        (
+            "link_event_alpha",
+            "keyverse_subject_alpha",
+            "12345",
+            "authenticated_proof_alpha",
+        ),
+        (
+            "link_event_alpha",
+            "keyverse_subject_alpha",
+            "anonymous_proof_alpha",
+            "12345",
+        ),
     ];
     for (event_ref, subject_ref, anonymous_proof_ref, authenticated_proof_ref) in invalid_cases {
-        let mut participant = ParticipantRecord::new_anonymous(
-            "participant_alpha",
-            "tenant_alpha",
-            60_000,
-        )
-        .unwrap();
+        let mut participant =
+            ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 60_000).unwrap();
         assert_eq!(
             participant.link_account(
                 event_ref,
