@@ -137,19 +137,17 @@ pub const fn transition(
     };
 
     let next = match (state, command) {
-        (Created | Active, Activate) => Active,
+        (Created | Active, Activate) | (Paused, Resume) => Active,
         (Active | Paused, Pause) => Paused,
-        (Paused, Resume) => Active,
         (Active | Completed, Complete) => Completed,
         (Completed | Scoring, BeginScoring) => Scoring,
         (Scoring | Scored, RecordScore) => Scored,
         (Scored | Released, Release) => Released,
-        (Created | Active | Paused, Cancel) => Cancelled,
-        (Cancelled, Cancel) => Cancelled,
-        (Created | Active | Paused, Expire) => Expired,
-        (Expired, Expire) => Expired,
-        (Created | Active | Paused | Completed | Scoring | Scored, Invalidate) => Invalidated,
-        (Invalidated, Invalidate) => Invalidated,
+        (Created | Active | Paused | Cancelled, Cancel) => Cancelled,
+        (Created | Active | Paused | Expired, Expire) => Expired,
+        (Created | Active | Paused | Completed | Scoring | Scored | Invalidated, Invalidate) => {
+            Invalidated
+        }
         _ => return Err(TransitionError::new(state, command)),
     };
 
