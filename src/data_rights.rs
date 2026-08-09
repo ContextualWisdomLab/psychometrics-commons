@@ -3,7 +3,9 @@
 //! Export and deletion requests are explicit domain resources rather than flags on
 //! participant records. Identity verification is required before processing, and
 //! deletion completion may preserve named legal-retention exceptions without
-//! pretending that retained evidence was deleted.
+//! pretending that retained evidence was deleted. Exact lifecycle command replays
+//! are idempotent even after later transitions, while conflicting evidence fails
+//! closed.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -49,6 +51,8 @@ pub enum DataRightsError {
     IdentityVerificationRequired,
     /// A retention exception was supplied for a non-deletion request.
     RetentionExceptionNotAllowed,
+    /// A lifecycle reference was reused with evidence different from its first use.
+    ConflictingReplay,
     /// The requested lifecycle transition is not valid from the current state.
     InvalidTransition,
 }
@@ -66,6 +70,9 @@ impl Display for DataRightsError {
             }
             Self::RetentionExceptionNotAllowed => {
                 "retention exceptions are valid only for deletion requests"
+            }
+            Self::ConflictingReplay => {
+                "data-rights lifecycle reference was replayed with conflicting evidence"
             }
             Self::InvalidTransition => {
                 "data-rights request transition is not allowed from the current state"
@@ -87,8 +94,11 @@ pub struct DataRightsRequest {
     requested_at_unix_ms: u64,
     latest_event_at_unix_ms: u64,
     verification_evidence_ref: Option<String>,
+    verified_at_unix_ms: Option<u64>,
     operation_ref: Option<String>,
+    processing_started_at_unix_ms: Option<u64>,
     completion_evidence_ref: Option<String>,
+    completed_at_unix_ms: Option<u64>,
     retained_scope_refs: Vec<String>,
 }
 
@@ -119,8 +129,11 @@ impl DataRightsRequest {
             requested_at_unix_ms,
             latest_event_at_unix_ms: requested_at_unix_ms,
             verification_evidence_ref: None,
+            verified_at_unix_ms: None,
             operation_ref: None,
+            processing_started_at_unix_ms: None,
             completion_evidence_ref: None,
+            completed_at_unix_ms: None,
             retained_scope_refs: Vec::new(),
         })
     }
@@ -167,16 +180,34 @@ impl DataRightsRequest {
         self.verification_evidence_ref.as_deref()
     }
 
+    /// Return the server-authoritative identity-verification time.
+    #[must_use]
+    pub const fn verified_at_unix_ms(&self) -> Option<u64> {
+        self.verified_at_unix_ms
+    }
+
     /// Return the durable operation reference after processing starts.
     #[must_use]
     pub fn operation_ref(&self) -> Option<&str> {
         self.operation_ref.as_deref()
     }
 
+    /// Return the server-authoritative processing-start time.
+    #[must_use]
+    pub const fn processing_started_at_unix_ms(&self) -> Option<u64> {
+        self.processing_started_at_unix_ms
+    }
+
     /// Return the durable completion evidence reference after completion.
     #[must_use]
     pub fn completion_evidence_ref(&self) -> Option<&str> {
         self.completion_evidence_ref.as_deref()
+    }
+
+    /// Return the server-authoritative completion time.
+    #[must_use]
+    pub const fn completed_at_unix_ms(&self) -> Option<u64> {
+        self.completed_at_unix_ms
     }
 
     /// Return deletion scopes retained for a declared legal or audit obligation.
@@ -188,22 +219,35 @@ impl DataRightsRequest {
     /// Verify requester identity for this specific data-rights request.
     ///
     /// Equal server timestamps are accepted; only backward time is rejected.
+    /// An exact replay remains idempotent after later lifecycle transitions.
     ///
     /// # Errors
     ///
     /// Returns a [`DataRightsError`] when evidence is invalid, event time moves
-    /// backwards, or the request has already advanced beyond `Requested`.
+    /// backwards, an existing verification is replayed with different evidence,
+    /// or a non-replay transition is attempted outside `Requested`.
     pub fn verify_identity(
         &mut self,
         verification_evidence_ref: &str,
         verified_at_unix_ms: u64,
     ) -> Result<(), DataRightsError> {
+        let evidence_ref = required_reference(verification_evidence_ref)?;
+        if let (Some(existing_ref), Some(existing_at)) = (
+            self.verification_evidence_ref.as_deref(),
+            self.verified_at_unix_ms,
+        ) {
+            return if existing_ref == evidence_ref && existing_at == verified_at_unix_ms {
+                Ok(())
+            } else {
+                Err(DataRightsError::ConflictingReplay)
+            };
+        }
         if self.state != DataRightsState::Requested {
             return Err(DataRightsError::InvalidTransition);
         }
-        let evidence_ref = required_reference(verification_evidence_ref)?;
         self.validate_event_time(verified_at_unix_ms)?;
         self.verification_evidence_ref = Some(evidence_ref.to_owned());
+        self.verified_at_unix_ms = Some(verified_at_unix_ms);
         self.latest_event_at_unix_ms = verified_at_unix_ms;
         self.state = DataRightsState::IdentityVerified;
         Ok(())
@@ -211,16 +255,30 @@ impl DataRightsRequest {
 
     /// Start durable processing after requester identity has been verified.
     ///
+    /// An exact replay remains idempotent after later lifecycle transitions.
+    ///
     /// # Errors
     ///
     /// Returns [`DataRightsError::IdentityVerificationRequired`] when processing
-    /// begins before identity verification, or another [`DataRightsError`] for
-    /// invalid evidence, time, or lifecycle state.
+    /// begins before identity verification, [`DataRightsError::ConflictingReplay`]
+    /// when an existing operation reference is replayed with different evidence,
+    /// or another [`DataRightsError`] for invalid evidence, time, or state.
     pub fn start_processing(
         &mut self,
         operation_ref: &str,
         started_at_unix_ms: u64,
     ) -> Result<(), DataRightsError> {
+        if let (Some(existing_ref), Some(existing_at)) = (
+            self.operation_ref.as_deref(),
+            self.processing_started_at_unix_ms,
+        ) {
+            let operation_ref = required_reference(operation_ref)?;
+            return if existing_ref == operation_ref && existing_at == started_at_unix_ms {
+                Ok(())
+            } else {
+                Err(DataRightsError::ConflictingReplay)
+            };
+        }
         if self.state == DataRightsState::Requested {
             return Err(DataRightsError::IdentityVerificationRequired);
         }
@@ -230,6 +288,7 @@ impl DataRightsRequest {
         let operation_ref = required_reference(operation_ref)?;
         self.validate_event_time(started_at_unix_ms)?;
         self.operation_ref = Some(operation_ref.to_owned());
+        self.processing_started_at_unix_ms = Some(started_at_unix_ms);
         self.latest_event_at_unix_ms = started_at_unix_ms;
         self.state = DataRightsState::Processing;
         Ok(())
@@ -239,33 +298,48 @@ impl DataRightsRequest {
     ///
     /// `retained_scope_refs` is valid only for deletion. A non-empty retained set
     /// results in [`DataRightsState::PartiallyCompleted`] so the product never
-    /// represents legally retained data as deleted.
+    /// represents legally retained data as deleted. An exact completion replay is
+    /// idempotent even after the request becomes terminal.
     ///
     /// # Errors
     ///
     /// Returns [`DataRightsError::RetentionExceptionNotAllowed`] for export
-    /// retention exceptions, or another [`DataRightsError`] for invalid evidence,
-    /// time, retained scope references, or lifecycle state.
+    /// retention exceptions, [`DataRightsError::ConflictingReplay`] when completion
+    /// evidence is replayed inconsistently, or another [`DataRightsError`] for
+    /// invalid evidence, time, retained scopes, or lifecycle state.
     pub fn complete(
         &mut self,
         completion_evidence_ref: &str,
         retained_scope_refs: &[&str],
         completed_at_unix_ms: u64,
     ) -> Result<(), DataRightsError> {
-        if self.state != DataRightsState::Processing {
-            return Err(DataRightsError::InvalidTransition);
-        }
         if self.kind != DataRightsRequestKind::Deletion && !retained_scope_refs.is_empty() {
             return Err(DataRightsError::RetentionExceptionNotAllowed);
         }
         let completion_ref = required_reference(completion_evidence_ref)?;
-        self.validate_event_time(completed_at_unix_ms)?;
         let normalized_retention = retained_scope_refs
             .iter()
             .map(|reference| required_reference(reference).map(str::to_owned))
             .collect::<Result<Vec<_>, _>>()?;
-
+        if let (Some(existing_ref), Some(existing_at)) = (
+            self.completion_evidence_ref.as_deref(),
+            self.completed_at_unix_ms,
+        ) {
+            return if existing_ref == completion_ref
+                && existing_at == completed_at_unix_ms
+                && self.retained_scope_refs == normalized_retention
+            {
+                Ok(())
+            } else {
+                Err(DataRightsError::ConflictingReplay)
+            };
+        }
+        if self.state != DataRightsState::Processing {
+            return Err(DataRightsError::InvalidTransition);
+        }
+        self.validate_event_time(completed_at_unix_ms)?;
         self.completion_evidence_ref = Some(completion_ref.to_owned());
+        self.completed_at_unix_ms = Some(completed_at_unix_ms);
         self.retained_scope_refs = normalized_retention;
         self.latest_event_at_unix_ms = completed_at_unix_ms;
         self.state = if self.retained_scope_refs.is_empty() {
