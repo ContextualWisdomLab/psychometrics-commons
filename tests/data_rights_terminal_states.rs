@@ -22,7 +22,10 @@ fn rejected_request_preserves_durable_evidence_and_is_terminal() {
 
     request.reject(" rejection_evidence_ref ", 10_100).unwrap();
     assert_eq!(request.state(), DataRightsState::Rejected);
-    assert_eq!(request.rejection_evidence_ref(), Some("rejection_evidence_ref"));
+    assert_eq!(
+        request.rejection_evidence_ref(),
+        Some("rejection_evidence_ref")
+    );
     assert_eq!(request.rejected_at_unix_ms(), Some(10_100));
 
     request.reject("rejection_evidence_ref", 10_100).unwrap();
@@ -51,13 +54,19 @@ fn rejected_request_preserves_durable_evidence_and_is_terminal() {
 #[test]
 fn identity_verified_request_can_be_rejected_but_processing_request_cannot() {
     let mut verified = deletion_request("verified_rejection_ref", 11_000);
-    verified.verify_identity("verification_ref", 11_050).unwrap();
+    verified
+        .verify_identity("verification_ref", 11_050)
+        .unwrap();
     verified.reject("policy_rejection_ref", 11_100).unwrap();
     assert_eq!(verified.state(), DataRightsState::Rejected);
 
     let mut processing = deletion_request("processing_rejection_ref", 12_000);
-    processing.verify_identity("verification_ref", 12_050).unwrap();
-    processing.start_processing("operation_ref", 12_100).unwrap();
+    processing
+        .verify_identity("verification_ref", 12_050)
+        .unwrap();
+    processing
+        .start_processing("operation_ref", 12_100)
+        .unwrap();
     assert_eq!(
         processing.reject("late_rejection_ref", 12_200),
         Err(DataRightsError::InvalidTransition)
@@ -103,14 +112,18 @@ fn failure_is_valid_only_after_processing_and_terminal_commands_fail_closed() {
     );
 
     let mut verified = deletion_request("verified_failure_ref", 15_000);
-    verified.verify_identity("verification_ref", 15_050).unwrap();
+    verified
+        .verify_identity("verification_ref", 15_050)
+        .unwrap();
     assert_eq!(
         verified.fail("failure_ref", 15_100),
         Err(DataRightsError::InvalidTransition)
     );
 
     let mut completed = deletion_request("completed_rejection_ref", 16_000);
-    completed.verify_identity("verification_ref", 16_050).unwrap();
+    completed
+        .verify_identity("verification_ref", 16_050)
+        .unwrap();
     completed.start_processing("operation_ref", 16_100).unwrap();
     completed.complete("completion_ref", &[], 16_200).unwrap();
     assert_eq!(
