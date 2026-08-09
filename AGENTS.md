@@ -16,12 +16,15 @@ Waiting is local to the affected branch/action. CI, reviewer latency, provider c
 
 ## Documentation and architecture completeness contract
 
-The repository uses multiple architecture viewpoints so product intent, implementation, security, data, and operations do not collapse into one stale document.
+The repository uses multiple architecture and governance viewpoints so product intent, measurement evidence, implementation, AI, research, security, data, and operations do not collapse into one stale document.
 
 Required architecture/documentation artifacts are:
 
 - `docs/PRD.md`
 - `docs/TRD.md`
+- `docs/MEASUREMENT_GOVERNANCE.md`
+- `docs/AI_GOVERNANCE.md`
+- `docs/RESEARCH_GOVERNANCE.md`
 - `ARCHITECTURE.md`
 - `docs/adr/README.md` and applicable ADRs
 - `docs/architecture/C4.md`
@@ -34,9 +37,9 @@ Required architecture/documentation artifacts are:
 - `docs/DOCUMENTATION_ASSESSMENT.md`
 - `CHANGELOG.md`
 
-A material change to bounded-context ownership, lifecycle states, public/admin operation families, events, logical entities/cardinalities, transaction boundaries, identity/privacy/trust boundaries, deployment/recovery semantics, or product acceptance must update the affected artifacts or explicitly demonstrate why their mappings are unchanged.
+A material change to bounded-context ownership, lifecycle states, public/admin operation families, events, logical entities/cardinalities, transaction boundaries, psychometric publication criteria, AI authority, research-release policy, identity/privacy/trust boundaries, deployment/recovery semantics, or product acceptance must update the affected artifacts or explicitly demonstrate why their mappings are unchanged.
 
-Architecture diagrams may describe target semantics, but diagrams are not as-built proof. `docs/TRACEABILITY.md` distinguishes current protected-main implementation from targets. Do not fabricate OpenAPI, AsyncAPI, physical DDL, deployed topology, SLO/RPO/RTO, or certification evidence before the corresponding implementation/operation exists.
+Architecture diagrams may describe target semantics, but diagrams are not as-built proof. `docs/TRACEABILITY.md` distinguishes current protected-main implementation from targets. Do not fabricate OpenAPI, AsyncAPI, physical DDL, deployed topology, SLO/RPO/RTO, certification, or integration evidence before the corresponding implementation/operation exists.
 
 Documentation work is support for implementation, not a reason to stop. When documentation gaps are fixed and executable product work remains, continue into implementation in the same run when the writer lease and run budget permit.
 
@@ -45,17 +48,20 @@ Documentation work is support for implementation, not a reason to stop. When doc
 An ADR is not complete when it only names a technology or gives a one-paragraph preference. Every proposed or accepted ADR must be implementation-ready and include:
 
 1. concrete context, constraints, assumptions, and decision drivers;
-2. owning repository/service/bounded context for every responsibility;
-3. allowed dependency direction and explicitly forbidden coupling;
-4. API, event, schema, identifier, idempotency, ordering, timeout, retry, and error contracts;
-5. invariants with named tests or controls that enforce them;
-6. fail-closed, degraded-mode, recovery, and poison-message behavior;
-7. authentication, authorization, tenancy, privacy, residency, encryption, retention, and audit consequences;
-8. migration, compatibility window, rollback triggers, and rollback mechanics;
-9. measurable scientific, security, accessibility, contract, and operational release evidence;
-10. rejected alternatives, accepted risks, follow-up work, and objective reversal conditions.
+2. whether the decision describes as-built behavior, target behavior, or a migration with explicit gaps;
+3. owning repository/service/bounded context for every responsibility;
+4. allowed dependency direction and explicitly forbidden coupling;
+5. API, event, schema, identifier, idempotency, ordering, timeout, retry, and error contracts;
+6. data/persistence/cardinality/transaction impact;
+7. invariants with named tests or controls that enforce them;
+8. fail-closed, degraded-mode, recovery, and poison-message behavior;
+9. authentication, authorization, tenancy, privacy, residency, encryption, retention, and audit consequences;
+10. deployment/operations impact, migration, compatibility window, rollback/roll-forward mechanics;
+11. affected architecture views and traceability;
+12. measurable scientific, security, privacy, accessibility, contract, recovery, and operational release evidence;
+13. rejected alternatives, accepted risks, concrete follow-up work, and objective reversal conditions.
 
-Use `docs/adr/0000-template.md`. One-line ADRs, aspirational prose without ownership, and decisions that omit failure behavior are not acceptable. A material implementation that contradicts an accepted ADR must first add a superseding ADR in the same PR or a prerequisite PR.
+Use `docs/adr/0000-template.md`. One-line ADRs, aspirational prose without ownership, decisions that omit failure behavior, and decisions that leave contradictory diagrams/data models behind are not acceptable. A material implementation that contradicts an accepted ADR must first add a superseding ADR in the same PR or a prerequisite PR.
 
 ## Architecture invariants
 
