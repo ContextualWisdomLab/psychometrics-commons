@@ -9,6 +9,7 @@
 
 pub mod consent;
 pub mod data_rights;
+pub mod instrument;
 pub mod integration;
 mod reference;
 pub mod response;
