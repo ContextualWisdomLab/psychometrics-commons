@@ -23,7 +23,9 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
             },
         )
         .unwrap();
-    ledger.freeze(SessionState::Completed).unwrap()
+    ledger
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
+        .unwrap()
 }
 
 fn scoring_input<'a>() -> ScoringRequestInput<'a> {
@@ -184,7 +186,12 @@ fn score_observations_fail_closed_for_invalid_numeric_or_reference_input() {
     assert_eq!(score_error, ScoringContractError::InvalidScore);
     assert_eq!(score_error.to_string(), "score values must be finite");
 
-    for invalid_standard_error in [-0.1, f64::INFINITY] {
+    for invalid_standard_error in [
+        -0.1,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NAN,
+    ] {
         let error = ScoreObservation::scored("construct_ref", 1.0, Some(invalid_standard_error))
             .unwrap_err();
         assert_eq!(error, ScoringContractError::InvalidStandardError);
@@ -293,12 +300,14 @@ fn result_snapshot_copies_scientific_provenance_without_recomputing_scores() {
     assert_eq!(snapshot.result_snapshot_ref(), "result_snapshot_ref");
     assert_eq!(snapshot.participant_ref(), "participant_ref");
     assert_eq!(snapshot.scoring_result_ref(), "scoring_result_ref");
+    assert_eq!(snapshot.session_ref(), "session_ref");
     assert_eq!(snapshot.response_snapshot_ref(), "response_snapshot_ref");
     assert_eq!(snapshot.assessment_spec_ref(), "assessment_spec_ref");
     assert_eq!(snapshot.instrument_version_ref(), "instrument_version_ref");
     assert_eq!(snapshot.scoring_version_ref(), "scoring_version_ref");
     assert_eq!(snapshot.calibration_reference(), "calibration_reference");
     assert_eq!(snapshot.norm_version_ref(), Some("norm_version_ref"));
+    assert_eq!(snapshot.requested_output_schema_version(), 1);
     assert_eq!(snapshot.narrative_version_ref(), "narrative_version_ref");
     assert_eq!(
         snapshot.consent_snapshot_refs(),
