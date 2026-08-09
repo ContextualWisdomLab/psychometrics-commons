@@ -15,6 +15,7 @@ fn create(
         event_type,
         schema_version,
         "psychometrics_commons",
+        "tenant_alpha",
         "subject_alpha",
         10_000,
         "correlation_alpha",
