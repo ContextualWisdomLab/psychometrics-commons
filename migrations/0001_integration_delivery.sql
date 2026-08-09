@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS integration_outbox (
             AND causation_ref !~ '^[0-9]+$'
         )),
     payload_digest TEXT NOT NULL CHECK (payload_digest ~ '^sha256:[0-9a-f]{64}$'),
-    max_attempts BIGINT NOT NULL CHECK (max_attempts > 0),
+    max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
     current_state TEXT NOT NULL DEFAULT 'pending'
         CHECK (current_state IN ('pending', 'delivered', 'quarantined')),
     latest_event_at_unix_ms BIGINT NOT NULL CHECK (latest_event_at_unix_ms > 0),
