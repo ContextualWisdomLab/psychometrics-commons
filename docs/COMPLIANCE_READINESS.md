@@ -14,9 +14,9 @@ Each control/evidence area can be in one of four states:
 - **architecture_defined** — design/ownership/expected evidence is documented;
 - **implemented** — control exists in code/infrastructure/process;
 - **verified** — current exact-release/deployment evidence proves operation;
-- **externally_assessed** — independent attestation/certification evidence exists for the applicable scope.
+- **externally_assessed** — an independent auditor/assessor has evaluated the applicable scope and produced assessment evidence.
 
-Only the last state supports external certification/attestation claims. Repository documentation alone is `architecture_defined` evidence.
+`externally_assessed` is one required evidence state for any external attestation/certification claim, but it is **not sufficient by itself**. Any claim also requires the actual deployment/product/legal-entity scope to match the assessment, a current control mapping for that scope, and the assessor's explicit scope, conclusions, exceptions, and validity period to support the claim. Repository documentation or this readiness architecture never constitutes SOC 2 attestation or CSAP certification. Repository documentation alone is `architecture_defined` evidence.
 
 ## 2. Control/evidence matrix
 
@@ -65,7 +65,8 @@ Do not promote a lower level into a higher-level claim. Examples:
 - “encrypted storage is required” is architecture intent, not evidence that a production database is encrypted;
 - a successful unit test is not an operational restore drill;
 - an SBOM file is not by itself supply-chain attestation;
-- “designed for SOC 2/CSAP readiness” is not SOC 2/CSAP certification.
+- “designed for SOC 2/CSAP readiness” is not SOC 2/CSAP certification;
+- an external assessment report outside the claimed deployment scope or validity period does not support a current product-wide claim.
 
 ## 4. Evidence registry requirement
 
