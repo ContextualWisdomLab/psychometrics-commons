@@ -98,10 +98,7 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
     let readme = read_required(&root.join("README.md"));
     let architecture = read_required(&root.join("ARCHITECTURE.md"));
 
-    for required_link in [
-        "docs/TRACEABILITY.md",
-        "docs/DOCUMENTATION_ASSESSMENT.md",
-    ] {
+    for required_link in ["docs/TRACEABILITY.md", "docs/DOCUMENTATION_ASSESSMENT.md"] {
         assert!(
             readme.contains(required_link),
             "README must expose {required_link}"
