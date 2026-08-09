@@ -29,13 +29,14 @@ const COMMANDS: [SessionCommand; 10] = [
 ];
 
 #[rustfmt::skip]
-const VALID: [(SessionState, SessionCommand, SessionState); 28] = [
+const VALID: [(SessionState, SessionCommand, SessionState); 29] = [
     (SessionState::Created, SessionCommand::Activate, SessionState::Active),
     (SessionState::Created, SessionCommand::Cancel, SessionState::Cancelled),
     (SessionState::Created, SessionCommand::Expire, SessionState::Expired),
     (SessionState::Created, SessionCommand::Invalidate, SessionState::Invalidated),
     (SessionState::Active, SessionCommand::Activate, SessionState::Active),
     (SessionState::Active, SessionCommand::Pause, SessionState::Paused),
+    (SessionState::Active, SessionCommand::Resume, SessionState::Active),
     (SessionState::Active, SessionCommand::Complete, SessionState::Completed),
     (SessionState::Active, SessionCommand::Cancel, SessionState::Cancelled),
     (SessionState::Active, SessionCommand::Expire, SessionState::Expired),
