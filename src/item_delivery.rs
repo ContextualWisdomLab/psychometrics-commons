@@ -281,9 +281,7 @@ fn valid_sha256_digest(digest: &str) -> bool {
 
 fn valid_locale(locale: &str) -> bool {
     let mut subtags = locale.split('-');
-    let Some(primary) = subtags.next() else {
-        return false;
-    };
+    let primary = subtags.next().unwrap_or_default();
     if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
     {
         return false;
