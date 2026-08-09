@@ -1,6 +1,6 @@
-//! PostgreSQL 18 persistence adapter for integration evidence.
+//! `PostgreSQL` 18 persistence adapter for integration evidence.
 //!
-//! The adapter receives a caller-owned PostgreSQL client or transaction. It never
+//! The adapter receives a caller-owned `PostgreSQL` client or transaction. It never
 //! owns credentials or a cross-service connection. The migration and write paths
 //! preserve the immutable integration-event, outbox, and inbox contracts defined
 //! by [`crate::integration`].
@@ -33,11 +33,11 @@ pub enum PersistenceError {
     InvalidTimestamp,
     /// The configured outbox delivery-attempt limit was zero.
     InvalidAttemptLimit,
-    /// A runtime value cannot be represented by the bounded PostgreSQL column.
+    /// A runtime value cannot be represented by the bounded `PostgreSQL` column.
     ValueOutOfRange,
     /// An idempotency identity already exists with different immutable evidence.
     ConflictingReplay,
-    /// PostgreSQL rejected or could not execute the persistence operation.
+    /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
 
@@ -64,7 +64,7 @@ impl From<postgres::Error> for PersistenceError {
     }
 }
 
-/// Apply the idempotent integration-evidence migration to a PostgreSQL connection.
+/// Apply the idempotent integration-evidence migration to a `PostgreSQL` connection.
 ///
 /// The caller owns the connection, transaction policy, credentials, TLS policy, and
 /// deployment routing. Re-applying this migration is safe because it creates only
@@ -72,7 +72,7 @@ impl From<postgres::Error> for PersistenceError {
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL error if the migration cannot be applied.
+/// Returns the `PostgreSQL` error if the migration cannot be applied.
 pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
     client.batch_execute(INTEGRATION_MIGRATION)
 }
@@ -87,7 +87,7 @@ pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<()
 /// # Errors
 ///
 /// Returns [`PersistenceError`] for an invalid attempt limit, a value outside the
-/// supported PostgreSQL integer range, conflicting replay, or a database failure.
+/// supported `PostgreSQL` integer range, conflicting replay, or a database failure.
 pub fn enqueue_outbox_event(
     client: &mut impl GenericClient,
     event: &IntegrationEvent,
