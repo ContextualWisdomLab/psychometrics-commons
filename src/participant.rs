@@ -19,6 +19,8 @@ pub enum AccountLinkError {
     InvalidTimestamp,
     /// Account linking was recorded before the participant existed.
     NonMonotonicTimestamp,
+    /// The same proof reference was offered for both independent control claims.
+    ProofReferenceReuse,
     /// The same account-link event reference was reused with different evidence.
     ConflictingReplay,
     /// An already-linked participant was offered a new account-link identity.
@@ -36,6 +38,9 @@ impl Display for AccountLinkError {
             }
             Self::NonMonotonicTimestamp => {
                 "participant account-link time must not precede participant creation"
+            }
+            Self::ProofReferenceReuse => {
+                "anonymous and authenticated account-link proofs must use distinct references"
             }
             Self::ConflictingReplay => {
                 "participant account-link event was replayed with conflicting evidence"
@@ -140,15 +145,18 @@ impl ParticipantRecord {
 
     /// Link this stable participant identity to one authenticated subject.
     ///
-    /// Both proof references are mandatory. An exact event replay is idempotent.
-    /// Reusing the same event reference with altered evidence fails closed. Once a
-    /// participant is linked, a different event cannot silently rebind it to another
-    /// subject; a future unlink/relink policy requires an explicit audited lifecycle.
+    /// Both proof references are mandatory and must be distinct identities because
+    /// they represent separate evidence that the caller controlled the anonymous
+    /// participant and the authenticated subject. An exact event replay is
+    /// idempotent. Reusing the same event reference with altered evidence fails
+    /// closed. Once a participant is linked, a different event cannot silently
+    /// rebind it to another subject; a future unlink/relink policy requires an
+    /// explicit audited lifecycle.
     ///
     /// # Errors
     ///
-    /// Returns [`AccountLinkError`] for invalid evidence, zero/backward time,
-    /// conflicting event replay, or attempted in-place rebinding.
+    /// Returns [`AccountLinkError`] for invalid evidence, proof-identity reuse,
+    /// zero/backward time, conflicting event replay, or attempted in-place rebinding.
     pub fn link_account(
         &mut self,
         link_event_ref: &str,
@@ -180,6 +188,9 @@ impl ParticipantRecord {
             return Err(AccountLinkError::AlreadyLinked);
         }
 
+        if anonymous_proof_ref == authenticated_proof_ref {
+            return Err(AccountLinkError::ProofReferenceReuse);
+        }
         if linked_at_unix_ms < self.created_at_unix_ms {
             return Err(AccountLinkError::NonMonotonicTimestamp);
         }
