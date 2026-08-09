@@ -22,7 +22,9 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
             },
         )
         .unwrap();
-    ledger.freeze(SessionState::Completed).unwrap()
+    ledger
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
+        .unwrap()
 }
 
 fn request(assessment_spec_ref: &str, norm_version_ref: Option<&str>) -> ScoringRequest {
