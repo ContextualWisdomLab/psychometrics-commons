@@ -5,6 +5,7 @@
 //! and monotonic sequences preserve a stable audit order. Completing a session
 //! freezes the accepted response prefix into an immutable snapshot value.
 
+use crate::reference::normalized_reference;
 use crate::session::SessionState;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -67,6 +68,7 @@ impl ResponseEvent {
 /// Immutable response snapshot frozen when collection completes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResponseSnapshot {
+    snapshot_ref: Option<String>,
     session_ref: String,
     event_refs: Vec<String>,
     item_version_refs: Vec<String>,
@@ -75,6 +77,12 @@ pub struct ResponseSnapshot {
 }
 
 impl ResponseSnapshot {
+    /// Return the durable snapshot reference when one was assigned at freeze time.
+    #[must_use]
+    pub fn snapshot_ref(&self) -> Option<&str> {
+        self.snapshot_ref.as_deref()
+    }
+
     /// Return the opaque assessment-session reference.
     #[must_use]
     pub fn session_ref(&self) -> &str {
@@ -241,18 +249,50 @@ impl ResponseLedger {
         Ok(event)
     }
 
-    /// Freeze the accepted event prefix into an immutable response snapshot.
+    /// Freeze the accepted event prefix without assigning durable persistence identity.
+    ///
+    /// This method is useful for purely in-memory inspection. Scoring dispatch
+    /// deliberately rejects such unbound snapshots; persistence adapters must use
+    /// [`Self::freeze_as`] when the snapshot becomes durable.
     ///
     /// # Errors
     ///
     /// Returns [`WriteError::SnapshotRequiresCompleted`] unless `state` is
     /// exactly [`SessionState::Completed`].
     pub fn freeze(&self, state: SessionState) -> Result<ResponseSnapshot, WriteError> {
+        self.freeze_internal(state, None)
+    }
+
+    /// Freeze the accepted event prefix with its durable opaque snapshot identity.
+    ///
+    /// Leading and trailing whitespace is removed before the reference becomes
+    /// identity-bearing state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::EmptyReference`] for a blank snapshot reference or
+    /// [`WriteError::SnapshotRequiresCompleted`] unless `state` is exactly
+    /// [`SessionState::Completed`].
+    pub fn freeze_as(
+        &self,
+        state: SessionState,
+        snapshot_ref: &str,
+    ) -> Result<ResponseSnapshot, WriteError> {
+        let snapshot_ref = normalized_reference(snapshot_ref).ok_or(WriteError::EmptyReference)?;
+        self.freeze_internal(state, Some(snapshot_ref))
+    }
+
+    fn freeze_internal(
+        &self,
+        state: SessionState,
+        snapshot_ref: Option<&str>,
+    ) -> Result<ResponseSnapshot, WriteError> {
         if state != SessionState::Completed {
             return Err(WriteError::SnapshotRequiresCompleted(state));
         }
 
         Ok(ResponseSnapshot {
+            snapshot_ref: snapshot_ref.map(str::to_owned),
             session_ref: self.session_ref.clone(),
             event_refs: self
                 .events
