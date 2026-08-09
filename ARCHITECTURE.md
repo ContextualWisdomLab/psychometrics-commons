@@ -2,6 +2,21 @@
 
 This document is the architectural map for the hosted product. Detailed normative decisions live in [`docs/adr/`](docs/adr/README.md); product and technical acceptance criteria live in [`docs/PRD.md`](docs/PRD.md) and [`docs/TRD.md`](docs/TRD.md). When these documents disagree, an accepted or superseding ADR governs architectural ownership and the PRD/TRD govern intended product behavior unless a later decision explicitly changes them.
 
+## Architecture description and implementation evidence
+
+The architecture is intentionally described through multiple stakeholder viewpoints rather than one overloaded diagram:
+
+- [`docs/architecture/C4.md`](docs/architecture/C4.md) — stakeholder concerns, system context, target containers, and runtime components;
+- [`docs/architecture/UML.md`](docs/architecture/UML.md) — domain class model, lifecycle state machines, and interaction sequences;
+- [`docs/architecture/ERD.md`](docs/architecture/ERD.md) — product-owned logical data model, cardinalities, immutable aggregates, restricted linkage, and persistence invariants;
+- [`docs/architecture/SECURITY_AND_DATA.md`](docs/architecture/SECURITY_AND_DATA.md) — trust boundaries, data classification, identity/privacy/AI controls, and threats;
+- [`docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) — deployment profiles, capability degradation, observability, backup/restore, migration, and GA evidence;
+- [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — intended requirements and architecture mapped to a named protected-main implementation baseline;
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — dependency-ordered product delivery and evidence-based exit criteria;
+- [`docs/DOCUMENTATION_ASSESSMENT.md`](docs/DOCUMENTATION_ASSESSMENT.md) — architecture-document completeness assessment and remaining GA evidence gaps.
+
+Architecture views may describe **normative target semantics** that have not yet been implemented. Diagrams and accepted ADRs are not by themselves as-built evidence. `docs/TRACEABILITY.md` is the current status index; implemented HTTP/event transports and physical persistence must eventually carry machine-readable OpenAPI/AsyncAPI/schema/migration evidence rather than being inferred from target diagrams.
+
 ## Product boundary
 
 Psychometrics Commons is the **hosted product and integration composition layer**, not a replacement for the reusable CWL scientific and infrastructure services it consumes.
@@ -143,7 +158,7 @@ assessment_spec_ref
 instrument_version_ref
 scoring_version_ref
 calibration_reference
-norm_version_ref? 
+norm_version_ref?
 requested_output_schema_version
 ```
 
@@ -233,6 +248,8 @@ Composes CWL bounded contexts as individually observable capabilities. Optional 
 
 Adds deployment-specific federation, data residency, retention, encryption, networking, provider, and audit controls without changing core domain contracts or historical result portability.
 
+Operational recovery, profile-specific SLO/RPO/RTO evidence, backup/restore, and GA release requirements are detailed in [`docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) and ADR-0017. No universal SLA value is assumed without measured deployment evidence.
+
 ## Security and privacy principles
 
 - least privilege and explicit service audiences;
@@ -244,6 +261,8 @@ Adds deployment-specific federation, data residency, retention, encryption, netw
 - exact-authority egress controls for external providers;
 - immutable release/scoring provenance and auditable privileged operations;
 - SBOM, secret scanning, SAST, dependency and reproducibility evidence at release gates.
+
+The detailed trust/data model is maintained in [`docs/architecture/SECURITY_AND_DATA.md`](docs/architecture/SECURITY_AND_DATA.md).
 
 ## Failure-degradation principle
 
@@ -273,8 +292,12 @@ The architecture is enforced by tests and release controls, not diagrams alone. 
 - locale no-silent-fallback behavior;
 - accessibility acceptance for supported clients;
 - migration and rollback compatibility;
-- exact owned-production coverage targets defined by repository policy.
+- exact owned-production coverage targets defined by repository policy;
+- architecture-view and traceability links remain valid;
+- as-built OpenAPI/AsyncAPI/schema contracts exist when the corresponding transports/persistence are implemented.
 
 ## Decision governance
 
 New material architecture decisions use [`docs/adr/0000-template.md`](docs/adr/0000-template.md). A code change that contradicts an accepted ADR must carry or depend on a superseding ADR. ADRs must include concrete ownership, contracts, invariants, failure behavior, security/privacy/tenancy effects, migration/rollback, measurable validation evidence, alternatives, and reversal conditions.
+
+ADR-0016 governs architecture-description viewpoints and target/as-built traceability. A stale diagram is a documentation defect; a diagram must never be used to silently override accepted product or technical contracts.
