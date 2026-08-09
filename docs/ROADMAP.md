@@ -6,26 +6,38 @@
 
 The roadmap is not a release-date promise. It is the dependency order for turning the architecture into a hosted product without moving psychometric numerics, identity, temporal analysis, or research catalog ownership into this repository.
 
-## Phase 0 — Architecture and contract baseline
+## Phase 0 — Architecture, governance, and contract baseline
 
 Deliverables:
 
 - PRD and TRD;
-- accepted ADR baseline;
+- accepted ADR baseline and ADR template;
+- psychometric measurement governance;
+- bounded AI governance;
+- Research Commons governance;
 - architecture context/container/component views;
 - UML-aligned class/state/sequence views;
 - logical ERD;
 - security/privacy/data-boundary model;
 - deployment/operations/recovery model;
-- requirements/code traceability;
-- repository governance (`AGENTS.md`, `CLAUDE.md`, changelog discipline).
+- measurable quality-attribute scenarios;
+- compliance-readiness evidence model and explicit certification non-claim;
+- material risk register;
+- canonical product/scientific/identity/research/operations glossary;
+- requirements/code/evidence traceability;
+- documentation completeness assessment;
+- repository governance (`AGENTS.md`, `CLAUDE.md`, changelog discipline);
+- repository fitness tests that prevent the required view/governance set and ADR index from silently disappearing.
 
 Exit criteria:
 
 - material ownership and dependency-direction decisions have accepted ADR coverage;
 - target and as-built documentation are clearly distinguished;
-- no known contradiction across PRD/TRD/ADR/Architecture;
-- implementation backlog can be derived without inventing domain ownership.
+- no known contradiction across PRD/TRD/ADR/governance/Architecture;
+- scientific/AI/research authority boundaries are explicit;
+- quality goals are expressed as measurable scenarios rather than unsupported adjectives;
+- architecture mitigation, verified control, risk closure, and external certification are not conflated;
+- implementation backlog can be derived without inventing domain ownership or relying on scheduler-only memory.
 
 ## Phase 1 — Hosted runtime domain core
 
@@ -200,14 +212,16 @@ Deliverables:
 - metrics/traces/alerts and operator runbooks;
 - SBOM, signed/reproducible provenance, vulnerability management;
 - customer-owned client/embed integration;
-- release rollback/roll-forward procedures.
+- release rollback/roll-forward procedures;
+- scope-specific assurance evidence registry for applicable SOC 2/CSAP readiness work.
 
 Exit criteria:
 
 - profile-specific SLO/RPO/RTO defined and measured;
 - restore drill passes on current schema/application version;
 - isolation/security/failure-injection/migration/accessibility/release gates pass on exact integrated head;
-- architecture/control evidence is sufficient to support SOC 2/CSAP readiness work without claiming certification.
+- critical/high risk register items are closed with evidence or explicitly accepted by the authorized risk owner;
+- architecture/control evidence supports a current external assurance assessment without claiming certification prematurely.
 
 ## Phase 10 — GA release evidence
 
@@ -225,7 +239,9 @@ Required evidence on one exact protected release head:
 - independent review;
 - release runbooks and verified rollback/roll-forward;
 - measured operational SLO/RPO/RTO;
-- no unresolved P0 product/security/privacy/scientific finding.
+- no unresolved P0 product/security/privacy/scientific finding;
+- no unaccepted critical/high risk that invalidates the release claim;
+- assurance/readiness claims limited to evidence actually held for the scoped deployment.
 
 Only then is version bump/release appropriate.
 
@@ -240,7 +256,7 @@ When all current PRs/issues are genuinely non-actionable or exhausted, inspect i
 5. accessibility/multilingual gap;
 6. Research Commons reproducibility gap;
 7. Workbench productivity gap;
-8. enterprise deployment/operator gap;
+8. enterprise deployment/operator/assurance gap;
 9. buyer-visible UX/onboarding gap;
 10. measured customer-value/ROI evidence gap.
 
