@@ -102,11 +102,7 @@ fn inbox_identity_comparison_covers_same_consumer_source_and_tenant_with_distinc
     );
     assert_eq!(
         inbox
-            .accept_event(
-                "consumer_alpha",
-                &event_with("event_beta", DIGEST_B),
-                2_100,
-            )
+            .accept_event("consumer_alpha", &event_with("event_beta", DIGEST_B), 2_100,)
             .unwrap(),
         InboxDisposition::Accepted
     );
