@@ -106,6 +106,55 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
 }
 
 #[test]
+fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
+    let mut ledger = ResponseLedger::new("session_ref");
+    ledger
+        .record(
+            SessionState::Active,
+            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+        )
+        .unwrap();
+
+    for state in [
+        SessionState::Paused,
+        SessionState::Completed,
+        SessionState::Scoring,
+        SessionState::Scored,
+        SessionState::Released,
+        SessionState::Expired,
+        SessionState::Cancelled,
+        SessionState::Invalidated,
+    ] {
+        let digest_error = ledger
+            .record(
+                state,
+                write(
+                    "ignored_new_server_ref",
+                    "client_a",
+                    "item_v1",
+                    "sha256:changed",
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(digest_error, WriteError::IdempotencyConflict);
+
+        let item_error = ledger
+            .record(
+                state,
+                write(
+                    "ignored_new_server_ref",
+                    "client_a",
+                    "item_v2",
+                    "sha256:aaa",
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(item_error, WriteError::IdempotencyConflict);
+    }
+    assert_eq!(ledger.len(), 1);
+}
+
+#[test]
 fn reused_client_event_with_different_content_fails_closed() {
     let mut ledger = ResponseLedger::new("session_ref");
     ledger
