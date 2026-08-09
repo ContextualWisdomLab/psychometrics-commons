@@ -1,11 +1,13 @@
 //! Session-bound immutable item-delivery evidence.
 //!
 //! Item delivery is product-runtime state rather than psychometric item-selection
-//! arithmetic. The ledger binds one assessment session to one immutable instrument
-//! release, its canonical content digest, and one exact locale. New logical delivery
+//! arithmetic. A ledger is created only from an already validated immutable
+//! [`InstrumentReleaseManifest`], so the release identity, locale, content digest,
+//! and complete allowed item-version set cannot drift apart. New logical delivery
 //! events are accepted only while the assessment session is active; exact retries of
 //! previously accepted delivery identities remain idempotent after lifecycle advance.
 
+use crate::instrument::InstrumentReleaseManifest;
 use crate::reference::normalized_reference;
 use crate::session::SessionState;
 use std::error::Error;
@@ -72,14 +74,12 @@ impl ItemDeliveryEvent {
 pub enum ItemDeliveryError {
     /// A required reference was blank or numeric-like instead of opaque.
     InvalidReference,
-    /// The pinned instrument-release digest was not canonical SHA-256.
-    InvalidDigest,
-    /// The pinned locale was not a valid BCP 47-style tag.
-    InvalidLocale,
     /// A new logical delivery was attempted while the assessment session was not active.
     SessionNotActive(SessionState),
     /// A delivery reference was replayed with evidence different from its first use.
     IdempotencyConflict,
+    /// The requested item version is not part of the exact immutable release manifest.
+    ItemNotInRelease,
     /// The immutable item version had already been delivered in this session.
     DuplicateItemDelivery,
 }
@@ -90,12 +90,6 @@ impl Display for ItemDeliveryError {
             Self::InvalidReference => {
                 formatter.write_str("item delivery references must be opaque non-numeric values")
             }
-            Self::InvalidDigest => {
-                formatter.write_str("item delivery release digest must be canonical sha256")
-            }
-            Self::InvalidLocale => {
-                formatter.write_str("item delivery locale must be a valid BCP 47-style tag")
-            }
             Self::SessionNotActive(state) => {
                 write!(
                     formatter,
@@ -105,6 +99,8 @@ impl Display for ItemDeliveryError {
             Self::IdempotencyConflict => {
                 formatter.write_str("delivery reference was already used for different evidence")
             }
+            Self::ItemNotInRelease => formatter
+                .write_str("item version is not part of the bound instrument release manifest"),
             Self::DuplicateItemDelivery => {
                 formatter.write_str("item version was already delivered in this session")
             }
@@ -119,44 +115,39 @@ impl Error for ItemDeliveryError {}
 /// The ledger deliberately records item-delivery evidence only. Selection/calibration
 /// algorithms remain in `fast-mlsirm`; persistence and transport adapters may store or
 /// expose these values differently but must preserve the same idempotency, ordering,
-/// release-binding, and active-session invariants.
+/// exact-release membership, and active-session invariants.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ItemDeliveryLedger {
     session_ref: String,
     instrument_release_ref: String,
     release_content_digest: String,
     locale: String,
+    allowed_item_version_refs: Vec<String>,
     events: Vec<ItemDeliveryEvent>,
 }
 
 impl ItemDeliveryLedger {
-    /// Create an empty item-delivery ledger bound to one immutable release.
+    /// Create an empty item-delivery ledger from one exact immutable release manifest.
+    ///
+    /// Release identity, content digest, locale, and allowed item versions are copied
+    /// from the validated manifest as one unit. This prevents callers from composing
+    /// an apparently valid ledger from references that belong to different releases.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError`] when a public reference, digest, or locale is
-    /// malformed.
-    pub fn new(
+    /// Returns [`ItemDeliveryError::InvalidReference`] when `session_ref` is blank or
+    /// numeric-like instead of an opaque product identifier.
+    pub fn from_manifest(
         session_ref: &str,
-        instrument_release_ref: &str,
-        release_content_digest: &str,
-        locale: &str,
+        manifest: &InstrumentReleaseManifest,
     ) -> Result<Self, ItemDeliveryError> {
         let session_ref = required_reference(session_ref)?;
-        let instrument_release_ref = required_reference(instrument_release_ref)?;
-        if !valid_sha256_digest(release_content_digest) {
-            return Err(ItemDeliveryError::InvalidDigest);
-        }
-        let locale = locale.trim();
-        if !valid_locale(locale) {
-            return Err(ItemDeliveryError::InvalidLocale);
-        }
-
         Ok(Self {
             session_ref: session_ref.to_owned(),
-            instrument_release_ref: instrument_release_ref.to_owned(),
-            release_content_digest: release_content_digest.to_owned(),
-            locale: locale.to_owned(),
+            instrument_release_ref: manifest.release_ref().to_owned(),
+            release_content_digest: manifest.content_digest().to_owned(),
+            locale: manifest.locale().to_owned(),
+            allowed_item_version_refs: manifest.item_version_refs().to_vec(),
             events: Vec::new(),
         })
     }
@@ -185,6 +176,12 @@ impl ItemDeliveryLedger {
         &self.locale
     }
 
+    /// Return the exact ordered item-version set allowed by the release manifest.
+    #[must_use]
+    pub fn allowed_item_version_refs(&self) -> &[String] {
+        &self.allowed_item_version_refs
+    }
+
     /// Return the number of accepted logical item deliveries.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -208,16 +205,19 @@ impl ItemDeliveryLedger {
     /// Exact replay of a previously accepted `delivery_ref` returns the original
     /// immutable event even after the session leaves [`SessionState::Active`]. Reuse
     /// of that identity with different evidence fails closed. Every genuinely new
-    /// logical delivery still requires an active session, and a different delivery
-    /// identity cannot re-administer an item version already delivered in the session.
+    /// logical delivery still requires an active session and an item version present
+    /// in the exact bound release manifest. A different delivery identity cannot
+    /// re-administer an item version already delivered in the session.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed evidence
-    /// references, [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay,
-    /// [`ItemDeliveryError::SessionNotActive`] when a new logical delivery is attempted
-    /// outside an active session, or [`ItemDeliveryError::DuplicateItemDelivery`] for
-    /// a second logical delivery of the same immutable item version.
+    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed evidence,
+    /// [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay,
+    /// [`ItemDeliveryError::SessionNotActive`] when a new logical delivery is offered
+    /// outside an active session, [`ItemDeliveryError::ItemNotInRelease`] when the
+    /// requested item is not present in the exact release manifest, or
+    /// [`ItemDeliveryError::DuplicateItemDelivery`] when the same immutable item is
+    /// offered under another logical delivery identity.
     pub fn deliver(
         &mut self,
         state: SessionState,
@@ -250,6 +250,14 @@ impl ItemDeliveryLedger {
             return Err(ItemDeliveryError::SessionNotActive(state));
         }
 
+        if !self
+            .allowed_item_version_refs
+            .iter()
+            .any(|allowed| allowed == item_version_ref)
+        {
+            return Err(ItemDeliveryError::ItemNotInRelease);
+        }
+
         if self
             .events
             .iter()
@@ -272,26 +280,4 @@ impl ItemDeliveryLedger {
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
     normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)
-}
-
-fn valid_sha256_digest(digest: &str) -> bool {
-    let Some(hex) = digest.strip_prefix("sha256:") else {
-        return false;
-    };
-    hex.len() == 64
-        && hex
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-}
-
-fn valid_locale(locale: &str) -> bool {
-    let mut subtags = locale.split('-');
-    let primary = subtags.next().unwrap_or_default();
-    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
-    {
-        return false;
-    }
-    subtags.all(|subtag| {
-        (1..=8).contains(&subtag.len()) && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
-    })
 }
