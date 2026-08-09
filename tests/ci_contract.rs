@@ -14,6 +14,14 @@ fn every_checkout_drops_persisted_credentials() {
 }
 
 #[test]
+fn postgres_service_image_is_immutably_pinned() {
+    const PINNED_IMAGE: &str =
+        "image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15";
+    assert_eq!(CI_WORKFLOW.matches(PINNED_IMAGE).count(), 3);
+    assert_eq!(CI_WORKFLOW.matches("image: postgres:18-alpine\n").count(), 0);
+}
+
+#[test]
 fn coverage_failures_identify_the_incomplete_source_files() {
     assert!(CI_WORKFLOW.contains("INCOMPLETE_FILE"));
     assert!(CI_WORKFLOW.contains("entry.get(\"files\", [])"));
