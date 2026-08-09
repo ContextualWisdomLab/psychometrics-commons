@@ -352,9 +352,12 @@ impl ResearchContribution {
     /// # Errors
     ///
     /// Returns [`ResearchContributionError::ResearchConsentRequired`] unless the
-    /// supplied snapshot contains an active research grant, an empty-reference
-    /// error for invalid new identities, or an invalid-start-time error when the
-    /// contribution start is zero or predates the authorizing research consent.
+    /// supplied snapshot contains an active research grant,
+    /// [`ResearchContributionError::OperationalIdentityReuse`] when the research
+    /// identity reuses the normalized operational participant reference, an
+    /// empty-reference error for invalid new identities, or an invalid-start-time
+    /// error when the contribution start is zero or predates the authorizing
+    /// research consent.
     pub fn from_snapshot(
         contribution_ref: &str,
         research_participant_ref: &str,
@@ -363,6 +366,9 @@ impl ResearchContribution {
     ) -> Result<Self, ResearchContributionError> {
         let contribution_ref = research_reference(contribution_ref)?;
         let research_participant_ref = research_reference(research_participant_ref)?;
+        if research_participant_ref == snapshot.participant_ref {
+            return Err(ResearchContributionError::OperationalIdentityReuse);
+        }
         let (research_scope_ref, research_granted_at_unix_ms) = snapshot
             .active_research_authorization()
             .ok_or(ResearchContributionError::ResearchConsentRequired)?;
@@ -475,6 +481,8 @@ pub enum ResearchContributionError {
     EmptyReference,
     /// The supplied consent snapshot has no active explicit research grant.
     ResearchConsentRequired,
+    /// Research identity reused the operational participant reference.
+    OperationalIdentityReuse,
     /// Contribution start time is zero or predates the authorizing consent.
     InvalidStartTime,
     /// Withdrawal time is not later than the contribution start.
@@ -489,6 +497,9 @@ impl Display for ResearchContributionError {
             Self::EmptyReference => "research contribution references must not be empty",
             Self::ResearchConsentRequired => {
                 "research contribution requires active explicit research consent"
+            }
+            Self::OperationalIdentityReuse => {
+                "research participant reference must differ from the operational participant"
             }
             Self::InvalidStartTime => "research contribution start time must be greater than zero",
             Self::InvalidWithdrawalTime => {
