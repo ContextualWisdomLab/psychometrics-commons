@@ -1,7 +1,87 @@
 use psychometrics_commons_runtime::session::{transition, SessionCommand, SessionState};
 
+const STATES: [SessionState; 10] = [
+    SessionState::Created,
+    SessionState::Active,
+    SessionState::Paused,
+    SessionState::Completed,
+    SessionState::Scoring,
+    SessionState::Scored,
+    SessionState::Released,
+    SessionState::Expired,
+    SessionState::Cancelled,
+    SessionState::Invalidated,
+];
+
+const COMMANDS: [SessionCommand; 10] = [
+    SessionCommand::Activate,
+    SessionCommand::Pause,
+    SessionCommand::Resume,
+    SessionCommand::Complete,
+    SessionCommand::BeginScoring,
+    SessionCommand::RecordScore,
+    SessionCommand::Release,
+    SessionCommand::Expire,
+    SessionCommand::Cancel,
+    SessionCommand::Invalidate,
+];
+
+const VALID: [(SessionState, SessionCommand, SessionState); 28] = [
+    (SessionState::Created, SessionCommand::Activate, SessionState::Active),
+    (SessionState::Created, SessionCommand::Cancel, SessionState::Cancelled),
+    (SessionState::Created, SessionCommand::Expire, SessionState::Expired),
+    (SessionState::Created, SessionCommand::Invalidate, SessionState::Invalidated),
+    (SessionState::Active, SessionCommand::Activate, SessionState::Active),
+    (SessionState::Active, SessionCommand::Pause, SessionState::Paused),
+    (SessionState::Active, SessionCommand::Complete, SessionState::Completed),
+    (SessionState::Active, SessionCommand::Cancel, SessionState::Cancelled),
+    (SessionState::Active, SessionCommand::Expire, SessionState::Expired),
+    (SessionState::Active, SessionCommand::Invalidate, SessionState::Invalidated),
+    (SessionState::Paused, SessionCommand::Pause, SessionState::Paused),
+    (SessionState::Paused, SessionCommand::Resume, SessionState::Active),
+    (SessionState::Paused, SessionCommand::Cancel, SessionState::Cancelled),
+    (SessionState::Paused, SessionCommand::Expire, SessionState::Expired),
+    (SessionState::Paused, SessionCommand::Invalidate, SessionState::Invalidated),
+    (SessionState::Completed, SessionCommand::Complete, SessionState::Completed),
+    (SessionState::Completed, SessionCommand::BeginScoring, SessionState::Scoring),
+    (SessionState::Completed, SessionCommand::Invalidate, SessionState::Invalidated),
+    (SessionState::Scoring, SessionCommand::BeginScoring, SessionState::Scoring),
+    (SessionState::Scoring, SessionCommand::RecordScore, SessionState::Scored),
+    (SessionState::Scoring, SessionCommand::Invalidate, SessionState::Invalidated),
+    (SessionState::Scored, SessionCommand::RecordScore, SessionState::Scored),
+    (SessionState::Scored, SessionCommand::Release, SessionState::Released),
+    (SessionState::Scored, SessionCommand::Invalidate, SessionState::Invalidated),
+    (SessionState::Released, SessionCommand::Release, SessionState::Released),
+    (SessionState::Expired, SessionCommand::Expire, SessionState::Expired),
+    (SessionState::Cancelled, SessionCommand::Cancel, SessionState::Cancelled),
+    (SessionState::Invalidated, SessionCommand::Invalidate, SessionState::Invalidated),
+];
+
 #[test]
-fn happy_path_reaches_released() {
+fn every_documented_transition_reaches_its_expected_state() {
+    for (state, command, expected) in VALID {
+        assert_eq!(transition(state, command).unwrap(), expected);
+    }
+}
+
+#[test]
+fn every_undocumented_transition_fails_closed() {
+    for state in STATES {
+        for command in COMMANDS {
+            let is_valid = VALID
+                .iter()
+                .any(|(source, candidate, _)| *source == state && *candidate == command);
+            if !is_valid {
+                let error = transition(state, command).unwrap_err();
+                assert_eq!(error.state(), state);
+                assert_eq!(error.command(), command);
+            }
+        }
+    }
+}
+
+#[test]
+fn canonical_flow_reaches_a_terminal_released_state() {
     let commands = [
         SessionCommand::Activate,
         SessionCommand::Complete,
@@ -9,7 +89,6 @@ fn happy_path_reaches_released() {
         SessionCommand::RecordScore,
         SessionCommand::Release,
     ];
-
     let state = commands
         .into_iter()
         .try_fold(SessionState::Created, transition)
@@ -17,79 +96,35 @@ fn happy_path_reaches_released() {
 
     assert_eq!(state, SessionState::Released);
     assert!(state.is_terminal());
+    assert!(!state.accepts_responses());
 }
 
 #[test]
-fn pause_resume_is_reversible_only_before_completion() {
-    let active = transition(SessionState::Created, SessionCommand::Activate).unwrap();
-    let paused = transition(active, SessionCommand::Pause).unwrap();
-    assert_eq!(paused, SessionState::Paused);
-    assert!(!paused.accepts_responses());
-
-    let resumed = transition(paused, SessionCommand::Resume).unwrap();
-    assert_eq!(resumed, SessionState::Active);
-    assert!(resumed.accepts_responses());
-
-    let completed = transition(resumed, SessionCommand::Complete).unwrap();
-    assert!(transition(completed, SessionCommand::Resume).is_err());
-}
-
-#[test]
-fn repeated_commands_are_idempotent() {
-    let cases = [
-        (SessionState::Active, SessionCommand::Activate),
-        (SessionState::Paused, SessionCommand::Pause),
-        (SessionState::Completed, SessionCommand::Complete),
-        (SessionState::Scoring, SessionCommand::BeginScoring),
-        (SessionState::Scored, SessionCommand::RecordScore),
-        (SessionState::Released, SessionCommand::Release),
-        (SessionState::Expired, SessionCommand::Expire),
-        (SessionState::Cancelled, SessionCommand::Cancel),
-        (SessionState::Invalidated, SessionCommand::Invalidate),
-    ];
-
-    for (state, command) in cases {
-        assert_eq!(transition(state, command).unwrap(), state);
+fn only_active_sessions_accept_response_events() {
+    for state in STATES {
+        assert_eq!(state.accepts_responses(), state == SessionState::Active);
     }
 }
 
 #[test]
-fn terminal_states_reject_unrelated_commands() {
-    let cases = [
-        (SessionState::Released, SessionCommand::Activate),
-        (SessionState::Expired, SessionCommand::Activate),
-        (SessionState::Cancelled, SessionCommand::Activate),
-        (SessionState::Invalidated, SessionCommand::Activate),
-    ];
-
-    for (state, command) in cases {
-        assert!(transition(state, command).is_err());
+fn only_release_expiry_cancellation_and_invalidation_are_terminal() {
+    for state in STATES {
+        let expected = matches!(
+            state,
+            SessionState::Released
+                | SessionState::Expired
+                | SessionState::Cancelled
+                | SessionState::Invalidated
+        );
+        assert_eq!(state.is_terminal(), expected);
     }
 }
 
 #[test]
-fn invalid_transition_preserves_source_and_command() {
+fn transition_error_has_stable_human_readable_context() {
     let error = transition(SessionState::Created, SessionCommand::Release).unwrap_err();
-    assert_eq!(error.state(), SessionState::Created);
-    assert_eq!(error.command(), SessionCommand::Release);
     assert_eq!(
         error.to_string(),
         "command Release is not valid while session is Created"
-    );
-}
-
-#[test]
-fn cancellation_expiry_and_invalidation_are_explicit() {
-    assert_eq!(
-        transition(SessionState::Created, SessionCommand::Cancel).unwrap(),
-        SessionState::Cancelled
-    );
-    assert_eq!(
-        transition(SessionState::Active, SessionCommand::Expire).unwrap(),
-        SessionState::Expired
-    );
-    assert_eq!(
-        transition(SessionState::Completed, SessionCommand::Invalidate).unwrap(),
-        SessionState::Invalidated
     );
 }
