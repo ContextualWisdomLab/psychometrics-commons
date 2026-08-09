@@ -100,6 +100,19 @@ pub fn enqueue_outbox_event(
     let max_attempts =
         i32::try_from(max_attempts).map_err(|_| PersistenceError::ValueOutOfRange)?;
     let causation_ref = event.causation_ref();
+    let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
+        &event.event_ref(),
+        &event.event_type(),
+        &event.schema_version(),
+        &event.source(),
+        &event.tenant_ref(),
+        &event.subject_ref(),
+        &occurred_at_unix_ms,
+        &event.correlation_ref(),
+        &causation_ref,
+        &event.payload_digest(),
+        &max_attempts,
+    ];
 
     let inserted = client.execute(
         "INSERT INTO integration_outbox (\
@@ -108,42 +121,25 @@ pub fn enqueue_outbox_event(
              max_attempts, current_state, latest_event_at_unix_ms\
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $7)\
          ON CONFLICT (event_ref) DO NOTHING",
-        &[
-            &event.event_ref(),
-            &event.event_type(),
-            &event.schema_version(),
-            &event.source(),
-            &event.tenant_ref(),
-            &event.subject_ref(),
-            &occurred_at_unix_ms,
-            &event.correlation_ref(),
-            &causation_ref,
-            &event.payload_digest(),
-            &max_attempts,
-        ],
+        params,
     )?;
     if inserted == 1 {
         return Ok(PersistenceDisposition::Inserted);
     }
 
-    let existing = client.query_one(
-        "SELECT event_type, schema_version, source_ref, tenant_ref, subject_ref,\
-                occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest, max_attempts\
-         FROM integration_outbox WHERE event_ref = $1",
-        &[&event.event_ref()],
-    )?;
-    let existing_causation: Option<String> = existing.get(7);
-    let exact_replay = existing.get::<_, String>(0) == event.event_type()
-        && existing.get::<_, String>(1) == event.schema_version()
-        && existing.get::<_, String>(2) == event.source()
-        && existing.get::<_, String>(3) == event.tenant_ref()
-        && existing.get::<_, String>(4) == event.subject_ref()
-        && existing.get::<_, i64>(5) == occurred_at_unix_ms
-        && existing.get::<_, String>(6) == event.correlation_ref()
-        && existing_causation.as_deref() == causation_ref
-        && existing.get::<_, String>(8) == event.payload_digest()
-        && existing.get::<_, i32>(9) == max_attempts;
-
+    let exact_replay: bool = client
+        .query_one(
+            "SELECT EXISTS (\
+                 SELECT 1 FROM integration_outbox\
+                 WHERE event_ref = $1 AND event_type = $2 AND schema_version = $3\
+                   AND source_ref = $4 AND tenant_ref = $5 AND subject_ref = $6\
+                   AND occurred_at_unix_ms = $7 AND correlation_ref = $8\
+                   AND causation_ref IS NOT DISTINCT FROM $9\
+                   AND payload_digest = $10 AND max_attempts = $11\
+             )",
+            params,
+        )?
+        .get(0);
     if exact_replay {
         Ok(PersistenceDisposition::Duplicate)
     } else {
@@ -175,6 +171,17 @@ pub fn accept_inbox_event(
         return Err(PersistenceError::InvalidTimestamp);
     }
     let received_at_unix_ms = postgres_bigint(received_at_unix_ms)?;
+    let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
+        &consumer_ref,
+        &event.source(),
+        &event.tenant_ref(),
+        &event.event_ref(),
+        &event.event_type(),
+        &event.schema_version(),
+        &event.subject_ref(),
+        &event.payload_digest(),
+        &received_at_unix_ms,
+    ];
 
     let inserted = client.execute(
         "INSERT INTO integration_inbox (\
@@ -182,38 +189,23 @@ pub fn accept_inbox_event(
              subject_ref, payload_digest, received_at_unix_ms\
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\
          ON CONFLICT (consumer_ref, source_ref, tenant_ref, source_event_ref) DO NOTHING",
-        &[
-            &consumer_ref,
-            &event.source(),
-            &event.tenant_ref(),
-            &event.event_ref(),
-            &event.event_type(),
-            &event.schema_version(),
-            &event.subject_ref(),
-            &event.payload_digest(),
-            &received_at_unix_ms,
-        ],
+        params,
     )?;
     if inserted == 1 {
         return Ok(InboxDisposition::Accepted);
     }
 
-    let existing = client.query_one(
-        "SELECT event_type, schema_version, subject_ref, payload_digest\
-         FROM integration_inbox\
-         WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 AND source_event_ref = $4",
-        &[
-            &consumer_ref,
-            &event.source(),
-            &event.tenant_ref(),
-            &event.event_ref(),
-        ],
-    )?;
-    let exact_replay = existing.get::<_, String>(0) == event.event_type()
-        && existing.get::<_, String>(1) == event.schema_version()
-        && existing.get::<_, String>(2) == event.subject_ref()
-        && existing.get::<_, String>(3) == event.payload_digest();
-
+    let exact_replay: bool = client
+        .query_one(
+            "SELECT EXISTS (\
+                 SELECT 1 FROM integration_inbox\
+                 WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3\
+                   AND source_event_ref = $4 AND event_type = $5 AND schema_version = $6\
+                   AND subject_ref = $7 AND payload_digest = $8\
+             )",
+            params,
+        )?
+        .get(0);
     if exact_replay {
         Ok(InboxDisposition::Duplicate)
     } else {
