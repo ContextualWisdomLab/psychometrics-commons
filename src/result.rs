@@ -66,7 +66,7 @@ impl ResultSnapshot {
         result: &ScoringResult,
         input: ResultSnapshotInput<'_>,
     ) -> Result<Self, ResultSnapshotError> {
-        if result.scoring_request_ref() != request.scoring_request_ref() {
+        if !result.matches_request(request) {
             return Err(ResultSnapshotError::ScoringRequestMismatch);
         }
 
