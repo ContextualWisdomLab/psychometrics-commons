@@ -14,6 +14,13 @@ fn every_checkout_drops_persisted_credentials() {
 }
 
 #[test]
+fn coverage_failures_identify_the_incomplete_source_files() {
+    assert!(CI_WORKFLOW.contains("INCOMPLETE_FILE"));
+    assert!(CI_WORKFLOW.contains("entry.get(\"files\", [])"));
+    assert!(CI_WORKFLOW.contains("summary.get(kind)"));
+}
+
+#[test]
 fn line_coverage_failure_diagnostic_prints_missing_source_lines() {
     assert!(CI_WORKFLOW.contains("cargo llvm-cov report --text --show-missing-lines"));
 }
