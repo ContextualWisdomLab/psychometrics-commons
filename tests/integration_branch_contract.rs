@@ -85,17 +85,29 @@ fn replay_conflict_checks_outcome_time_and_cause_independently() {
 }
 
 #[test]
-fn inbox_identity_comparison_covers_same_consumer_with_distinct_events() {
+fn inbox_identity_comparison_covers_same_consumer_and_source_with_distinct_events() {
     let mut inbox = IntegrationInbox::new();
     assert_eq!(
         inbox
-            .accept("consumer_alpha", "event_alpha", DIGEST_A, 2_000)
+            .accept(
+                "consumer_alpha",
+                "psychometrics_commons",
+                "event_alpha",
+                DIGEST_A,
+                2_000,
+            )
             .unwrap(),
         InboxDisposition::Accepted
     );
     assert_eq!(
         inbox
-            .accept("consumer_alpha", "event_beta", DIGEST_B, 2_100)
+            .accept(
+                "consumer_alpha",
+                "psychometrics_commons",
+                "event_beta",
+                DIGEST_B,
+                2_100,
+            )
             .unwrap(),
         InboxDisposition::Accepted
     );
