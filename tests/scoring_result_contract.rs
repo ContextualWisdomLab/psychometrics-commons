@@ -103,17 +103,19 @@ fn scoring_request_accepts_absent_norm_but_rejects_invalid_references_or_schema(
         ScoringContractError::EmptyReference
     );
 
-    let mut bad_schema = scoring_input();
-    bad_schema.requested_output_schema_version = 0;
-    let schema_error = ScoringRequest::from_snapshot(&snapshot, bad_schema).unwrap_err();
-    assert_eq!(
-        schema_error,
-        ScoringContractError::UnsupportedOutputSchemaVersion
-    );
-    assert_eq!(
-        schema_error.to_string(),
-        "requested scoring output schema version must be positive"
-    );
+    for unsupported_version in [0, 2] {
+        let mut bad_schema = scoring_input();
+        bad_schema.requested_output_schema_version = unsupported_version;
+        let schema_error = ScoringRequest::from_snapshot(&snapshot, bad_schema).unwrap_err();
+        assert_eq!(
+            schema_error,
+            ScoringContractError::UnsupportedOutputSchemaVersion
+        );
+        assert_eq!(
+            schema_error.to_string(),
+            "requested scoring output schema version is unsupported"
+        );
+    }
 }
 
 #[test]
