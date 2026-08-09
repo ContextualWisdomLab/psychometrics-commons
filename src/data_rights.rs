@@ -3,9 +3,9 @@
 //! Export and deletion requests are explicit domain resources rather than flags on
 //! participant records. Every request is tenant-scoped and identity-verified before
 //! processing. Deletion completion may preserve named legal-retention exceptions
-//! without pretending that retained evidence was deleted. Exact lifecycle command
-//! replays are idempotent even after later transitions, while conflicting evidence
-//! fails closed.
+//! without pretending that retained evidence was deleted. Rejected and failed
+//! requests preserve durable terminal evidence, and exact lifecycle command replays
+//! remain idempotent while conflicting evidence fails closed.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -35,6 +35,10 @@ pub enum DataRightsState {
     Completed,
     /// Deletion completed except for explicitly retained legal/audit scopes.
     PartiallyCompleted,
+    /// Request was rejected before processing and preserves rejection evidence.
+    Rejected,
+    /// Processing failed terminally and preserves failure evidence.
+    Failed,
 }
 
 /// Fail-closed error returned by data-rights request operations.
@@ -99,6 +103,10 @@ pub struct DataRightsRequest {
     completion_evidence_ref: Option<String>,
     completed_at_unix_ms: Option<u64>,
     retained_scope_refs: Vec<String>,
+    rejection_evidence_ref: Option<String>,
+    rejected_at_unix_ms: Option<u64>,
+    failure_evidence_ref: Option<String>,
+    failed_at_unix_ms: Option<u64>,
 }
 
 impl DataRightsRequest {
@@ -136,6 +144,10 @@ impl DataRightsRequest {
             completion_evidence_ref: None,
             completed_at_unix_ms: None,
             retained_scope_refs: Vec::new(),
+            rejection_evidence_ref: None,
+            rejected_at_unix_ms: None,
+            failure_evidence_ref: None,
+            failed_at_unix_ms: None,
         })
     }
 
@@ -223,6 +235,30 @@ impl DataRightsRequest {
         &self.retained_scope_refs
     }
 
+    /// Return durable evidence for a rejected request.
+    #[must_use]
+    pub fn rejection_evidence_ref(&self) -> Option<&str> {
+        self.rejection_evidence_ref.as_deref()
+    }
+
+    /// Return the server-authoritative rejection time.
+    #[must_use]
+    pub const fn rejected_at_unix_ms(&self) -> Option<u64> {
+        self.rejected_at_unix_ms
+    }
+
+    /// Return durable evidence for a terminal processing failure.
+    #[must_use]
+    pub fn failure_evidence_ref(&self) -> Option<&str> {
+        self.failure_evidence_ref.as_deref()
+    }
+
+    /// Return the server-authoritative terminal failure time.
+    #[must_use]
+    pub const fn failed_at_unix_ms(&self) -> Option<u64> {
+        self.failed_at_unix_ms
+    }
+
     /// Verify requester identity for this specific data-rights request.
     ///
     /// Equal server timestamps are accepted; only backward time is rejected.
@@ -231,7 +267,8 @@ impl DataRightsRequest {
     /// # Errors
     ///
     /// Returns a [`DataRightsError`] when evidence is invalid, event time moves
-    /// backwards, or an existing verification is replayed with different evidence.
+    /// backwards, an existing verification is replayed with different evidence,
+    /// or verification is attempted after a terminal state without prior evidence.
     pub fn verify_identity(
         &mut self,
         verification_evidence_ref: &str,
@@ -247,6 +284,9 @@ impl DataRightsRequest {
             } else {
                 Err(DataRightsError::ConflictingReplay)
             };
+        }
+        if self.state != DataRightsState::Requested {
+            return Err(DataRightsError::InvalidTransition);
         }
         self.validate_event_time(verified_at_unix_ms)?;
         self.verification_evidence_ref = Some(evidence_ref.to_owned());
@@ -265,7 +305,7 @@ impl DataRightsRequest {
     /// Returns [`DataRightsError::IdentityVerificationRequired`] when processing
     /// begins before identity verification, [`DataRightsError::ConflictingReplay`]
     /// when an existing operation reference is replayed with different evidence,
-    /// or another [`DataRightsError`] for invalid evidence or event time.
+    /// or another [`DataRightsError`] for invalid evidence, time, or lifecycle state.
     pub fn start_processing(
         &mut self,
         operation_ref: &str,
@@ -284,6 +324,9 @@ impl DataRightsRequest {
         }
         if self.state == DataRightsState::Requested {
             return Err(DataRightsError::IdentityVerificationRequired);
+        }
+        if self.state != DataRightsState::IdentityVerified {
+            return Err(DataRightsError::InvalidTransition);
         }
         let operation_ref = required_reference(operation_ref)?;
         self.validate_event_time(started_at_unix_ms)?;
@@ -347,6 +390,84 @@ impl DataRightsRequest {
         } else {
             DataRightsState::PartiallyCompleted
         };
+        Ok(())
+    }
+
+    /// Reject a request before processing and preserve durable rejection evidence.
+    ///
+    /// Rejection is allowed while the request is still unverified or immediately
+    /// after request-specific identity verification. An exact rejection replay is
+    /// idempotent after the request becomes terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataRightsError::ConflictingReplay`] when rejection evidence is
+    /// replayed inconsistently, or another [`DataRightsError`] for invalid evidence,
+    /// time, or lifecycle state.
+    pub fn reject(
+        &mut self,
+        rejection_evidence_ref: &str,
+        rejected_at_unix_ms: u64,
+    ) -> Result<(), DataRightsError> {
+        let evidence_ref = required_reference(rejection_evidence_ref)?;
+        if let (Some(existing_ref), Some(existing_at)) = (
+            self.rejection_evidence_ref.as_deref(),
+            self.rejected_at_unix_ms,
+        ) {
+            return if existing_ref == evidence_ref && existing_at == rejected_at_unix_ms {
+                Ok(())
+            } else {
+                Err(DataRightsError::ConflictingReplay)
+            };
+        }
+        if !matches!(
+            self.state,
+            DataRightsState::Requested | DataRightsState::IdentityVerified
+        ) {
+            return Err(DataRightsError::InvalidTransition);
+        }
+        self.validate_event_time(rejected_at_unix_ms)?;
+        self.rejection_evidence_ref = Some(evidence_ref.to_owned());
+        self.rejected_at_unix_ms = Some(rejected_at_unix_ms);
+        self.latest_event_at_unix_ms = rejected_at_unix_ms;
+        self.state = DataRightsState::Rejected;
+        Ok(())
+    }
+
+    /// Record terminal processing failure and preserve durable failure evidence.
+    ///
+    /// Failure is valid only after processing has started. An exact failure replay
+    /// remains idempotent after the request becomes terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataRightsError::ConflictingReplay`] when failure evidence is
+    /// replayed inconsistently, or another [`DataRightsError`] for invalid evidence,
+    /// time, or lifecycle state.
+    pub fn fail(
+        &mut self,
+        failure_evidence_ref: &str,
+        failed_at_unix_ms: u64,
+    ) -> Result<(), DataRightsError> {
+        let evidence_ref = required_reference(failure_evidence_ref)?;
+        if let (Some(existing_ref), Some(existing_at)) = (
+            self.failure_evidence_ref.as_deref(),
+            self.failed_at_unix_ms,
+        ) {
+            return if existing_ref == evidence_ref && existing_at == failed_at_unix_ms {
+                Ok(())
+            } else {
+                Err(DataRightsError::ConflictingReplay)
+            };
+        }
+        if self.state != DataRightsState::Processing {
+            return Err(DataRightsError::InvalidTransition);
+        }
+        self.validate_event_time(failed_at_unix_ms)?;
+        self.failure_evidence_ref = Some(evidence_ref.to_owned());
+        self.failed_at_unix_ms = Some(failed_at_unix_ms);
+        self.latest_event_at_unix_ms = failed_at_unix_ms;
+        self.state = DataRightsState::Failed;
         Ok(())
     }
 
