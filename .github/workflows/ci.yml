@@ -83,7 +83,22 @@ jobs:
         run: python3 scripts/check_coverage.py coverage.json --kind lines
       - name: Diagnose missing line coverage
         if: failure()
-        run: cargo llvm-cov report --show-missing-lines || true
+        run: |
+          cargo llvm-cov report --lcov --output-path coverage.lcov
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = None
+          uncovered = []
+          for raw_line in Path("coverage.lcov").read_text(encoding="utf-8").splitlines():
+              if raw_line.startswith("SF:"):
+                  source = raw_line[3:]
+              elif raw_line.startswith("DA:") and raw_line.endswith(",0"):
+                  line_number = raw_line[3:].split(",", 1)[0]
+                  uncovered.append((source, line_number))
+          for source, line_number in uncovered:
+              print(f"UNCOVERED_LINE {source}:{line_number}")
+          PY
 
   branch-coverage:
     name: Production branch coverage
