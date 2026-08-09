@@ -1,5 +1,6 @@
 //! Regression tests for item-delivery replay after collection stops accepting new items.
 
+use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{
     ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRequest,
 };
@@ -7,6 +8,27 @@ use psychometrics_commons_runtime::session::SessionState;
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+fn manifest() -> InstrumentReleaseManifest {
+    InstrumentReleaseManifest::new(
+        "release_big_five_ko_v1",
+        "instrument_big_five",
+        "instrument_version_ko_v1",
+        "construct_big_five",
+        &["item_version_001", "item_version_002"],
+        "ko-KR",
+        "assessment_spec_big_five_v1",
+        "scoring_big_five_v1",
+        "calibration_big_five_v1",
+        Some("norm_big_five_ko_v1"),
+        "narrative_big_five_v1",
+        &["consent_service_v1"],
+        "intended_use_self_reflection_v1",
+        "limitations_big_five_v1",
+        RELEASE_DIGEST,
+    )
+    .unwrap()
+}
 
 fn request<'a>(
     item_version_ref: &'a str,
@@ -21,13 +43,8 @@ fn request<'a>(
 }
 
 fn ledger_with_delivery() -> ItemDeliveryLedger {
-    let mut ledger = ItemDeliveryLedger::new(
-        "session_big_five_001",
-        "release_big_five_ko_v1",
-        RELEASE_DIGEST,
-        "ko-KR",
-    )
-    .unwrap();
+    let mut ledger =
+        ItemDeliveryLedger::from_manifest("session_big_five_001", &manifest()).unwrap();
     ledger
         .deliver(
             SessionState::Active,
