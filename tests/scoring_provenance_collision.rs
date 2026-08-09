@@ -25,7 +25,7 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
     ledger.freeze(SessionState::Completed).unwrap()
 }
 
-fn request(assessment_spec_ref: &str) -> ScoringRequest {
+fn request(assessment_spec_ref: &str, norm_version_ref: Option<&str>) -> ScoringRequest {
     ScoringRequest::from_snapshot(
         &completed_snapshot(),
         ScoringRequestInput {
@@ -35,38 +35,52 @@ fn request(assessment_spec_ref: &str) -> ScoringRequest {
             instrument_version_ref: "instrument_version_ref",
             scoring_version_ref: "scoring_version_ref",
             calibration_reference: "calibration_reference",
-            norm_version_ref: Some("norm_version_ref"),
+            norm_version_ref,
             requested_output_schema_version: 1,
         },
     )
     .unwrap()
 }
 
-#[test]
-fn result_snapshot_rejects_same_request_reference_with_different_provenance() {
-    let expected_request = request("assessment_spec_a");
-    let conflicting_request = request("assessment_spec_b");
-    let result = ScoringResult::new(
+fn result_for(request: &ScoringRequest) -> ScoringResult {
+    ScoringResult::new(
         "scoring_result_ref",
-        &conflicting_request,
+        request,
         "sha256:engine",
         vec![ScoreObservation::scored("construct_ref", 1.0, Some(0.2)).unwrap()],
     )
-    .unwrap();
+    .unwrap()
+}
 
-    let error = ResultSnapshot::new(
-        &expected_request,
-        &result,
-        ResultSnapshotInput {
-            result_snapshot_ref: "result_snapshot_ref",
-            participant_ref: "participant_ref",
-            narrative_version_ref: "narrative_version_ref",
-            consent_snapshot_refs: &["service_consent_ref"],
-            created_at_unix_ms: 1,
-            supersedes_ref: None,
-        },
-    )
-    .unwrap_err();
+fn result_input<'a>() -> ResultSnapshotInput<'a> {
+    ResultSnapshotInput {
+        result_snapshot_ref: "result_snapshot_ref",
+        participant_ref: "participant_ref",
+        narrative_version_ref: "narrative_version_ref",
+        consent_snapshot_refs: &["service_consent_ref"],
+        created_at_unix_ms: 1,
+        supersedes_ref: None,
+    }
+}
+
+#[test]
+fn result_snapshot_rejects_same_request_reference_with_different_assessment_spec() {
+    let expected_request = request("assessment_spec_a", Some("norm_version_ref"));
+    let conflicting_request = request("assessment_spec_b", Some("norm_version_ref"));
+    let result = result_for(&conflicting_request);
+
+    let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
+
+    assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
+}
+
+#[test]
+fn result_snapshot_rejects_same_request_reference_with_different_optional_norm() {
+    let expected_request = request("assessment_spec_ref", Some("norm_version_ref"));
+    let conflicting_request = request("assessment_spec_ref", None);
+    let result = result_for(&conflicting_request);
+
+    let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
 
     assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
 }
