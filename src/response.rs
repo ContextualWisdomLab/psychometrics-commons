@@ -29,7 +29,7 @@ pub struct ResponseEvent {
     client_event_ref: String,
     item_version_ref: String,
     payload_digest: String,
-    sequence: u64,
+    sequence: usize,
 }
 
 impl ResponseEvent {
@@ -59,7 +59,7 @@ impl ResponseEvent {
 
     /// Return the server-assigned monotonic sequence number.
     #[must_use]
-    pub const fn sequence(&self) -> u64 {
+    pub const fn sequence(&self) -> usize {
         self.sequence
     }
 }
@@ -71,7 +71,7 @@ pub struct ResponseSnapshot {
     event_refs: Vec<String>,
     item_version_refs: Vec<String>,
     payload_digests: Vec<String>,
-    last_sequence: Option<u64>,
+    last_sequence: Option<usize>,
 }
 
 impl ResponseSnapshot {
@@ -89,7 +89,7 @@ impl ResponseSnapshot {
 
     /// Return the last accepted server sequence, if the snapshot is non-empty.
     #[must_use]
-    pub const fn last_sequence(&self) -> Option<u64> {
+    pub const fn last_sequence(&self) -> Option<usize> {
         self.last_sequence
     }
 
@@ -216,14 +216,12 @@ impl ResponseLedger {
             return Err(WriteError::IdempotencyConflict);
         }
 
-        let sequence = u64::try_from(self.events.len() + 1)
-            .expect("a Rust vector cannot contain more response events than u64 can represent");
         let event = ResponseEvent {
             server_event_ref: request.server_event_ref.to_owned(),
             client_event_ref: request.client_event_ref.to_owned(),
             item_version_ref: request.item_version_ref.to_owned(),
             payload_digest: request.payload_digest.to_owned(),
-            sequence,
+            sequence: self.events.len() + 1,
         };
         self.events.push(event.clone());
         Ok(event)
