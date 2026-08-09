@@ -79,7 +79,7 @@ LLMs are optional bounded helpers. They cannot change numeric scores, norms, unc
 - Database objects use descriptive two-or-more-word `snake_case`; public IDs are opaque/non-numeric.
 - Preserve idempotency, immutable snapshots, exact version/digest provenance, tenant isolation, and fail-closed unknown semantics.
 - Material ownership/lifecycle/API/event/data/scientific/AI/research/security/deployment changes update affected architecture/governance/traceability/risk artifacts or explicitly prove they are unaffected.
-- Use current primary standards/official docs/peer-reviewed research where material and record APA 7 references in authoritative doctoring/ADRs.
+- Use current primary standards/official docs/peer-reviewed research where material and record APA 7 references in authoritative documentation/ADRs.
 
 ## Automation and model tests
 
