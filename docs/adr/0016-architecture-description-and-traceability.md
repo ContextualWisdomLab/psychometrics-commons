@@ -2,8 +2,13 @@
 
 - Status: Accepted
 - Date: 2026-08-09
+- Deciders: ContextualWisdomLab Psychometrics Commons maintainers
 - Scope: architecture-description governance, diagrams, target/as-built distinction, requirements-to-implementation traceability
 - Supersedes: none
+- Superseded by: none
+- Current/as-built status: protected main has PRD, TRD, root architecture and ADR baseline; the multi-view architecture pack introduced by this change is active-PR documentation until merged
+- Target status: one discoverable, multi-view, code-current architecture graph with machine-checkable traceability and explicit target-versus-as-built evidence
+- Migration status: documentation-only migration; no product data migration is required, but old or contradictory architecture claims must be superseded/updated rather than left as parallel authority
 
 ## Context
 
@@ -26,8 +31,23 @@ The mandatory architecture artifact set is:
 - `docs/architecture/ERD.md` — logical product-owned data model;
 - `docs/architecture/SECURITY_AND_DATA.md` — trust, privacy, classification, threat/data flows;
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` — target deployment, degraded modes, recovery evidence;
+- `docs/MEASUREMENT_GOVERNANCE.md` — scientific publication/model interpretation evidence;
+- `docs/AI_GOVERNANCE.md` — bounded model authority/provider policy;
+- `docs/RESEARCH_GOVERNANCE.md` — research contribution/release governance;
 - `docs/TRACEABILITY.md` — PRD/TRD/ADR/source/test status mapping;
-- `docs/ROADMAP.md` — dependency-ordered delivery and exit criteria.
+- `docs/ROADMAP.md` — dependency-ordered delivery and exit criteria;
+- `docs/DOCUMENTATION_ASSESSMENT.md` — documented completeness/evidence gaps.
+
+## Ownership and boundaries
+
+| Responsibility | Owner | Interface | Forbidden coupling |
+|---|---|---|---|
+| Product requirements | psychometrics-commons product governance | `docs/PRD.md` | diagrams silently redefining product acceptance |
+| Technical contracts | psychometrics-commons architecture/engineering governance | `docs/TRD.md` | implementation-specific shortcuts overriding required semantics |
+| Material architecture decisions | accountable maintainers/deciders | accepted/superseding ADRs | silent architectural drift |
+| Architecture viewpoints | psychometrics-commons | version-controlled Mermaid/text views | proprietary diagram as sole source of truth |
+| Implementation evidence | owning source/test/migration modules | code/tests/contracts/releases | target diagrams presented as shipped evidence |
+| External bounded-context behavior | owning CWL repository | versioned external contract/reference | copying another service's internal schema into local authority |
 
 ## Authority hierarchy
 
@@ -52,7 +72,7 @@ Every architecture/model document must make clear whether it is:
 
 Target diagrams may show not-yet-implemented components only when labeled accordingly. They cannot be used as release evidence.
 
-`docs/TRACEABILITY.md` records implementation status against a named protected-main baseline. Status changes require source/test evidence.
+`docs/TRACEABILITY.md` records implementation status against a named protected-main baseline. Status changes require source/test evidence. Active PR state is not promoted to protected-main implementation until the exact change is integrated.
 
 ## Model kinds
 
@@ -66,7 +86,7 @@ Used for domain structure, state machines, and interaction sequences. Mermaid is
 
 ### ERD
 
-Defines logical data ownership/cardinality/immutability, not necessarily one-table-per-class physical DDL.
+Defines logical data ownership/cardinality/immutability, not necessarily one-table-per-class physical DDL. Conceptual/target entities must not be presented as persisted until migrations exist.
 
 ### Security/data view
 
@@ -75,6 +95,37 @@ Defines trust boundaries, classifications, prohibited flows, privacy and identit
 ### Deployment/operations view
 
 Defines profile composition, capability degradation, observability, backup/restore, migration and release evidence.
+
+## Contract details
+
+Every architecture view must identify its status and scope and link to the normative decisions/requirements it explains. A material concept uses the same canonical name across PRD/TRD/ADR/UML/ERD/code unless an adapter mapping is explicit.
+
+Traceability records distinguish at minimum:
+
+```text
+Implemented
+Partially implemented
+Target
+External dependency
+```
+
+When an active PR is relevant, the traceability note may identify it as active work but must not mark the behavior implemented on protected main before merge. Unstable SHAs/run IDs belong in dated evidence, PRs, or release records rather than timeless architecture prose except when a named baseline is deliberately being assessed.
+
+## Data and persistence impact
+
+This ADR does not itself create or change product persistence. `docs/architecture/ERD.md` is a logical target until physical migrations exist. When persistence lands, schema/migration evidence must be linked from traceability and validated against the logical invariants rather than inferred from the diagram.
+
+Architecture metadata/traceability may be stored as repository files; no application database is required for documentation governance.
+
+## Invariants
+
+1. An accepted ADR cannot be silently contradicted by a lower-authority diagram or implementation comment.
+2. A target component/entity/API/event cannot be represented as implemented without source/test/migration/contract evidence on the named protected-main/release baseline.
+3. Every numbered ADR is indexed with its status.
+4. Required architecture entry points are discoverable from README/root Architecture or their documented index.
+5. A material ownership/lifecycle/API/event/entity/transaction/security/deployment change updates affected viewpoints or records an explicit reason that the view is unaffected.
+6. External CWL bounded contexts remain references/contracts, never local cross-service foreign keys or copied source-of-truth internals.
+7. A documentation fitness test may prove structure/consistency, but it cannot substitute for human semantic architecture review or operational evidence.
 
 ## Traceability rule
 
@@ -89,7 +140,8 @@ A material change to any of the following requires a traceability update or an e
 - cross-service dependency;
 - trust/privacy/identity boundary;
 - deployment profile or recovery contract;
-- consumer/research release acceptance criterion.
+- consumer/research release acceptance criterion;
+- scientific publication or AI authority rule.
 
 ## Diagram quality rules
 
@@ -108,16 +160,42 @@ Documentation drift is treated as a release-quality defect when it can change im
 
 If a diagram is stale but code/ADR is correct, update or remove the diagram; do not rationalize the contradiction. If implementation intentionally changes the architecture, create/supersede the relevant ADR first or in the same reviewed change.
 
-## Validation
+If automated diagram/traceability tooling is unavailable, repository-native text/Mermaid and human review remain authoritative; lack of optional rendering tooling does not authorize dropping the required semantic content.
+
+## Security, privacy, and tenancy
+
+Architecture documents must not contain real credentials, participant data, restricted linkage values, or confidential tenant payloads. Examples use synthetic references. Security/privacy views must preserve purpose and authority boundaries rather than simplifying them away for visual neatness.
+
+Tenant boundaries, restricted linkage, and external provider/data-class restrictions are material architecture concerns and therefore require view/traceability updates when changed.
+
+## Deployment and operations impact
+
+Documentation is packaged/versioned with source and reviewed through the same protected repository workflow. Operators must be able to identify the current release's applicable architecture, compatibility, migration, recovery, and runbook references without reconstructing chat history.
+
+A deployment diagram that describes a target profile is not an as-built topology record. Exact environment topology, regions, secrets, backup systems, SLO/RPO/RTO, and runtime evidence are recorded only when deployed and verified.
+
+## Migration and rollback
+
+The documentation migration introduces/updates the canonical view graph without changing product runtime data. Existing strong documents are linked/consolidated instead of duplicated. Obsolete claims are removed or explicitly superseded.
+
+Rollback of a documentation-only change is safe only if it does not reintroduce a contradiction with already integrated source/ADR behavior. If implementation has advanced to depend on a new contract, roll forward the documentation rather than reverting to stale architecture.
+
+## Architecture-view impact
+
+This ADR governs all files under `docs/architecture/`, the architecture index in `ARCHITECTURE.md`, ADR indexing, and `docs/TRACEABILITY.md`. Changes to this governance rule must update `docs/DOCUMENTATION_ASSESSMENT.md` and documentation fitness tests.
+
+## Validation and release evidence
 
 CI should progressively enforce:
 
-- linked architecture files exist;
+- linked architecture files exist and are non-empty;
 - Mermaid/diagram syntax is renderable where automated validation is available;
-- ADR index contains every ADR and status;
-- traceability paths reference real source/test files;
+- ADR index contains every numbered ADR and status;
+- required ADR metadata/section contract is preserved;
+- traceability paths reference real source/test files or explicitly labelled target/external work;
 - machine-readable API/event/schema artifacts are linked when implemented;
-- physical schema fitness checks compare required logical ERD invariants once migrations exist.
+- physical schema fitness checks compare required logical ERD invariants once migrations exist;
+- canonical terminology/profile names do not drift across normative documents.
 
 Human architecture review remains necessary for semantic contradictions that syntax checks cannot detect.
 
@@ -125,7 +203,7 @@ Human architecture review remains necessary for semantic contradictions that syn
 
 ### One large `ARCHITECTURE.md`
 
-Rejected. It becomes difficult to review, reason about, and keep synchronized across product, data, security, behavior, and operations concerns.
+Rejected. It becomes difficult to review, reason about, and keep synchronized across product, data, security, behavior, scientific, research, and operations concerns.
 
 ### Diagrams only
 
@@ -144,7 +222,7 @@ Rejected. Figma may be used for product design, but architecture governance need
 Positive:
 
 - a reviewer can navigate architecture by concern;
-- target and implemented state are not conflated;
+- target, active-PR work, and implemented state are not conflated;
 - architectural drift becomes visible;
 - product, scientific, privacy, and operational decisions share a traceable evidence chain.
 
@@ -152,6 +230,22 @@ Cost:
 
 - material changes require multi-artifact maintenance;
 - CI/tooling for diagram/schema/traceability fitness must grow with implementation.
+
+## Follow-up work
+
+- strengthen documentation fitness tests beyond file existence to metadata/status/canonical-name consistency;
+- update traceability whenever protected main advances across a documented lifecycle or capability;
+- add as-built OpenAPI/AsyncAPI/schema/deployment evidence only when corresponding implementations exist;
+- periodically remove superseded/stale views rather than accumulating parallel authority.
+
+## Traceability
+
+- Product intent: `docs/PRD.md`.
+- Technical contracts: `docs/TRD.md`.
+- Architecture map/index: `ARCHITECTURE.md`, `docs/architecture/README.md`.
+- Architecture views: `docs/architecture/C4.md`, `docs/architecture/UML.md`, `docs/architecture/ERD.md`, `docs/architecture/SECURITY_AND_DATA.md`, `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`.
+- Status evidence: `docs/TRACEABILITY.md`, `docs/DOCUMENTATION_ASSESSMENT.md`.
+- Fitness test: `tests/documentation_architecture_contract.rs`.
 
 ## Reversal conditions
 
