@@ -8,7 +8,10 @@ use psychometrics_commons_runtime::session::SessionState;
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-fn request<'a>(item_version_ref: &'a str, presentation_context_ref: &'a str) -> ItemDeliveryRequest<'a> {
+fn request<'a>(
+    item_version_ref: &'a str,
+    presentation_context_ref: &'a str,
+) -> ItemDeliveryRequest<'a> {
     ItemDeliveryRequest {
         delivery_ref: "delivery_event_001",
         item_version_ref,
