@@ -17,7 +17,7 @@ Every ADR must identify:
 9. measurable acceptance evidence and release gates;
 10. alternatives rejected and conditions that would reverse the decision.
 
-A statement such as “use Keyverse” or “make it headless” is not sufficient unless the ADR defines the integration boundary, failure behavior, and ownership consequences.
+A statement such as “use Keyverse” or “make it headless” is not sufficient unless the ADR defines the integration boundary, failure behavior, and ownership consequences. The full required structure is in [0000-template.md](0000-template.md), including target/as-built status, data/persistence, deployment/operations, architecture-view impact, follow-up, and traceability.
 
 ## Status lifecycle
 
@@ -48,7 +48,9 @@ A statement such as “use Keyverse” or “make it headless” is not sufficie
 | [0015](0015-persistence-and-transaction-boundaries.md) | Product persistence and transaction boundaries | Accepted |
 | [0016](0016-architecture-description-and-traceability.md) | Architecture description viewpoints and traceability | Accepted |
 | [0017](0017-operational-recovery-and-ga-evidence.md) | Operational recovery and GA evidence contract | Accepted |
+| [0018](0018-continuous-scores-and-narrative-separation.md) | Continuous psychometric scores and narrative-style separation | Accepted |
+| [0019](0019-scientific-publication-evidence-gates.md) | Scientific publication and score-interpretation evidence gates | Accepted |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 
-Architecture decisions are linked to current protected-main implementation status in [`../TRACEABILITY.md`](../TRACEABILITY.md). An accepted ADR defines normative intent; it does not by itself prove that the described transport, persistence, deployment, or operational control has already been implemented.
+Architecture decisions are linked to current protected-main implementation status in [`../TRACEABILITY.md`](../TRACEABILITY.md). An accepted ADR defines normative intent; it does not by itself prove that the described transport, persistence, deployment, scientific evidence, or operational control has already been implemented.
