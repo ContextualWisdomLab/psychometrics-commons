@@ -476,3 +476,36 @@ fn instrument_release_errors_have_stable_safe_display_text() {
         assert_eq!(error.to_string(), expected);
     }
 }
+
+#[test]
+fn cloned_publication_evidence_preserves_immutable_identity_and_state() {
+    let mut release = InstrumentRelease::new(manifest(), 40_000).unwrap();
+    release
+        .apply_command(
+            "submit_review_clone_event",
+            PublicationCommand::SubmitReview,
+            40_100,
+        )
+        .unwrap();
+
+    let cloned_manifest = release.manifest().clone();
+    let cloned_event = release.events()[0].clone();
+    let cloned_release = release.clone();
+
+    assert_eq!(cloned_manifest, *release.manifest());
+    assert_eq!(cloned_event, release.events()[0]);
+    assert_eq!(cloned_release, release);
+    assert_eq!(
+        PublicationState::clone(&PublicationState::Review),
+        PublicationState::Review
+    );
+    assert_eq!(
+        PublicationCommand::clone(&PublicationCommand::SubmitReview),
+        PublicationCommand::SubmitReview
+    );
+    assert_eq!(
+        InstrumentReleaseError::clone(&InstrumentReleaseError::InvalidReference),
+        InstrumentReleaseError::InvalidReference
+    );
+    assert!(format!("{cloned_release:?}").contains("InstrumentRelease"));
+}
