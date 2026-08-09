@@ -11,6 +11,15 @@ const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn event(event_ref: &str, tenant_ref: &str, digest: &str) -> IntegrationEvent {
+    event_at(event_ref, tenant_ref, digest, 10_000)
+}
+
+fn event_at(
+    event_ref: &str,
+    tenant_ref: &str,
+    digest: &str,
+    occurred_at_unix_ms: u64,
+) -> IntegrationEvent {
     IntegrationEvent::new(
         event_ref,
         "assessment.session.completed",
@@ -18,7 +27,7 @@ fn event(event_ref: &str, tenant_ref: &str, digest: &str) -> IntegrationEvent {
         "psychometrics_commons",
         tenant_ref,
         "session_alpha",
-        10_000,
+        occurred_at_unix_ms,
         "correlation_alpha",
         None,
         digest,
@@ -47,6 +56,20 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
     apply_integration_migration(&mut client).unwrap();
 
     let tenant_alpha = event("event_alpha", "tenant_alpha", DIGEST_A);
+    assert!(matches!(
+        enqueue_outbox_event(&mut client, &tenant_alpha, 0),
+        Err(PersistenceError::InvalidAttemptLimit)
+    ));
+    assert!(matches!(
+        enqueue_outbox_event(&mut client, &tenant_alpha, i32::MAX as usize + 1),
+        Err(PersistenceError::ValueOutOfRange)
+    ));
+    let out_of_range_event = event_at("event_range", "tenant_alpha", DIGEST_A, u64::MAX);
+    assert!(matches!(
+        enqueue_outbox_event(&mut client, &out_of_range_event, 3),
+        Err(PersistenceError::ValueOutOfRange)
+    ));
+
     assert_eq!(
         enqueue_outbox_event(&mut client, &tenant_alpha, 3).unwrap(),
         PersistenceDisposition::Inserted
@@ -60,6 +83,23 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
     assert!(matches!(
         enqueue_outbox_event(&mut client, &conflicting, 3),
         Err(PersistenceError::ConflictingReplay)
+    ));
+    assert!(matches!(
+        enqueue_outbox_event(&mut client, &tenant_alpha, 4),
+        Err(PersistenceError::ConflictingReplay)
+    ));
+
+    assert!(matches!(
+        accept_inbox_event(&mut client, "123", &tenant_alpha, 11_000),
+        Err(PersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, 0),
+        Err(PersistenceError::InvalidTimestamp)
+    ));
+    assert!(matches!(
+        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, u64::MAX),
+        Err(PersistenceError::ValueOutOfRange)
     ));
 
     assert_eq!(
@@ -104,4 +144,46 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         &[&DIGEST_A],
     );
     assert!(invalid_reference.is_err());
+
+    assert_eq!(
+        PersistenceError::InvalidReference.to_string(),
+        "persistence references must be opaque non-numeric values"
+    );
+    assert_eq!(
+        PersistenceError::InvalidTimestamp.to_string(),
+        "persistence timestamps must be greater than zero"
+    );
+    assert_eq!(
+        PersistenceError::InvalidAttemptLimit.to_string(),
+        "outbox maximum attempts must be greater than zero"
+    );
+    assert_eq!(
+        PersistenceError::ValueOutOfRange.to_string(),
+        "persistence value exceeds the supported PostgreSQL range"
+    );
+    assert_eq!(
+        PersistenceError::ConflictingReplay.to_string(),
+        "persistence idempotency identity was replayed with conflicting evidence"
+    );
+
+    client
+        .batch_execute(
+            "DROP TABLE integration_inbox;\
+             DROP TABLE integration_delivery_attempt;\
+             DROP TABLE integration_outbox;",
+        )
+        .unwrap();
+    let outbox_database_error = enqueue_outbox_event(&mut client, &tenant_alpha, 3).unwrap_err();
+    assert!(matches!(
+        outbox_database_error,
+        PersistenceError::Database(_)
+    ));
+    assert_eq!(
+        outbox_database_error.to_string(),
+        "PostgreSQL persistence operation failed"
+    );
+    assert!(matches!(
+        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, 15_000),
+        Err(PersistenceError::Database(_))
+    ));
 }
