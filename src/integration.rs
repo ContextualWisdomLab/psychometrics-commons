@@ -390,6 +390,7 @@ pub enum InboxDisposition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InboxReceipt {
     consumer_ref: String,
+    source_ref: String,
     source_event_ref: String,
     payload_digest: String,
     received_at_unix_ms: u64,
@@ -400,6 +401,12 @@ impl InboxReceipt {
     #[must_use]
     pub fn consumer_ref(&self) -> &str {
         &self.consumer_ref
+    }
+
+    /// Return the upstream bounded-context/source identity.
+    #[must_use]
+    pub fn source_ref(&self) -> &str {
+        &self.source_ref
     }
 
     /// Return the upstream source event reference.
@@ -424,8 +431,10 @@ impl InboxReceipt {
 /// In-memory domain ledger specifying consumer inbox deduplication behavior.
 ///
 /// Persistence adapters may use a unique database constraint rather than this data
-/// structure, but must preserve the same `(consumer_ref, source_event_ref)` identity
-/// and digest-conflict semantics.
+/// structure, but must preserve the same
+/// `(consumer_ref, source_ref, source_event_ref)` identity and digest-conflict
+/// semantics. Event references are not assumed to be globally unique across all
+/// upstream bounded contexts.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IntegrationInbox {
     receipts: Vec<InboxReceipt>,
@@ -446,7 +455,7 @@ impl IntegrationInbox {
         self.receipts.is_empty()
     }
 
-    /// Return the number of unique consumer/event receipts.
+    /// Return the number of unique consumer/source/event receipts.
     #[must_use]
     pub fn len(&self) -> usize {
         self.receipts.len()
@@ -460,22 +469,26 @@ impl IntegrationInbox {
 
     /// Accept or deduplicate one immutable source event for a consumer.
     ///
-    /// The deduplication key is `(consumer_ref, source_event_ref)`. An exact digest
-    /// replay is a duplicate even when transport redelivers it later; a different
-    /// digest under the same identity fails closed rather than applying last write.
+    /// The deduplication key is `(consumer_ref, source_ref, source_event_ref)`. An
+    /// exact digest replay is a duplicate even when transport redelivers it later;
+    /// a different digest under the same source-scoped identity fails closed rather
+    /// than applying last write. The same event reference from a different upstream
+    /// source is independent and cannot suppress legitimate delivery.
     ///
     /// # Errors
     ///
-    /// Returns [`IntegrationError`] for invalid identity/digest/timestamp or a
-    /// conflicting replay.
+    /// Returns [`IntegrationError`] for invalid consumer/source/event identity,
+    /// digest, timestamp, or a conflicting replay.
     pub fn accept(
         &mut self,
         consumer_ref: &str,
+        source_ref: &str,
         source_event_ref: &str,
         payload_digest: &str,
         received_at_unix_ms: u64,
     ) -> Result<InboxDisposition, IntegrationError> {
         let consumer_ref = required_reference(consumer_ref)?;
+        let source_ref = required_reference(source_ref)?;
         let source_event_ref = required_reference(source_event_ref)?;
         if received_at_unix_ms == 0 {
             return Err(IntegrationError::InvalidTimestamp);
@@ -485,7 +498,9 @@ impl IntegrationInbox {
         }
 
         if let Some(existing) = self.receipts.iter().find(|receipt| {
-            receipt.consumer_ref == consumer_ref && receipt.source_event_ref == source_event_ref
+            receipt.consumer_ref == consumer_ref
+                && receipt.source_ref == source_ref
+                && receipt.source_event_ref == source_event_ref
         }) {
             return if existing.payload_digest == payload_digest {
                 Ok(InboxDisposition::Duplicate)
@@ -496,6 +511,7 @@ impl IntegrationInbox {
 
         self.receipts.push(InboxReceipt {
             consumer_ref: consumer_ref.to_owned(),
+            source_ref: source_ref.to_owned(),
             source_event_ref: source_event_ref.to_owned(),
             payload_digest: payload_digest.to_owned(),
             received_at_unix_ms,
