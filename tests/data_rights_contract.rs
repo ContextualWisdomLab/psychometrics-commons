@@ -4,9 +4,26 @@ use psychometrics_commons_runtime::data_rights::{
     DataRightsError, DataRightsRequest, DataRightsRequestKind, DataRightsState,
 };
 
+fn request(
+    request_ref: &str,
+    participant_ref: &str,
+    kind: DataRightsRequestKind,
+    scope_ref: &str,
+    requested_at_unix_ms: u64,
+) -> Result<DataRightsRequest, DataRightsError> {
+    DataRightsRequest::new(
+        request_ref,
+        "tenant_ref",
+        participant_ref,
+        kind,
+        scope_ref,
+        requested_at_unix_ms,
+    )
+}
+
 #[test]
 fn export_request_requires_verified_identity_before_processing() {
-    let mut request = DataRightsRequest::new(
+    let mut request = request(
         " export_request_ref ",
         " participant_ref ",
         DataRightsRequestKind::Export,
@@ -16,6 +33,7 @@ fn export_request_requires_verified_identity_before_processing() {
     .unwrap();
 
     assert_eq!(request.request_ref(), "export_request_ref");
+    assert_eq!(request.tenant_ref(), "tenant_ref");
     assert_eq!(request.participant_ref(), "participant_ref");
     assert_eq!(request.scope_ref(), "account_data_scope");
     assert_eq!(request.kind(), DataRightsRequestKind::Export);
@@ -59,7 +77,7 @@ fn export_request_requires_verified_identity_before_processing() {
 
 #[test]
 fn deletion_completion_preserves_legal_retention_exceptions() {
-    let mut request = DataRightsRequest::new(
+    let mut request = request(
         "deletion_request_ref",
         "participant_ref",
         DataRightsRequestKind::Deletion,
@@ -93,7 +111,7 @@ fn deletion_completion_preserves_legal_retention_exceptions() {
 
 #[test]
 fn export_completion_rejects_deletion_retention_exceptions() {
-    let mut request = DataRightsRequest::new(
+    let mut request = request(
         "export_request_ref",
         "participant_ref",
         DataRightsRequestKind::Export,
@@ -112,7 +130,7 @@ fn export_completion_rejects_deletion_retention_exceptions() {
 
 #[test]
 fn lifecycle_is_monotonic_and_invalid_transitions_fail_closed() {
-    let mut request = DataRightsRequest::new(
+    let mut request = request(
         "deletion_request_ref",
         "participant_ref",
         DataRightsRequestKind::Deletion,
@@ -158,7 +176,7 @@ fn lifecycle_is_monotonic_and_invalid_transitions_fail_closed() {
     request.complete("completion_ref", &[], 4_000).unwrap();
     assert_eq!(request.state(), DataRightsState::Completed);
 
-    let mut not_processing = DataRightsRequest::new(
+    let mut not_processing = request(
         "second_request_ref",
         "participant_ref",
         DataRightsRequestKind::Deletion,
@@ -174,7 +192,7 @@ fn lifecycle_is_monotonic_and_invalid_transitions_fail_closed() {
 
 #[test]
 fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
-    let mut request = DataRightsRequest::new(
+    let mut request = request(
         "deletion_request_ref",
         "participant_ref",
         DataRightsRequestKind::Deletion,
@@ -237,7 +255,48 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
 #[test]
 fn invalid_or_numeric_only_public_references_fail_closed() {
     assert_eq!(
+        request(
+            "12345",
+            "participant_ref",
+            DataRightsRequestKind::Export,
+            "account_data_scope",
+            5_000,
+        ),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request(
+            "request_ref",
+            " ",
+            DataRightsRequestKind::Export,
+            "account_data_scope",
+            5_000,
+        ),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request(
+            "request_ref",
+            "participant_ref",
+            DataRightsRequestKind::Export,
+            "12345",
+            5_000,
+        ),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request(
+            "request_ref",
+            "participant_ref",
+            DataRightsRequestKind::Export,
+            "account_data_scope",
+            0,
+        ),
+        Err(DataRightsError::InvalidTimestamp)
+    );
+    assert_eq!(
         DataRightsRequest::new(
+            "request_ref",
             "12345",
             "participant_ref",
             DataRightsRequestKind::Export,
@@ -250,34 +309,15 @@ fn invalid_or_numeric_only_public_references_fail_closed() {
         DataRightsRequest::new(
             "request_ref",
             " ",
+            "participant_ref",
             DataRightsRequestKind::Export,
             "account_data_scope",
             5_000,
         ),
         Err(DataRightsError::InvalidReference)
-    );
-    assert_eq!(
-        DataRightsRequest::new(
-            "request_ref",
-            "participant_ref",
-            DataRightsRequestKind::Export,
-            "12345",
-            5_000,
-        ),
-        Err(DataRightsError::InvalidReference)
-    );
-    assert_eq!(
-        DataRightsRequest::new(
-            "request_ref",
-            "participant_ref",
-            DataRightsRequestKind::Export,
-            "account_data_scope",
-            0,
-        ),
-        Err(DataRightsError::InvalidTimestamp)
     );
 
-    let mut request = DataRightsRequest::new(
+    let mut request = request(
         "request_ref",
         "participant_ref",
         DataRightsRequestKind::Deletion,
