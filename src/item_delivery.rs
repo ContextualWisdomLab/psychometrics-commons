@@ -2,9 +2,9 @@
 //!
 //! Item delivery is product-runtime state rather than psychometric item-selection
 //! arithmetic. The ledger binds one assessment session to one immutable instrument
-//! release, its canonical content digest, and one exact locale. Delivery events are
-//! server-ordered, idempotent by opaque delivery reference, and accepted only while
-//! the assessment session is active.
+//! release, its canonical content digest, and one exact locale. New logical delivery
+//! events are accepted only while the assessment session is active; exact retries of
+//! previously accepted delivery identities remain idempotent after lifecycle advance.
 
 use crate::reference::normalized_reference;
 use crate::session::SessionState;
@@ -76,7 +76,7 @@ pub enum ItemDeliveryError {
     InvalidDigest,
     /// The pinned locale was not a valid BCP 47-style tag.
     InvalidLocale,
-    /// The assessment session was not active when delivery was attempted.
+    /// A new logical delivery was attempted while the assessment session was not active.
     SessionNotActive(SessionState),
     /// A delivery reference was replayed with evidence different from its first use.
     IdempotencyConflict,
@@ -206,26 +206,23 @@ impl ItemDeliveryLedger {
     /// Record one item delivery or replay an identical accepted delivery.
     ///
     /// Exact replay of a previously accepted `delivery_ref` returns the original
-    /// immutable event. Reuse of that identity with different evidence fails closed.
-    /// A different delivery identity cannot re-administer an item version already
-    /// delivered in this session.
+    /// immutable event even after the session leaves [`SessionState::Active`]. Reuse
+    /// of that identity with different evidence fails closed. Every genuinely new
+    /// logical delivery still requires an active session, and a different delivery
+    /// identity cannot re-administer an item version already delivered in the session.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::SessionNotActive`] when the session is not active,
-    /// [`ItemDeliveryError::InvalidReference`] for malformed evidence references,
-    /// [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay, or
-    /// [`ItemDeliveryError::DuplicateItemDelivery`] for a second logical delivery of
-    /// the same immutable item version.
+    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed evidence
+    /// references, [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay,
+    /// [`ItemDeliveryError::SessionNotActive`] when a new logical delivery is attempted
+    /// outside an active session, or [`ItemDeliveryError::DuplicateItemDelivery`] for
+    /// a second logical delivery of the same immutable item version.
     pub fn deliver(
         &mut self,
         state: SessionState,
         request: ItemDeliveryRequest<'_>,
     ) -> Result<ItemDeliveryEvent, ItemDeliveryError> {
-        if state != SessionState::Active {
-            return Err(ItemDeliveryError::SessionNotActive(state));
-        }
-
         let delivery_ref = required_reference(request.delivery_ref)?;
         let item_version_ref = required_reference(request.item_version_ref)?;
         let presentation_context_ref = required_reference(request.presentation_context_ref)?;
@@ -247,6 +244,10 @@ impl ItemDeliveryLedger {
             } else {
                 Err(ItemDeliveryError::IdempotencyConflict)
             };
+        }
+
+        if state != SessionState::Active {
+            return Err(ItemDeliveryError::SessionNotActive(state));
         }
 
         if self
