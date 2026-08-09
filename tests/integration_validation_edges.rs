@@ -5,7 +5,11 @@ use psychometrics_commons_runtime::integration::{IntegrationError, IntegrationEv
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-fn create(event_type: &str, schema_version: &str, digest: &str) -> Result<IntegrationEvent, IntegrationError> {
+fn create(
+    event_type: &str,
+    schema_version: &str,
+    digest: &str,
+) -> Result<IntegrationEvent, IntegrationError> {
     IntegrationEvent::new(
         "event_alpha",
         event_type,
