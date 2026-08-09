@@ -18,3 +18,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 - Research-contribution lifecycle primitives that require an explicit scoped research grant, separate pseudonymous research identity from the operational participant, and preserve idempotent irreversible withdrawal evidence.
 - Tenant-scoped participant export/deletion request lifecycle primitives that require request-specific identity verification, preserve durable operation/completion evidence, keep event time monotonic, make exact lifecycle replays idempotent, and represent legal retention exceptions as explicit partial deletion completion rather than a misleading deletion boolean.
 - Immutable locale-specific instrument release manifests that pin ordered item versions, AssessmentSpec, scoring, calibration, norms, narrative, consent, intended-use, limitations, and content digest provenance, with a fail-closed review/publish/suspend/reactivate/retire lifecycle controlling new-session eligibility.
+
+### Fixed
+
+- Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
