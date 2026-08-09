@@ -45,9 +45,7 @@ impl Display for IntegrationError {
             Self::InvalidSchemaVersion => {
                 "integration schema version must be non-empty and bounded"
             }
-            Self::InvalidDigest => {
-                "integration payload digest must be a canonical sha256 digest"
-            }
+            Self::InvalidDigest => "integration payload digest must be a canonical sha256 digest",
             Self::InvalidTimestamp => "integration timestamps must be greater than zero",
             Self::NonMonotonicTimestamp => "integration event time must not move backwards",
             Self::InvalidAttemptLimit => "outbox maximum attempts must be greater than zero",
