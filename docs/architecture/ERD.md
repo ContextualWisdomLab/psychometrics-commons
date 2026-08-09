@@ -1,0 +1,383 @@
+# Logical Entity-Relationship Model
+
+- Status: Normative logical data model
+- Date: 2026-08-09
+- Scope: Psychometrics Commons-owned persistence only
+- Important: this is **not** a claim that physical DDL or all tables are already implemented
+
+The ERD defines target cardinalities, ownership, immutable boundaries, and restricted identity linkage. Physical migrations may split or combine tables for performance, but they must preserve these semantics and may not create cross-service application-database coupling.
+
+## 1. Logical ERD
+
+```mermaid
+erDiagram
+    tenant_account ||--o{ assessment_participant : owns
+    tenant_account ||--o{ instrument_definition : owns
+    tenant_account ||--o{ data_rights_request : scopes
+
+    instrument_definition ||--|{ instrument_version : versions
+    item_definition ||--|{ item_version : versions
+    instrument_version ||--|{ instrument_item : contains
+    item_version ||--o{ instrument_item : referenced_by
+
+    assessment_participant ||--o{ assessment_session : starts
+    instrument_version ||--o{ assessment_session : administered_as
+    assessment_session ||--o{ response_event : records
+    assessment_session ||--o| response_snapshot : freezes
+    response_snapshot ||--|{ response_snapshot_entry : contains
+    response_event ||--o| response_snapshot_entry : frozen_as
+
+    response_snapshot ||--o{ scoring_job : submitted_for
+    scoring_job ||--o| result_snapshot : produces
+    assessment_participant ||--o{ result_snapshot : owns
+
+    assessment_participant ||--o{ consent_snapshot : decides
+    consent_form ||--o{ consent_snapshot : instantiated_as
+    assessment_participant ||--o{ research_contribution : contributes
+    consent_snapshot ||--o{ research_contribution : authorizes
+
+    assessment_participant ||--o{ research_identity_linkage : linked_under_restriction
+    research_participant ||--o{ research_identity_linkage : linked_under_restriction
+    research_participant ||--o{ dataset_snapshot_member : included_as
+    dataset_snapshot ||--o{ dataset_snapshot_member : contains
+    dataset_snapshot ||--o{ research_release : released_as
+
+    assessment_participant ||--o{ data_rights_request : requests
+
+    integration_outbox ||--o{ integration_delivery_attempt : dispatches
+    integration_inbox ||--o{ integration_consumption : deduplicates
+
+    tenant_account {
+      string tenant_ref PK
+      string tenant_status
+      timestamp created_at
+    }
+
+    instrument_definition {
+      string instrument_ref PK
+      string tenant_ref FK
+      string construct_ref
+      timestamp created_at
+    }
+
+    instrument_version {
+      string instrument_version_ref PK
+      string instrument_ref FK
+      string locale
+      string assessment_spec_ref
+      string scoring_version_ref
+      string calibration_reference
+      string norm_version_ref
+      string narrative_version_ref
+      string publication_state
+      string content_digest
+      timestamp created_at
+    }
+
+    item_definition {
+      string item_ref PK
+      timestamp created_at
+    }
+
+    item_version {
+      string item_version_ref PK
+      string item_ref FK
+      string content_digest
+      string response_schema_version
+      timestamp created_at
+    }
+
+    instrument_item {
+      string instrument_item_ref PK
+      string instrument_version_ref FK
+      string item_version_ref FK
+      int item_order
+      string selection_policy_ref
+    }
+
+    assessment_participant {
+      string participant_ref PK
+      string tenant_ref FK
+      string keyverse_subject_ref
+      string participant_status
+      timestamp created_at
+    }
+
+    assessment_session {
+      string session_ref PK
+      string participant_ref FK
+      string instrument_version_ref FK
+      string session_state
+      string locale
+      timestamp created_at
+      timestamp latest_event_at
+    }
+
+    response_event {
+      string response_event_ref PK
+      string session_ref FK
+      string client_event_ref
+      string item_version_ref
+      string payload_digest
+      int server_sequence
+      timestamp observed_at
+      timestamp received_at
+    }
+
+    response_snapshot {
+      string response_snapshot_ref PK
+      string session_ref FK
+      string content_digest
+      int event_count
+      int last_sequence
+      timestamp frozen_at
+    }
+
+    response_snapshot_entry {
+      string snapshot_entry_ref PK
+      string response_snapshot_ref FK
+      string response_event_ref FK
+      int snapshot_sequence
+      string item_version_ref
+      string payload_digest
+    }
+
+    scoring_job {
+      string scoring_job_ref PK
+      string response_snapshot_ref FK
+      string assessment_spec_ref
+      string scoring_version_ref
+      string calibration_reference
+      string norm_version_ref
+      string requested_output_schema_version
+      string scoring_state
+      timestamp created_at
+    }
+
+    result_snapshot {
+      string result_snapshot_ref PK
+      string participant_ref FK
+      string scoring_job_ref FK
+      string response_snapshot_ref FK
+      string scoring_result_ref
+      string instrument_version_ref
+      string assessment_spec_ref
+      string scoring_version_ref
+      string calibration_reference
+      string norm_version_ref
+      string narrative_version_ref
+      string engine_artifact_digest
+      string supersedes_ref
+      timestamp created_at
+    }
+
+    consent_form {
+      string consent_form_ref PK
+      string consent_form_version_ref
+      string purpose
+      string content_digest
+      timestamp published_at
+    }
+
+    consent_snapshot {
+      string consent_snapshot_ref PK
+      string participant_ref FK
+      string consent_form_ref FK
+      string purpose
+      string decision
+      string scope_ref
+      timestamp effective_at
+    }
+
+    research_contribution {
+      string contribution_ref PK
+      string participant_ref FK
+      string consent_snapshot_ref FK
+      string research_participant_ref
+      string research_scope_ref
+      string contribution_state
+      timestamp created_at
+    }
+
+    research_participant {
+      string research_participant_ref PK
+      string research_program_ref
+      string pseudonym_key_version
+      timestamp created_at
+    }
+
+    research_identity_linkage {
+      string linkage_ref PK
+      string participant_ref FK
+      string research_participant_ref FK
+      string research_program_ref
+      string linkage_key_version
+      timestamp created_at
+    }
+
+    dataset_snapshot {
+      string dataset_snapshot_ref PK
+      string manifest_digest
+      string privacy_review_ref
+      string scientific_review_ref
+      string snapshot_state
+      timestamp created_at
+    }
+
+    dataset_snapshot_member {
+      string dataset_member_ref PK
+      string dataset_snapshot_ref FK
+      string research_participant_ref FK
+      string contribution_ref
+    }
+
+    research_release {
+      string research_release_ref PK
+      string dataset_snapshot_ref FK
+      string manifest_digest
+      string access_class
+      string supersedes_ref
+      timestamp published_at
+    }
+
+    data_rights_request {
+      string request_ref PK
+      string tenant_ref FK
+      string participant_ref FK
+      string request_kind
+      string scope_ref
+      string request_state
+      string verification_evidence_ref
+      string operation_ref
+      string completion_evidence_ref
+      timestamp requested_at
+      timestamp latest_event_at
+    }
+
+    integration_outbox {
+      string outbox_event_ref PK
+      string event_type
+      string subject_ref
+      string correlation_ref
+      string causation_ref
+      string schema_version
+      string payload_digest
+      timestamp occurred_at
+      timestamp published_at
+    }
+
+    integration_delivery_attempt {
+      string delivery_attempt_ref PK
+      string outbox_event_ref FK
+      int attempt_number
+      string delivery_state
+      string failure_class
+      timestamp attempted_at
+    }
+
+    integration_inbox {
+      string inbox_message_ref PK
+      string source_event_ref
+      string consumer_name
+      string payload_digest
+      timestamp first_seen_at
+    }
+
+    integration_consumption {
+      string consumption_ref PK
+      string inbox_message_ref FK
+      string side_effect_ref
+      string consumption_state
+      timestamp completed_at
+    }
+```
+
+## 2. System-of-record boundaries
+
+The ERD includes only Psychometrics Commons-owned state. The following values are **references**, not local copies of another service's source-of-truth tables:
+
+- `keyverse_subject_ref` → Keyverse identity/federation domain;
+- `assessment_spec_ref`, `scoring_version_ref`, `calibration_reference`, `norm_version_ref` → fast-mlsirm scientific contracts/artifacts;
+- TEPP analysis artifact references → temporal-analysis domain;
+- semantic-data-portal catalog references → research catalog/release presentation;
+- contextual-orchestrator execution references → bounded AI domain.
+
+No local foreign key is created into another service's database.
+
+## 3. Immutable aggregates
+
+Once semantically published/frozen, the following are append-only or superseded rather than mutated in place:
+
+- `instrument_version` after publication;
+- `item_version` after publication;
+- `response_snapshot` and `response_snapshot_entry`;
+- `result_snapshot`;
+- `consent_snapshot`;
+- approved `dataset_snapshot`;
+- published `research_release`.
+
+Operational fields such as delivery attempt state may change according to their own audited lifecycle; they must not alter the immutable scientific payload they reference.
+
+## 4. Critical uniqueness and idempotency constraints
+
+A physical schema must enforce equivalents of the following constraints:
+
+| Constraint | Purpose |
+|---|---|
+| unique `(session_ref, client_event_ref)` | response replay idempotency |
+| unique `(session_ref, server_sequence)` | authoritative response ordering |
+| unique `response_event_ref` | no server event identity reuse |
+| unique `response_snapshot_ref` and one canonical completed snapshot per session/version policy | immutable scoring evidence |
+| unique `(instrument_version_ref, item_order)` | deterministic published order |
+| unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
+| unique `outbox_event_ref` | durable event identity |
+| unique `(consumer_name, source_event_ref)` | inbox deduplication |
+| unique research linkage for `(research_program_ref, participant_ref)` unless an ADR explicitly permits rotation semantics | controlled pseudonym mapping |
+| unique manifest digest identity for a published research release reference | release replay safety |
+
+Idempotency keys are tenant/resource scoped; a key from one tenant cannot suppress or replay another tenant's state change.
+
+## 5. Restricted linkage boundary
+
+`research_identity_linkage` is the highest-sensitivity product-owned data structure because it bridges operational participant identity to research pseudonym identity.
+
+Requirements:
+
+- separate database role/authorization policy from normal assessment read paths;
+- no general analytics query access;
+- no export into public research bundles;
+- audited privileged access;
+- versioned pseudonym/linkage-key metadata;
+- deletion/retention behavior governed by explicit research scope, law, and ethics policy rather than blanket row masking.
+
+## 6. Payload storage
+
+The logical model stores `payload_digest` because routine domain, audit, and observability paths should not require raw response content. A deployment may store the encrypted response payload in the operational database or an approved encrypted object store.
+
+Whichever adapter is chosen must preserve:
+
+- exact binding between payload/reference and digest;
+- tenant/resource authorization;
+- encryption and key-rotation policy;
+- deletion/export propagation;
+- immutable snapshot replay;
+- no raw payload in routine logs, outbox metadata, or public release manifests.
+
+## 7. Naming contract
+
+Database objects use at least two descriptive words and `snake_case` by default. Short legacy names are not introduced for convenience. Public identifiers remain opaque, non-numeric references even if a storage engine uses internal surrogate keys.
+
+## 8. Migration contract
+
+The first physical migration must be reviewed against this logical model and the accepted ADRs. Subsequent migrations must:
+
+1. preserve a backward-compatible application deployment window;
+2. include explicit data transformation and rollback/roll-forward evidence;
+3. never mutate published scientific payloads to emulate a schema upgrade;
+4. backfill new immutable references deterministically and audibly;
+5. prove tenant and identity-boundary constraints after migration;
+6. pass backup/restore verification before destructive changes.
+
+## 9. As-built rule
+
+Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, and ownership rules against this model. Silent divergence is a release defect.
