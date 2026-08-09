@@ -23,31 +23,6 @@ fn event() -> IntegrationEvent {
     .unwrap()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn create_event(
-    event_ref: &str,
-    event_type: &str,
-    schema_version: &str,
-    source: &str,
-    subject_ref: &str,
-    occurred_at: u64,
-    correlation_ref: &str,
-    causation_ref: Option<&str>,
-    digest: &str,
-) -> Result<IntegrationEvent, IntegrationError> {
-    IntegrationEvent::new(
-        event_ref,
-        event_type,
-        schema_version,
-        source,
-        subject_ref,
-        occurred_at,
-        correlation_ref,
-        causation_ref,
-        digest,
-    )
-}
-
 #[test]
 fn integration_event_preserves_versioned_audit_metadata() {
     let event = event();
@@ -64,9 +39,31 @@ fn integration_event_preserves_versioned_audit_metadata() {
 
 #[test]
 fn malformed_event_references_fail_closed() {
+    let create = |event_ref: &str,
+                  event_type: &str,
+                  schema_version: &str,
+                  source: &str,
+                  subject_ref: &str,
+                  occurred_at: u64,
+                  correlation_ref: &str,
+                  causation_ref: Option<&str>,
+                  digest: &str| {
+        IntegrationEvent::new(
+            event_ref,
+            event_type,
+            schema_version,
+            source,
+            subject_ref,
+            occurred_at,
+            correlation_ref,
+            causation_ref,
+            digest,
+        )
+    };
+
     for invalid_ref in ["", "   ", "12345"] {
         assert_eq!(
-            create_event(
+            create(
                 invalid_ref,
                 "assessment.scoring.requested",
                 "v1",
@@ -82,7 +79,7 @@ fn malformed_event_references_fail_closed() {
     }
 
     assert_eq!(
-        create_event(
+        create(
             "event_alpha",
             "assessment.scoring.requested",
             "v1",
@@ -99,8 +96,30 @@ fn malformed_event_references_fail_closed() {
 
 #[test]
 fn malformed_event_metadata_fails_closed() {
+    let create = |event_ref: &str,
+                  event_type: &str,
+                  schema_version: &str,
+                  source: &str,
+                  subject_ref: &str,
+                  occurred_at: u64,
+                  correlation_ref: &str,
+                  causation_ref: Option<&str>,
+                  digest: &str| {
+        IntegrationEvent::new(
+            event_ref,
+            event_type,
+            schema_version,
+            source,
+            subject_ref,
+            occurred_at,
+            correlation_ref,
+            causation_ref,
+            digest,
+        )
+    };
+
     assert_eq!(
-        create_event(
+        create(
             "event_alpha",
             "",
             "v1",
@@ -114,7 +133,7 @@ fn malformed_event_metadata_fails_closed() {
         Err(IntegrationError::InvalidEventType)
     );
     assert_eq!(
-        create_event(
+        create(
             "event_alpha",
             "assessment.scoring.requested",
             "",
@@ -128,7 +147,7 @@ fn malformed_event_metadata_fails_closed() {
         Err(IntegrationError::InvalidSchemaVersion)
     );
     assert_eq!(
-        create_event(
+        create(
             "event_alpha",
             "assessment.scoring.requested",
             "v1",
@@ -142,7 +161,7 @@ fn malformed_event_metadata_fails_closed() {
         Err(IntegrationError::InvalidTimestamp)
     );
     assert_eq!(
-        create_event(
+        create(
             "event_alpha",
             "assessment.scoring.requested",
             "v1",
