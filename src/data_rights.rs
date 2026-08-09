@@ -1,11 +1,11 @@
 //! Purpose-bound participant data-rights request lifecycle.
 //!
 //! Export and deletion requests are explicit domain resources rather than flags on
-//! participant records. Identity verification is required before processing, and
-//! deletion completion may preserve named legal-retention exceptions without
-//! pretending that retained evidence was deleted. Exact lifecycle command replays
-//! are idempotent even after later transitions, while conflicting evidence fails
-//! closed.
+//! participant records. Every request is tenant-scoped and identity-verified before
+//! processing. Deletion completion may preserve named legal-retention exceptions
+//! without pretending that retained evidence was deleted. Exact lifecycle command
+//! replays are idempotent even after later transitions, while conflicting evidence
+//! fails closed.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -81,10 +81,11 @@ impl Display for DataRightsError {
 
 impl Error for DataRightsError {}
 
-/// Product-owned lifecycle resource for one participant export or deletion request.
+/// Product-owned lifecycle resource for one tenant-scoped participant export or deletion request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DataRightsRequest {
     request_ref: String,
+    tenant_ref: String,
     participant_ref: String,
     kind: DataRightsRequestKind,
     scope_ref: String,
@@ -101,7 +102,7 @@ pub struct DataRightsRequest {
 }
 
 impl DataRightsRequest {
-    /// Create a participant-scoped export or deletion request.
+    /// Create a tenant- and participant-scoped export or deletion request.
     ///
     /// # Errors
     ///
@@ -110,6 +111,7 @@ impl DataRightsRequest {
     /// `requested_at_unix_ms` is zero.
     pub fn new(
         request_ref: &str,
+        tenant_ref: &str,
         participant_ref: &str,
         kind: DataRightsRequestKind,
         scope_ref: &str,
@@ -120,6 +122,7 @@ impl DataRightsRequest {
         }
         Ok(Self {
             request_ref: required_reference(request_ref)?.to_owned(),
+            tenant_ref: required_reference(tenant_ref)?.to_owned(),
             participant_ref: required_reference(participant_ref)?.to_owned(),
             kind,
             scope_ref: required_reference(scope_ref)?.to_owned(),
@@ -140,6 +143,12 @@ impl DataRightsRequest {
     #[must_use]
     pub fn request_ref(&self) -> &str {
         &self.request_ref
+    }
+
+    /// Return the tenant that owns this data-rights request.
+    #[must_use]
+    pub fn tenant_ref(&self) -> &str {
+        &self.tenant_ref
     }
 
     /// Return the operational participant reference scoped to this request.
