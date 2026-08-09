@@ -20,6 +20,10 @@ Related authoritative artifacts:
 - [`../MEASUREMENT_GOVERNANCE.md`](../MEASUREMENT_GOVERNANCE.md) — measurement publication/evidence, model selection, recovery, fairness, automated scoring and item-bank governance
 - [`../AI_GOVERNANCE.md`](../AI_GOVERNANCE.md) — bounded AI tasks, deterministic fallback, provider/privacy and judge governance
 - [`../RESEARCH_GOVERNANCE.md`](../RESEARCH_GOVERNANCE.md) — research contribution, identity separation, release, withdrawal and reproducibility governance
+- [`../QUALITY_ATTRIBUTES.md`](../QUALITY_ATTRIBUTES.md) — measurable quality-attribute scenarios and evidence requirements
+- [`../COMPLIANCE_READINESS.md`](../COMPLIANCE_READINESS.md) — assurance/control evidence maturity and certification non-claim
+- [`../RISK_REGISTER.md`](../RISK_REGISTER.md) — material architecture/product/scientific/security/privacy/operational risks and evidence state
+- [`../GLOSSARY.md`](../GLOSSARY.md) — canonical terminology across architecture, APIs, code, UI and research artifacts
 - [`../adr/README.md`](../adr/README.md) — authoritative architecture decisions
 - [`../TRACEABILITY.md`](../TRACEABILITY.md) — target-to-implementation/evidence mapping
 - [`../ROADMAP.md`](../ROADMAP.md) — delivery dependency order and exit criteria
@@ -33,3 +37,4 @@ Related authoritative artifacts:
 4. **Diagrams remain reviewable in GitHub.** Mermaid is used for repository-native rendering; external visual tools may supplement but not replace the version-controlled source.
 5. **Material changes update affected views.** Lifecycle, ownership, entity/cardinality, trust boundary, deployment/recovery, or public interface changes require either the corresponding view update or an explicit traceability statement explaining why no view changes.
 6. **Measurement, AI, and research policies remain separate.** A model or AI capability cannot weaken scientific publication, participant consent, privacy, or research-release gates defined by their governing documents.
+7. **Risk/quality/compliance claims require evidence level.** Architecture mitigation or readiness does not equal implemented control, exact-release verification, risk closure, or external certification.
