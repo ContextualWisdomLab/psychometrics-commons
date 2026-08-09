@@ -30,7 +30,7 @@ pub struct ResultSnapshotInput<'a> {
 /// Immutable product result with copied score observations and full provenance.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResultSnapshot {
-    result_snapshot_ref: String,
+    snapshot_ref: String,
     participant_ref: String,
     scoring_result_ref: String,
     response_snapshot_ref: String,
@@ -97,7 +97,7 @@ impl ResultSnapshot {
         }
 
         Ok(Self {
-            result_snapshot_ref: input.result_snapshot_ref.to_owned(),
+            snapshot_ref: input.result_snapshot_ref.to_owned(),
             participant_ref: input.participant_ref.to_owned(),
             scoring_result_ref: result.scoring_result_ref().to_owned(),
             response_snapshot_ref: request.response_snapshot_ref().to_owned(),
@@ -122,7 +122,7 @@ impl ResultSnapshot {
     /// Return this immutable result-snapshot reference.
     #[must_use]
     pub fn result_snapshot_ref(&self) -> &str {
-        &self.result_snapshot_ref
+        &self.snapshot_ref
     }
 
     /// Return the product participant that owns this personal result.
