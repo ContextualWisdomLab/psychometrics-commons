@@ -477,6 +477,10 @@ fn instrument_release_errors_have_stable_safe_display_text() {
     }
 }
 
+fn clone_public_value<T: Clone>(value: &T) -> T {
+    value.clone()
+}
+
 #[test]
 fn cloned_publication_evidence_preserves_immutable_identity_and_state() {
     let mut release = InstrumentRelease::new(manifest(), 40_000).unwrap();
@@ -488,23 +492,23 @@ fn cloned_publication_evidence_preserves_immutable_identity_and_state() {
         )
         .unwrap();
 
-    let cloned_manifest = release.manifest().clone();
-    let cloned_event = release.events()[0].clone();
-    let cloned_release = release.clone();
+    let cloned_manifest = clone_public_value(release.manifest());
+    let cloned_event = clone_public_value(&release.events()[0]);
+    let cloned_release = clone_public_value(&release);
 
     assert_eq!(cloned_manifest, *release.manifest());
     assert_eq!(cloned_event, release.events()[0]);
     assert_eq!(cloned_release, release);
     assert_eq!(
-        PublicationState::clone(&PublicationState::Review),
+        clone_public_value(&PublicationState::Review),
         PublicationState::Review
     );
     assert_eq!(
-        PublicationCommand::clone(&PublicationCommand::SubmitReview),
+        clone_public_value(&PublicationCommand::SubmitReview),
         PublicationCommand::SubmitReview
     );
     assert_eq!(
-        InstrumentReleaseError::clone(&InstrumentReleaseError::InvalidReference),
+        clone_public_value(&InstrumentReleaseError::InvalidReference),
         InstrumentReleaseError::InvalidReference
     );
     assert!(format!("{cloned_release:?}").contains("InstrumentRelease"));
