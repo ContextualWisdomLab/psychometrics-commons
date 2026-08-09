@@ -8,6 +8,7 @@
 //! contracts rather than reimplemented here.
 
 pub mod consent;
+pub mod data_rights;
 mod reference;
 pub mod response;
 pub mod result;
