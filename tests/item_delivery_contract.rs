@@ -1,5 +1,6 @@
 //! Contract tests for session-bound immutable item-delivery evidence.
 
+use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{
     ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRequest,
 };
@@ -8,14 +9,29 @@ use psychometrics_commons_runtime::session::SessionState;
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-fn ledger() -> ItemDeliveryLedger {
-    ItemDeliveryLedger::new(
-        "session_big_five_001",
+fn manifest() -> InstrumentReleaseManifest {
+    InstrumentReleaseManifest::new(
         "release_big_five_ko_v1",
-        RELEASE_DIGEST,
+        "instrument_big_five",
+        "instrument_version_ko_v1",
+        "construct_big_five",
+        &["item_version_001", "item_version_002"],
         "ko-KR",
+        "assessment_spec_big_five_v1",
+        "scoring_big_five_v1",
+        "calibration_big_five_v1",
+        Some("norm_big_five_ko_v1"),
+        "narrative_big_five_v1",
+        &["consent_service_v1"],
+        "intended_use_self_reflection_v1",
+        "limitations_big_five_v1",
+        RELEASE_DIGEST,
     )
     .unwrap()
+}
+
+fn ledger() -> ItemDeliveryLedger {
+    ItemDeliveryLedger::from_manifest("session_big_five_001", &manifest()).unwrap()
 }
 
 fn request<'a>(
@@ -33,13 +49,17 @@ fn request<'a>(
 }
 
 #[test]
-fn ledger_pins_session_release_digest_and_locale() {
+fn ledger_pins_session_and_exact_release_manifest_evidence() {
     let ledger = ledger();
 
     assert_eq!(ledger.session_ref(), "session_big_five_001");
     assert_eq!(ledger.instrument_release_ref(), "release_big_five_ko_v1");
     assert_eq!(ledger.release_content_digest(), RELEASE_DIGEST);
     assert_eq!(ledger.locale(), "ko-KR");
+    assert_eq!(
+        ledger.allowed_item_version_refs(),
+        ["item_version_001", "item_version_002"]
+    );
     assert!(ledger.is_empty());
     assert_eq!(ledger.len(), 0);
 }
@@ -162,6 +182,24 @@ fn exact_replay_remains_idempotent_after_session_stops_accepting_new_deliveries(
 }
 
 #[test]
+fn item_outside_bound_release_fails_closed_before_duplicate_item_logic() {
+    let mut ledger = ledger();
+    assert_eq!(
+        ledger.deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_outside",
+                "item_version_outside_release",
+                "presentation_standard_v1",
+                None,
+            ),
+        ),
+        Err(ItemDeliveryError::ItemNotInRelease)
+    );
+    assert!(ledger.is_empty());
+}
+
+#[test]
 fn same_item_cannot_be_delivered_twice_under_a_new_identity() {
     let mut ledger = ledger();
     ledger
@@ -222,43 +260,11 @@ fn item_delivery_requires_an_active_session() {
 
 #[test]
 fn ledger_and_request_identity_fail_closed() {
-    for invalid in ["", "   ", "12345"] {
+    let manifest = manifest();
+    for invalid_session_ref in ["", "   ", "12345"] {
         assert_eq!(
-            ItemDeliveryLedger::new(invalid, "release_big_five_ko_v1", RELEASE_DIGEST, "ko-KR"),
+            ItemDeliveryLedger::from_manifest(invalid_session_ref, &manifest),
             Err(ItemDeliveryError::InvalidReference)
-        );
-        assert_eq!(
-            ItemDeliveryLedger::new("session_big_five_001", invalid, RELEASE_DIGEST, "ko-KR"),
-            Err(ItemDeliveryError::InvalidReference)
-        );
-    }
-
-    for digest in [
-        "",
-        "sha256:0123",
-        "md5:0123456789abcdef0123456789abcdef",
-        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeF",
-    ] {
-        assert_eq!(
-            ItemDeliveryLedger::new(
-                "session_big_five_001",
-                "release_big_five_ko_v1",
-                digest,
-                "ko-KR"
-            ),
-            Err(ItemDeliveryError::InvalidDigest)
-        );
-    }
-
-    for locale in ["", "k", "ko_kr", "ko-", "ko-KR!"] {
-        assert_eq!(
-            ItemDeliveryLedger::new(
-                "session_big_five_001",
-                "release_big_five_ko_v1",
-                RELEASE_DIGEST,
-                locale
-            ),
-            Err(ItemDeliveryError::InvalidLocale)
         );
     }
 
@@ -322,20 +328,16 @@ fn delivery_errors_have_stable_safe_text() {
             "item delivery references must be opaque non-numeric values",
         ),
         (
-            ItemDeliveryError::InvalidDigest,
-            "item delivery release digest must be canonical sha256",
-        ),
-        (
-            ItemDeliveryError::InvalidLocale,
-            "item delivery locale must be a valid BCP 47-style tag",
-        ),
-        (
             ItemDeliveryError::SessionNotActive(SessionState::Paused),
             "session Paused cannot deliver assessment items",
         ),
         (
             ItemDeliveryError::IdempotencyConflict,
             "delivery reference was already used for different evidence",
+        ),
+        (
+            ItemDeliveryError::ItemNotInRelease,
+            "item version is not part of the bound instrument release manifest",
         ),
         (
             ItemDeliveryError::DuplicateItemDelivery,
