@@ -2,7 +2,7 @@
 
 - Status: Delivery baseline
 - Date: 2026-08-09
-- Principle: finish current PR/issue work before opening speculative parallel slices; each phase exit criterion is evidence-based
+- Principle: finish current actionable PR/issue work before opening conflicting or speculative parallel slices; when current work is blocked by CI, review, provider cooldown, another writer, or a read-only dependency, continue independent bounded repository work; each phase exit criterion is evidence-based
 
 The roadmap is not a release-date promise. It is the dependency order for turning the architecture into a hosted product without moving psychometric numerics, identity, temporal analysis, or research catalog ownership into this repository.
 
@@ -57,7 +57,7 @@ Exit criteria:
 
 - exhaustive lifecycle transition tests;
 - conflicting replay fails closed;
-- exact owned production statement/branch coverage target met;
+- exactly 100% owned-production statement and branch coverage, with no meaningless exclusions or tests added only to satisfy a percentage;
 - no psychometric numerical duplication;
 - no transport/database implementation is required to understand/test domain semantics.
 
