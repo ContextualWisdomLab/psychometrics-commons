@@ -1,8 +1,6 @@
 //! Integration tests for response-event idempotency and immutable snapshots.
 
-use psychometrics_commons_runtime::response::{
-    ResponseLedger, ResponseWrite, WriteError,
-};
+use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
 use psychometrics_commons_runtime::session::SessionState;
 
 fn write<'a>(
@@ -36,6 +34,10 @@ fn active_session_assigns_monotonic_server_sequences() {
         )
         .unwrap();
 
+    assert_eq!(first.server_event_ref(), "event_a");
+    assert_eq!(first.client_event_ref(), "client_a");
+    assert_eq!(first.item_version_ref(), "item_v1");
+    assert_eq!(first.payload_digest(), "sha256:aaa");
     assert_eq!(first.sequence(), 1);
     assert_eq!(second.sequence(), 2);
     assert_eq!(ledger.len(), 2);
@@ -191,4 +193,24 @@ fn empty_completed_session_has_an_explicit_empty_snapshot() {
     assert!(snapshot.event_refs().is_empty());
     assert!(snapshot.item_version_refs().is_empty());
     assert!(snapshot.payload_digests().is_empty());
+}
+
+#[test]
+fn write_errors_have_stable_human_readable_context() {
+    assert_eq!(
+        WriteError::SessionNotActive(SessionState::Paused).to_string(),
+        "session Paused cannot accept response events"
+    );
+    assert_eq!(
+        WriteError::EmptyReference.to_string(),
+        "response references must not be empty"
+    );
+    assert_eq!(
+        WriteError::IdempotencyConflict.to_string(),
+        "client event reference was already used for different response content"
+    );
+    assert_eq!(
+        WriteError::SnapshotRequiresCompleted(SessionState::Active).to_string(),
+        "response snapshot requires Completed session state, found Active"
+    );
 }
