@@ -203,7 +203,7 @@ pub fn accept_inbox_event(
                    AND source_event_ref = $4 AND event_type = $5 AND schema_version = $6 \
                    AND subject_ref = $7 AND payload_digest = $8\
              )",
-            params,
+            &params[..8],
         )?
         .get(0);
     if exact_replay {
