@@ -69,6 +69,16 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Compile all targets
         run: cargo check --all-targets
+      - name: Require committed Cargo lockfile
+        run: git diff --exit-code -- Cargo.lock
+      - name: Preserve resolved lockfile when the lock gate fails
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: resolved-cargo-lock-${{ github.event.pull_request.head.sha || github.sha }}
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 1
       - name: Run Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Run Rust tests
