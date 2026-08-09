@@ -162,9 +162,14 @@ impl InstrumentReleaseManifest {
         if item_version_refs.is_empty() {
             return Err(InstrumentReleaseError::EmptyItemSet);
         }
-        let item_version_refs = normalize_unique_references(item_version_refs, true)?;
-        let consent_requirement_refs =
-            normalize_unique_references(consent_requirement_refs, false)?;
+        let item_version_refs = normalize_unique_references(
+            item_version_refs,
+            InstrumentReleaseError::DuplicateItemReference,
+        )?;
+        let consent_requirement_refs = normalize_unique_references(
+            consent_requirement_refs,
+            InstrumentReleaseError::InvalidReference,
+        )?;
         let locale = locale.trim();
         if !valid_locale(locale) {
             return Err(InstrumentReleaseError::InvalidLocale);
@@ -176,22 +181,32 @@ impl InstrumentReleaseManifest {
             .map(required_reference)
             .transpose()?
             .map(str::to_owned);
+        let release_ref = required_reference(release_ref)?.to_owned();
+        let instrument_ref = required_reference(instrument_ref)?.to_owned();
+        let instrument_version_ref = required_reference(instrument_version_ref)?.to_owned();
+        let construct_ref = required_reference(construct_ref)?.to_owned();
+        let assessment_spec_ref = required_reference(assessment_spec_ref)?.to_owned();
+        let scoring_version_ref = required_reference(scoring_version_ref)?.to_owned();
+        let calibration_reference = required_reference(calibration_reference)?.to_owned();
+        let narrative_version_ref = required_reference(narrative_version_ref)?.to_owned();
+        let intended_use_ref = required_reference(intended_use_ref)?.to_owned();
+        let limitations_ref = required_reference(limitations_ref)?.to_owned();
 
         Ok(Self {
-            release_ref: required_reference(release_ref)?.to_owned(),
-            instrument_ref: required_reference(instrument_ref)?.to_owned(),
-            instrument_version_ref: required_reference(instrument_version_ref)?.to_owned(),
-            construct_ref: required_reference(construct_ref)?.to_owned(),
+            release_ref,
+            instrument_ref,
+            instrument_version_ref,
+            construct_ref,
             item_version_refs,
             locale: locale.to_owned(),
-            assessment_spec_ref: required_reference(assessment_spec_ref)?.to_owned(),
-            scoring_version_ref: required_reference(scoring_version_ref)?.to_owned(),
-            calibration_reference: required_reference(calibration_reference)?.to_owned(),
+            assessment_spec_ref,
+            scoring_version_ref,
+            calibration_reference,
             norm_version_ref,
-            narrative_version_ref: required_reference(narrative_version_ref)?.to_owned(),
+            narrative_version_ref,
             consent_requirement_refs,
-            intended_use_ref: required_reference(intended_use_ref)?.to_owned(),
-            limitations_ref: required_reference(limitations_ref)?.to_owned(),
+            intended_use_ref,
+            limitations_ref,
             content_digest: content_digest.to_owned(),
         })
     }
@@ -444,17 +459,13 @@ const fn transition(
 
 fn normalize_unique_references(
     references: &[&str],
-    item_references: bool,
+    duplicate_error: InstrumentReleaseError,
 ) -> Result<Vec<String>, InstrumentReleaseError> {
     let mut normalized = Vec::with_capacity(references.len());
     for reference in references {
         let reference = required_reference(reference)?;
         if normalized.iter().any(|existing| existing == reference) {
-            return Err(if item_references {
-                InstrumentReleaseError::DuplicateItemReference
-            } else {
-                InstrumentReleaseError::InvalidReference
-            });
+            return Err(duplicate_error);
         }
         normalized.push(reference.to_owned());
     }
@@ -477,9 +488,7 @@ fn valid_sha256_digest(digest: &str) -> bool {
 
 fn valid_locale(locale: &str) -> bool {
     let mut subtags = locale.split('-');
-    let Some(primary) = subtags.next() else {
-        return false;
-    };
+    let primary = subtags.next().unwrap_or_default();
     if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
     {
         return false;
