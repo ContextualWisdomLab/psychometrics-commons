@@ -75,7 +75,9 @@ fn same_tenant_source_event_identity_cannot_change_subject_or_digest() {
     let mut inbox = IntegrationInbox::new();
     let original = event("tenant_alpha", "session_alpha", DIGEST_A);
     assert_eq!(
-        inbox.accept_event("scoring_worker", &original, 20_000).unwrap(),
+        inbox
+            .accept_event("scoring_worker", &original, 20_000)
+            .unwrap(),
         InboxDisposition::Accepted
     );
 
