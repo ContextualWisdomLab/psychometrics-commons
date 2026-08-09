@@ -46,10 +46,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
     let unbound_error =
         ScoringRequest::from_snapshot(&unbound, scoring_input("response_snapshot_ref"))
             .unwrap_err();
-    assert_eq!(
-        unbound_error,
-        ScoringContractError::UnboundResponseSnapshot
-    );
+    assert_eq!(unbound_error, ScoringContractError::UnboundResponseSnapshot);
     assert_eq!(
         unbound_error.to_string(),
         "scoring requires a durable response snapshot reference"
