@@ -450,10 +450,9 @@ impl DataRightsRequest {
         failed_at_unix_ms: u64,
     ) -> Result<(), DataRightsError> {
         let evidence_ref = required_reference(failure_evidence_ref)?;
-        if let (Some(existing_ref), Some(existing_at)) = (
-            self.failure_evidence_ref.as_deref(),
-            self.failed_at_unix_ms,
-        ) {
+        if let (Some(existing_ref), Some(existing_at)) =
+            (self.failure_evidence_ref.as_deref(), self.failed_at_unix_ms)
+        {
             return if existing_ref == evidence_ref && existing_at == failed_at_unix_ms {
                 Ok(())
             } else {
