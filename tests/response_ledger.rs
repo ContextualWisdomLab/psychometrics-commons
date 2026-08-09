@@ -98,6 +98,27 @@ fn reused_client_event_with_different_content_fails_closed() {
 }
 
 #[test]
+fn server_event_reference_cannot_identify_two_different_events() {
+    let mut ledger = ResponseLedger::new("session_ref");
+    ledger
+        .record(
+            SessionState::Active,
+            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+        )
+        .unwrap();
+
+    let error = ledger
+        .record(
+            SessionState::Active,
+            write("event_a", "client_b", "item_v2", "sha256:bbb"),
+        )
+        .unwrap_err();
+
+    assert_eq!(error, WriteError::ServerReferenceConflict);
+    assert_eq!(ledger.len(), 1);
+}
+
+#[test]
 fn non_active_session_cannot_accept_response_events() {
     let mut ledger = ResponseLedger::new("session_ref");
 
@@ -210,6 +231,10 @@ fn write_errors_have_stable_human_readable_context() {
     assert_eq!(
         WriteError::IdempotencyConflict.to_string(),
         "client event reference was already used for different response content"
+    );
+    assert_eq!(
+        WriteError::ServerReferenceConflict.to_string(),
+        "server event reference was already used by another response event"
     );
     assert_eq!(
         WriteError::SnapshotRequiresCompleted(SessionState::Active).to_string(),
