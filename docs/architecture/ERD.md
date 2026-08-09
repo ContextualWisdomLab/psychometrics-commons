@@ -44,6 +44,8 @@ erDiagram
 
     assessment_participant ||--o{ data_rights_request : requests
 
+    tenant_account ||--o{ integration_outbox : scopes
+    tenant_account ||--o{ integration_inbox : scopes
     integration_outbox ||--o{ integration_delivery_attempt : dispatches
     integration_inbox ||--o{ integration_consumption : deduplicates
 
@@ -69,6 +71,8 @@ erDiagram
       string calibration_reference
       string norm_version_ref
       string narrative_version_ref
+      string evidence_policy_ref
+      string publication_evidence_ref
       string publication_state
       string content_digest
       timestamp created_at
@@ -256,7 +260,9 @@ erDiagram
 
     integration_outbox {
       string outbox_event_ref PK
+      string tenant_ref FK
       string event_type
+      string source
       string subject_ref
       string correlation_ref
       string causation_ref
@@ -277,10 +283,16 @@ erDiagram
 
     integration_inbox {
       string inbox_message_ref PK
+      string tenant_ref FK
+      string source
       string source_event_ref
       string consumer_name
       string payload_digest
+      string processing_state
+      string side_effect_key
+      string completion_evidence_ref
       timestamp first_seen_at
+      timestamp completed_at
     }
 
     integration_consumption {
@@ -316,7 +328,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - approved `dataset_snapshot`;
 - published `research_release`.
 
-Operational fields such as delivery attempt state may change according to their own audited lifecycle; they must not alter the immutable scientific payload they reference.
+Operational fields such as delivery attempt or inbox processing state may change according to their own audited lifecycle; they must not alter the immutable scientific payload they reference.
 
 ## 4. Critical uniqueness and idempotency constraints
 
@@ -330,14 +342,29 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `response_snapshot_ref` and one canonical completed snapshot per session/version policy | immutable scoring evidence |
 | unique `(instrument_version_ref, item_order)` | deterministic published order |
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
-| unique `outbox_event_ref` | durable event identity |
-| unique `(consumer_name, source_event_ref)` | inbox deduplication |
+| unique `(tenant_ref, source, outbox_event_ref)` or an equivalently stronger globally unique event identity with tenant binding | durable outbound event identity |
+| unique `(tenant_ref, consumer_name, source, source_event_ref)` | tenant-bound inbox deduplication |
 | unique research linkage for `(research_program_ref, participant_ref)` unless an ADR explicitly permits rotation semantics | controlled pseudonym mapping |
 | unique manifest digest identity for a published research release reference | release replay safety |
 
 Idempotency keys are tenant/resource scoped; a key from one tenant cannot suppress or replay another tenant's state change.
 
-## 5. Restricted linkage boundary
+## 5. Integration tenant binding and crash-safe consumption
+
+`integration_outbox.tenant_ref` is derived from the product-owned subject/resource in the same local transaction as the business mutation and outbox record. A caller-provided tenant string never becomes authoritative merely because it appears in an event body.
+
+Before a consumer creates a processable inbox record it validates:
+
+1. event source and schema/canonicalization version are supported;
+2. canonical payload digest matches ADR-0014;
+3. envelope `tenant_ref` matches the subject/resource authority expected by the consumer;
+4. a replay of `(tenant_ref, consumer_name, source, source_event_ref)` has the same digest and compatible required semantics.
+
+A tenant/resource mismatch or conflicting replay is quarantined/fails closed before side effects.
+
+`integration_inbox.processing_state` models at least `pending`, `processing`, `completed`, and `quarantined`/terminal failure. Receipt alone is not completion. For a local side effect, the domain mutation and inbox completion commit atomically. For a non-local side effect, processing records a durable local work/outbox item or stable external idempotency key; `completed` is written only after completion evidence is verified. A crash therefore leaves recoverable state instead of suppressing an effect that never happened.
+
+## 6. Restricted linkage boundary
 
 `research_identity_linkage` is the highest-sensitivity product-owned data structure because it bridges operational participant identity to research pseudonym identity.
 
@@ -350,7 +377,7 @@ Requirements:
 - versioned pseudonym/linkage-key metadata;
 - deletion/retention behavior governed by explicit research scope, law, and ethics policy rather than blanket row masking.
 
-## 6. Payload storage
+## 7. Payload storage
 
 The logical model stores `payload_digest` because routine domain, audit, and observability paths should not require raw response content. A deployment may store the encrypted response payload in the operational database or an approved encrypted object store.
 
@@ -363,11 +390,11 @@ Whichever adapter is chosen must preserve:
 - immutable snapshot replay;
 - no raw payload in routine logs, outbox metadata, or public release manifests.
 
-## 7. Naming contract
+## 8. Naming contract
 
 Database objects use at least two descriptive words and `snake_case` by default. Short legacy names are not introduced for convenience. Public identifiers remain opaque, non-numeric references even if a storage engine uses internal surrogate keys.
 
-## 8. Migration contract
+## 9. Migration contract
 
 The first physical migration must be reviewed against this logical model and the accepted ADRs. Subsequent migrations must:
 
@@ -376,8 +403,9 @@ The first physical migration must be reviewed against this logical model and the
 3. never mutate published scientific payloads to emulate a schema upgrade;
 4. backfill new immutable references deterministically and audibly;
 5. prove tenant and identity-boundary constraints after migration;
-6. pass backup/restore verification before destructive changes.
+6. pass backup/restore verification before destructive changes;
+7. preserve tenant-bound outbox/inbox uniqueness and crash-recoverable processing state.
 
-## 9. As-built rule
+## 10. As-built rule
 
-Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, and ownership rules against this model. Silent divergence is a release defect.
+Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, and ownership rules against this model. Silent divergence is a release defect.
