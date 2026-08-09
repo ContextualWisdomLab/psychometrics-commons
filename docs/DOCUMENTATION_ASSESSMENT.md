@@ -9,7 +9,7 @@
 
 The repository already had a **strong textual baseline** before this assessment: a product requirements document, a detailed technical requirements document, an architecture map, thirteen implementation-ready ADRs, and executable Rust domain contracts for session, response, scoring, result, consent, research-contribution, and data-rights behavior.
 
-It was **not yet sufficient as a complete architecture description for commercial due diligence or multi-team implementation** because several critical viewpoints existed only as prose. In particular, there was no explicit C4-style context/container/component view, no UML-aligned domain/state/sequence model set, no logical ERD with cardinalities and ownership, no dedicated security/privacy data-flow model, no requirements-to-code traceability matrix, no operations/recovery evidence model, no measurable quality-attribute scenario set, no consolidated risk/compliance-readiness model, no canonical glossary, and no durable consolidated governance documents covering the psychometric, AI, and Research Commons rules developed throughout the design discussion.
+It was **not yet sufficient as a complete architecture description for commercial due diligence or multi-team implementation** because several critical viewpoints existed only as prose. In particular, there was no explicit C4-style context/container/component view, no UML-aligned domain/state/sequence model set, no logical ERD with cardinalities and ownership, no dedicated security/privacy data-flow model, no requirements-to-code traceability matrix, no operations/recovery evidence model, no measurable quality-attribute scenario set, no consolidated risk/compliance-readiness model, no canonical glossary, no dedicated decision governing continuous-score versus narrative-style separation, no product-side scientific publication evidence gate, and no durable consolidated governance documents covering the psychometric, AI, and Research Commons rules developed throughout the design discussion.
 
 This change closes those architecture-description and governance gaps while deliberately separating **normative target architecture** from **as-built implementation**. It does not pretend that future API transports, database migrations, integrations, deployment infrastructure, SLA commitments, certifications, or scientific validation studies already exist.
 
@@ -26,7 +26,7 @@ This change closes those architecture-description and governance gaps while deli
 | Compliance readiness | General SOC 2/CSAP intent only | No evidence maturity model/control-readiness map; risk of certification overclaim | Add `COMPLIANCE_READINESS.md` with architecture→implementation→verification→external assessment distinction |
 | Risk register | Missing | Material scientific/product/security/privacy/ops/commercial risks had no consolidated treatment/evidence state | Add `RISK_REGISTER.md` |
 | Glossary | Missing | Similar terms such as assessment/instrument/release/result/research identity/multifactor/multifaceted could drift | Add `GLOSSARY.md` canonical terminology |
-| ADR set | Strong: ownership, failure modes, validation, rollback, reversal conditions explicit | API/event representation, persistence transaction boundaries, architecture-view governance, and GA recovery evidence lacked dedicated decisions | Add ADR-0014 through ADR-0017 and strengthen ADR template view/data/operations impact requirements |
+| ADR set | Strong general ownership/failure/validation/rollback baseline | API/event representation, persistence boundaries, architecture governance, GA recovery, score-vs-narrative semantics and scientific publication gates lacked dedicated decisions | Add ADR-0014 through ADR-0019 and strengthen ADR template view/data/operations impact requirements |
 | `ARCHITECTURE.md` | Strong bounded-context and failure-degradation map | Stakeholders/viewpoints, logical containers, UML/ERD links, and as-built/target distinction incomplete | Add governed architecture-view index and target/as-built rule |
 | UML | Missing | No class, state, or sequence model suitable for implementation/review | Add UML-aligned Mermaid class/state/sequence model set |
 | ERD | Missing | Entity names existed in TRD but cardinalities, restricted linkage, snapshot membership, and ownership were not explicit | Add logical ERD and persistence invariants |
@@ -60,13 +60,14 @@ Implementation-baseline sufficiency means a new engineer, reviewer, buyer-side a
 9. how PRD requirements trace to TRD sections, ADRs, source modules, and future verification;
 10. which architecture artifacts describe target intent versus current protected-main implementation;
 11. what psychometric evidence is required before instrument/score publication without duplicating fast-mlsirm numerics;
-12. what AI may and may not do and why a model/judge output cannot override deterministic scientific/product gates;
-13. how research contribution becomes a privacy/scientifically reviewed immutable release without exposing operational identity;
-14. which nonfunctional qualities must be demonstrated through measurable scenarios rather than slogans;
-15. which material risks remain open/evidence-required even when architecture controls exist;
-16. how compliance-readiness evidence differs from external certification/attestation;
-17. the canonical meaning of product/scientific/identity/research/operations terms;
-18. what implementation sequence closes remaining product gaps without inventing new repositories or duplicating existing CWL bounded contexts.
+12. why continuous/facet psychometric scores remain the scientific source while Personality Style is only a versioned, deterministic, optional narrative/presentation mapping;
+13. what AI may and may not do and why a model/judge output cannot override deterministic scientific/product gates;
+14. how research contribution becomes a privacy/scientifically reviewed immutable release without exposing operational identity;
+15. which nonfunctional qualities must be demonstrated through measurable scenarios rather than slogans;
+16. which material risks remain open/evidence-required even when architecture controls exist;
+17. how compliance-readiness evidence differs from external certification/attestation;
+18. the canonical meaning of product/scientific/identity/research/operations terms;
+19. what implementation sequence closes remaining product gaps without inventing new repositories or duplicating existing CWL bounded contexts.
 
 ## Remaining evidence before GA
 
@@ -110,7 +111,7 @@ machine-readable API/event/schema contracts when implemented
 code, migrations, tests and operational evidence
 ```
 
-A lower layer that contradicts a higher layer is a defect; it must not be rationalized as implementation detail. A material change to product ownership, lifecycle, public interface, event, logical entity/cardinality, transaction, scientific publication rule, AI/research authority, trust/privacy boundary, deployment/recovery, or release acceptance must update affected views/governance/traceability or explicitly prove the mappings remain valid.
+A lower layer that contradicts a higher layer is a defect; it must not be rationalized as implementation detail. A material change to product ownership, lifecycle, public interface, event, logical entity/cardinality, transaction, scientific publication rule, score/narrative relationship, AI/research authority, trust/privacy boundary, deployment/recovery, or release acceptance must update affected views/governance/traceability or explicitly prove the mappings remain valid.
 
 ## What “sufficient” does not mean
 
@@ -124,6 +125,7 @@ A lower layer that contradicts a higher layer is a defect; it must not be ration
 - architecture/compliance readiness equals SOC 2 or CSAP certification;
 - a research release is safe merely because identifiers are pseudonymized;
 - a psychometric score is valid merely because a model fit or correlation is high;
+- a Personality Style label is itself a psychometric latent trait or MBTI-equivalent measure;
 - an LLM narrative/judge is a scientific source of truth;
 - a recovery architecture constitutes an SLA;
 - a risk marked `mitigated_by_architecture` is actually closed;
