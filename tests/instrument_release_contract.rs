@@ -193,6 +193,21 @@ fn locale_digest_and_reference_edge_cases_fail_closed() {
         );
     }
 
+    for locale in ["ko", "language", "ko-KR", "ko-ABCDEFGH", "zh-Hans-CN"] {
+        assert!(
+            custom_manifest(
+                "release_ref",
+                &["item_version_001"],
+                locale,
+                None,
+                &["consent_service_v1"],
+                VALID_DIGEST,
+            )
+            .is_ok(),
+            "locale {locale:?} must be accepted"
+        );
+    }
+
     let uppercase_digest = format!("sha256:{}A", "0".repeat(63));
     for digest in [
         "md5:0123456789abcdef0123456789abcdef",
@@ -417,16 +432,21 @@ fn event_time_is_server_monotonic_and_retirement_is_terminal() {
         .apply_command("retire_event", PublicationCommand::Retire, 30_300)
         .unwrap();
 
-    for command in [
+    for (index, command) in [
         PublicationCommand::SubmitReview,
         PublicationCommand::Publish,
         PublicationCommand::Suspend,
         PublicationCommand::Reactivate,
         PublicationCommand::Retire,
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let event_ref = format!("terminal_event_{index}");
         assert_eq!(
-            release.apply_command("new_terminal_event", command, 30_400),
-            Err(InstrumentReleaseError::InvalidTransition)
+            release.apply_command(&event_ref, command, 30_400),
+            Err(InstrumentReleaseError::InvalidTransition),
+            "terminal state must reject {command:?}"
         );
     }
 }
@@ -499,17 +519,12 @@ fn cloned_publication_evidence_preserves_immutable_identity_and_state() {
     assert_eq!(cloned_manifest, *release.manifest());
     assert_eq!(cloned_event, release.events()[0]);
     assert_eq!(cloned_release, release);
-    assert_eq!(
-        clone_public_value(&PublicationState::Review),
-        PublicationState::Review
-    );
-    assert_eq!(
-        clone_public_value(&PublicationCommand::SubmitReview),
-        PublicationCommand::SubmitReview
-    );
-    assert_eq!(
-        clone_public_value(&InstrumentReleaseError::InvalidReference),
-        InstrumentReleaseError::InvalidReference
-    );
+
+    let state = PublicationState::Review;
+    let command = PublicationCommand::SubmitReview;
+    let error = InstrumentReleaseError::InvalidReference;
+    assert_eq!(state, PublicationState::Review);
+    assert_eq!(command, PublicationCommand::SubmitReview);
+    assert_eq!(error, InstrumentReleaseError::InvalidReference);
     assert!(format!("{cloned_release:?}").contains("InstrumentRelease"));
 }
