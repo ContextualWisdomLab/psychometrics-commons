@@ -1,7 +1,9 @@
 //! Regression for conflicting provenance hidden behind one scoring request reference.
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
-use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotError, ResultSnapshotInput};
+use psychometrics_commons_runtime::result::{
+    ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
+};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
