@@ -184,7 +184,9 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     .unwrap();
 
     request.verify_identity("verification_ref", 6_100).unwrap();
-    request.verify_identity(" verification_ref ", 6_100).unwrap();
+    request
+        .verify_identity(" verification_ref ", 6_100)
+        .unwrap();
     assert_eq!(
         request.verify_identity("verification_ref", 6_101),
         Err(DataRightsError::ConflictingReplay)
@@ -206,25 +208,13 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     );
 
     request
-        .complete(
-            "completion_ref",
-            &["legal_retention_scope"],
-            6_300,
-        )
+        .complete("completion_ref", &["legal_retention_scope"], 6_300)
         .unwrap();
     request
-        .complete(
-            " completion_ref ",
-            &[" legal_retention_scope "],
-            6_300,
-        )
+        .complete(" completion_ref ", &[" legal_retention_scope "], 6_300)
         .unwrap();
     assert_eq!(
-        request.complete(
-            "completion_ref",
-            &["different_retention_scope"],
-            6_300,
-        ),
+        request.complete("completion_ref", &["different_retention_scope"], 6_300,),
         Err(DataRightsError::ConflictingReplay)
     );
     assert_eq!(
@@ -236,11 +226,7 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
         Err(DataRightsError::ConflictingReplay)
     );
     assert_eq!(
-        request.complete(
-            "completion_ref",
-            &["legal_retention_scope"],
-            6_301,
-        ),
+        request.complete("completion_ref", &["legal_retention_scope"], 6_301,),
         Err(DataRightsError::ConflictingReplay)
     );
 
