@@ -8,4 +8,6 @@
 //! contracts rather than reimplemented here.
 
 pub mod response;
+pub mod result;
+pub mod scoring;
 pub mod session;
