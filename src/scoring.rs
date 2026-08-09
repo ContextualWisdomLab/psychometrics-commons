@@ -11,6 +11,8 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
+const SUPPORTED_OUTPUT_SCHEMA_VERSION: u16 = 1;
+
 /// Borrowed fields needed to dispatch one immutable response snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScoringRequestInput<'a> {
@@ -63,7 +65,7 @@ impl ScoringRequest {
     /// [`ScoringContractError::ResponseSnapshotMismatch`] when the supplied
     /// reference does not identify the snapshot, or
     /// [`ScoringContractError::UnsupportedOutputSchemaVersion`] when the
-    /// requested schema version is zero.
+    /// requested schema major is not supported by this runtime.
     pub fn from_snapshot(
         snapshot: &ResponseSnapshot,
         input: ScoringRequestInput<'_>,
@@ -85,7 +87,7 @@ impl ScoringRequest {
         if requested_snapshot_ref != snapshot_ref {
             return Err(ScoringContractError::ResponseSnapshotMismatch);
         }
-        if input.requested_output_schema_version == 0 {
+        if input.requested_output_schema_version != SUPPORTED_OUTPUT_SCHEMA_VERSION {
             return Err(ScoringContractError::UnsupportedOutputSchemaVersion);
         }
 
@@ -358,7 +360,7 @@ pub enum ScoringContractError {
     EmptyResponseSnapshot,
     /// The supplied snapshot reference does not identify the supplied snapshot.
     ResponseSnapshotMismatch,
-    /// Output schema version zero is not a valid versioned contract.
+    /// The requested output schema major is not supported by this runtime.
     UnsupportedOutputSchemaVersion,
     /// A numeric score is NaN or infinite.
     InvalidScore,
@@ -387,7 +389,7 @@ impl Display for ScoringContractError {
             Self::ResponseSnapshotMismatch => formatter
                 .write_str("scoring response snapshot reference does not match supplied snapshot"),
             Self::UnsupportedOutputSchemaVersion => {
-                formatter.write_str("requested scoring output schema version must be positive")
+                formatter.write_str("requested scoring output schema version is unsupported")
             }
             Self::InvalidScore => formatter.write_str("score values must be finite"),
             Self::InvalidStandardError => {
