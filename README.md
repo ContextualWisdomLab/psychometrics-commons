@@ -4,4 +4,4 @@ CWL Psychometrics Commons is the headless product repository for public psychome
 
 This repository owns the hosted product runtime and integration composition. It consumes reusable measurement contracts and numerical capabilities from `ContextualWisdomLab/fast-mlsirm`; identity and federation from Keyverse; temporal/event analysis from TEPP; and research release/catalog capabilities from `semantic-data-portal`.
 
-Architecture decisions are maintained under `docs/adr/` and must state concrete ownership, interfaces, invariants, failure behavior, security/privacy boundaries, migrations, validation evidence, and reversal conditions.
+Architecture decisions are maintained under [`docs/adr/`](docs/adr/README.md). An accepted ADR must define concrete ownership, interfaces, invariants, failure behavior, security/privacy boundaries, migration and rollback, validation evidence, and reversal conditions.
