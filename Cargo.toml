@@ -1,0 +1,18 @@
+[package]
+name = "psychometrics-commons-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Hosted product runtime primitives for CWL Psychometrics Commons"
+repository = "https://github.com/ContextualWisdomLab/psychometrics-commons"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+all = "deny"
+pedantic = "deny"
