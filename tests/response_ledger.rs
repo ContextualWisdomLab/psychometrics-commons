@@ -70,6 +70,42 @@ fn duplicate_client_event_is_idempotent_when_content_matches() {
 }
 
 #[test]
+fn exact_response_replay_remains_idempotent_after_collection_closes() {
+    let mut ledger = ResponseLedger::new("session_ref");
+    let original = ledger
+        .record(
+            SessionState::Active,
+            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+        )
+        .unwrap();
+
+    for state in [
+        SessionState::Paused,
+        SessionState::Completed,
+        SessionState::Scoring,
+        SessionState::Scored,
+        SessionState::Released,
+        SessionState::Expired,
+        SessionState::Cancelled,
+        SessionState::Invalidated,
+    ] {
+        let replay = ledger
+            .record(
+                state,
+                write(
+                    "ignored_new_server_ref",
+                    "client_a",
+                    "item_v1",
+                    "sha256:aaa",
+                ),
+            )
+            .unwrap();
+        assert_eq!(replay, original, "exact replay must survive state {state:?}");
+    }
+    assert_eq!(ledger.len(), 1);
+}
+
+#[test]
 fn reused_client_event_with_different_content_fails_closed() {
     let mut ledger = ResponseLedger::new("session_ref");
     ledger
