@@ -1,9 +1,11 @@
 //! Response-event ledger and immutable response-snapshot semantics.
 //!
-//! The hosted runtime accepts response events only while a session is active.
-//! Client event references provide idempotency, while server event references
-//! and monotonic sequences preserve a stable audit order. Completing a session
-//! freezes the accepted response prefix into an immutable snapshot value.
+//! The hosted runtime accepts new logical response events only while a session is
+//! active. Exact client-event replays remain idempotent after the collection
+//! lifecycle advances, while client event references provide replay detection and
+//! server event references plus monotonic sequences preserve a stable audit order.
+//! Completing a session freezes the accepted response prefix into an immutable
+//! snapshot value.
 
 use crate::reference::normalized_reference;
 use crate::session::SessionState;
@@ -124,7 +126,7 @@ impl ResponseSnapshot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum WriteError {
-    /// A response was offered while the session was not active.
+    /// A new logical response was offered while the session was not active.
     SessionNotActive(SessionState),
     /// One or more required opaque references or digests were empty.
     EmptyReference,
@@ -193,12 +195,18 @@ impl ResponseLedger {
 
     /// Record one response event or replay an identical prior event.
     ///
+    /// Exact replay of an already accepted `client_event_ref` remains idempotent
+    /// even after the session leaves [`SessionState::Active`]. The supplied
+    /// server event reference is ignored for that replay because the original
+    /// immutable event identity is returned. Every genuinely new logical response
+    /// still requires an active session.
+    ///
     /// # Errors
     ///
-    /// Returns [`WriteError::SessionNotActive`] when response collection is not
-    /// active, [`WriteError::EmptyReference`] for missing required references,
-    /// [`WriteError::IdempotencyConflict`] when a client event reference is
-    /// reused with different item or payload content, or
+    /// Returns [`WriteError::EmptyReference`] for missing required references,
+    /// [`WriteError::IdempotencyConflict`] when a client event reference is reused
+    /// with different item or payload content, [`WriteError::SessionNotActive`]
+    /// when a new logical response is offered outside active collection, or
     /// [`WriteError::ServerReferenceConflict`] when a server event reference
     /// already identifies another response event.
     pub fn record(
@@ -206,9 +214,6 @@ impl ResponseLedger {
         state: SessionState,
         request: ResponseWrite<'_>,
     ) -> Result<ResponseEvent, WriteError> {
-        if !state.accepts_responses() {
-            return Err(WriteError::SessionNotActive(state));
-        }
         if request.server_event_ref.is_empty()
             || request.client_event_ref.is_empty()
             || request.item_version_ref.is_empty()
@@ -228,6 +233,10 @@ impl ResponseLedger {
                 return Ok(existing.clone());
             }
             return Err(WriteError::IdempotencyConflict);
+        }
+
+        if !state.accepts_responses() {
+            return Err(WriteError::SessionNotActive(state));
         }
 
         if self
