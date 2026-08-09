@@ -45,9 +45,7 @@ impl Display for AccountLinkError {
             Self::ConflictingReplay => {
                 "participant account-link event was replayed with conflicting evidence"
             }
-            Self::AlreadyLinked => {
-                "participant is already linked and cannot be rebound in place"
-            }
+            Self::AlreadyLinked => "participant is already linked and cannot be rebound in place",
         })
     }
 }
