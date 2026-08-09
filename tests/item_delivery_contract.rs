@@ -79,7 +79,10 @@ fn active_session_delivery_records_server_ordered_evidence() {
 
     assert_eq!(second.delivery_ref(), "delivery_event_002");
     assert_eq!(second.item_version_ref(), "item_version_002");
-    assert_eq!(second.selection_evidence_ref(), Some("selection_fixed_order_v1"));
+    assert_eq!(
+        second.selection_evidence_ref(),
+        Some("selection_fixed_order_v1")
+    );
     assert_eq!(second.sequence(), 2);
     assert_eq!(ledger.events(), [first, second]);
 }
@@ -195,21 +198,11 @@ fn item_delivery_requires_an_active_session() {
 fn ledger_and_request_identity_fail_closed() {
     for invalid in ["", "   ", "12345"] {
         assert_eq!(
-            ItemDeliveryLedger::new(
-                invalid,
-                "release_big_five_ko_v1",
-                RELEASE_DIGEST,
-                "ko-KR"
-            ),
+            ItemDeliveryLedger::new(invalid, "release_big_five_ko_v1", RELEASE_DIGEST, "ko-KR"),
             Err(ItemDeliveryError::InvalidReference)
         );
         assert_eq!(
-            ItemDeliveryLedger::new(
-                "session_big_five_001",
-                invalid,
-                RELEASE_DIGEST,
-                "ko-KR"
-            ),
+            ItemDeliveryLedger::new("session_big_five_001", invalid, RELEASE_DIGEST, "ko-KR"),
             Err(ItemDeliveryError::InvalidReference)
         );
     }
@@ -246,8 +239,18 @@ fn ledger_and_request_identity_fail_closed() {
     let mut ledger = ledger();
     for invalid_request in [
         request("", "item_version_001", "presentation_standard_v1", None),
-        request("12345", "item_version_001", "presentation_standard_v1", None),
-        request("delivery_event_001", "12345", "presentation_standard_v1", None),
+        request(
+            "12345",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+        ),
+        request(
+            "delivery_event_001",
+            "12345",
+            "presentation_standard_v1",
+            None,
+        ),
         request("delivery_event_001", "item_version_001", "12345", None),
         request(
             "delivery_event_001",
