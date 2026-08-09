@@ -2,7 +2,7 @@
 
 use psychometrics_commons_runtime::integration::{
     DeliveryOutcome, InboxDisposition, IntegrationError, IntegrationEvent, IntegrationInbox,
-    OutboxEntry,
+    OutboxEntry, OutboxState,
 };
 
 const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -44,6 +44,13 @@ fn delivered_outbox_rejects_new_attempt_but_keeps_exact_replay_idempotent() {
         ),
         Err(IntegrationError::TerminalOutboxState)
     );
+    assert_eq!(
+        outbox
+            .record_attempt("attempt_one", DeliveryOutcome::Delivered, 1_100, None)
+            .unwrap(),
+        OutboxState::Delivered
+    );
+    assert_eq!(outbox.attempt_count(), 1);
 }
 
 #[test]
