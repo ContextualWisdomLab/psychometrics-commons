@@ -1,7 +1,9 @@
 //! Integration tests for scoring-dispatch and immutable result provenance.
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
-use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotError, ResultSnapshotInput};
+use psychometrics_commons_runtime::result::{
+    ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
+};
 use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringContractError, ScoringRequest,
     ScoringRequestInput, ScoringResult,
@@ -183,12 +185,8 @@ fn score_observations_fail_closed_for_invalid_numeric_or_reference_input() {
     assert_eq!(score_error.to_string(), "score values must be finite");
 
     for invalid_standard_error in [-0.1, f64::INFINITY] {
-        let error = ScoreObservation::scored(
-            "construct_ref",
-            1.0,
-            Some(invalid_standard_error),
-        )
-        .unwrap_err();
+        let error = ScoreObservation::scored("construct_ref", 1.0, Some(invalid_standard_error))
+            .unwrap_err();
         assert_eq!(error, ScoringContractError::InvalidStandardError);
         assert_eq!(
             error.to_string(),
@@ -238,8 +236,7 @@ fn scoring_result_pins_engine_request_and_observations() {
 fn scoring_result_rejects_missing_identity_empty_observations_and_duplicate_constructs() {
     let request = scoring_request();
     assert_eq!(
-        ScoringResult::new("", &request, "sha256:engine", vec![scored_observation()])
-            .unwrap_err(),
+        ScoringResult::new("", &request, "sha256:engine", vec![scored_observation()]).unwrap_err(),
         ScoringContractError::EmptyReference
     );
     assert_eq!(
@@ -253,17 +250,10 @@ fn scoring_result_rejects_missing_identity_empty_observations_and_duplicate_cons
         ScoringContractError::EmptyReference
     );
 
-    let no_observations = ScoringResult::new(
-        "scoring_result_ref",
-        &request,
-        "sha256:engine",
-        Vec::new(),
-    )
-    .unwrap_err();
-    assert_eq!(
-        no_observations,
-        ScoringContractError::EmptyObservationSet
-    );
+    let no_observations =
+        ScoringResult::new("scoring_result_ref", &request, "sha256:engine", Vec::new())
+            .unwrap_err();
+    assert_eq!(no_observations, ScoringContractError::EmptyObservationSet);
     assert_eq!(
         no_observations.to_string(),
         "scoring results must contain at least one observation"
@@ -335,7 +325,8 @@ fn result_snapshot_rejects_mismatched_scoring_request() {
     let first_request = scoring_request();
     let mut second_input = scoring_input();
     second_input.scoring_request_ref = "other_request_ref";
-    let second_request = ScoringRequest::from_snapshot(&completed_snapshot(), second_input).unwrap();
+    let second_request =
+        ScoringRequest::from_snapshot(&completed_snapshot(), second_input).unwrap();
     let result = ScoringResult::new(
         "scoring_result_ref",
         &second_request,
@@ -412,12 +403,8 @@ fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
 
     let mut self_supersedes = result_input();
     self_supersedes.supersedes_ref = Some("result_snapshot_ref");
-    let supersession_error =
-        ResultSnapshot::new(&request, &result, self_supersedes).unwrap_err();
-    assert_eq!(
-        supersession_error,
-        ResultSnapshotError::SelfSupersession
-    );
+    let supersession_error = ResultSnapshot::new(&request, &result, self_supersedes).unwrap_err();
+    assert_eq!(supersession_error, ResultSnapshotError::SelfSupersession);
     assert_eq!(
         supersession_error.to_string(),
         "a result snapshot cannot supersede itself"
