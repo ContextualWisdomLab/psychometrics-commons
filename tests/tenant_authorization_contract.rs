@@ -145,11 +145,7 @@ fn privileged_product_roles_are_explicit_and_separation_of_duties_is_preserved()
         Ok(())
     );
     assert_eq!(
-        authorize(
-            &steward,
-            &instrument,
-            ProductPermission::PublishInstrument
-        ),
+        authorize(&steward, &instrument, ProductPermission::PublishInstrument),
         Err(AuthorizationError::MissingRole)
     );
 
@@ -178,11 +174,7 @@ fn permission_and_resource_kind_must_match_before_ownership_or_role_evaluation()
     )
     .unwrap();
     assert_eq!(
-        authorize(
-            &participant,
-            &result,
-            ProductPermission::ManageOwnSession
-        ),
+        authorize(&participant, &result, ProductPermission::ManageOwnSession),
         Err(AuthorizationError::ResourceKindMismatch)
     );
 
@@ -257,11 +249,7 @@ fn malformed_or_numeric_references_fail_closed() {
             Err(AuthorizationError::InvalidReference)
         );
         assert_eq!(
-            ResourceScope::tenant_scoped(
-                ResourceKind::Result,
-                tenant_ref,
-                "result_alpha"
-            ),
+            ResourceScope::tenant_scoped(ResourceKind::Result, tenant_ref, "result_alpha"),
             Err(AuthorizationError::InvalidReference)
         );
     }
@@ -327,7 +315,6 @@ fn context_and_resource_metadata_are_auditable_without_identity_role_confusion()
     assert!(actor.has_role(ProductRole::InstrumentPublisher));
     assert!(!actor.has_role(ProductRole::ResearchSteward));
     assert_eq!(actor.roles().len(), 2);
-
     assert_eq!(resource.kind(), ResourceKind::Result);
     assert_eq!(resource.tenant_ref(), "tenant_alpha");
     assert_eq!(resource.resource_ref(), "result_alpha");
