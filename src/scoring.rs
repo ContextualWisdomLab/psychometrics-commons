@@ -5,6 +5,7 @@
 //! versioned `fast-mlsirm`-compatible scoring implementation and to accept a
 //! typed immutable result without collapsing missing outcomes into numeric zero.
 
+use crate::reference::normalized_reference;
 use crate::response::ResponseSnapshot;
 use std::collections::HashSet;
 use std::error::Error;
@@ -15,7 +16,7 @@ use std::fmt::{Display, Formatter};
 pub struct ScoringRequestInput<'a> {
     /// Opaque idempotent reference for the scoring request.
     pub scoring_request_ref: &'a str,
-    /// Opaque reference assigned to the durable response snapshot.
+    /// Opaque reference expected to identify the supplied durable snapshot.
     pub response_snapshot_ref: &'a str,
     /// Exact reusable assessment-contract reference.
     pub assessment_spec_ref: &'a str,
@@ -46,41 +47,60 @@ pub struct ScoringRequest {
 }
 
 impl ScoringRequest {
-    /// Build a scoring request from a response snapshot that could only be
-    /// frozen after session completion.
+    /// Build a scoring request from a non-empty durable response snapshot.
+    ///
+    /// References are trimmed before becoming identity-bearing state. The
+    /// caller-supplied snapshot reference must exactly match the durable
+    /// reference embedded in `snapshot` after normalization.
     ///
     /// # Errors
     ///
     /// Returns [`ScoringContractError::EmptyReference`] when a required or
-    /// supplied optional reference is blank, or
+    /// supplied optional reference is blank,
+    /// [`ScoringContractError::UnboundResponseSnapshot`] when the snapshot has
+    /// no durable identity, [`ScoringContractError::EmptyResponseSnapshot`] when
+    /// the snapshot contains no response events,
+    /// [`ScoringContractError::ResponseSnapshotMismatch`] when the supplied
+    /// reference does not identify the snapshot, or
     /// [`ScoringContractError::UnsupportedOutputSchemaVersion`] when the
     /// requested schema version is zero.
     pub fn from_snapshot(
         snapshot: &ResponseSnapshot,
         input: ScoringRequestInput<'_>,
     ) -> Result<Self, ScoringContractError> {
-        validate_reference(input.scoring_request_ref)?;
-        validate_reference(input.response_snapshot_ref)?;
-        validate_reference(input.assessment_spec_ref)?;
-        validate_reference(input.instrument_version_ref)?;
-        validate_reference(input.scoring_version_ref)?;
-        validate_reference(input.calibration_reference)?;
-        if let Some(norm_version_ref) = input.norm_version_ref {
-            validate_reference(norm_version_ref)?;
+        let request_ref = required_reference(input.scoring_request_ref)?;
+        let requested_snapshot_ref = required_reference(input.response_snapshot_ref)?;
+        let assessment_spec_ref = required_reference(input.assessment_spec_ref)?;
+        let instrument_version_ref = required_reference(input.instrument_version_ref)?;
+        let scoring_version_ref = required_reference(input.scoring_version_ref)?;
+        let calibration_reference = required_reference(input.calibration_reference)?;
+        let norm_version_ref = input
+            .norm_version_ref
+            .map(required_reference)
+            .transpose()?;
+
+        let snapshot_ref = snapshot
+            .snapshot_ref()
+            .ok_or(ScoringContractError::UnboundResponseSnapshot)?;
+        if snapshot.event_count() == 0 {
+            return Err(ScoringContractError::EmptyResponseSnapshot);
+        }
+        if requested_snapshot_ref != snapshot_ref {
+            return Err(ScoringContractError::ResponseSnapshotMismatch);
         }
         if input.requested_output_schema_version == 0 {
             return Err(ScoringContractError::UnsupportedOutputSchemaVersion);
         }
 
         Ok(Self {
-            request_ref: input.scoring_request_ref.to_owned(),
+            request_ref: request_ref.to_owned(),
             session_ref: snapshot.session_ref().to_owned(),
-            response_snapshot_ref: input.response_snapshot_ref.to_owned(),
-            assessment_spec_ref: input.assessment_spec_ref.to_owned(),
-            instrument_version_ref: input.instrument_version_ref.to_owned(),
-            scoring_version_ref: input.scoring_version_ref.to_owned(),
-            calibration_reference: input.calibration_reference.to_owned(),
-            norm_version_ref: input.norm_version_ref.map(str::to_owned),
+            response_snapshot_ref: snapshot_ref.to_owned(),
+            assessment_spec_ref: assessment_spec_ref.to_owned(),
+            instrument_version_ref: instrument_version_ref.to_owned(),
+            scoring_version_ref: scoring_version_ref.to_owned(),
+            calibration_reference: calibration_reference.to_owned(),
+            norm_version_ref: norm_version_ref.map(str::to_owned),
             requested_output_schema_version: input.requested_output_schema_version,
         })
     }
@@ -178,7 +198,7 @@ impl ScoreObservation {
         standard_error: Option<f64>,
     ) -> Result<Self, ScoringContractError> {
         let construct_ref = construct_ref.into();
-        validate_reference(&construct_ref)?;
+        let construct_ref = required_reference(&construct_ref)?;
         if !score.is_finite() {
             return Err(ScoringContractError::InvalidScore);
         }
@@ -188,7 +208,7 @@ impl ScoreObservation {
             }
         }
         Ok(Self {
-            construct_ref,
+            construct_ref: construct_ref.to_owned(),
             disposition: ObservationDisposition::Scored,
             score: Some(score),
             standard_error,
@@ -207,12 +227,12 @@ impl ScoreObservation {
         disposition: ObservationDisposition,
     ) -> Result<Self, ScoringContractError> {
         let construct_ref = construct_ref.into();
-        validate_reference(&construct_ref)?;
+        let construct_ref = required_reference(&construct_ref)?;
         if disposition == ObservationDisposition::Scored {
             return Err(ScoringContractError::ScoredDispositionRequiresScore);
         }
         Ok(Self {
-            construct_ref,
+            construct_ref: construct_ref.to_owned(),
             disposition,
             score: None,
             standard_error: None,
@@ -261,7 +281,7 @@ impl ScoringResult {
     /// Returns [`ScoringContractError::EmptyReference`] for blank identity or
     /// engine provenance, [`ScoringContractError::EmptyObservationSet`] when no
     /// construct observation exists, or [`ScoringContractError::DuplicateConstruct`]
-    /// when a construct appears more than once.
+    /// when a construct appears more than once after reference normalization.
     pub fn new(
         scoring_result_ref: impl Into<String>,
         request: &ScoringRequest,
@@ -269,9 +289,9 @@ impl ScoringResult {
         observations: Vec<ScoreObservation>,
     ) -> Result<Self, ScoringContractError> {
         let scoring_result_ref = scoring_result_ref.into();
+        let scoring_result_ref = required_reference(&scoring_result_ref)?;
         let engine_artifact_digest = engine_artifact_digest.into();
-        validate_reference(&scoring_result_ref)?;
-        validate_reference(&engine_artifact_digest)?;
+        let engine_artifact_digest = required_reference(&engine_artifact_digest)?;
         if observations.is_empty() {
             return Err(ScoringContractError::EmptyObservationSet);
         }
@@ -285,9 +305,9 @@ impl ScoringResult {
         }
 
         Ok(Self {
-            result_ref: scoring_result_ref,
+            result_ref: scoring_result_ref.to_owned(),
             request: request.clone(),
-            engine_artifact_digest,
+            engine_artifact_digest: engine_artifact_digest.to_owned(),
             observations,
         })
     }
@@ -335,6 +355,12 @@ impl ScoringResult {
 pub enum ScoringContractError {
     /// A required or supplied optional reference is blank.
     EmptyReference,
+    /// The response snapshot has not been assigned durable identity.
+    UnboundResponseSnapshot,
+    /// The response snapshot contains no accepted response event.
+    EmptyResponseSnapshot,
+    /// The supplied snapshot reference does not identify the supplied snapshot.
+    ResponseSnapshotMismatch,
     /// Output schema version zero is not a valid versioned contract.
     UnsupportedOutputSchemaVersion,
     /// A numeric score is NaN or infinite.
@@ -355,6 +381,14 @@ impl Display for ScoringContractError {
             Self::EmptyReference => {
                 formatter.write_str("scoring contract references must not be empty")
             }
+            Self::UnboundResponseSnapshot => {
+                formatter.write_str("scoring requires a durable response snapshot reference")
+            }
+            Self::EmptyResponseSnapshot => {
+                formatter.write_str("scoring requires at least one response event")
+            }
+            Self::ResponseSnapshotMismatch => formatter
+                .write_str("scoring response snapshot reference does not match supplied snapshot"),
             Self::UnsupportedOutputSchemaVersion => {
                 formatter.write_str("requested scoring output schema version must be positive")
             }
@@ -376,10 +410,6 @@ impl Display for ScoringContractError {
 
 impl Error for ScoringContractError {}
 
-fn validate_reference(reference: &str) -> Result<(), ScoringContractError> {
-    if reference.trim().is_empty() {
-        Err(ScoringContractError::EmptyReference)
-    } else {
-        Ok(())
-    }
+fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
+    normalized_reference(reference).ok_or(ScoringContractError::EmptyReference)
 }
