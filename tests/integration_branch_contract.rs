@@ -5,10 +5,8 @@ use psychometrics_commons_runtime::integration::{
     OutboxEntry,
 };
 
-const DIGEST_A: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const DIGEST_B: &str =
-    "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn event() -> IntegrationEvent {
     IntegrationEvent::new(
