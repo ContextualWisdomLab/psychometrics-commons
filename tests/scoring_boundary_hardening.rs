@@ -25,7 +25,7 @@ fn ledger_with_one_response() -> ResponseLedger {
     ledger
 }
 
-fn scoring_input<'a>(response_snapshot_ref: &'a str) -> ScoringRequestInput<'a> {
+fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
     ScoringRequestInput {
         scoring_request_ref: "  scoring_request_ref  ",
         response_snapshot_ref,
