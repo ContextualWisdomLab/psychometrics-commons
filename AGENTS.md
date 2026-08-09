@@ -8,7 +8,37 @@ This repository owns the **hosted Psychometrics Commons product**: public/admin 
 
 ## Execution loop
 
-For every run: refetch exact repository and PR state → inspect reviews/checks/security findings → fix valid findings test-first → rerun exact-head validation → merge only when protection and independent-review requirements are satisfied → continue with the next executable product gap. Do not terminate with status narration while safe work remains.
+For every run: refetch exact repository and PR state → inspect reviews/checks/security findings → fix valid findings test-first → rerun exact-head validation → merge only when protection and independent-review requirements are satisfied → continue with the next executable product gap.
+
+**Do not stop after the first useful action.** A commit, PR update, documentation improvement, diagram, design review, CI start, review request, green focused test, merge, blocked branch, or dependency diagnosis is an intermediate state whenever another safe executable item exists. Before ending, sweep open PRs/issues, Draft work, protected main, architecture/traceability gaps, product backlog, security/privacy/accessibility/operations, and release evidence. If any safe item can advance under the current writer lease, continue working rather than producing a status recap.
+
+Waiting is local to the affected branch/action. CI, reviewer latency, provider cooldown, external approval, or a read-only dependency must not freeze unrelated repository work.
+
+## Documentation and architecture completeness contract
+
+The repository uses multiple architecture viewpoints so product intent, implementation, security, data, and operations do not collapse into one stale document.
+
+Required architecture/documentation artifacts are:
+
+- `docs/PRD.md`
+- `docs/TRD.md`
+- `ARCHITECTURE.md`
+- `docs/adr/README.md` and applicable ADRs
+- `docs/architecture/C4.md`
+- `docs/architecture/UML.md`
+- `docs/architecture/ERD.md`
+- `docs/architecture/SECURITY_AND_DATA.md`
+- `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`
+- `docs/TRACEABILITY.md`
+- `docs/ROADMAP.md`
+- `docs/DOCUMENTATION_ASSESSMENT.md`
+- `CHANGELOG.md`
+
+A material change to bounded-context ownership, lifecycle states, public/admin operation families, events, logical entities/cardinalities, transaction boundaries, identity/privacy/trust boundaries, deployment/recovery semantics, or product acceptance must update the affected artifacts or explicitly demonstrate why their mappings are unchanged.
+
+Architecture diagrams may describe target semantics, but diagrams are not as-built proof. `docs/TRACEABILITY.md` distinguishes current protected-main implementation from targets. Do not fabricate OpenAPI, AsyncAPI, physical DDL, deployed topology, SLO/RPO/RTO, or certification evidence before the corresponding implementation/operation exists.
+
+Documentation work is support for implementation, not a reason to stop. When documentation gaps are fixed and executable product work remains, continue into implementation in the same run when the writer lease and run budget permit.
 
 ## ADR quality contract
 
