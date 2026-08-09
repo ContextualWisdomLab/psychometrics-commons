@@ -1,0 +1,263 @@
+//! Response-event ledger and immutable response-snapshot semantics.
+//!
+//! The hosted runtime accepts response events only while a session is active.
+//! Client event references provide idempotency, while server event references
+//! and monotonic sequences preserve a stable audit order. Completing a session
+//! freezes the accepted response prefix into an immutable snapshot value.
+
+use crate::session::SessionState;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+
+/// Borrowed input used to record one response event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResponseWrite<'a> {
+    /// Server-generated opaque event reference reserved for a new event.
+    pub server_event_ref: &'a str,
+    /// Client-generated idempotency reference for replay detection.
+    pub client_event_ref: &'a str,
+    /// Exact immutable item-version reference answered by the participant.
+    pub item_version_ref: &'a str,
+    /// Digest identifying the canonical response payload without logging it.
+    pub payload_digest: &'a str,
+}
+
+/// One accepted response event in server-authoritative sequence order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseEvent {
+    server_event_ref: String,
+    client_event_ref: String,
+    item_version_ref: String,
+    payload_digest: String,
+    sequence: u64,
+}
+
+impl ResponseEvent {
+    /// Return the server-generated opaque event reference.
+    #[must_use]
+    pub fn server_event_ref(&self) -> &str {
+        &self.server_event_ref
+    }
+
+    /// Return the client idempotency reference.
+    #[must_use]
+    pub fn client_event_ref(&self) -> &str {
+        &self.client_event_ref
+    }
+
+    /// Return the immutable item-version reference.
+    #[must_use]
+    pub fn item_version_ref(&self) -> &str {
+        &self.item_version_ref
+    }
+
+    /// Return the canonical response-payload digest.
+    #[must_use]
+    pub fn payload_digest(&self) -> &str {
+        &self.payload_digest
+    }
+
+    /// Return the server-assigned monotonic sequence number.
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+}
+
+/// Immutable response snapshot frozen when collection completes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseSnapshot {
+    session_ref: String,
+    event_refs: Vec<String>,
+    item_version_refs: Vec<String>,
+    payload_digests: Vec<String>,
+    last_sequence: Option<u64>,
+}
+
+impl ResponseSnapshot {
+    /// Return the opaque assessment-session reference.
+    #[must_use]
+    pub fn session_ref(&self) -> &str {
+        &self.session_ref
+    }
+
+    /// Return the number of response events frozen into this snapshot.
+    #[must_use]
+    pub fn event_count(&self) -> usize {
+        self.event_refs.len()
+    }
+
+    /// Return the last accepted server sequence, if the snapshot is non-empty.
+    #[must_use]
+    pub const fn last_sequence(&self) -> Option<u64> {
+        self.last_sequence
+    }
+
+    /// Return response-event references in server-authoritative order.
+    #[must_use]
+    pub fn event_refs(&self) -> &[String] {
+        &self.event_refs
+    }
+
+    /// Return item-version references aligned with [`Self::event_refs`].
+    #[must_use]
+    pub fn item_version_refs(&self) -> &[String] {
+        &self.item_version_refs
+    }
+
+    /// Return response-payload digests aligned with [`Self::event_refs`].
+    #[must_use]
+    pub fn payload_digests(&self) -> &[String] {
+        &self.payload_digests
+    }
+}
+
+/// Fail-closed error returned by response recording or snapshot freezing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum WriteError {
+    /// A response was offered while the session was not active.
+    SessionNotActive(SessionState),
+    /// One or more required opaque references or digests were empty.
+    EmptyReference,
+    /// A client idempotency reference was reused for different response content.
+    IdempotencyConflict,
+    /// A response snapshot was requested before the session reached completion.
+    SnapshotRequiresCompleted(SessionState),
+}
+
+impl Display for WriteError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SessionNotActive(state) => {
+                write!(formatter, "session {state:?} cannot accept response events")
+            }
+            Self::EmptyReference => formatter.write_str("response references must not be empty"),
+            Self::IdempotencyConflict => formatter.write_str(
+                "client event reference was already used for different response content",
+            ),
+            Self::SnapshotRequiresCompleted(state) => write!(
+                formatter,
+                "response snapshot requires Completed session state, found {state:?}"
+            ),
+        }
+    }
+}
+
+impl Error for WriteError {}
+
+/// In-memory domain ledger defining response idempotency and snapshot behavior.
+///
+/// Persistence adapters may store events differently, but they must preserve
+/// the semantics expressed by this type: server-monotonic sequence order,
+/// client-reference idempotency, and immutable completed-session snapshots.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseLedger {
+    session_ref: String,
+    events: Vec<ResponseEvent>,
+}
+
+impl ResponseLedger {
+    /// Create an empty response ledger for one assessment session.
+    #[must_use]
+    pub fn new(session_ref: impl Into<String>) -> Self {
+        Self {
+            session_ref: session_ref.into(),
+            events: Vec::new(),
+        }
+    }
+
+    /// Return the number of accepted response events.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Return whether no response event has been accepted.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    /// Record one response event or replay an identical prior event.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::SessionNotActive`] when response collection is not
+    /// active, [`WriteError::EmptyReference`] for missing required references,
+    /// or [`WriteError::IdempotencyConflict`] when a client event reference is
+    /// reused with different item or payload content.
+    pub fn record(
+        &mut self,
+        state: SessionState,
+        request: ResponseWrite<'_>,
+    ) -> Result<ResponseEvent, WriteError> {
+        if !state.accepts_responses() {
+            return Err(WriteError::SessionNotActive(state));
+        }
+        if request.server_event_ref.is_empty()
+            || request.client_event_ref.is_empty()
+            || request.item_version_ref.is_empty()
+            || request.payload_digest.is_empty()
+        {
+            return Err(WriteError::EmptyReference);
+        }
+
+        if let Some(existing) = self
+            .events
+            .iter()
+            .find(|event| event.client_event_ref == request.client_event_ref)
+        {
+            if existing.item_version_ref == request.item_version_ref
+                && existing.payload_digest == request.payload_digest
+            {
+                return Ok(existing.clone());
+            }
+            return Err(WriteError::IdempotencyConflict);
+        }
+
+        let sequence = u64::try_from(self.events.len() + 1)
+            .expect("a Rust vector cannot contain more response events than u64 can represent");
+        let event = ResponseEvent {
+            server_event_ref: request.server_event_ref.to_owned(),
+            client_event_ref: request.client_event_ref.to_owned(),
+            item_version_ref: request.item_version_ref.to_owned(),
+            payload_digest: request.payload_digest.to_owned(),
+            sequence,
+        };
+        self.events.push(event.clone());
+        Ok(event)
+    }
+
+    /// Freeze the accepted event prefix into an immutable response snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::SnapshotRequiresCompleted`] unless `state` is
+    /// exactly [`SessionState::Completed`].
+    pub fn freeze(&self, state: SessionState) -> Result<ResponseSnapshot, WriteError> {
+        if state != SessionState::Completed {
+            return Err(WriteError::SnapshotRequiresCompleted(state));
+        }
+
+        Ok(ResponseSnapshot {
+            session_ref: self.session_ref.clone(),
+            event_refs: self
+                .events
+                .iter()
+                .map(|event| event.server_event_ref.clone())
+                .collect(),
+            item_version_refs: self
+                .events
+                .iter()
+                .map(|event| event.item_version_ref.clone())
+                .collect(),
+            payload_digests: self
+                .events
+                .iter()
+                .map(|event| event.payload_digest.clone())
+                .collect(),
+            last_sequence: self.events.last().map(ResponseEvent::sequence),
+        })
+    }
+}
