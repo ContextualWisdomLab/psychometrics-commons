@@ -5,6 +5,7 @@
 //! presentation and consent references, but it does not recompute psychometric
 //! values or mutate a historical snapshot when norms or narratives change.
 
+use crate::reference::normalized_reference;
 use crate::scoring::{ScoreObservation, ScoringRequest, ScoringResult};
 use std::collections::HashSet;
 use std::error::Error;
@@ -33,12 +34,14 @@ pub struct ResultSnapshot {
     snapshot_ref: String,
     participant_ref: String,
     scoring_result_ref: String,
+    session_ref: String,
     response_snapshot_ref: String,
     assessment_spec_ref: String,
     instrument_version_ref: String,
     scoring_version_ref: String,
     calibration_reference: String,
     norm_version_ref: Option<String>,
+    requested_output_schema_version: u16,
     narrative_version_ref: String,
     consent_snapshot_refs: Vec<String>,
     engine_artifact_digest: String,
@@ -50,6 +53,10 @@ pub struct ResultSnapshot {
 impl ResultSnapshot {
     /// Create a result snapshot by copying the scoring request and engine output.
     ///
+    /// All product-owned references are normalized before they become identity-
+    /// bearing state. Scientific provenance is copied verbatim from the already
+    /// validated scoring request/result boundary.
+    ///
     /// # Errors
     ///
     /// Returns [`ResultSnapshotError::ScoringRequestMismatch`] when `result`
@@ -57,10 +64,10 @@ impl ResultSnapshot {
     /// for any blank required/supersession/consent reference,
     /// [`ResultSnapshotError::MissingConsentSnapshot`] when no consent evidence
     /// is supplied, [`ResultSnapshotError::DuplicateConsentSnapshot`] when the
-    /// same consent reference appears more than once,
+    /// same normalized consent reference appears more than once,
     /// [`ResultSnapshotError::InvalidCreationTime`] when creation time is zero,
-    /// or [`ResultSnapshotError::SelfSupersession`] when a snapshot claims to
-    /// supersede itself.
+    /// or [`ResultSnapshotError::SelfSupersession`] when a normalized snapshot
+    /// reference claims to supersede itself.
     pub fn new(
         request: &ScoringRequest,
         result: &ScoringResult,
@@ -70,52 +77,53 @@ impl ResultSnapshot {
             return Err(ResultSnapshotError::ScoringRequestMismatch);
         }
 
-        validate_reference(input.result_snapshot_ref)?;
-        validate_reference(input.participant_ref)?;
-        validate_reference(input.narrative_version_ref)?;
+        let snapshot_ref = required_reference(input.result_snapshot_ref)?;
+        let participant_ref = required_reference(input.participant_ref)?;
+        let narrative_version_ref = required_reference(input.narrative_version_ref)?;
         if input.consent_snapshot_refs.is_empty() {
             return Err(ResultSnapshotError::MissingConsentSnapshot);
         }
 
         let mut consent_refs = HashSet::with_capacity(input.consent_snapshot_refs.len());
+        let mut normalized_consents = Vec::with_capacity(input.consent_snapshot_refs.len());
         for consent_ref in input.consent_snapshot_refs {
-            validate_reference(consent_ref)?;
-            if !consent_refs.insert(*consent_ref) {
+            let consent_ref = required_reference(consent_ref)?;
+            if !consent_refs.insert(consent_ref.to_owned()) {
                 return Err(ResultSnapshotError::DuplicateConsentSnapshot);
             }
+            normalized_consents.push(consent_ref.to_owned());
         }
 
         if input.created_at_unix_ms == 0 {
             return Err(ResultSnapshotError::InvalidCreationTime);
         }
 
-        if let Some(supersedes_ref) = input.supersedes_ref {
-            validate_reference(supersedes_ref)?;
-            if supersedes_ref == input.result_snapshot_ref {
-                return Err(ResultSnapshotError::SelfSupersession);
-            }
+        let supersedes_ref = input
+            .supersedes_ref
+            .map(required_reference)
+            .transpose()?;
+        if supersedes_ref == Some(snapshot_ref) {
+            return Err(ResultSnapshotError::SelfSupersession);
         }
 
         Ok(Self {
-            snapshot_ref: input.result_snapshot_ref.to_owned(),
-            participant_ref: input.participant_ref.to_owned(),
+            snapshot_ref: snapshot_ref.to_owned(),
+            participant_ref: participant_ref.to_owned(),
             scoring_result_ref: result.scoring_result_ref().to_owned(),
+            session_ref: request.session_ref().to_owned(),
             response_snapshot_ref: request.response_snapshot_ref().to_owned(),
             assessment_spec_ref: request.assessment_spec_ref().to_owned(),
             instrument_version_ref: request.instrument_version_ref().to_owned(),
             scoring_version_ref: request.scoring_version_ref().to_owned(),
             calibration_reference: request.calibration_reference().to_owned(),
             norm_version_ref: request.norm_version_ref().map(str::to_owned),
-            narrative_version_ref: input.narrative_version_ref.to_owned(),
-            consent_snapshot_refs: input
-                .consent_snapshot_refs
-                .iter()
-                .map(|reference| (*reference).to_owned())
-                .collect(),
+            requested_output_schema_version: request.requested_output_schema_version(),
+            narrative_version_ref: narrative_version_ref.to_owned(),
+            consent_snapshot_refs: normalized_consents,
             engine_artifact_digest: result.engine_artifact_digest().to_owned(),
             score_observations: result.observations().to_vec(),
             created_at_unix_ms: input.created_at_unix_ms,
-            supersedes_ref: input.supersedes_ref.map(str::to_owned),
+            supersedes_ref: supersedes_ref.map(str::to_owned),
         })
     }
 
@@ -135,6 +143,12 @@ impl ResultSnapshot {
     #[must_use]
     pub fn scoring_result_ref(&self) -> &str {
         &self.scoring_result_ref
+    }
+
+    /// Return the assessment session that produced the scored response snapshot.
+    #[must_use]
+    pub fn session_ref(&self) -> &str {
+        &self.session_ref
     }
 
     /// Return the exact response snapshot that was scored.
@@ -171,6 +185,12 @@ impl ResultSnapshot {
     #[must_use]
     pub fn norm_version_ref(&self) -> Option<&str> {
         self.norm_version_ref.as_deref()
+    }
+
+    /// Return the exact scoring-output schema version pinned by the request.
+    #[must_use]
+    pub const fn requested_output_schema_version(&self) -> u16 {
+        self.requested_output_schema_version
     }
 
     /// Return the independently versioned narrative rule/template reference.
@@ -252,10 +272,6 @@ impl Display for ResultSnapshotError {
 
 impl Error for ResultSnapshotError {}
 
-fn validate_reference(reference: &str) -> Result<(), ResultSnapshotError> {
-    if reference.trim().is_empty() {
-        Err(ResultSnapshotError::EmptyReference)
-    } else {
-        Ok(())
-    }
+fn required_reference(reference: &str) -> Result<&str, ResultSnapshotError> {
+    normalized_reference(reference).ok_or(ResultSnapshotError::EmptyReference)
 }
