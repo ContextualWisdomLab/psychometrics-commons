@@ -4,7 +4,7 @@
 //! persistence adapters must commit local domain changes and outbox rows atomically,
 //! then preserve these delivery-attempt and inbox-deduplication invariants. No raw
 //! assessment payload is required here: routine integration identity is expressed as
-//! opaque references and canonical payload digests.
+//! opaque tenant/resource references and canonical payload digests.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -68,6 +68,7 @@ pub struct IntegrationEvent {
     event_type: String,
     schema_version: String,
     source: String,
+    tenant_ref: String,
     subject_ref: String,
     occurred_at_unix_ms: u64,
     correlation_ref: String,
@@ -76,7 +77,11 @@ pub struct IntegrationEvent {
 }
 
 impl IntegrationEvent {
-    /// Construct one immutable event envelope.
+    /// Construct one immutable tenant- and subject-bound event envelope.
+    ///
+    /// The tenant reference is part of immutable event evidence rather than
+    /// transport metadata so consumers cannot detach a source event from the
+    /// tenant/resource authority under which it was emitted.
     ///
     /// # Errors
     ///
@@ -88,6 +93,7 @@ impl IntegrationEvent {
         event_type: &str,
         schema_version: &str,
         source: &str,
+        tenant_ref: &str,
         subject_ref: &str,
         occurred_at_unix_ms: u64,
         correlation_ref: &str,
@@ -120,6 +126,7 @@ impl IntegrationEvent {
             event_type: event_type.to_owned(),
             schema_version: schema_version.to_owned(),
             source: required_reference(source)?.to_owned(),
+            tenant_ref: required_reference(tenant_ref)?.to_owned(),
             subject_ref: required_reference(subject_ref)?.to_owned(),
             occurred_at_unix_ms,
             correlation_ref: required_reference(correlation_ref)?.to_owned(),
@@ -150,6 +157,12 @@ impl IntegrationEvent {
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Return the tenant whose product resource emitted this event.
+    #[must_use]
+    pub fn tenant_ref(&self) -> &str {
+        &self.tenant_ref
     }
 
     /// Return the opaque event subject reference.
@@ -378,18 +391,22 @@ impl OutboxEntry {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InboxDisposition {
-    /// The consumer had not previously accepted this source event.
+    /// The consumer had not previously accepted this tenant-bound source event.
     Accepted,
     /// The exact immutable event evidence was already accepted by this consumer.
     Duplicate,
 }
 
-/// Immutable consumer receipt used for inbox deduplication.
+/// Immutable consumer receipt used for tenant-bound inbox deduplication.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InboxReceipt {
     consumer_ref: String,
     source_ref: String,
+    tenant_ref: String,
     source_event_ref: String,
+    event_type: String,
+    schema_version: String,
+    subject_ref: String,
     payload_digest: String,
     received_at_unix_ms: u64,
 }
@@ -407,10 +424,34 @@ impl InboxReceipt {
         &self.source_ref
     }
 
+    /// Return the tenant bound to the accepted source event.
+    #[must_use]
+    pub fn tenant_ref(&self) -> &str {
+        &self.tenant_ref
+    }
+
     /// Return the upstream source event reference.
     #[must_use]
     pub fn source_event_ref(&self) -> &str {
         &self.source_event_ref
+    }
+
+    /// Return the accepted event type.
+    #[must_use]
+    pub fn event_type(&self) -> &str {
+        &self.event_type
+    }
+
+    /// Return the accepted event schema version.
+    #[must_use]
+    pub fn schema_version(&self) -> &str {
+        &self.schema_version
+    }
+
+    /// Return the tenant-scoped resource subject of the accepted event.
+    #[must_use]
+    pub fn subject_ref(&self) -> &str {
+        &self.subject_ref
     }
 
     /// Return the immutable payload digest accepted for this event.
@@ -426,13 +467,14 @@ impl InboxReceipt {
     }
 }
 
-/// In-memory domain ledger specifying consumer inbox deduplication behavior.
+/// In-memory domain ledger specifying tenant-bound consumer inbox behavior.
 ///
 /// Persistence adapters may use a unique database constraint rather than this data
 /// structure, but must preserve the same
-/// `(consumer_ref, source_ref, source_event_ref)` identity and digest-conflict
-/// semantics. Event references are not assumed to be globally unique across all
-/// upstream bounded contexts.
+/// `(consumer_ref, source_ref, tenant_ref, source_event_ref)` identity. For an
+/// existing identity, event type, schema version, subject and payload digest are
+/// immutable evidence and any difference fails closed. Event references are not
+/// assumed to be globally unique across upstream sources or tenants.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IntegrationInbox {
     receipts: Vec<InboxReceipt>,
@@ -453,7 +495,7 @@ impl IntegrationInbox {
         self.receipts.is_empty()
     }
 
-    /// Return the number of unique consumer/source/event receipts.
+    /// Return the number of unique consumer/source/tenant/event receipts.
     #[must_use]
     pub fn len(&self) -> usize {
         self.receipts.len()
@@ -465,42 +507,41 @@ impl IntegrationInbox {
         &self.receipts
     }
 
-    /// Accept or deduplicate one immutable source event for a consumer.
+    /// Accept or deduplicate one immutable tenant-bound source event.
     ///
-    /// The deduplication key is `(consumer_ref, source_ref, source_event_ref)`. An
-    /// exact digest replay is a duplicate even when transport redelivers it later;
-    /// a different digest under the same source-scoped identity fails closed rather
-    /// than applying last write. The same event reference from a different upstream
-    /// source is independent and cannot suppress legitimate delivery.
+    /// Accepting the complete [`IntegrationEvent`] prevents transport adapters from
+    /// supplying a tenant independently from the immutable source envelope. The
+    /// deduplication key is `(consumer_ref, source, tenant_ref, event_ref)`. An exact
+    /// replay is a duplicate even when transport redelivers it later. Reuse of that
+    /// key with a different event type, schema version, subject or payload digest
+    /// fails closed rather than applying last write.
     ///
     /// # Errors
     ///
-    /// Returns [`IntegrationError`] for invalid consumer/source/event identity,
-    /// digest, timestamp, or a conflicting replay.
-    pub fn accept(
+    /// Returns [`IntegrationError`] for an invalid consumer identity, zero receive
+    /// timestamp, or conflicting replay evidence.
+    pub fn accept_event(
         &mut self,
         consumer_ref: &str,
-        source_ref: &str,
-        source_event_ref: &str,
-        payload_digest: &str,
+        event: &IntegrationEvent,
         received_at_unix_ms: u64,
     ) -> Result<InboxDisposition, IntegrationError> {
         let consumer_ref = required_reference(consumer_ref)?;
-        let source_ref = required_reference(source_ref)?;
-        let source_event_ref = required_reference(source_event_ref)?;
         if received_at_unix_ms == 0 {
             return Err(IntegrationError::InvalidTimestamp);
-        }
-        if !valid_sha256_digest(payload_digest) {
-            return Err(IntegrationError::InvalidDigest);
         }
 
         if let Some(existing) = self.receipts.iter().find(|receipt| {
             receipt.consumer_ref == consumer_ref
-                && receipt.source_ref == source_ref
-                && receipt.source_event_ref == source_event_ref
+                && receipt.source_ref == event.source()
+                && receipt.tenant_ref == event.tenant_ref()
+                && receipt.source_event_ref == event.event_ref()
         }) {
-            return if existing.payload_digest == payload_digest {
+            return if existing.event_type == event.event_type()
+                && existing.schema_version == event.schema_version()
+                && existing.subject_ref == event.subject_ref()
+                && existing.payload_digest == event.payload_digest()
+            {
                 Ok(InboxDisposition::Duplicate)
             } else {
                 Err(IntegrationError::ConflictingReplay)
@@ -509,9 +550,13 @@ impl IntegrationInbox {
 
         self.receipts.push(InboxReceipt {
             consumer_ref: consumer_ref.to_owned(),
-            source_ref: source_ref.to_owned(),
-            source_event_ref: source_event_ref.to_owned(),
-            payload_digest: payload_digest.to_owned(),
+            source_ref: event.source().to_owned(),
+            tenant_ref: event.tenant_ref().to_owned(),
+            source_event_ref: event.event_ref().to_owned(),
+            event_type: event.event_type().to_owned(),
+            schema_version: event.schema_version().to_owned(),
+            subject_ref: event.subject_ref().to_owned(),
+            payload_digest: event.payload_digest().to_owned(),
             received_at_unix_ms,
         });
         Ok(InboxDisposition::Accepted)
