@@ -158,9 +158,26 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         );
     }
 
+    let marker = "- Evaluated protected-main implementation baseline: `";
+    let baseline_line = traceability
+        .lines()
+        .find(|line| line.starts_with(marker))
+        .expect("traceability must name its evaluated protected-main baseline");
+    let baseline = baseline_line
+        .strip_prefix(marker)
+        .and_then(|value| value.strip_suffix('`'))
+        .expect("evaluated protected-main baseline must be enclosed in backticks");
+
+    assert_eq!(
+        baseline.len(),
+        40,
+        "evaluated protected-main baseline must be a full Git commit SHA"
+    );
     assert!(
-        traceability.contains("8b1f410fc16ec4c867d28a1cd26c12fc495b8de5"),
-        "traceability status must be tied to an explicit evaluated protected-main baseline"
+        baseline
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+        "evaluated protected-main baseline must be lowercase hexadecimal"
     );
 }
 
