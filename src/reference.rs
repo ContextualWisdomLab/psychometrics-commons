@@ -4,7 +4,11 @@
 #[must_use]
 pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
     let normalized = reference.trim();
-    if normalized.is_empty() || normalized.chars().all(|character| character.is_ascii_digit()) {
+    if normalized.is_empty()
+        || normalized
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
         None
     } else {
         Some(normalized)
