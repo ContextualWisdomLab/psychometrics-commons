@@ -22,9 +22,8 @@ fn coverage_failures_identify_the_incomplete_source_files() {
 
 #[test]
 fn line_coverage_failure_diagnostic_exposes_instantiation_gaps() {
-    assert!(CI_WORKFLOW.contains(
-        "cargo llvm-cov report --text --show-missing-lines --show-instantiations"
-    ));
+    assert!(CI_WORKFLOW
+        .contains("cargo llvm-cov report --text --show-missing-lines --show-instantiations"));
 }
 
 #[test]
