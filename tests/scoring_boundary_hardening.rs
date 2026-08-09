@@ -1,7 +1,9 @@
 //! Fail-first regressions for scoring provenance binding and reference normalization.
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
-use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotError, ResultSnapshotInput};
+use psychometrics_commons_runtime::result::{
+    ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
+};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
@@ -42,7 +44,8 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
         .freeze(SessionState::Completed)
         .unwrap();
     assert_eq!(
-        ScoringRequest::from_snapshot(&unbound, scoring_input("response_snapshot_ref")).unwrap_err(),
+        ScoringRequest::from_snapshot(&unbound, scoring_input("response_snapshot_ref"))
+            .unwrap_err(),
         ScoringContractError::UnboundResponseSnapshot
     );
 
@@ -134,4 +137,23 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
     )
     .unwrap_err();
     assert_eq!(self_supersession, ResultSnapshotError::SelfSupersession);
+
+    let normalized = ResultSnapshot::new(
+        &request,
+        &result,
+        ResultSnapshotInput {
+            result_snapshot_ref: " result_snapshot_ref ",
+            participant_ref: " participant_ref ",
+            narrative_version_ref: " narrative_version_ref ",
+            consent_snapshot_refs: &[" consent_ref "],
+            created_at_unix_ms: 1,
+            supersedes_ref: Some(" prior_result_ref "),
+        },
+    )
+    .unwrap();
+    assert_eq!(normalized.result_snapshot_ref(), "result_snapshot_ref");
+    assert_eq!(normalized.participant_ref(), "participant_ref");
+    assert_eq!(normalized.narrative_version_ref(), "narrative_version_ref");
+    assert_eq!(normalized.consent_snapshot_refs(), ["consent_ref"]);
+    assert_eq!(normalized.supersedes_ref(), Some("prior_result_ref"));
 }
