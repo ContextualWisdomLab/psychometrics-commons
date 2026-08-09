@@ -12,3 +12,13 @@ fn every_checkout_is_bound_to_the_pull_request_head() {
 fn every_checkout_drops_persisted_credentials() {
     assert_eq!(CI_WORKFLOW.matches("persist-credentials: false").count(), 3);
 }
+
+#[test]
+fn branch_coverage_failure_diagnostic_uses_lcov_branch_records() {
+    assert!(CI_WORKFLOW.contains(
+        "cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov"
+    ));
+    assert!(CI_WORKFLOW.contains("raw_line.startswith(\"BRDA:\")"));
+    assert!(CI_WORKFLOW.contains("taken in {\"0\", \"-\"}"));
+    assert!(!CI_WORKFLOW.contains("--show-missing-lines"));
+}
