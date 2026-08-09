@@ -88,7 +88,10 @@ fn explicit_research_grant_requires_scope_and_enables_contribution() {
     );
     assert_eq!(snapshot.active_research_scope(), Some("study_scope_v3"));
     assert_eq!(contribution.contribution_ref(), "contribution_ref");
-    assert_eq!(contribution.research_participant_ref(), "research_participant_ref");
+    assert_eq!(
+        contribution.research_participant_ref(),
+        "research_participant_ref"
+    );
     assert_eq!(contribution.consent_snapshot_ref(), "consent_snapshot_2");
     assert_eq!(contribution.research_scope_ref(), "study_scope_v3");
     assert_eq!(contribution.state(), ResearchContributionState::Active);
@@ -176,7 +179,10 @@ fn repeated_identical_consent_event_is_idempotent_but_conflicts_fail_closed() {
 
 #[test]
 fn consent_contract_rejects_blank_invalid_and_mis_scoped_evidence() {
-    assert_eq!(ConsentLedger::new("  "), Err(ConsentWriteError::EmptyReference));
+    assert_eq!(
+        ConsentLedger::new("  "),
+        Err(ConsentWriteError::EmptyReference)
+    );
 
     let mut ledger = ConsentLedger::new("participant_ref").unwrap();
     assert_eq!(
