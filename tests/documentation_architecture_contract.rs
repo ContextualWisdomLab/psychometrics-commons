@@ -160,6 +160,8 @@ fn required_architecture_decisions_are_indexed() {
         "0015-persistence-and-transaction-boundaries.md",
         "0016-architecture-description-and-traceability.md",
         "0017-operational-recovery-and-ga-evidence.md",
+        "0018-continuous-scores-and-narrative-separation.md",
+        "0019-scientific-publication-evidence-gates.md",
     ] {
         assert!(index.contains(adr), "ADR index must expose {adr}");
     }
