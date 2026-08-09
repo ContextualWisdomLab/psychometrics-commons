@@ -23,6 +23,7 @@ Use these terms consistently across PRD, TRD, ADRs, APIs, diagrams, code, UI, an
 | **ScoreProfile** | Versioned structured score output from the scientific scoring contract used as the source for result presentation/narrative. |
 | **result snapshot** | Immutable product result/provenance artifact binding response snapshot, scoring output, instrument/scoring/calibration/norm/narrative/engine evidence. Corrections/rescoring supersede rather than mutate. |
 | **Personality Style** | Product presentation/narrative mapping derived from continuous/facet profile. It is not a psychometric type score and does not claim MBTI equivalence. |
+| **style assignment key** | Deterministic digest identity binding all behavior-affecting score/instrument/scoring/norm/mapping/rule/locale inputs used to select a Personality Style. Optional AI wording provenance is separate. |
 | **reflection construct** | Independently measured construct used for reflection, such as self-compassion when rights/validation permit. It is not inferred from Big Five by default. |
 | **consent form** | Versioned content/policy defining a specific processing purpose and participant decision surface. |
 | **consent snapshot** | Immutable evidence of one participant's purpose-specific decision under an exact consent-form/scope version. |
@@ -39,7 +40,7 @@ Use these terms consistently across PRD, TRD, ADRs, APIs, diagrams, code, UI, an
 | **bounded context** | Independently owned domain with its own source of truth and contracts. Cross-context integration uses APIs/events/artifacts, not normal direct DB access. |
 | **system of record (SoR)** | Bounded context that authoritatively owns a fact/resource. A cached/reference copy does not become SoR. |
 | **transactional outbox** | Product-owned durable event record written in the same local transaction as the state change whose downstream effects it represents. |
-| **integration inbox** | Consumer-side durable deduplication/consumption evidence for at-least-once delivered events. |
+| **integration inbox** | Consumer-side durable deduplication/processing evidence for at-least-once delivered events. Receipt is not equivalent to completion of a required side effect. |
 | **idempotency key** | Caller/resource-scoped identity allowing exact request replay to return the original outcome while conflicting reuse fails closed. Not a general cache key. |
 | **content digest** | Cryptographic digest of canonical bytes used to establish immutable artifact identity/integrity in addition to opaque resource references. |
 | **provenance** | Exact references/digests/versions required to explain/replay the origin and transformations of a score, result, artifact, or release. |
@@ -55,9 +56,9 @@ Use these terms consistently across PRD, TRD, ADRs, APIs, diagrams, code, UI, an
 | **AI narrative** | Optional bounded prose rendering from pinned product/scientific evidence. It is not allowed to modify the source scientific result. |
 | **LLM judge** | LLM producing a rating/criterion observation. It is treated as a fallible rater with possible severity/bias/drift, not ground truth by default. |
 | **deterministic fallback** | Approved non-LLM output path that preserves core product behavior when optional AI is unavailable/invalid/denied. |
-| **Community/Research profile** | Minimal standalone deployment profile with product runtime/store, fast-mlsirm-compatible scoring and simple client; optional CWL integrations can be absent. |
-| **CWL Hosted profile** | CWL-operated composition enabling selected CWL bounded contexts as independently observable capabilities. |
-| **Enterprise/Self-hosted profile** | Customer/deployment-specific profile adding federation/residency/retention/encryption/network/provider/operations policy while preserving domain contracts. |
+| **Community profile** | Minimal standalone/community-research deployment with product runtime/store, fast-mlsirm-compatible scoring and a simple client; optional CWL integrations can be absent. |
+| **Hosted profile** | CWL-operated deployment enabling selected CWL bounded contexts as independently observable capabilities. |
+| **Enterprise profile** | Customer/self-hosted or contracted deployment adding federation/residency/retention/encryption/network/provider/operations policy while preserving the same domain contracts. |
 | **SLO** | Measured service-level objective for a defined capability/profile/indicator/window. No universal value is assumed in architecture docs. |
 | **RPO** | Recovery Point Objective for a defined data domain/profile, backed by actual backup/recovery design/evidence. |
 | **RTO** | Recovery Time Objective for a defined data domain/capability/profile, backed by measured recovery evidence. |
