@@ -74,10 +74,7 @@ impl ScoringRequest {
         let instrument_version_ref = required_reference(input.instrument_version_ref)?;
         let scoring_version_ref = required_reference(input.scoring_version_ref)?;
         let calibration_reference = required_reference(input.calibration_reference)?;
-        let norm_version_ref = input
-            .norm_version_ref
-            .map(required_reference)
-            .transpose()?;
+        let norm_version_ref = input.norm_version_ref.map(required_reference).transpose()?;
 
         let snapshot_ref = snapshot
             .snapshot_ref()
