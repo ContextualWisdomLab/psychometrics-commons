@@ -89,6 +89,24 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         Err(PersistenceError::ConflictingReplay)
     ));
 
+    let transactional_event = event("event_transaction", "tenant_alpha", DIGEST_A);
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            enqueue_outbox_event(&mut transaction, &transactional_event, 3).unwrap(),
+            PersistenceDisposition::Inserted
+        );
+        transaction.rollback().unwrap();
+    }
+    let rolled_back_count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM integration_outbox WHERE event_ref = 'event_transaction'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(rolled_back_count, 0);
+
     assert!(matches!(
         accept_inbox_event(&mut client, "123", &tenant_alpha, 11_000),
         Err(PersistenceError::InvalidReference)
@@ -144,6 +162,18 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         &[&DIGEST_A],
     );
     assert!(invalid_reference.is_err());
+
+    let invalid_digest = client.execute(
+        "INSERT INTO integration_outbox (\
+             event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,\
+             occurred_at_unix_ms, correlation_ref, payload_digest, max_attempts,\
+             current_state, latest_event_at_unix_ms\
+         ) VALUES ('event_invalid_digest', 'assessment.session.completed', 'v1',\
+                   'psychometrics_commons', 'tenant_alpha', 'session_alpha', 1,\
+                   'correlation_alpha', 'sha256:not-a-digest', 3, 'pending', 1)",
+        &[],
+    );
+    assert!(invalid_digest.is_err());
 
     assert_eq!(
         PersistenceError::InvalidReference.to_string(),
