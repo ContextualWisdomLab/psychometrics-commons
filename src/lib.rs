@@ -14,6 +14,7 @@ pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
 pub mod participant;
+pub mod postgres_integration;
 mod reference;
 pub mod response;
 pub mod result;
