@@ -122,6 +122,8 @@ pub enum WriteError {
     EmptyReference,
     /// A client idempotency reference was reused for different response content.
     IdempotencyConflict,
+    /// A server event reference was reused for a distinct response event.
+    ServerReferenceConflict,
     /// A response snapshot was requested before the session reached completion.
     SnapshotRequiresCompleted(SessionState),
 }
@@ -136,6 +138,8 @@ impl Display for WriteError {
             Self::IdempotencyConflict => formatter.write_str(
                 "client event reference was already used for different response content",
             ),
+            Self::ServerReferenceConflict => formatter
+                .write_str("server event reference was already used by another response event"),
             Self::SnapshotRequiresCompleted(state) => write!(
                 formatter,
                 "response snapshot requires Completed session state, found {state:?}"
@@ -185,8 +189,10 @@ impl ResponseLedger {
     ///
     /// Returns [`WriteError::SessionNotActive`] when response collection is not
     /// active, [`WriteError::EmptyReference`] for missing required references,
-    /// or [`WriteError::IdempotencyConflict`] when a client event reference is
-    /// reused with different item or payload content.
+    /// [`WriteError::IdempotencyConflict`] when a client event reference is
+    /// reused with different item or payload content, or
+    /// [`WriteError::ServerReferenceConflict`] when a server event reference
+    /// already identifies another response event.
     pub fn record(
         &mut self,
         state: SessionState,
@@ -214,6 +220,14 @@ impl ResponseLedger {
                 return Ok(existing.clone());
             }
             return Err(WriteError::IdempotencyConflict);
+        }
+
+        if self
+            .events
+            .iter()
+            .any(|event| event.server_event_ref == request.server_event_ref)
+        {
+            return Err(WriteError::ServerReferenceConflict);
         }
 
         let event = ResponseEvent {
