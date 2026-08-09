@@ -133,6 +133,7 @@ classDiagram
 - `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
 - `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.
 - Associations involving external scientific artifacts are references, not cross-service foreign keys into another service database.
+- A narrative/presentation artifact is finalized before a `ResultSnapshot` that references it is created; an immutable result is never modified later to attach narrative content. If narrative persistence becomes a separate aggregate, its relationship and supersession semantics require a corresponding ERD/ADR update.
 
 ## 2. Assessment-session state machine
 
@@ -177,15 +178,15 @@ stateDiagram-v2
     [*] --> Draft
     Draft --> Review: submit_for_review
     Review --> Draft: request_revision
-    Review --> Published: publish exact immutable version
+    Review --> Published: publish exact immutable version + required evidence gate
     Published --> Suspended: suspend new sessions
-    Suspended --> Published: reactivate same bytes/policy
+    Suspended --> Published: reactivate same bytes/policy/evidence-compatible release
     Published --> Retired: retire
     Suspended --> Retired: retire
     Retired --> [*]
 ```
 
-A semantic content change after publication creates a new instrument version; it does not transition a published version back to Draft.
+A semantic content change after publication creates a new instrument version; it does not transition a published version back to Draft. ADR-0019 requires exact-version scientific/content/rights evidence before `Review -> Published` succeeds.
 
 ## 4. Data-rights state machine
 
@@ -242,16 +243,18 @@ sequenceDiagram
     W->>DB: claim scoring work
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance
-    W->>DB: persist scoring evidence + immutable ResultSnapshot
-    W->>N: render approved narrative from pinned ScoreProfile
-    N-->>W: deterministic or validated optional-AI narrative
-    W->>DB: attach narrative snapshot / release result
+    W->>DB: persist immutable scoring-result evidence
+    W->>N: resolve deterministic style/narrative from pinned ScoreProfile + mapping/rules/locale
+    N-->>W: finalized deterministic or validated optional-AI narrative artifact/provenance
+    W->>DB: atomically persist immutable ResultSnapshot binding scoring + narrative provenance, then release
 
     C->>A: GET result
     A->>DB: authorize participant-owned result
     DB-->>A: immutable result snapshot
     A-->>C: scores + uncertainty + limitations + narrative provenance
 ```
+
+The result snapshot is created exactly once with the narrative-version/provenance it references. A later narrative rerender or correction creates a separately versioned presentation artifact and/or a superseding result according to ADR-0010/ADR-0018; it never mutates the prior immutable result in place.
 
 ## 6. Scoring dependency outage sequence
 
@@ -275,7 +278,7 @@ sequenceDiagram
 
     W->>F: retry same version-pinned request
     F-->>W: valid scoring result
-    W->>DB: persist immutable result snapshot
+    W->>DB: persist scoring evidence; result finalization proceeds only after required presentation provenance is resolved
 ```
 
 No fallback score may be fabricated merely because the scoring dependency is unavailable.
@@ -333,13 +336,38 @@ sequenceDiagram
     Note over S: No Keyverse subject, operational participant ref, or linkage key in public release bundle
 ```
 
-## 9. Modeling conventions
+## 9. Durable event consumption sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Broker / Transport
+    participant C as Product Consumer
+    participant DB as Product Store
+    participant X as External Dependency
+
+    B->>C: deliver event(source, tenant, event_ref, schema, payload_digest, payload)
+    C->>C: validate schema + canonical payload digest + tenant/resource binding
+    C->>DB: create/find dedup record as pending
+    C->>DB: atomically mark processing + persist local durable work/outbox
+    DB-->>C: processing evidence + stable external idempotency key
+    C->>X: perform/retry external effect with stable idempotency key
+    X-->>C: durable idempotent completion evidence
+    C->>DB: record completion evidence + mark inbox completed
+
+    Note over C,DB: A crash before completion leaves recoverable pending/processing state; receipt alone never suppresses an unperformed effect
+```
+
+For effects fully owned by the same PostgreSQL transaction, the domain side effect and inbox completion may instead commit atomically without the external-work step. ADR-0014 and ADR-0015 govern canonical payload integrity, deduplication, tenant binding, crash recovery, and quarantine.
+
+## 10. Modeling conventions
 
 - Classes shown here are domain concepts, not a mandate that each concept map one-to-one to a Rust struct or database table.
 - A sequence message is a contract responsibility, not evidence that the HTTP/event transport already exists.
 - External systems are accessed through versioned adapters; direct database joins across bounded contexts are forbidden.
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
+- Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
 
-## 10. Reference
+## 11. Reference
 
 Object Management Group. (2017). *OMG Unified Modeling Language (OMG UML), Version 2.5.1*.
