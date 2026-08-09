@@ -36,6 +36,8 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/MEASUREMENT_GOVERNANCE.md",
         "docs/AI_GOVERNANCE.md",
         "docs/RESEARCH_GOVERNANCE.md",
+        "docs/QUALITY_ATTRIBUTES.md",
+        "docs/GLOSSARY.md",
         "docs/DOCUMENTATION_ASSESSMENT.md",
         "docs/TRACEABILITY.md",
         "docs/ROADMAP.md",
@@ -113,6 +115,8 @@ fn repository_entry_points_link_traceability_and_view_index() {
         "docs/MEASUREMENT_GOVERNANCE.md",
         "docs/AI_GOVERNANCE.md",
         "docs/RESEARCH_GOVERNANCE.md",
+        "docs/QUALITY_ATTRIBUTES.md",
+        "docs/GLOSSARY.md",
     ] {
         assert!(
             readme.contains(governance_link),
