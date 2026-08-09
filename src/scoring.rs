@@ -248,8 +248,7 @@ impl ScoreObservation {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoringResult {
     result_ref: String,
-    scoring_request_ref: String,
-    response_snapshot_ref: String,
+    request: ScoringRequest,
     engine_artifact_digest: String,
     observations: Vec<ScoreObservation>,
 }
@@ -287,8 +286,7 @@ impl ScoringResult {
 
         Ok(Self {
             result_ref: scoring_result_ref,
-            scoring_request_ref: request.scoring_request_ref().to_owned(),
-            response_snapshot_ref: request.response_snapshot_ref().to_owned(),
+            request: request.clone(),
             engine_artifact_digest,
             observations,
         })
@@ -303,13 +301,13 @@ impl ScoringResult {
     /// Return the scoring request that produced this result.
     #[must_use]
     pub fn scoring_request_ref(&self) -> &str {
-        &self.scoring_request_ref
+        self.request.scoring_request_ref()
     }
 
     /// Return the response snapshot scored by the engine.
     #[must_use]
     pub fn response_snapshot_ref(&self) -> &str {
-        &self.response_snapshot_ref
+        self.request.response_snapshot_ref()
     }
 
     /// Return the exact scoring-engine artifact digest.
@@ -322,6 +320,12 @@ impl ScoringResult {
     #[must_use]
     pub fn observations(&self) -> &[ScoreObservation] {
         &self.observations
+    }
+
+    /// Return whether this result is bound to the complete supplied request.
+    #[must_use]
+    pub(crate) fn matches_request(&self, request: &ScoringRequest) -> bool {
+        &self.request == request
     }
 }
 
