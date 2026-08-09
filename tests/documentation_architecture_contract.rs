@@ -1,9 +1,10 @@
 //! Repository architecture-documentation fitness checks.
 //!
-//! These tests keep the required architecture viewpoints discoverable and prevent
-//! an accepted ADR from being added without the authoritative ADR index knowing
-//! about it. They intentionally validate repository structure, not Mermaid layout
-//! or semantic correctness; human architecture review remains required for those.
+//! These tests keep the required product/architecture/governance viewpoints
+//! discoverable and prevent an accepted ADR from being added without the
+//! authoritative ADR index knowing about it. They intentionally validate
+//! repository structure and traceability markers, not Mermaid layout or semantic
+//! correctness; human architecture review remains required for those.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,12 +14,16 @@ fn repository_root() -> PathBuf {
 }
 
 fn read_required(path: &Path) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("required documentation {} is unreadable: {error}", path.display()))
+    fs::read_to_string(path).unwrap_or_else(|error| {
+        panic!(
+            "required documentation {} is unreadable: {error}",
+            path.display()
+        )
+    })
 }
 
 #[test]
-fn required_architecture_viewpoints_exist() {
+fn required_architecture_and_governance_viewpoints_exist() {
     let root = repository_root();
     let required_paths = [
         "README.md",
@@ -28,6 +33,9 @@ fn required_architecture_viewpoints_exist() {
         "CHANGELOG.md",
         "docs/PRD.md",
         "docs/TRD.md",
+        "docs/MEASUREMENT_GOVERNANCE.md",
+        "docs/AI_GOVERNANCE.md",
+        "docs/RESEARCH_GOVERNANCE.md",
         "docs/DOCUMENTATION_ASSESSMENT.md",
         "docs/TRACEABILITY.md",
         "docs/ROADMAP.md",
@@ -45,11 +53,11 @@ fn required_architecture_viewpoints_exist() {
         let path = root.join(relative_path);
         assert!(
             path.is_file(),
-            "required architecture artifact is missing: {relative_path}"
+            "required architecture/governance artifact is missing: {relative_path}"
         );
         assert!(
             !read_required(&path).trim().is_empty(),
-            "required architecture artifact is empty: {relative_path}"
+            "required architecture/governance artifact is empty: {relative_path}"
         );
     }
 }
@@ -100,6 +108,17 @@ fn repository_entry_points_link_traceability_and_view_index() {
             "ARCHITECTURE.md must expose {required_link}"
         );
     }
+
+    for governance_link in [
+        "docs/MEASUREMENT_GOVERNANCE.md",
+        "docs/AI_GOVERNANCE.md",
+        "docs/RESEARCH_GOVERNANCE.md",
+    ] {
+        assert!(
+            readme.contains(governance_link),
+            "README must expose {governance_link}"
+        );
+    }
 }
 
 #[test]
@@ -122,4 +141,18 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         traceability.contains("8b1f410fc16ec4c867d28a1cd26c12fc495b8de5"),
         "traceability status must be tied to an explicit evaluated protected-main baseline"
     );
+}
+
+#[test]
+fn required_architecture_decisions_are_indexed() {
+    let index = read_required(&repository_root().join("docs/adr/README.md"));
+
+    for adr in [
+        "0014-api-and-event-contract-representation.md",
+        "0015-persistence-and-transaction-boundaries.md",
+        "0016-architecture-description-and-traceability.md",
+        "0017-operational-recovery-and-ga-evidence.md",
+    ] {
+        assert!(index.contains(adr), "ADR index must expose {adr}");
+    }
 }
