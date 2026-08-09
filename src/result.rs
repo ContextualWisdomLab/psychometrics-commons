@@ -98,10 +98,7 @@ impl ResultSnapshot {
             return Err(ResultSnapshotError::InvalidCreationTime);
         }
 
-        let supersedes_ref = input
-            .supersedes_ref
-            .map(required_reference)
-            .transpose()?;
+        let supersedes_ref = input.supersedes_ref.map(required_reference).transpose()?;
         if supersedes_ref == Some(snapshot_ref) {
             return Err(ResultSnapshotError::SelfSupersession);
         }
