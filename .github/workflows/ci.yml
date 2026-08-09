@@ -81,6 +81,9 @@ jobs:
         run: cargo llvm-cov --json --summary-only --output-path coverage.json
       - name: Enforce complete line coverage
         run: python3 scripts/check_coverage.py coverage.json --kind lines
+      - name: Diagnose missing line coverage
+        if: failure()
+        run: cargo llvm-cov report --show-missing-lines || true
 
   branch-coverage:
     name: Production branch coverage
@@ -102,3 +105,6 @@ jobs:
         run: cargo +nightly-2026-08-01 llvm-cov --branch --json --summary-only --output-path coverage-branches.json
       - name: Enforce complete branch coverage
         run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
+      - name: Diagnose missing branch coverage
+        if: failure()
+        run: cargo +nightly-2026-08-01 llvm-cov report --branch --show-missing-lines || true
