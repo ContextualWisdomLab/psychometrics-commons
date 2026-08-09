@@ -232,7 +232,7 @@ impl InstrumentReleaseManifest {
         &self.locale
     }
 
-    /// Return the AssessmentSpec reference.
+    /// Return the `AssessmentSpec` reference.
     #[must_use]
     pub fn assessment_spec_ref(&self) -> &str {
         &self.assessment_spec_ref
@@ -435,9 +435,8 @@ const fn transition(
 
     match (state, command) {
         (Draft, SubmitReview) => Ok(Review),
-        (Review, Publish) => Ok(Published),
+        (Review, Publish) | (Suspended, Reactivate) => Ok(Published),
         (Published, Suspend) => Ok(Suspended),
-        (Suspended, Reactivate) => Ok(Published),
         (Published | Suspended, Retire) => Ok(PublicationState::Retired),
         _ => Err(InstrumentReleaseError::InvalidTransition),
     }
