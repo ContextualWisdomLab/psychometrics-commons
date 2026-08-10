@@ -1,7 +1,7 @@
 # UML-Aligned Domain and Behavior Models
 
 - Status: Normative architecture view
-- Date: 2026-08-09
+- Date: 2026-08-10
 - Notation: Mermaid diagrams using OMG UML 2.5.1 structural/behavioral semantics where the notation permits
 - Authority: accepted ADRs and PRD/TRD override a diagram if a contradiction is discovered
 
@@ -23,6 +23,7 @@ classDiagram
       +calibration_reference
       +norm_version_ref?
       +narrative_version_ref
+      +publication_evidence_ref
       +content_digest
       +publication_state
     }
@@ -34,7 +35,15 @@ classDiagram
     class AssessmentParticipant {
       +participant_ref
       +tenant_ref
-      +keyverse_subject_ref?
+      +participant_status
+    }
+    class ParticipantIdentityLink {
+      +identity_link_ref
+      +identity_issuer
+      +identity_subject_ref
+      +link_state
+      +supersedes_link_ref?
+      +effective_at
     }
     class AssessmentSession {
       +session_ref
@@ -42,6 +51,14 @@ classDiagram
       +participant_ref
       +state
       +created_at
+    }
+    class ItemDeliveryEvent {
+      +delivery_event_ref
+      +item_version_ref
+      +delivery_sequence
+      +routing_policy_ref?
+      +payload_digest
+      +delivered_at
     }
     class ResponseEvent {
       +response_event_ref
@@ -110,11 +127,37 @@ classDiagram
       +access_class
       +supersedes_ref?
     }
+    class LongitudinalEnrollment {
+      +enrollment_ref
+      +program_ref
+      +collection_system_ref
+      +state
+    }
+    class LongitudinalObservationRecord {
+      +observation_record_ref
+      +source_system_ref
+      +source_observation_ref
+      +construct_ref
+      +measure_ref
+      +observed_at
+      +available_at
+      +membership_context_ref
+    }
+    class TemporalAnalysisSubmission {
+      +analysis_submission_ref
+      +analysis_spec_ref
+      +observation_set_digest
+      +analysis_state
+      +tepp_artifact_ref?
+    }
 
     InstrumentDefinition "1" --> "1..*" InstrumentVersion : versions
     InstrumentVersion "1" --> "1..*" ItemVersion : publishes ordered set
+    AssessmentParticipant "1" --> "0..*" ParticipantIdentityLink : optional account history
     AssessmentParticipant "1" --> "0..*" AssessmentSession : owns
     InstrumentVersion "1" --> "0..*" AssessmentSession : administers
+    AssessmentSession "1" --> "0..*" ItemDeliveryEvent : delivers
+    ItemVersion "1" --> "0..*" ItemDeliveryEvent : presented as
     AssessmentSession "1" --> "0..*" ResponseEvent : records
     AssessmentSession "1" --> "0..1" ResponseSnapshot : freezes
     ResponseSnapshot "1" --> "0..*" ScoringJob : scored by
@@ -124,14 +167,19 @@ classDiagram
     AssessmentParticipant "1" --> "0..*" DataRightsRequest : requests
     ResearchContribution "0..*" --> "0..*" DatasetSnapshot : eligible input
     DatasetSnapshot "1" --> "0..*" ResearchRelease : released as
+    AssessmentParticipant "1" --> "0..*" LongitudinalEnrollment : enrolls
+    LongitudinalEnrollment "1" --> "0..*" LongitudinalObservationRecord : ingests
+    LongitudinalEnrollment "1" --> "0..*" TemporalAnalysisSubmission : analyzes
 ```
 
 ### Domain-model rules
 
-- `InstrumentVersion`, `ResponseSnapshot`, `ResultSnapshot`, and published `ResearchRelease` are immutable semantic artifacts.
+- `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence.
 - `ScoringJob` is operational state; `ResultSnapshot` is scientific/product evidence. They are not the same aggregate.
 - `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
 - `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.
+- `ParticipantIdentityLink` is product-owned append-only account-attachment history. It is neither the participant primary key nor a research pseudonym.
+- Longitudinal records preserve collection and temporal-analysis references without duplicating the Gyeot application database or TEPP analytical kernel.
 - Associations involving external scientific artifacts are references, not cross-service foreign keys into another service database.
 - A narrative/presentation artifact is finalized before a `ResultSnapshot` that references it is created; an immutable result is never modified later to attach narrative content. If narrative persistence becomes a separate aggregate, its relationship and supersession semantics require a corresponding ERD/ADR update.
 
@@ -188,7 +236,23 @@ stateDiagram-v2
 
 A semantic content change after publication creates a new instrument version; it does not transition a published version back to Draft. ADR-0019 requires exact-version scientific/content/rights evidence before `Review -> Published` succeeds.
 
-## 4. Data-rights state machine
+## 4. Participant identity-link lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Anonymous
+    Anonymous --> Linked: append first Active identity link
+    Linked --> Unlinked: append revocation/unlink evidence
+    Unlinked --> Linked: append recovered/replacement link
+    Linked --> Linked: idempotent replay of identical link evidence
+    Linked --> Conflict: conflicting concurrent active subject
+    Unlinked --> Conflict: ambiguous recovery evidence
+    Conflict --> Linked: explicit audited recovery/merge decision
+```
+
+The state diagram is a projection over append-only `ParticipantIdentityLink` records, not a mutable identity column. Historical participant/session/result identifiers remain unchanged through every transition. Research pseudonym identity has a separate lifecycle and namespace.
+
+## 5. Data-rights state machine
 
 ```mermaid
 stateDiagram-v2
@@ -209,7 +273,7 @@ stateDiagram-v2
 
 Export cannot complete with a deletion-retention exception. Exact terminal replays are idempotent; conflicting evidence for the same lifecycle reference fails closed.
 
-## 5. Anonymous assessment happy-path sequence
+## 6. Anonymous assessment happy-path sequence
 
 ```mermaid
 sequenceDiagram
@@ -228,8 +292,9 @@ sequenceDiagram
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
 
-    loop each response
-        P->>C: answer item
+    loop each presented item / response
+        A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
+        P->>C: answer presented item
         C->>A: submit response(client_event_ref)
         A->>DB: validate active state + append response event
         DB-->>A: server sequence / idempotent replay outcome
@@ -256,7 +321,7 @@ sequenceDiagram
 
 The result snapshot is created exactly once with the narrative-version/provenance it references. A later narrative rerender or correction creates a separately versioned presentation artifact and/or a superseding result according to ADR-0010/ADR-0018; it never mutates the prior immutable result in place.
 
-## 6. Scoring dependency outage sequence
+## 7. Scoring dependency outage sequence
 
 ```mermaid
 sequenceDiagram
@@ -283,7 +348,7 @@ sequenceDiagram
 
 No fallback score may be fabricated merely because the scoring dependency is unavailable.
 
-## 7. Optional account-linking sequence
+## 8. Optional account-linking sequence
 
 ```mermaid
 sequenceDiagram
@@ -300,14 +365,77 @@ sequenceDiagram
     C->>A: link request + anonymous-session proof + Keyverse assertion
     A->>K: validate issuer/audience/signature/expiry/anti-replay context
     K-->>A: validated subject claims
-    A->>DB: verify ownership and create append-only subject mapping
-    DB-->>A: mapping evidence
+    A->>DB: verify tenant/ownership + append Active ParticipantIdentityLink
+    DB-->>A: immutable link evidence / current-link projection
     A-->>C: link complete
 
-    Note over DB: Historical response/result identifiers are not rewritten
+    Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
 ```
 
-## 8. Research-contribution and release sequence
+## 9. Longitudinal Gyeot-to-TEPP orchestration sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor P as Participant
+    participant G as Gyeot / approved collection client
+    participant A as Psychometrics Commons
+    participant DB as Product Store
+    participant T as TEPP
+
+    P->>A: enroll in longitudinal program + purpose-specific consent
+    A->>DB: persist LongitudinalEnrollment + consent reference
+    A-->>G: enrollment_ref + versioned collection contract
+
+    loop each EMA/ESM observation
+        G->>A: normalized candidate observation + source identity/time/context
+        A->>A: validate participant/program/consent/version + exact source identity
+        A->>DB: append LongitudinalObservationRecord(observed/available/ingested time, membership context)
+        DB-->>A: idempotent observation evidence
+    end
+
+    A->>DB: freeze analysis observation-set digest + TemporalAnalysisSubmission
+    A->>T: submit version-pinned temporal analysis request
+    T-->>A: analysis artifact ref + evidence or typed failure
+    A->>DB: record artifact/failure evidence without copying TEPP analytical state
+```
+
+Gyeot remains the collection owner and TEPP remains the temporal/event/multilevel/multiple-membership analytical owner. Psychometrics Commons owns consented enrollment, normalized ingestion evidence, exact observation-set identity, and orchestration. Observed/available/ingested time and membership context are preserved so temporal leakage and atomistic flattening can be detected rather than silently introduced.
+
+## 10. Measurement Workbench publication-evidence sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as Researcher / Instrument Author
+    participant W as Measurement Workbench
+    participant I as Inkspan
+    participant K as RankWeave
+    participant F as fast-mlsirm
+    participant A as Psychometrics Commons Runtime
+    participant DB as Product Store
+
+    R->>W: define construct / rubric / blueprint / intended use
+    W->>I: author/review item and protocol content
+    I-->>W: versioned authored artifacts
+    W->>K: retrieve governed prior instruments/evidence references
+    K-->>W: ranked evidence references with provenance
+    W->>F: build/evaluate AssessmentSpec + item-bank/scoring/calibration evidence
+    F-->>W: versioned scientific artifacts + validation evidence
+    W->>W: assemble rights + locale/translation + calibration/norm + DIF/invariance/linking + scoreability evidence
+    W->>A: submit immutable instrument version + publication evidence references
+    A->>A: enforce ADR-0019 intended-use publication gate
+    alt evidence sufficient for claimed use
+        A->>DB: publish exact immutable InstrumentVersion
+        DB-->>W: publication evidence + release ref
+    else evidence absent/incompatible
+        A-->>W: typed fail-closed publication rejection
+    end
+```
+
+The Workbench orchestrates/references capabilities; it does not copy fast-mlsirm numerical kernels, Inkspan authoring internals, or RankWeave retrieval internals. LLM-assisted item/rubric authoring may propose content, but published measurement/scoring claims remain evidence-gated and deterministic/versioned.
+
+## 11. Research-contribution and release sequence
 
 ```mermaid
 sequenceDiagram
@@ -336,7 +464,7 @@ sequenceDiagram
     Note over S: No Keyverse subject, operational participant ref, or linkage key in public release bundle
 ```
 
-## 9. Durable event consumption sequence
+## 12. Durable event consumption sequence
 
 ```mermaid
 sequenceDiagram
@@ -360,14 +488,15 @@ sequenceDiagram
 
 For effects fully owned by the same PostgreSQL transaction, the domain side effect and inbox completion may instead commit atomically without the external-work step. ADR-0014 and ADR-0015 govern canonical payload integrity, deduplication, tenant binding, crash recovery, and quarantine.
 
-## 10. Modeling conventions
+## 13. Modeling conventions
 
 - Classes shown here are domain concepts, not a mandate that each concept map one-to-one to a Rust struct or database table.
 - A sequence message is a contract responsibility, not evidence that the HTTP/event transport already exists.
 - External systems are accessed through versioned adapters; direct database joins across bounded contexts are forbidden.
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
 - Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
+- `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land.
 
-## 11. Reference
+## 14. Reference
 
 Object Management Group. (2017). *OMG Unified Modeling Language (OMG UML), Version 2.5.1*.
