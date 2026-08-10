@@ -1,10 +1,11 @@
 //! Repository architecture-documentation fitness checks.
 //!
 //! These tests keep the required product/architecture/governance viewpoints
-//! discoverable and prevent an accepted ADR from being added without the
-//! authoritative ADR index knowing about it. They intentionally validate
-//! repository structure and traceability markers, not Mermaid layout or semantic
-//! correctness; human architecture review remains required for those.
+//! discoverable, prevent accepted ADRs from disappearing from the authoritative
+//! index, and pin the cross-document vocabulary that distinguishes protected-main
+//! evidence from active-PR and target architecture. They intentionally validate
+//! repository structure and traceability markers, not Mermaid layout or full
+//! semantic correctness; human architecture review remains required for those.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,6 +52,7 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
         "docs/adr/README.md",
         "docs/adr/0000-template.md",
+        "docs/adr/0020-append-only-participant-identity-link-history.md",
     ];
 
     for relative_path in required_paths {
@@ -149,6 +151,7 @@ fn traceability_distinguishes_current_implementation_from_targets() {
     for status in [
         "Implemented",
         "Partially implemented",
+        "Active PR",
         "Target",
         "External dependency",
     ] {
@@ -157,6 +160,23 @@ fn traceability_distinguishes_current_implementation_from_targets() {
             "traceability document must define status {status}"
         );
     }
+
+    for protected_main_module in [
+        "src/item_delivery.rs",
+        "src/participant.rs",
+        "src/authorization.rs",
+        "src/integration.rs",
+    ] {
+        assert!(
+            traceability.contains(protected_main_module),
+            "traceability must reconcile protected-main module {protected_main_module}"
+        );
+    }
+
+    assert!(
+        traceability.contains("PR #24") && traceability.contains("not protected-main truth"),
+        "active persistence work must remain explicitly segregated from protected-main truth"
+    );
 
     let marker = "- Evaluated protected-main implementation baseline: `";
     let baseline_line = traceability
@@ -192,7 +212,49 @@ fn required_architecture_decisions_are_indexed() {
         "0017-operational-recovery-and-ga-evidence.md",
         "0018-continuous-scores-and-narrative-separation.md",
         "0019-scientific-publication-evidence-gates.md",
+        "0020-append-only-participant-identity-link-history.md",
     ] {
         assert!(index.contains(adr), "ADR index must expose {adr}");
+    }
+}
+
+#[test]
+fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
+    let erd = read_required(&repository_root().join("docs/architecture/ERD.md"));
+
+    for logical_entity in [
+        "item_delivery_event",
+        "participant_identity_link",
+        "longitudinal_enrollment",
+        "longitudinal_observation_record",
+        "temporal_analysis_submission",
+    ] {
+        assert!(
+            erd.contains(logical_entity),
+            "logical ERD must expose {logical_entity}"
+        );
+    }
+
+    assert!(
+        erd.contains("logical target ERD") && erd.contains("not the future mutable persistence source of truth"),
+        "ERD must distinguish target logical persistence from current participant projection/as-built evidence"
+    );
+}
+
+#[test]
+fn uml_covers_identity_longitudinal_and_workbench_behavior() {
+    let uml = read_required(&repository_root().join("docs/architecture/UML.md"));
+
+    for behavior_marker in [
+        "Participant identity-link lifecycle",
+        "Longitudinal Gyeot-to-TEPP orchestration sequence",
+        "Measurement Workbench publication-evidence sequence",
+        "ItemDeliveryEvent",
+        "ParticipantIdentityLink",
+    ] {
+        assert!(
+            uml.contains(behavior_marker),
+            "UML architecture view must expose {behavior_marker}"
+        );
     }
 }
