@@ -37,6 +37,10 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/MEASUREMENT_GOVERNANCE.md",
         "docs/AI_GOVERNANCE.md",
         "docs/RESEARCH_GOVERNANCE.md",
+        "docs/THREAT_MODEL.md",
+        "docs/TEST_STRATEGY.md",
+        "docs/OPERABILITY.md",
+        "docs/RELEASE_ACCEPTANCE.md",
         "docs/QUALITY_ATTRIBUTES.md",
         "docs/COMPLIANCE_READINESS.md",
         "docs/RISK_REGISTER.md",
@@ -132,6 +136,10 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
         "docs/MEASUREMENT_GOVERNANCE.md",
         "docs/AI_GOVERNANCE.md",
         "docs/RESEARCH_GOVERNANCE.md",
+        "docs/THREAT_MODEL.md",
+        "docs/TEST_STRATEGY.md",
+        "docs/OPERABILITY.md",
+        "docs/RELEASE_ACCEPTANCE.md",
         "docs/QUALITY_ATTRIBUTES.md",
         "docs/COMPLIANCE_READINESS.md",
         "docs/RISK_REGISTER.md",
@@ -140,6 +148,71 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
         assert!(
             readme.contains(governance_link),
             "README must expose {governance_link}"
+        );
+    }
+}
+
+#[test]
+fn release_authority_separates_software_instrument_and_research_gates() {
+    let release = read_required(&repository_root().join("docs/RELEASE_ACCEPTANCE.md"));
+    for required_heading in [
+        "Software release gate",
+        "Consumer instrument release gate",
+        "Research dataset release gate",
+        "Release blockers",
+        "Post-release verification",
+    ] {
+        assert!(
+            release.contains(required_heading),
+            "release acceptance must define {required_heading}"
+        );
+    }
+
+    assert!(
+        release.contains("Correlation alone is not sufficient"),
+        "instrument release must reject correlation-only recovery claims"
+    );
+}
+
+#[test]
+fn threat_test_and_operability_docs_preserve_evidence_maturity() {
+    let threat_model = read_required(&repository_root().join("docs/THREAT_MODEL.md"));
+    let test_strategy = read_required(&repository_root().join("docs/TEST_STRATEGY.md"));
+    let operability = read_required(&repository_root().join("docs/OPERABILITY.md"));
+
+    for marker in [
+        "architecture controls described here are not evidence",
+        "cross-tenant IDOR/BOLA",
+        "research re-identification",
+        "outbox/inbox cross-tenant collision",
+    ] {
+        assert!(
+            threat_model.contains(marker),
+            "threat model must preserve marker {marker}"
+        );
+    }
+
+    for marker in [
+        "100% statement/branch coverage does not prove",
+        "Correlation alone is not accepted",
+        "real supported PostgreSQL version",
+        "exact source/artifact it actually tested",
+    ] {
+        assert!(
+            test_strategy.contains(marker),
+            "test strategy must preserve marker {marker}"
+        );
+    }
+
+    for marker in [
+        "measured service levels remain evidence-gated",
+        "single undifferentiated `healthy=true` is insufficient",
+        "does **not** publish universal RPO/RTO numbers",
+        "runbook link that has never been exercised is documentation, not recovery evidence",
+    ] {
+        assert!(
+            operability.contains(marker),
+            "operability contract must preserve marker {marker}"
         );
     }
 }
