@@ -1,11 +1,11 @@
 # Logical Entity-Relationship Model
 
 - Status: Normative logical data model
-- Date: 2026-08-09
+- Date: 2026-08-10
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
-The ERD defines target cardinalities, ownership, immutable boundaries, and restricted identity linkage. Physical migrations may split or combine tables for performance, but they must preserve these semantics and may not create cross-service application-database coupling.
+The ERD defines target cardinalities, ownership, immutable boundaries, restricted identity linkage, longitudinal orchestration records, and integration evidence. Physical migrations may split or combine tables for performance, but they must preserve these semantics and may not create cross-service application-database coupling.
 
 ## 1. Logical ERD
 
@@ -20,8 +20,11 @@ erDiagram
     instrument_version ||--|{ instrument_item : contains
     item_version ||--o{ instrument_item : referenced_by
 
+    assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
+    assessment_session ||--o{ item_delivery_event : delivers
+    item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
     assessment_session ||--o| response_snapshot : freezes
     response_snapshot ||--|{ response_snapshot_entry : contains
@@ -41,6 +44,10 @@ erDiagram
     research_participant ||--o{ dataset_snapshot_member : included_as
     dataset_snapshot ||--o{ dataset_snapshot_member : contains
     dataset_snapshot ||--o{ research_release : released_as
+
+    assessment_participant ||--o{ longitudinal_enrollment : enrolls
+    longitudinal_enrollment ||--o{ longitudinal_observation_record : ingests
+    longitudinal_enrollment ||--o{ temporal_analysis_submission : submits
 
     assessment_participant ||--o{ data_rights_request : requests
 
@@ -102,8 +109,21 @@ erDiagram
     assessment_participant {
       string participant_ref PK
       string tenant_ref FK
-      string keyverse_subject_ref
       string participant_status
+      timestamp created_at
+    }
+
+    participant_identity_link {
+      string identity_link_ref PK
+      string participant_ref FK
+      string tenant_ref FK
+      string identity_issuer
+      string identity_subject_ref
+      string link_state
+      string supersedes_link_ref
+      string actor_evidence_ref
+      string reason_code
+      timestamp effective_at
       timestamp created_at
     }
 
@@ -115,6 +135,16 @@ erDiagram
       string locale
       timestamp created_at
       timestamp latest_event_at
+    }
+
+    item_delivery_event {
+      string delivery_event_ref PK
+      string session_ref FK
+      string item_version_ref FK
+      int delivery_sequence
+      string routing_policy_ref
+      string payload_digest
+      timestamp delivered_at
     }
 
     response_event {
@@ -244,6 +274,45 @@ erDiagram
       timestamp published_at
     }
 
+    longitudinal_enrollment {
+      string enrollment_ref PK
+      string participant_ref FK
+      string program_ref
+      string consent_snapshot_ref
+      string collection_system_ref
+      string enrollment_state
+      timestamp enrolled_at
+      timestamp latest_event_at
+    }
+
+    longitudinal_observation_record {
+      string observation_record_ref PK
+      string enrollment_ref FK
+      string source_system_ref
+      string source_observation_ref
+      string construct_ref
+      string measure_ref
+      string scoring_version_ref
+      string theta_ref
+      string uncertainty_ref
+      string membership_context_ref
+      timestamp observed_at
+      timestamp available_at
+      timestamp ingested_at
+    }
+
+    temporal_analysis_submission {
+      string analysis_submission_ref PK
+      string enrollment_ref FK
+      string analysis_spec_ref
+      string observation_set_digest
+      string analysis_state
+      string tepp_artifact_ref
+      string failure_evidence_ref
+      timestamp submitted_at
+      timestamp completed_at
+    }
+
     data_rights_request {
       string request_ref PK
       string tenant_ref FK
@@ -304,44 +373,65 @@ erDiagram
     }
 ```
 
-## 2. System-of-record boundaries
+## 2. Reconciliation notes: target model versus current protected main
+
+The target ERD deliberately includes several logical entities that are not yet physical tables:
+
+- `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
+- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
+- `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
+- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. PostgreSQL evidence persistence exists only on active PR #24 until merged.
+
+This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
+
+## 3. System-of-record boundaries
 
 The ERD includes only Psychometrics Commons-owned state. The following values are **references**, not local copies of another service's source-of-truth tables:
 
-- `keyverse_subject_ref` → Keyverse identity/federation domain;
+- `identity_issuer` / `identity_subject_ref` → Keyverse identity/federation domain;
 - `assessment_spec_ref`, `scoring_version_ref`, `calibration_reference`, `norm_version_ref` → fast-mlsirm scientific contracts/artifacts;
-- TEPP analysis artifact references → temporal-analysis domain;
-- semantic-data-portal catalog references → research catalog/release presentation;
+- `collection_system_ref`, `source_system_ref` → Gyeot or another approved collection adapter identity;
+- `analysis_spec_ref`, `tepp_artifact_ref` → TEPP temporal-analysis domain;
+- semantic-data-portal catalog/release references → research catalog/release presentation;
 - contextual-orchestrator execution references → bounded AI domain.
 
 No local foreign key is created into another service's database.
 
-## 3. Immutable aggregates
+## 4. Immutable and append-only aggregates
 
 Once semantically published/frozen, the following are append-only or superseded rather than mutated in place:
 
 - `instrument_version` after publication;
 - `item_version` after publication;
+- `item_delivery_event`;
 - `response_snapshot` and `response_snapshot_entry`;
 - `result_snapshot`;
 - `consent_snapshot`;
+- `participant_identity_link` history;
+- accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
 - published `research_release`.
 
-Operational fields such as delivery attempt or inbox processing state may change according to their own audited lifecycle; they must not alter the immutable scientific payload they reference.
+Operational fields such as delivery attempt, inbox processing, enrollment state, or analysis-submission state may change according to their own audited lifecycle; they must not alter the immutable scientific payload they reference.
 
-## 4. Critical uniqueness and idempotency constraints
+## 5. Critical uniqueness and idempotency constraints
 
 A physical schema must enforce equivalents of the following constraints:
 
 | Constraint | Purpose |
 |---|---|
+| unique `(session_ref, delivery_sequence)` | authoritative item-presentation order |
+| unique `delivery_event_ref` | no delivery evidence identity reuse |
 | unique `(session_ref, client_event_ref)` | response replay idempotency |
 | unique `(session_ref, server_sequence)` | authoritative response ordering |
 | unique `response_event_ref` | no server event identity reuse |
 | unique `response_snapshot_ref` and one canonical completed snapshot per session/version policy | immutable scoring evidence |
 | unique `(instrument_version_ref, item_order)` | deterministic published order |
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
+| at most one current Active `participant_identity_link` per participant under the accepted single-account-link policy | unambiguous current account projection |
+| unique active `(tenant_ref, identity_issuer, identity_subject_ref)` unless an explicit account-merge ADR permits otherwise | prevent one external subject from silently owning multiple product participants |
+| unique `(enrollment_ref, source_system_ref, source_observation_ref)` | longitudinal ingestion replay safety |
+| unique analysis-submission idempotency identity per `(enrollment_ref, analysis_spec_ref, observation_set_digest)` | repeatable TEPP dispatch |
 | unique `(tenant_ref, source, outbox_event_ref)` or an equivalently stronger globally unique event identity with tenant binding | durable outbound event identity |
 | unique `(tenant_ref, consumer_name, source, source_event_ref)` | tenant-bound inbox deduplication |
 | unique research linkage for `(research_program_ref, participant_ref)` unless an ADR explicitly permits rotation semantics | controlled pseudonym mapping |
@@ -349,7 +439,31 @@ A physical schema must enforce equivalents of the following constraints:
 
 Idempotency keys are tenant/resource scoped; a key from one tenant cannot suppress or replay another tenant's state change.
 
-## 5. Integration tenant binding and crash-safe consumption
+## 6. Participant identity-link boundary
+
+`participant_identity_link` implements ADR-0020's product-owned append-only account-attachment evidence. It is deliberately separate from `assessment_participant` and from the research linkage table.
+
+Requirements:
+
+- `assessment_participant.participant_ref` remains stable whether the person is anonymous, linked, unlinked, or recovered;
+- link/unlink/relink/recovery appends lifecycle evidence rather than replacing historical issuer/subject values;
+- the current link is a derivable projection over valid lifecycle records;
+- issuer and subject references remain opaque and provider scoped;
+- historical sessions/results never cascade-delete or rewrite because an IdP account changes;
+- restricted research linkage never reads the current account-link table as its public pseudonym namespace;
+- data-rights/retention handling is explicit and auditable.
+
+## 7. Longitudinal boundary
+
+The Commons longitudinal tables are orchestration/evidence records only:
+
+- `longitudinal_enrollment` binds product participant, program, consent, and collection-system references;
+- `longitudinal_observation_record` stores normalized observation identity/time/construct/version/context references required to reproduce a submission, not a duplicate Gyeot application database;
+- `temporal_analysis_submission` records exact observation-set digest, TEPP analysis specification, lifecycle, and returned artifact reference.
+
+The model preserves observed/available/ingested time so temporal leakage can be tested. Membership/context is versioned/referenced so multilevel, cross-classified, and multiple-membership semantics are not flattened before TEPP analysis.
+
+## 8. Integration tenant binding and crash-safe consumption
 
 `integration_outbox.tenant_ref` is derived from the product-owned subject/resource in the same local transaction as the business mutation and outbox record. A caller-provided tenant string never becomes authoritative merely because it appears in an event body.
 
@@ -364,7 +478,7 @@ A tenant/resource mismatch or conflicting replay is quarantined/fails closed bef
 
 `integration_inbox.processing_state` models at least `pending`, `processing`, `completed`, and `quarantined`/terminal failure. Receipt alone is not completion. For a local side effect, the domain mutation and inbox completion commit atomically. For a non-local side effect, processing records a durable local work/outbox item or stable external idempotency key; `completed` is written only after completion evidence is verified. A crash therefore leaves recoverable state instead of suppressing an effect that never happened.
 
-## 6. Restricted linkage boundary
+## 9. Restricted research linkage boundary
 
 `research_identity_linkage` is the highest-sensitivity product-owned data structure because it bridges operational participant identity to research pseudonym identity.
 
@@ -377,7 +491,7 @@ Requirements:
 - versioned pseudonym/linkage-key metadata;
 - deletion/retention behavior governed by explicit research scope, law, and ethics policy rather than blanket row masking.
 
-## 7. Payload storage
+## 10. Payload storage
 
 The logical model stores `payload_digest` because routine domain, audit, and observability paths should not require raw response content. A deployment may store the encrypted response payload in the operational database or an approved encrypted object store.
 
@@ -390,11 +504,11 @@ Whichever adapter is chosen must preserve:
 - immutable snapshot replay;
 - no raw payload in routine logs, outbox metadata, or public release manifests.
 
-## 8. Naming contract
+## 11. Naming contract
 
 Database objects use at least two descriptive words and `snake_case` by default. Short legacy names are not introduced for convenience. Public identifiers remain opaque, non-numeric references even if a storage engine uses internal surrogate keys.
 
-## 9. Migration contract
+## 12. Migration contract
 
 The first physical migration must be reviewed against this logical model and the accepted ADRs. Subsequent migrations must:
 
@@ -404,8 +518,9 @@ The first physical migration must be reviewed against this logical model and the
 4. backfill new immutable references deterministically and audibly;
 5. prove tenant and identity-boundary constraints after migration;
 6. pass backup/restore verification before destructive changes;
-7. preserve tenant-bound outbox/inbox uniqueness and crash-recoverable processing state.
+7. preserve tenant-bound outbox/inbox uniqueness and crash-recoverable processing state;
+8. preserve append-only participant identity-link history and longitudinal source-time semantics.
 
-## 10. As-built rule
+## 13. As-built rule
 
-Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, and ownership rules against this model. Silent divergence is a release defect.
+Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, identity-link history, longitudinal time semantics, and ownership rules against this model. Silent divergence is a release defect.
