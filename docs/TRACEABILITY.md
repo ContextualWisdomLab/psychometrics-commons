@@ -1,7 +1,7 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-10
+- Date: 2026-08-12
 - Evaluated protected-main implementation baseline: `748876c12f443cc3325448927271199fd98db733`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
@@ -39,6 +39,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
 | Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
 | Durable outbox/inbox delivery semantics | PRD §7, §9 | TRD §19–20 | ADR-0014, ADR-0015 | **Implemented** domain contracts in `src/integration.rs`; physical PostgreSQL evidence persistence is **Active PR #24**, not protected-main truth |
+| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Active PR #26** adds a domain health/readiness contract; HTTP probes, live dependency checks, measured thresholds, and deployment evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; actual English/Korean form content, rights, translation, invariance and serving are Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
 | EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/normalized-ingestion/orchestration adapter |
@@ -74,6 +75,9 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts | physical persistence, canonical digest, tenant mismatch, crash, duplicate, poison-message tests; PR #24 supplies a subset pending merge |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics | durable pending/processing/completed persistence + crash/retry tests |
+| Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Active PR #26** models liveness separately from operation-scoped readiness and independent capabilities | live transport probes, dependency observations, metrics, and deployment-profile acceptance |
+| Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Active PR #26** evaluates only capabilities required by the selected operation and fails unknown required capability closed | real adapter classification and degraded-mode integration tests |
+| Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Active PR #26** fail-closed domain contract | persistence/job backlog metrics, migration/schema probes, alerting, and failure-injection evidence |
 | No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
 | AI cannot mutate numeric scientific result | AI Governance; ADR-0009, ADR-0018 | architecture policy | product adapter/adversarial mutation tests |
@@ -101,11 +105,13 @@ src/lib.rs
 └── session.rs        # server-authoritative assessment-session transitions
 ```
 
-Still-Target logical modules/adapters include full persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, and Measurement Workbench orchestration. ADR-0019's full publication-evidence gate also remains Target.
+Still-Target logical modules/adapters include full persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/probes/metrics, and Measurement Workbench orchestration. ADR-0019's full publication-evidence gate also remains Target.
 
 ### Active implementation work that is not protected-main truth
 
 PR #24 (`feat/postgres-integration-persistence`) carries PostgreSQL integration-evidence persistence and Runtime CI evidence at its own exact head. It is **not protected-main truth** and is classified **Active PR** until the unchanged reviewed/check-clean head is actually integrated into protected main. This document must be advanced again after merge rather than silently treating the PR as shipped.
+
+PR #26 (`feat/capability-health-contract-20260812`) carries the operation-scoped health/readiness domain contract and exact-head contract tests. It is **not protected-main truth** and remains **Active PR** until an unchanged reviewed/check-clean head is integrated. HTTP `/health` endpoints, live dependency probes, metrics/alerts, measured backlog thresholds, deployment evidence, and SLO/RPO/RTO claims remain explicitly outside this slice.
 
 ## 5. ADR traceability by concern
 
