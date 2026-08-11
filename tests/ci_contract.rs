@@ -36,6 +36,22 @@ fn postgres_health_checks_allow_initialization_restart() {
 }
 
 #[test]
+fn postgres_credentials_are_ephemeral_per_workflow_run() {
+    const EPHEMERAL_PASSWORD: &str =
+        "POSTGRES_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}";
+
+    assert!(!CI_WORKFLOW.contains("POSTGRES_PASSWORD: postgres"));
+    assert!(!CI_WORKFLOW.contains("password=postgres"));
+    assert_eq!(CI_WORKFLOW.matches(EPHEMERAL_PASSWORD).count(), 3);
+    assert_eq!(
+        CI_WORKFLOW
+            .matches("name: Configure ephemeral PostgreSQL test connection")
+            .count(),
+        3
+    );
+}
+
+#[test]
 fn compile_gate_rejects_stale_lockfiles_before_building() {
     assert!(CI_WORKFLOW.contains("run: cargo check --locked --all-targets"));
 }
