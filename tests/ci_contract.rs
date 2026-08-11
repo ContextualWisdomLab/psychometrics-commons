@@ -34,6 +34,17 @@ fn lockfile_artifact_upload_uses_node24_compatible_action() {
 }
 
 #[test]
+fn lockfile_failure_evidence_is_scoped_to_the_lock_gate() {
+    assert!(CI_WORKFLOW.contains("id: cargo_lock_gate"));
+    assert_eq!(
+        CI_WORKFLOW
+            .matches("if: failure() && steps.cargo_lock_gate.outcome == 'failure'")
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn coverage_failures_identify_the_incomplete_source_files() {
     assert!(CI_WORKFLOW.contains("INCOMPLETE_FILE"));
     assert!(CI_WORKFLOW.contains("entry.get(\"files\", [])"));
