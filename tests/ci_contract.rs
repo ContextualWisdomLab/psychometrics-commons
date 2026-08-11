@@ -36,6 +36,11 @@ fn postgres_health_checks_allow_initialization_restart() {
 }
 
 #[test]
+fn compile_gate_rejects_stale_lockfiles_before_building() {
+    assert!(CI_WORKFLOW.contains("run: cargo check --locked --all-targets"));
+}
+
+#[test]
 fn lockfile_artifact_upload_uses_node24_compatible_action() {
     const NODE24_UPLOAD: &str =
         "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f";
