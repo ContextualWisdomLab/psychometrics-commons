@@ -1,6 +1,6 @@
 //! Real `PostgreSQL` persistence contract for durable integration evidence.
 
-use postgres::{Client, NoTls};
+use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::integration::{InboxDisposition, IntegrationEvent};
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration, enqueue_outbox_event, PersistenceDisposition,
@@ -11,7 +11,13 @@ const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn event(event_ref: &str, tenant_ref: &str, digest: &str) -> IntegrationEvent {
-    event_at(event_ref, tenant_ref, digest, 10_000)
+    event_from_source(
+        event_ref,
+        "psychometrics_commons",
+        tenant_ref,
+        digest,
+        10_000,
+    )
 }
 
 fn event_at(
@@ -20,11 +26,27 @@ fn event_at(
     digest: &str,
     occurred_at_unix_ms: u64,
 ) -> IntegrationEvent {
+    event_from_source(
+        event_ref,
+        "psychometrics_commons",
+        tenant_ref,
+        digest,
+        occurred_at_unix_ms,
+    )
+}
+
+fn event_from_source(
+    event_ref: &str,
+    source_ref: &str,
+    tenant_ref: &str,
+    digest: &str,
+    occurred_at_unix_ms: u64,
+) -> IntegrationEvent {
     IntegrationEvent::new(
         event_ref,
         "assessment.session.completed",
         "v1",
-        "psychometrics_commons",
+        source_ref,
         tenant_ref,
         "session_alpha",
         occurred_at_unix_ms,
@@ -85,6 +107,39 @@ fn verify_outbox_contract(client: &mut Client) -> IntegrationEvent {
         enqueue_outbox_event(client, &tenant_alpha, 4),
         Err(PersistenceError::ConflictingReplay)
     ));
+
+    let tenant_beta = event("event_alpha", "tenant_beta", DIGEST_B);
+    assert_eq!(
+        enqueue_outbox_event(client, &tenant_beta, 3).unwrap(),
+        PersistenceDisposition::Inserted
+    );
+    let source_beta = event_from_source(
+        "event_alpha",
+        "validated_partner",
+        "tenant_alpha",
+        DIGEST_B,
+        10_000,
+    );
+    assert_eq!(
+        enqueue_outbox_event(client, &source_beta, 3).unwrap(),
+        PersistenceDisposition::Inserted
+    );
+
+    for (source_ref, tenant_ref) in [
+        ("psychometrics_commons", "tenant_alpha"),
+        ("psychometrics_commons", "tenant_beta"),
+        ("validated_partner", "tenant_alpha"),
+    ] {
+        client
+            .execute(
+                "INSERT INTO integration_delivery_attempt (\
+                     source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome,\
+                     occurred_at_unix_ms\
+                 ) VALUES ($1, $2, 'event_alpha', 'attempt_alpha', 'delivered', 10001)",
+                &[&source_ref, &tenant_ref],
+            )
+            .unwrap();
+    }
 
     let transactional_event = event("event_transaction", "tenant_alpha", DIGEST_A);
     {
@@ -148,25 +203,89 @@ fn verify_persisted_row_counts(client: &mut Client) {
         .query_one("SELECT count(*) FROM integration_outbox", &[])
         .unwrap()
         .get(0);
+    let attempt_count: i64 = client
+        .query_one("SELECT count(*) FROM integration_delivery_attempt", &[])
+        .unwrap()
+        .get(0);
     let inbox_count: i64 = client
         .query_one("SELECT count(*) FROM integration_inbox", &[])
         .unwrap()
         .get(0);
-    assert_eq!(outbox_count, 1);
+    assert_eq!(outbox_count, 3);
+    assert_eq!(attempt_count, 3);
     assert_eq!(inbox_count, 2);
 }
 
-fn verify_database_constraints(client: &mut Client) {
-    let invalid_reference = client.execute(
+fn assert_outbox_reference_rejected(
+    client: &mut Client,
+    event_ref: &str,
+    source_ref: &str,
+    tenant_ref: &str,
+    subject_ref: &str,
+    correlation_ref: &str,
+) {
+    let result = client.execute(
         "INSERT INTO integration_outbox (\
              event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,\
              occurred_at_unix_ms, correlation_ref, payload_digest, max_attempts,\
              current_state, latest_event_at_unix_ms\
-         ) VALUES ('123', 'assessment.session.completed', 'v1', 'psychometrics_commons',\
-                   'tenant_alpha', 'session_alpha', 1, 'correlation_alpha', $1, 3, 'pending', 1)",
-        &[&DIGEST_A],
+         ) VALUES ($1, 'assessment.session.completed', 'v1', $2, $3, $4, 1, $5, $6, 3,\
+                   'pending', 1)",
+        &[
+            &event_ref,
+            &source_ref,
+            &tenant_ref,
+            &subject_ref,
+            &correlation_ref,
+            &DIGEST_A,
+        ],
     );
-    assert!(invalid_reference.is_err());
+    assert!(result.is_err());
+}
+
+fn verify_database_constraints(client: &mut Client) {
+    for invalid_reference in ["123", "-3", "+3", "1.5", "1,5", "1e5", "1E-5"] {
+        assert_outbox_reference_rejected(
+            client,
+            invalid_reference,
+            "psychometrics_commons",
+            "tenant_constraint",
+            "session_constraint",
+            "correlation_constraint",
+        );
+    }
+    assert_outbox_reference_rejected(
+        client,
+        "event_invalid_source",
+        "-3",
+        "tenant_constraint",
+        "session_constraint",
+        "correlation_constraint",
+    );
+    assert_outbox_reference_rejected(
+        client,
+        "event_invalid_tenant",
+        "psychometrics_commons",
+        "1.5",
+        "session_constraint",
+        "correlation_constraint",
+    );
+    assert_outbox_reference_rejected(
+        client,
+        "event_invalid_subject",
+        "psychometrics_commons",
+        "tenant_constraint",
+        "1e5",
+        "correlation_constraint",
+    );
+    assert_outbox_reference_rejected(
+        client,
+        "event_invalid_correlation",
+        "psychometrics_commons",
+        "tenant_constraint",
+        "session_constraint",
+        "1,5",
+    );
 
     let invalid_digest = client.execute(
         "INSERT INTO integration_outbox (\
@@ -179,6 +298,36 @@ fn verify_database_constraints(client: &mut Client) {
         &[],
     );
     assert!(invalid_digest.is_err());
+}
+
+fn verify_transaction_isolation_contract(client: &mut Client, tenant_alpha: &IntegrationEvent) {
+    let isolation_event = event("event_isolation", "tenant_alpha", DIGEST_A);
+    let mut serializable = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        enqueue_outbox_event(&mut serializable, &isolation_event, 3),
+        Err(PersistenceError::UnsupportedIsolationLevel)
+    ));
+    serializable.rollback().unwrap();
+
+    let mut repeatable_read = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        accept_inbox_event(
+            &mut repeatable_read,
+            "consumer_isolation",
+            tenant_alpha,
+            16_000,
+        ),
+        Err(PersistenceError::UnsupportedIsolationLevel)
+    ));
+    repeatable_read.rollback().unwrap();
 }
 
 fn verify_persistence_error_messages() {
@@ -201,6 +350,10 @@ fn verify_persistence_error_messages() {
     assert_eq!(
         PersistenceError::ConflictingReplay.to_string(),
         "persistence idempotency identity was replayed with conflicting evidence"
+    );
+    assert_eq!(
+        PersistenceError::UnsupportedIsolationLevel.to_string(),
+        "PostgreSQL integration persistence requires read committed isolation"
     );
 }
 
@@ -238,6 +391,7 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
     verify_inbox_contract(&mut client, &tenant_alpha);
     verify_persisted_row_counts(&mut client);
     verify_database_constraints(&mut client);
+    verify_transaction_isolation_contract(&mut client, &tenant_alpha);
     verify_persistence_error_messages();
     verify_database_failures(&mut client, &tenant_alpha);
 }
