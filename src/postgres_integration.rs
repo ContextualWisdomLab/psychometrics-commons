@@ -12,6 +12,20 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const INTEGRATION_MIGRATION: &str = include_str!("../migrations/0001_integration_delivery.sql");
+const OUTBOX_REPLAY_QUERY: &str = "SELECT EXISTS (\
+     SELECT 1 FROM integration_outbox \
+     WHERE event_ref = $1 AND event_type = $2 AND schema_version = $3 \
+       AND source_ref = $4 AND tenant_ref = $5 AND subject_ref = $6 \
+       AND occurred_at_unix_ms = $7 AND correlation_ref = $8 \
+       AND causation_ref IS NOT DISTINCT FROM $9 \
+       AND payload_digest = $10 AND max_attempts = $11\
+ )";
+const INBOX_REPLAY_QUERY: &str = "SELECT EXISTS (\
+     SELECT 1 FROM integration_inbox \
+     WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
+       AND source_event_ref = $4 AND event_type = $5 AND schema_version = $6 \
+       AND subject_ref = $7 AND payload_digest = $8\
+ )";
 
 /// Outcome of inserting immutable persistence evidence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -127,19 +141,8 @@ pub fn enqueue_outbox_event(
         return Ok(PersistenceDisposition::Inserted);
     }
 
-    let exact_replay: bool = client
-        .query_one(
-            "SELECT EXISTS (\
-                 SELECT 1 FROM integration_outbox \
-                 WHERE event_ref = $1 AND event_type = $2 AND schema_version = $3 \
-                   AND source_ref = $4 AND tenant_ref = $5 AND subject_ref = $6 \
-                   AND occurred_at_unix_ms = $7 AND correlation_ref = $8 \
-                   AND causation_ref IS NOT DISTINCT FROM $9 \
-                   AND payload_digest = $10 AND max_attempts = $11\
-             )",
-            params,
-        )?
-        .get(0);
+    let exact_replay_row = client.query_one(OUTBOX_REPLAY_QUERY, params)?;
+    let exact_replay: bool = exact_replay_row.get(0);
     if exact_replay {
         Ok(PersistenceDisposition::Duplicate)
     } else {
@@ -195,17 +198,8 @@ pub fn accept_inbox_event(
         return Ok(InboxDisposition::Accepted);
     }
 
-    let exact_replay: bool = client
-        .query_one(
-            "SELECT EXISTS (\
-                 SELECT 1 FROM integration_inbox \
-                 WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
-                   AND source_event_ref = $4 AND event_type = $5 AND schema_version = $6 \
-                   AND subject_ref = $7 AND payload_digest = $8\
-             )",
-            &params[..8],
-        )?
-        .get(0);
+    let exact_replay_row = client.query_one(INBOX_REPLAY_QUERY, &params[..8])?;
+    let exact_replay: bool = exact_replay_row.get(0);
     if exact_replay {
         Ok(InboxDisposition::Duplicate)
     } else {
