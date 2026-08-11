@@ -1,99 +1,104 @@
 # Documentation Completeness Assessment
 
 - Status: Architecture baseline assessment
-- Date: 2026-08-09
-- Evaluated protected-main baseline: `8b1f410fc16ec4c867d28a1cd26c12fc495b8de5`
-- Scope: the product, architecture, psychometric, longitudinal, research, AI, privacy, integration, quality, risk, compliance-readiness, and operational decisions established in the Psychometrics Commons design discussions
+- Date: 2026-08-10
+- Evaluated protected-main baseline: `748876c12f443cc3325448927271199fd98db733`
+- Scope: product, architecture, psychometric, longitudinal, research, AI, privacy, integration, quality, risk, compliance-readiness, operations, and durable product decisions established throughout the Psychometrics Commons design discussion
 
 ## Executive assessment
 
-The repository already had a **strong textual baseline** before this assessment: a product requirements document, a detailed technical requirements document, an architecture map, thirteen implementation-ready ADRs, and executable Rust domain contracts for session, response, scoring, result, consent, research-contribution, and data-rights behavior.
+The repository is **sufficient as an implementation architecture baseline**. It is **not sufficient as GA operational/scientific release evidence**, and before this reconciliation it was not fully current with protected main.
 
-It was **not yet sufficient as a complete architecture description for commercial due diligence or multi-team implementation** because several critical viewpoints existed only as prose. In particular, there was no explicit C4-style context/container/component view, no UML-aligned domain/state/sequence model set, no logical ERD with cardinalities and ownership, no dedicated security/privacy data-flow model, no requirements-to-code traceability matrix, no operations/recovery evidence model, no measurable quality-attribute scenario set, no consolidated risk/compliance-readiness model, no canonical glossary, no dedicated decision governing continuous-score versus narrative-style separation, no product-side scientific publication evidence gate, and no durable consolidated governance documents covering the psychometric, AI, and Research Commons rules developed throughout the design discussion.
+The material defect was not absence of PRD/TRD/Architecture. Those artifacts are strong. The defect was **traceability and view drift after protected-main implementation advanced**: `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` were merged while `docs/TRACEABILITY.md` still described those responsibilities as Target; the logical ERD did not yet model item-delivery evidence, append-only account-link history, or the Commons-owned longitudinal orchestration records; and UML did not make the Measurement Workbench publication-evidence flow or Gyeot→Commons→TEPP sequence explicit.
 
-This change closes those architecture-description and governance gaps while deliberately separating **normative target architecture** from **as-built implementation**. It does not pretend that future API transports, database migrations, integrations, deployment infrastructure, SLA commitments, certifications, or scientific validation studies already exist.
+This reconciliation closes those architecture-definition gaps without promoting active PR work or target diagrams to shipped truth. PostgreSQL evidence persistence on PR #24 remains **Active PR**, not protected-main implementation. OpenAPI/AsyncAPI, physical DDL beyond actual migrations, deployed topology, measured SLO/RPO/RTO, certification, and instrument-release evidence remain implementation/evidence-gated and must not be fabricated.
 
-## Artifact assessment
+## Current artifact sufficiency
 
-| Artifact | Pre-update assessment | Gap | Action in this update |
-|---|---|---|---|
-| PRD | Strong implementation baseline | Requirement identifiers and downstream traceability were implicit | Keep PRD authoritative and add cross-artifact traceability instead of duplicating requirement prose |
-| TRD | Strong and unusually detailed | API/event contracts were prose-only; physical topology and diagram views were absent | Keep TRD authoritative; add architecture views and machine-readable contract gate through ADR/traceability |
-| Measurement governance | Distributed across PRD/TRD/conversation/upstream fast-mlsirm research | Model selection, recovery, scoreability, multilevel/time/facet, rubric/item-bank rules were not consolidated | Add `MEASUREMENT_GOVERNANCE.md` while keeping numerical ownership in fast-mlsirm |
-| AI governance | Distributed across ADR-0009/TRD/conversation | Judge-as-rater, provider/privacy, deterministic fallback, artificial-crowd and prohibited mutation rules were not consolidated | Add `AI_GOVERNANCE.md` |
-| Research governance | Distributed across PRD/TRD/ADR-0006/0007 | Release access classes, staging/privacy/scientific review, withdrawal/correction and reproducibility were not one governed lifecycle | Add `RESEARCH_GOVERNANCE.md` |
-| Quality attributes | Scattered nonfunctional requirements | Reliability/security/privacy/performance/recovery goals lacked scenario/evidence form | Add `QUALITY_ATTRIBUTES.md` with stimulus/response/evidence scenarios and no invented SLA numbers |
-| Compliance readiness | General SOC 2/CSAP intent only | No evidence maturity model/control-readiness map; risk of certification overclaim | Add `COMPLIANCE_READINESS.md` with architecture→implementation→verification→external assessment distinction |
-| Risk register | Missing | Material scientific/product/security/privacy/ops/commercial risks had no consolidated treatment/evidence state | Add `RISK_REGISTER.md` |
-| Glossary | Missing | Similar terms such as assessment/instrument/release/result/research identity/multifactor/multifaceted could drift | Add `GLOSSARY.md` canonical terminology |
-| ADR set | Strong general ownership/failure/validation/rollback baseline | API/event representation, persistence boundaries, architecture governance, GA recovery, score-vs-narrative semantics and scientific publication gates lacked dedicated decisions | Add ADR-0014 through ADR-0019 and strengthen ADR template view/data/operations impact requirements |
-| `ARCHITECTURE.md` | Strong bounded-context and failure-degradation map | Stakeholders/viewpoints, logical containers, UML/ERD links, and as-built/target distinction incomplete | Add governed architecture-view index and target/as-built rule |
-| UML | Missing | No class, state, or sequence model suitable for implementation/review | Add UML-aligned Mermaid class/state/sequence model set |
-| ERD | Missing | Entity names existed in TRD but cardinalities, restricted linkage, snapshot membership, and ownership were not explicit | Add logical ERD and persistence invariants |
-| C4/context views | Missing as formal view set | Existing ASCII dependency map did not separate context/container/component concerns | Add context, container, and component views |
-| Security/privacy architecture | Distributed across ADR/TRD | No single threat/data-classification/trust-boundary model | Add security/privacy architecture document |
-| Deployment/operations | Partial prose in ADR-0011/TRD | No deployment topology, recovery gate, observability/runbook evidence matrix | Add deployment/operations architecture document |
-| Requirements traceability | Missing | PRD/TRD/ADR/code/test relationships could drift silently | Add traceability matrix and maintenance rule |
-| Roadmap | Scheduler prompt only / implicit | Product delivery order was not durable repository documentation | Add bounded product roadmap with exit criteria |
-| Agent guidance | `AGENTS.md` existed, `CLAUDE.md` absent | Architecture-view maintenance and no-early-stop continuation were not durable repo rules | Strengthen AGENTS and add concise CLAUDE entry point |
-| Documentation fitness test | Missing | Required view/governance set and ADR index could silently regress | Add repository integration test for required artifacts, ADR index, and traceability markers |
-| Machine-readable HTTP API | Not implemented | Prose routes are not yet executable OpenAPI contract | ADR-0014 requires OpenAPI only when transport exists; do not fabricate an as-built API now |
-| Machine-readable event API | Not implemented | Prose events are not yet executable AsyncAPI contract | ADR-0014 requires AsyncAPI when durable event transport exists |
-| Physical database DDL | Not implemented | Logical ERD must not be mistaken for deployed schema | Keep ERD logical until migrations are implemented/reviewed; ADR-0015 governs persistence |
-| As-built deployment diagram | Not yet meaningful | Current repo is domain/runtime core rather than deployed hosted stack | Add target deployment views now; require exact as-built topology/evidence at deployable/GA profiles |
-| Operational SLO/RPO/RTO | Not defined | Values without topology/load/recovery evidence would be invented | ADR-0017 explicitly blocks GA/SLA claims until profile-specific measured evidence exists |
+| Artifact family | Current assessment | Reconciliation / remaining obligation |
+|---|---|---|
+| PRD | **Sufficient / current** | Canonical journey, consumer scope, Big Five first family, narrative separation, reflection, longitudinal, research contribution, boundaries, and acceptance criteria are present. Keep requirement-to-evidence mapping in Traceability rather than duplicate prose. |
+| TRD | **Sufficient with normal implementation follow-through** | Strong systems-of-record, lifecycle, security/tenancy, research, AI, API/event, persistence, accessibility, locale and degraded-mode contracts. New concrete domain modules are reconciled through Traceability/UML/ERD; future transport/migration work must update TRD if semantics change. |
+| Root `ARCHITECTURE.md` + C4 | **Sufficient / current target architecture** | Bounded-context ownership and dependency direction are explicit. It is target/mixed architecture, not deployment proof. |
+| ADR set | **Sufficient after ADR-0020** | ADR-0001–0019 covered the major product/scientific/integration decisions; ADR-0020 now removes ambiguity around mutable Keyverse projection versus append-only persisted identity-link history. |
+| UML | **Sufficient after reconciliation** | Domain/state/sequence views now include item delivery, participant identity-link lifecycle, longitudinal orchestration, and Measurement Workbench publication evidence. |
+| Logical ERD | **Sufficient after reconciliation** | Adds `participant_identity_link`, `item_delivery_event`, `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` while retaining the no-fabricated-DDL rule. |
+| Security/privacy architecture | **Sufficient as design baseline** | Trust boundaries, research linkage, tenant fail-closed behavior, data classes, and prohibited flows are documented; E2E evidence remains required. |
+| Measurement governance | **Sufficient as product-side governance** | Covers relation-sensitive model selection, factor-retention separation, parameter recovery/coverage, scoreability, DIF/invariance/linking, multilevel/multiple-membership/time, judge-as-rater, and fast-mlsirm ownership. Numerical kernels remain upstream. |
+| AI governance | **Sufficient as design baseline** | AI is optional/bounded and cannot mutate scientific numeric truth. Provider/egress/model tests remain implementation evidence. |
+| Research governance | **Sufficient as design baseline** | Purpose-specific contribution, pseudonymization/linkage boundary, privacy/scientific review and immutable release semantics are present. End-to-end release evidence remains Target. |
+| Product experience | **Sufficient as design baseline** | Quick/Deep/Reflect/Longitudinal, continuous-score interpretation, narrative UX, research opt-in, accessibility/i18n and Workbench surfaces are described. |
+| Quality / risk / compliance readiness | **Sufficient as assurance baseline** | Evidence scenarios and risk state are explicit; readiness is not certification. |
+| Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `748876…`, marks newly merged domain modules Implemented/Partial, and isolates PR #24 as Active PR. Must be updated after every material merge. |
+| Roadmap / agent guidance / changelog | **Sufficient for continued delivery** | Must remain code-current; documentation completion is not a terminal condition for the execution loop. |
+| Machine-readable OpenAPI / AsyncAPI | **Not yet applicable as as-built evidence** | Add and validate with the first implemented HTTP/event transport. Do not publish aspirational operations as deployed. |
+| Physical schema / as-built topology | **Partial / implementation-gated** | Logical ERD is authoritative target semantics. Actual migrations/topology/rollback/restore evidence must be compared to it as those artifacts land. |
+| Instrument-release evidence bundles | **Target** | Every publishable consumer instrument needs immutable rights, locale/translation, scoring/calibration/norm, DIF/invariance/linking where claimed, scoreability, intended-use and narrative-rule evidence. |
 
-## Sufficiency decision after this update
+## Whole-conversation architecture reconciliation
 
-After the linked governance/view documents, ADR additions, traceability, risk/quality/compliance/terminology baselines, and architecture fitness test in this change are merged, the repository is considered **sufficient as an implementation architecture baseline**, but **not sufficient as GA operational or scientific release evidence**.
+The durable product definition is:
 
-Implementation-baseline sufficiency means a new engineer, reviewer, buyer-side architect, scientist, or security/data reviewer can determine:
+> **Scientific Trait Core + Accessible Narrative + Reflective Capacities + Longitudinal Context + Open Science**
 
-1. what the product owns and explicitly does not own;
-2. which CWL repository is system of record for each cross-service capability;
-3. the allowed dependency direction and forbidden database coupling;
-4. the principal domain aggregates, cardinalities, immutable boundaries, and lifecycle states;
-5. the participant, scoring, account-linking, data-rights, and research-release sequences including failure/degraded behavior;
-6. the logical data model, identity separation, research linkage restriction, and outbox/inbox transaction design;
-7. the security/privacy trust boundaries, data classifications, major threats, and prohibited flows;
-8. the target deployment profiles, capability-scoped failure model, recovery/observability expectations, and truthful pre-GA/GA distinction;
-9. how PRD requirements trace to TRD sections, ADRs, source modules, and future verification;
-10. which architecture artifacts describe target intent versus current protected-main implementation;
-11. what psychometric evidence is required before instrument/score publication without duplicating fast-mlsirm numerics;
-12. why continuous/facet psychometric scores remain the scientific source while Personality Style is only a versioned, deterministic, optional narrative/presentation mapping;
-13. what AI may and may not do and why a model/judge output cannot override deterministic scientific/product gates;
-14. how research contribution becomes a privacy/scientifically reviewed immutable release without exposing operational identity;
-15. which nonfunctional qualities must be demonstrated through measurable scenarios rather than slogans;
-16. which material risks remain open/evidence-required even when architecture controls exist;
-17. how compliance-readiness evidence differs from external certification/attestation;
-18. the canonical meaning of product/scientific/identity/research/operations terms;
-19. what implementation sequence closes remaining product gaps without inventing new repositories or duplicating existing CWL bounded contexts.
+The user journey is:
+
+> **Measure → Understand → Reflect → Observe Over Time → Contribute to Science**
+
+The following decisions are now discoverable in canonical repository artifacts and must remain mutually consistent:
+
+1. **Scientific source of truth.** Continuous/facet scores, uncertainty, calibration, norms, DIF/invariance/linking and scoreability are scientific artifacts. Personality Style is a separately versioned deterministic presentation mapping; it is not MBTI equivalence and optional AI cannot change the numeric source of truth.
+2. **Initial consumer scope.** IPIP Big Five is the first core family. Self-compassion and future reflection constructs are independently measured instruments, not inferences from Big Five.
+3. **Anonymous-first identity.** Product-owned participant identity is stable. Keyverse is optional federation. Account attachment never rewrites historical assessment/result identity and persistence uses append-only identity-link history (ADR-0020).
+4. **Purpose-specific consent and research separation.** Service use does not imply research donation. Operational and research identity namespaces are separated; public releases exclude operational/Keyverse identifiers.
+5. **Longitudinal ownership.** Gyeot owns EMA/ESM collection; TEPP owns temporal/event/multilevel/cross-classified/multiple-membership analytics; Psychometrics Commons owns consented enrollment, normalized ingestion evidence, exact observation-set identity and orchestration.
+6. **Measurement Workbench reuse.** Construct→Assessment Contract→Rubric/Blueprint→Item Bank→Pilot→Calibration→DIF/Fairness/Fit→Norming/Linking→Assessment Release→Data Collection→Dataset Release is orchestrated without copying fast-mlsirm numerical kernels, Inkspan authoring internals or RankWeave retrieval internals.
+7. **Research Commons release.** Candidate data pass purpose limitation, pseudonymization/de-identification, rare-combination/privacy review, scientific review and immutable snapshot/release registration through semantic-data-portal.
+8. **Bounded-context independence.** Keyverse, fast-mlsirm, Gyeot, TEPP, semantic-data-portal, contextual-orchestrator, pg-llm-batch, EgressWeave, Inkspan, RankWeave, LifeOS and Clearfolio remain independently deployable dependencies. g7 is a replaceable reference shell, never a product-core dependency.
+9. **Scientific acceptance.** Correlation alone is insufficient. Where scientifically applicable, true-parameter/score bias, MAE/RMSE, interval/SE coverage, convergence, numerical-boundary/backend parity, DIF/invariance/linking/norm and scoreability evidence are required. Factor retention and structural model selection are distinct, and relation/distinguishability must fail closed rather than be guessed.
+10. **Hierarchy/time preservation.** Testlet, multilevel, cross-classified, multiple-membership and temporal structure cannot be flattened when scientifically material; otherwise the product risks atomistic and temporal-leakage errors.
+
+Enterprise issue prioritization/causal expected-intervention-value logic is not part of the Psychometrics Commons bounded context unless a future accepted ADR explicitly adds it.
+
+## Protected-main implementation reconciliation
+
+At exact protected-main `748876c12f443cc3325448927271199fd98db733` the domain surface includes, among other existing modules:
+
+- `src/item_delivery.rs` — sequence-aware item delivery evidence;
+- `src/participant.rs` — stable participant identity and first optional Keyverse link primitive;
+- `src/authorization.rs` — fail-closed tenant/task authorization domain gates;
+- `src/integration.rs` — outbox/inbox/retry/quarantine domain contracts.
+
+Those modules are now represented as protected-main evidence in `docs/TRACEABILITY.md`. Their HTTP/persistence/live-adapter layers are not inferred from the existence of the domain structs.
+
+PR #24 (`feat/postgres-integration-persistence`) remains an active implementation lane. Any PostgreSQL evidence adapter or migration that exists only on that PR remains `IMPLEMENTED_ON_ACTIVE_PR` until the exact reviewed/check-clean head is merged and protected main is refetched.
 
 ## Remaining evidence before GA
 
-The documentation set intentionally does **not** claim GA completion. GA evidence remains incomplete until the product has, on one exact integrated protected head/release architecture:
+GA evidence remains incomplete until one exact integrated protected head/release architecture supplies all applicable evidence below:
 
-- machine-readable OpenAPI contract validated against implemented HTTP transport;
-- AsyncAPI contract validated against implemented durable event channels/messages;
-- reviewed physical database migrations matching logical ERD, transaction, uniqueness, tenancy, and rollback/recovery contracts;
-- a deployed topology with environment-specific network, secret, encryption, residency, retention, backup, restore, and observability evidence;
-- profile-specific SLO, RPO, and RTO commitments derived from measured workload/recovery evidence;
-- protected-main end-to-end functional, security, privacy, tenancy, accessibility, failure-injection, migration, backup/restore, packaging, SBOM/provenance, and release-acceptance results;
-- real fast-mlsirm scoring integration and deterministic fallback behavior;
-- Keyverse identity/account-linking integration tests where the authenticated feature is enabled;
-- research pseudonymization, privacy/scientific review, immutable release, and semantic-data-portal registration end-to-end evidence;
-- instrument rights, translation/content review, calibration, norm, recovery, DIF/invariance, scoreability, intended-use, and narrative-rule evidence for every consumer assessment release;
-- reference-client accessibility evidence, including WCAG 2.2 AA target acceptance and assistive-technology tests;
-- current runbooks and incident/recovery exercises for every enabled GA capability;
-- exact hosted provider/data-location/retention inventory for enabled features;
-- scope-specific current SOC 2/CSAP or other certification mapping and independent assessment evidence before any certification claim;
-- explicit treatment/closure or accepted rationale for critical/high risks in `RISK_REGISTER.md`.
+- machine-readable OpenAPI validated against implemented HTTP transport;
+- AsyncAPI validated against implemented durable event channels/messages;
+- reviewed physical migrations matching logical ERD, transaction, uniqueness, tenant, identity-link, longitudinal-time and rollback/recovery contracts;
+- deployed topology with environment-specific network, secret, encryption, residency, retention, backup, restore and observability evidence;
+- profile-specific SLO/RPO/RTO commitments derived from measured workload and recovery evidence;
+- protected-main E2E functional, security, privacy, tenant-isolation, accessibility, failure-injection, migration, backup/restore, packaging, SBOM/provenance and release-acceptance results;
+- live fast-mlsirm scoring integration with typed failure/no-invented-score and deterministic presentation fallback;
+- Keyverse link/unlink/recovery persistence and transport evidence where authenticated linking is enabled;
+- Gyeot normalized-ingestion and TEPP temporal-analysis orchestration evidence without source-of-truth duplication;
+- research pseudonymization, privacy/scientific review, immutable release and semantic-data-portal registration E2E evidence;
+- per-instrument rights, translation/content review, calibration, norm, recovery, DIF/invariance/linking where claimed, scoreability, intended-use and narrative-rule evidence;
+- WCAG 2.2 AA reference-client acceptance including assistive-technology testing;
+- current runbooks and incident/recovery exercises for enabled GA capabilities;
+- exact provider/data-location/retention inventory;
+- scope-specific independent assessment before any SOC 2/CSAP or equivalent certification claim;
+- explicit closure/accepted-risk rationale for material open risks.
 
 ## Architecture-description governance
 
-Architecture descriptions follow the stakeholder/concern/viewpoint discipline of ISO/IEC/IEEE 42010:2022. UML-aligned behavioral and structural views follow OMG UML 2.5.1 semantics where applicable, while GitHub-rendered Mermaid is used as the repository-native presentation notation. Mermaid rendering is **not** treated as a substitute for normative contracts or executable tests.
+Architecture descriptions follow the stakeholder/concern/viewpoint discipline of ISO/IEC/IEEE 42010:2022. UML-aligned behavioral and structural views follow OMG UML 2.5.1 semantics where applicable, while GitHub-rendered Mermaid is used as the repository-native presentation notation. Mermaid rendering is not a substitute for normative contracts or executable tests.
 
-The hierarchy of authority is:
+Authority is resolved in this order:
 
 ```text
 accepted/superseding ADR
@@ -111,27 +116,13 @@ machine-readable API/event/schema contracts when implemented
 code, migrations, tests and operational evidence
 ```
 
-A lower layer that contradicts a higher layer is a defect; it must not be rationalized as implementation detail. A material change to product ownership, lifecycle, public interface, event, logical entity/cardinality, transaction, scientific publication rule, score/narrative relationship, AI/research authority, trust/privacy boundary, deployment/recovery, or release acceptance must update affected views/governance/traceability or explicitly prove the mappings remain valid.
+A lower layer that contradicts a higher layer is a defect. A material change to product ownership, lifecycle, public interface, event, logical entity/cardinality, transaction, scientific publication rule, score/narrative relationship, identity-link lifecycle, longitudinal boundary, AI/research authority, trust/privacy boundary, deployment/recovery or release acceptance must update affected views/governance/traceability or explicitly prove the mappings remain valid.
 
 ## What “sufficient” does not mean
 
-“Sufficient as an implementation architecture baseline” does **not** mean:
+“Sufficient as an implementation architecture baseline” does **not** mean that target functionality is implemented, diagrams prove deployment, a logical ERD proves migrations, prose routes are usable APIs, an accepted ADR proves a control is tested, compliance readiness equals certification, pseudonymization alone makes a research release safe, high correlation proves psychometric validity, a narrative label is a latent trait, an LLM judge is scientific truth, recovery architecture is an SLA, or complete documentation proves commercial product-market fit.
 
-- all target product functionality is implemented;
-- diagrams prove a deployed service exists;
-- a logical ERD proves physical migrations exist;
-- prose APIs are usable endpoints;
-- accepted ADRs prove their controls are tested;
-- architecture/compliance readiness equals SOC 2 or CSAP certification;
-- a research release is safe merely because identifiers are pseudonymized;
-- a psychometric score is valid merely because a model fit or correlation is high;
-- a Personality Style label is itself a psychometric latent trait or MBTI-equivalent measure;
-- an LLM narrative/judge is a scientific source of truth;
-- a recovery architecture constitutes an SLA;
-- a risk marked `mitigated_by_architecture` is actually closed;
-- a complete documentation set proves commercial product-market fit or acquisition-scale value.
-
-These distinctions are deliberate due-diligence controls rather than documentation caveats.
+These distinctions are due-diligence controls, not caveats to be removed.
 
 ## References
 

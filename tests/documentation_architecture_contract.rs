@@ -1,10 +1,11 @@
 //! Repository architecture-documentation fitness checks.
 //!
 //! These tests keep the required product/architecture/governance viewpoints
-//! discoverable and prevent an accepted ADR from being added without the
-//! authoritative ADR index knowing about it. They intentionally validate
-//! repository structure and traceability markers, not Mermaid layout or semantic
-//! correctness; human architecture review remains required for those.
+//! discoverable, prevent accepted ADRs from disappearing from the authoritative
+//! index, and pin the cross-document vocabulary that distinguishes protected-main
+//! evidence from active-PR and target architecture. They intentionally validate
+//! repository structure and traceability markers, not Mermaid layout or full
+//! semantic correctness; human architecture review remains required for those.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,6 +37,10 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/MEASUREMENT_GOVERNANCE.md",
         "docs/AI_GOVERNANCE.md",
         "docs/RESEARCH_GOVERNANCE.md",
+        "docs/THREAT_MODEL.md",
+        "docs/TEST_STRATEGY.md",
+        "docs/OPERABILITY.md",
+        "docs/RELEASE_ACCEPTANCE.md",
         "docs/QUALITY_ATTRIBUTES.md",
         "docs/COMPLIANCE_READINESS.md",
         "docs/RISK_REGISTER.md",
@@ -51,6 +56,7 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
         "docs/adr/README.md",
         "docs/adr/0000-template.md",
+        "docs/adr/0020-append-only-participant-identity-link-history.md",
     ];
 
     for relative_path in required_paths {
@@ -130,6 +136,10 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
         "docs/MEASUREMENT_GOVERNANCE.md",
         "docs/AI_GOVERNANCE.md",
         "docs/RESEARCH_GOVERNANCE.md",
+        "docs/THREAT_MODEL.md",
+        "docs/TEST_STRATEGY.md",
+        "docs/OPERABILITY.md",
+        "docs/RELEASE_ACCEPTANCE.md",
         "docs/QUALITY_ATTRIBUTES.md",
         "docs/COMPLIANCE_READINESS.md",
         "docs/RISK_REGISTER.md",
@@ -143,12 +153,78 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
 }
 
 #[test]
+fn release_authority_separates_software_instrument_and_research_gates() {
+    let release = read_required(&repository_root().join("docs/RELEASE_ACCEPTANCE.md"));
+    for required_heading in [
+        "Software release gate",
+        "Consumer instrument release gate",
+        "Research dataset release gate",
+        "Release blockers",
+        "Post-release verification",
+    ] {
+        assert!(
+            release.contains(required_heading),
+            "release acceptance must define {required_heading}"
+        );
+    }
+
+    assert!(
+        release.contains("Correlation alone is not sufficient"),
+        "instrument release must reject correlation-only recovery claims"
+    );
+}
+
+#[test]
+fn threat_test_and_operability_docs_preserve_evidence_maturity() {
+    let threat_model = read_required(&repository_root().join("docs/THREAT_MODEL.md"));
+    let test_strategy = read_required(&repository_root().join("docs/TEST_STRATEGY.md"));
+    let operability = read_required(&repository_root().join("docs/OPERABILITY.md"));
+
+    for marker in [
+        "architecture controls described here are not evidence",
+        "cross-tenant IDOR/BOLA",
+        "research re-identification",
+        "outbox/inbox cross-tenant collision",
+    ] {
+        assert!(
+            threat_model.contains(marker),
+            "threat model must preserve marker {marker}"
+        );
+    }
+
+    for marker in [
+        "100% statement/branch coverage does not prove",
+        "Correlation alone is not accepted",
+        "real supported PostgreSQL version",
+        "exact source/artifact it actually tested",
+    ] {
+        assert!(
+            test_strategy.contains(marker),
+            "test strategy must preserve marker {marker}"
+        );
+    }
+
+    for marker in [
+        "measured service levels remain evidence-gated",
+        "single undifferentiated `healthy=true` is insufficient",
+        "does **not** publish universal RPO/RTO numbers",
+        "runbook link that has never been exercised is documentation, not recovery evidence",
+    ] {
+        assert!(
+            operability.contains(marker),
+            "operability contract must preserve marker {marker}"
+        );
+    }
+}
+
+#[test]
 fn traceability_distinguishes_current_implementation_from_targets() {
     let traceability = read_required(&repository_root().join("docs/TRACEABILITY.md"));
 
     for status in [
         "Implemented",
         "Partially implemented",
+        "Active PR",
         "Target",
         "External dependency",
     ] {
@@ -157,6 +233,34 @@ fn traceability_distinguishes_current_implementation_from_targets() {
             "traceability document must define status {status}"
         );
     }
+
+    for protected_main_module in [
+        "src/item_delivery.rs",
+        "src/participant.rs",
+        "src/authorization.rs",
+        "src/integration.rs",
+    ] {
+        assert!(
+            traceability.contains(protected_main_module),
+            "traceability must reconcile protected-main module {protected_main_module}"
+        );
+    }
+
+    let active_work = traceability
+        .split("### Active implementation work that is not protected-main truth")
+        .nth(1)
+        .and_then(|section| section.split("\n## ").next())
+        .expect("traceability must define the active implementation-work section");
+    let pr_entry = active_work
+        .lines()
+        .find(|line| line.contains("PR #24"))
+        .expect("active implementation work must name PR #24");
+    assert!(
+        pr_entry.contains("**Active PR**")
+            && pr_entry.contains("not protected-main truth")
+            && !pr_entry.contains("**Implemented**"),
+        "active persistence work must remain explicitly segregated from protected-main truth"
+    );
 
     let marker = "- Evaluated protected-main implementation baseline: `";
     let baseline_line = traceability
@@ -192,7 +296,61 @@ fn required_architecture_decisions_are_indexed() {
         "0017-operational-recovery-and-ga-evidence.md",
         "0018-continuous-scores-and-narrative-separation.md",
         "0019-scientific-publication-evidence-gates.md",
+        "0020-append-only-participant-identity-link-history.md",
     ] {
         assert!(index.contains(adr), "ADR index must expose {adr}");
+    }
+}
+
+#[test]
+fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
+    let erd = read_required(&repository_root().join("docs/architecture/ERD.md"));
+
+    for logical_entity in [
+        "item_delivery_event",
+        "participant_identity_link",
+        "longitudinal_enrollment",
+        "longitudinal_observation_record",
+        "temporal_analysis_submission",
+    ] {
+        assert!(
+            erd.contains(logical_entity),
+            "logical ERD must expose {logical_entity}"
+        );
+    }
+
+    assert!(
+        erd.contains("logical target ERD") && erd.contains("not the future mutable persistence source of truth"),
+        "ERD must distinguish target logical persistence from current participant projection/as-built evidence"
+    );
+    for time_field in [
+        "validity_start_at",
+        "validity_end_at",
+        "recorded_at",
+        "received_at",
+        "ingested_at",
+    ] {
+        assert!(
+            erd.contains(time_field),
+            "longitudinal ERD must preserve time field {time_field}"
+        );
+    }
+}
+
+#[test]
+fn uml_covers_identity_longitudinal_and_workbench_behavior() {
+    let uml = read_required(&repository_root().join("docs/architecture/UML.md"));
+
+    for behavior_marker in [
+        "Participant identity-link lifecycle",
+        "Longitudinal Gyeot-to-TEPP orchestration sequence",
+        "Measurement Workbench publication-evidence sequence",
+        "ItemDeliveryEvent",
+        "ParticipantIdentityLink",
+    ] {
+        assert!(
+            uml.contains(behavior_marker),
+            "UML architecture view must expose {behavior_marker}"
+        );
     }
 }

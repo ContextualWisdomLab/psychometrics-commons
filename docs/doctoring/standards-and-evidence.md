@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-09
+- Last reviewed: 2026-08-11
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -74,6 +74,26 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
+## Temporal and provenance evidence
+
+Longitudinal observations distinguish validity time from source-recorded time,
+platform receipt time, and durable-ingestion time. ISO 8601-1:2019 remains the
+current published representation baseline after its 2024 review; W3C PROV-DM
+supplies the provenance vocabulary for entities, activities, agents, and their
+creation/use/end times. These references constrain representation and lineage;
+they do not authorize inventing temporal values or treating a source timestamp as
+platform-authoritative.
+
+Product consequences:
+
+- point observations preserve a validity interval and do not silently replace an
+  interval with a receipt timestamp;
+- source and platform timestamps are retained as separate evidence fields;
+- clock skew, impossible ordering, and unknown precision are typed validation
+  outcomes rather than reasons to rewrite source history;
+- analysis-set digests bind the exact observations and time semantics consumed by
+  temporal, multilevel, cross-classified, or multiple-membership analysis.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -97,6 +117,10 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
+International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
+
+World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
