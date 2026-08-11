@@ -38,6 +38,15 @@ fn line_coverage_failure_diagnostic_exposes_instantiation_gaps() {
 }
 
 #[test]
+fn line_coverage_failure_diagnostic_emits_machine_readable_annotations() {
+    assert!(CI_WORKFLOW
+        .contains("cargo llvm-cov report --lcov --output-path coverage-lines.lcov"));
+    assert!(CI_WORKFLOW.contains("raw_line.startswith(\"DA:\")"));
+    assert!(CI_WORKFLOW.contains("hits == \"0\""));
+    assert!(CI_WORKFLOW.contains("::error file={source},line={line}::uncovered production line"));
+}
+
+#[test]
 fn branch_coverage_failure_diagnostic_uses_lcov_branch_records() {
     assert!(CI_WORKFLOW.contains(
         "cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov"
