@@ -103,6 +103,21 @@ fn nonlive_process_and_unknown_required_capability_fail_closed() {
 }
 
 #[test]
+fn health_dimensions_remain_independently_observable() {
+    let scoring = CapabilityHealth::new("scoring", CapabilityState::Available, true).unwrap();
+    let snapshot = healthy_snapshot(vec![scoring]);
+
+    assert_eq!(snapshot.backlog_health(), BacklogHealth::WithinBounds);
+    assert_eq!(
+        snapshot.data_integrity_health(),
+        DataIntegrityHealth::Verified
+    );
+    assert_eq!(snapshot.capabilities().len(), 1);
+    assert_eq!(snapshot.capabilities()[0].capability_ref(), "scoring");
+    assert_eq!(snapshot.capability("missing_capability"), None);
+}
+
+#[test]
 fn capability_identity_is_opaque_unique_and_queryable() {
     assert_eq!(
         CapabilityHealth::new("12345", CapabilityState::Available, true),
