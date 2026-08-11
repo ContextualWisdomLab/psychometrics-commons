@@ -105,7 +105,7 @@ Still-Target logical modules/adapters include full persistence/repositories, pub
 
 ### Active implementation work that is not protected-main truth
 
-PR #24 (`feat/postgres-integration-persistence`) carries PostgreSQL integration-evidence persistence and Runtime CI evidence at its own exact head. It is classified **Active PR** until the unchanged reviewed/check-clean head is actually integrated into protected main. This document must be advanced again after merge rather than silently treating the PR as shipped.
+PR #24 (`feat/postgres-integration-persistence`) carries PostgreSQL integration-evidence persistence and Runtime CI evidence at its own exact head. It is **not protected-main truth** and is classified **Active PR** until the unchanged reviewed/check-clean head is actually integrated into protected main. This document must be advanced again after merge rather than silently treating the PR as shipped.
 
 ## 5. ADR traceability by concern
 

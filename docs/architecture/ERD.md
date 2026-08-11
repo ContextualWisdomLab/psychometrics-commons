@@ -296,8 +296,10 @@ erDiagram
       string theta_ref
       string uncertainty_ref
       string membership_context_ref
-      timestamp observed_at
-      timestamp available_at
+      timestamp validity_start_at
+      timestamp validity_end_at
+      timestamp recorded_at
+      timestamp received_at
       timestamp ingested_at
     }
 
@@ -461,7 +463,21 @@ The Commons longitudinal tables are orchestration/evidence records only:
 - `longitudinal_observation_record` stores normalized observation identity/time/construct/version/context references required to reproduce a submission, not a duplicate Gyeot application database;
 - `temporal_analysis_submission` records exact observation-set digest, TEPP analysis specification, lifecycle, and returned artifact reference.
 
-The model preserves observed/available/ingested time so temporal leakage can be tested. Membership/context is versioned/referenced so multilevel, cross-classified, and multiple-membership semantics are not flattened before TEPP analysis.
+The model preserves four distinct time meanings so temporal leakage can be tested without
+silently collapsing source and platform clocks:
+
+- `validity_start_at` and `validity_end_at` are the validity-time interval for the
+  observation; a point observation uses the same instant for both fields.
+- `recorded_at` is when the source collection system recorded the observation.
+- `received_at` is when Psychometrics Commons received the candidate at its trust
+  boundary.
+- `ingested_at` is when the normalized observation was durably accepted by Commons.
+
+The source interval is retained even when source clocks are skewed. Validation records
+impossible or untrusted ordering as typed evidence rather than rewriting timestamps;
+platform receipt/ingestion ordering remains monotonic. Membership/context is
+versioned/referenced so multilevel, cross-classified, and multiple-membership semantics
+are not flattened before TEPP analysis.
 
 ## 8. Integration tenant binding and crash-safe consumption
 

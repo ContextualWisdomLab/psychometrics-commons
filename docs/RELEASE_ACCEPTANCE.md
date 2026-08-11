@@ -43,7 +43,11 @@ When physical persistence exists:
 - migration/roll-forward/rollback strategy is explicit and tested;
 - physical as-built schema is reconciled with the logical ERD/ADR contract;
 - tenant/restricted-linkage constraints survive migration;
-- backup/restore drill succeeds for the release profile and restored immutable digests/provenance reconcile;
+- backup/restore drill succeeds for the exact deployment profile and ADR-0017 evidence
+  records the supported database version, encryption context, restored tenant and
+  restricted-linkage/data-rights state, key/secret recovery, duplicate-effect
+  prevention, measured restore duration, and recoverable data point; restored
+  immutable digests/provenance must reconcile;
 - worker/outbox/inbox/job state resumes without duplicate domain effects after restart/restore.
 
 ### Runtime and degraded-mode acceptance

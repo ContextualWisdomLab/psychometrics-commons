@@ -139,8 +139,11 @@ classDiagram
       +source_observation_ref
       +construct_ref
       +measure_ref
-      +observed_at
-      +available_at
+      +validity_start_at
+      +validity_end_at
+      +recorded_at
+      +received_at
+      +ingested_at
       +membership_context_ref
     }
     class TemporalAnalysisSubmission {
@@ -390,7 +393,7 @@ sequenceDiagram
     loop each EMA/ESM observation
         G->>A: normalized candidate observation + source identity/time/context
         A->>A: validate participant/program/consent/version + exact source identity
-        A->>DB: append LongitudinalObservationRecord(observed/available/ingested time, membership context)
+        A->>DB: append LongitudinalObservationRecord(validity/recorded/received/ingested time, membership context)
         DB-->>A: idempotent observation evidence
     end
 
@@ -400,7 +403,7 @@ sequenceDiagram
     A->>DB: record artifact/failure evidence without copying TEPP analytical state
 ```
 
-Gyeot remains the collection owner and TEPP remains the temporal/event/multilevel/multiple-membership analytical owner. Psychometrics Commons owns consented enrollment, normalized ingestion evidence, exact observation-set identity, and orchestration. Observed/available/ingested time and membership context are preserved so temporal leakage and atomistic flattening can be detected rather than silently introduced.
+Gyeot remains the collection owner and TEPP remains the temporal/event/multilevel/multiple-membership analytical owner. Psychometrics Commons owns consented enrollment, normalized ingestion evidence, exact observation-set identity, and orchestration. Validity-time, source-recorded time, platform-received time, platform-ingested time, and membership context are preserved so temporal leakage and atomistic flattening can be detected rather than silently introduced.
 
 ## 10. Measurement Workbench publication-evidence sequence
 

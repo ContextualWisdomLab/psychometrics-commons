@@ -48,3 +48,5 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.
+- Architecture contracts now keep longitudinal validity, source-recorded, platform-received, and durable-ingestion timestamps distinct, with ISO 8601-1 and W3C PROV-DM doctoring references.
+- Release and operations handoff gates now require profile-specific ADR-0017 recovery evidence and evidence-backed closure or authorized acceptance for unresolved critical/high risks; traceability tests inspect the active PR entry rather than unrelated document text.

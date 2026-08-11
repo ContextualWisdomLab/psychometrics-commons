@@ -214,7 +214,8 @@ Gyeot/Commons/TEPP contracts require:
 - offline observation creation and idempotent replay;
 - daylight-saving and timezone transitions;
 - clock skew and impossible ordering flags;
-- observed/recorded/received/available/validity-time preservation;
+- validity-time interval plus source-recorded, platform-received, and platform-ingested
+  timestamp preservation;
 - explicit multiple-membership context and weight validation;
 - no silent single-group collapse;
 - deterministic immutable analysis input snapshot refs;

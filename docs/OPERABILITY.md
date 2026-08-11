@@ -211,7 +211,9 @@ A release is not operationally accepted until the target profile proves, as appl
 - degraded-mode tests match architecture promises;
 - exact release SBOM/provenance/artifact digests are preserved;
 - operator docs refer to current resource/state names;
-- no unresolved P0 security/privacy/scientific/data-integrity risk remains.
+- no unresolved critical or high security/privacy/scientific/data-integrity risk remains
+  unless `docs/RISK_REGISTER.md` records evidence-backed closure or an explicitly
+  accepted risk by authorized governance.
 
 ## 14. Acquisition-readiness evidence
 
