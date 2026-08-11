@@ -160,6 +160,24 @@ jobs:
                       f"{file_entry.get('filename')}"
                   )
           PY
+          cargo llvm-cov report --lcov --output-path coverage-lines.lcov
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workspace = Path.cwd().resolve()
+          source = None
+          for raw_line in Path("coverage-lines.lcov").read_text(encoding="utf-8").splitlines():
+              if raw_line.startswith("SF:"):
+                  source_path = Path(raw_line[3:]).resolve()
+                  try:
+                      source = source_path.relative_to(workspace).as_posix()
+                  except ValueError:
+                      source = source_path.as_posix()
+              elif raw_line.startswith("DA:") and source is not None:
+                  line, hits, *_ = raw_line[3:].split(",")
+                  if hits == "0":
+                      print(f"::error file={source},line={line}::uncovered production line")
+          PY
           cargo llvm-cov report --text --show-missing-lines --show-instantiations
 
   branch-coverage:
