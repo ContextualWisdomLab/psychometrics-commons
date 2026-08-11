@@ -81,7 +81,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Compile all targets
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
       - name: Require committed Cargo lockfile
         id: cargo_lock_gate
         run: git diff --exit-code -- Cargo.lock
