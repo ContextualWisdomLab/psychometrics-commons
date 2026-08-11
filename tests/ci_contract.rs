@@ -25,6 +25,16 @@ fn postgres_service_image_is_immutably_pinned() {
 }
 
 #[test]
+fn lockfile_artifact_upload_uses_node24_compatible_action() {
+    const NODE24_UPLOAD: &str =
+        "uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f";
+    assert!(CI_WORKFLOW.contains(NODE24_UPLOAD));
+    assert!(!CI_WORKFLOW.contains(
+        "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    ));
+}
+
+#[test]
 fn coverage_failures_identify_the_incomplete_source_files() {
     assert!(CI_WORKFLOW.contains("INCOMPLETE_FILE"));
     assert!(CI_WORKFLOW.contains("entry.get(\"files\", [])"));
