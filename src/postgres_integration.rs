@@ -75,7 +75,14 @@ impl Display for PersistenceError {
     }
 }
 
-impl Error for PersistenceError {}
+impl Error for PersistenceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<postgres::Error> for PersistenceError {
     fn from(error: postgres::Error) -> Self {
@@ -98,10 +105,12 @@ pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<()
 
 /// Insert an immutable integration event into the durable outbox.
 ///
-/// A repeated `event_ref` is idempotent only when every immutable event field and
-/// `max_attempts` match the existing row. Reuse with different evidence fails
-/// closed. The function uses the caller-owned client/transaction, so a domain
-/// mutation and this outbox insert can be committed atomically by the caller.
+/// The durable identity is `(source_ref, tenant_ref, event_ref)`, because an event
+/// reference is not globally unique across bounded-context sources or tenants. A
+/// repeated scoped identity is idempotent only when every immutable event field and
+/// `max_attempts` match the existing row. Reuse with different evidence fails closed.
+/// The function uses the caller-owned client/transaction, so a domain mutation and
+/// this outbox insert can be committed atomically by the caller.
 ///
 /// The current insert-then-inspect replay algorithm requires PostgreSQL `READ
 /// COMMITTED` isolation. That isolation refreshes the statement snapshot after an
@@ -146,7 +155,7 @@ pub fn enqueue_outbox_event(
              occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest,\
              max_attempts, current_state, latest_event_at_unix_ms\
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $7) \
-         ON CONFLICT (event_ref) DO NOTHING",
+         ON CONFLICT (source_ref, tenant_ref, event_ref) DO NOTHING",
         params,
     )?;
     if inserted == 1 {
@@ -192,7 +201,18 @@ pub fn accept_inbox_event(
     }
     let received_at_unix_ms = postgres_bigint(received_at_unix_ms)?;
     require_read_committed(client)?;
-    let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
+
+    let replay_params: &[&(dyn postgres::types::ToSql + Sync)] = &[
+        &consumer_ref,
+        &event.source(),
+        &event.tenant_ref(),
+        &event.event_ref(),
+        &event.event_type(),
+        &event.schema_version(),
+        &event.subject_ref(),
+        &event.payload_digest(),
+    ];
+    let insert_params: &[&(dyn postgres::types::ToSql + Sync)] = &[
         &consumer_ref,
         &event.source(),
         &event.tenant_ref(),
@@ -210,13 +230,13 @@ pub fn accept_inbox_event(
              subject_ref, payload_digest, received_at_unix_ms\
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
          ON CONFLICT (consumer_ref, source_ref, tenant_ref, source_event_ref) DO NOTHING",
-        params,
+        insert_params,
     )?;
     if inserted == 1 {
         return Ok(InboxDisposition::Accepted);
     }
 
-    let exact_replay_row = client.query_one(INBOX_REPLAY_QUERY, &params[..8])?;
+    let exact_replay_row = client.query_one(INBOX_REPLAY_QUERY, replay_params)?;
     let exact_replay: bool = exact_replay_row.get(0);
     if exact_replay {
         Ok(InboxDisposition::Duplicate)
