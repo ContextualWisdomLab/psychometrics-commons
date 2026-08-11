@@ -144,7 +144,7 @@ fn retry_schedule_blocks_early_claim_and_invalidates_stale_workers() {
 }
 
 #[test]
-fn successful_completion_is_idempotent_only_for_the_same_result() {
+fn successful_completion_is_idempotent_only_for_the_same_result_and_fence() {
     let mut scoring_job = job(2);
     let lease = scoring_job
         .claim("worker_alpha", "lease_alpha", 10_000, 20_000)
@@ -168,6 +168,12 @@ fn successful_completion_is_idempotent_only_for_the_same_result() {
         .unwrap();
     assert_eq!(
         scoring_job
+            .record_success(lease.fencing_token() + 1, "scoring_result_alpha")
+            .unwrap_err(),
+        ScoringJobError::ConflictingCompletion
+    );
+    assert_eq!(
+        scoring_job
             .record_success(lease.fencing_token(), "scoring_result_beta")
             .unwrap_err(),
         ScoringJobError::ConflictingCompletion
@@ -178,6 +184,7 @@ fn successful_completion_is_idempotent_only_for_the_same_result() {
             .unwrap_err(),
         ScoringJobError::NotLeased
     );
+    assert_eq!(scoring_job.cancel().unwrap_err(), ScoringJobError::TerminalState);
 }
 
 #[test]
@@ -274,6 +281,10 @@ fn permanent_failure_and_cancellation_are_terminal_and_fence_active_work() {
         failed_job.cancel().unwrap_err(),
         ScoringJobError::TerminalState
     );
+
+    let mut queued_job = job(1);
+    queued_job.cancel().unwrap();
+    assert_eq!(queued_job.state(), ScoringJobState::Cancelled);
 }
 
 #[test]
