@@ -2,8 +2,8 @@
 //!
 //! This module owns product orchestration state only. It does not calculate
 //! psychometric quantities, call a scoring engine, or persist worker leases.
-//! Persistence adapters must preserve these state, attempt, and fencing
-//! invariants with real database concurrency evidence.
+//! Persistence adapters must preserve these state, attempt, time-bound lease,
+//! and fencing invariants with real database concurrency evidence.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -222,16 +222,17 @@ impl ScoringJob {
         Ok(lease)
     }
 
-    /// Record a retryable failed attempt using the current fencing token.
+    /// Record a retryable failed attempt using the current live fencing token.
     ///
     /// The job is scheduled for another attempt when budget remains. Exhausting
     /// the configured attempt budget moves it to quarantine instead of retrying
-    /// indefinitely.
+    /// indefinitely. A worker command observed at or after lease expiry is
+    /// rejected even when the expiry-recovery sweep has not run yet.
     ///
     /// # Errors
     ///
     /// Returns [`ScoringJobError`] for invalid evidence, invalid retry timing,
-    /// missing lease ownership, or a stale fencing token.
+    /// missing lease ownership, a stale fencing token, or expired lease authority.
     pub fn record_retryable_failure(
         &mut self,
         fencing_token: u64,
@@ -240,12 +241,11 @@ impl ScoringJob {
         retry_at_unix_ms: u64,
     ) -> Result<ScoringJobState, ScoringJobError> {
         let cause_code = required_reference(cause_code)?;
-        require_timestamp(failed_at_unix_ms)?;
         require_timestamp(retry_at_unix_ms)?;
         if retry_at_unix_ms < failed_at_unix_ms {
             return Err(ScoringJobError::InvalidRetryWindow);
         }
-        self.require_fencing_token(fencing_token)?;
+        self.require_live_fencing_token(fencing_token, failed_at_unix_ms)?;
         self.last_failure_code = Some(cause_code.to_owned());
         self.active_lease = None;
         Ok(self.finish_failed_attempt(retry_at_unix_ms))
@@ -253,17 +253,20 @@ impl ScoringJob {
 
     /// Record a permanent failed attempt and quarantine the job.
     ///
+    /// The server-observed failure time must still fall within the worker lease.
+    ///
     /// # Errors
     ///
-    /// Returns [`ScoringJobError`] for invalid cause identity, missing lease
-    /// ownership, or a stale fencing token.
+    /// Returns [`ScoringJobError`] for invalid cause/timestamp evidence, missing
+    /// lease ownership, a stale fencing token, or expired lease authority.
     pub fn record_permanent_failure(
         &mut self,
         fencing_token: u64,
         cause_code: &str,
+        failed_at_unix_ms: u64,
     ) -> Result<(), ScoringJobError> {
         let cause_code = required_reference(cause_code)?;
-        self.require_fencing_token(fencing_token)?;
+        self.require_live_fencing_token(fencing_token, failed_at_unix_ms)?;
         self.last_failure_code = Some(cause_code.to_owned());
         self.active_lease = None;
         self.next_attempt_at_unix_ms = 0;
@@ -273,20 +276,23 @@ impl ScoringJob {
 
     /// Record one immutable successful scoring result.
     ///
-    /// Exact replay of the same completion evidence is idempotent. A different
-    /// result after completion is rejected rather than rewriting historical
-    /// scoring evidence.
+    /// The first completion must be observed while the presenting worker lease
+    /// is still live. Exact replay of the same accepted result/fence is
+    /// idempotent; a different result or fence is rejected rather than rewriting
+    /// historical scoring evidence.
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringJobError`] for invalid result identity, missing/stale
-    /// lease ownership, or conflicting completion evidence.
+    /// Returns [`ScoringJobError`] for invalid result/timestamp evidence,
+    /// missing/stale/expired lease ownership, or conflicting completion evidence.
     pub fn record_success(
         &mut self,
         fencing_token: u64,
         scoring_result_ref: &str,
+        completed_at_unix_ms: u64,
     ) -> Result<(), ScoringJobError> {
         let scoring_result_ref = required_reference(scoring_result_ref)?;
+        require_timestamp(completed_at_unix_ms)?;
         if self.state == ScoringJobState::Completed {
             if self.result_ref.as_deref() != Some(scoring_result_ref)
                 || self.completed_fencing_token != Some(fencing_token)
@@ -296,7 +302,7 @@ impl ScoringJob {
             return Ok(());
         }
 
-        self.require_fencing_token(fencing_token)?;
+        self.require_live_fencing_token(fencing_token, completed_at_unix_ms)?;
         self.result_ref = Some(scoring_result_ref.to_owned());
         self.completed_fencing_token = Some(fencing_token);
         self.active_lease = None;
@@ -361,13 +367,20 @@ impl ScoringJob {
             .ok_or(ScoringJobError::NotLeased)
     }
 
-    fn require_fencing_token(&self, fencing_token: u64) -> Result<(), ScoringJobError> {
+    fn require_live_fencing_token(
+        &self,
+        fencing_token: u64,
+        observed_at_unix_ms: u64,
+    ) -> Result<(), ScoringJobError> {
+        require_timestamp(observed_at_unix_ms)?;
         let lease = self.require_active_lease()?;
-        if lease.fencing_token == fencing_token {
-            Ok(())
-        } else {
-            Err(ScoringJobError::StaleLease)
+        if lease.fencing_token != fencing_token {
+            return Err(ScoringJobError::StaleLease);
         }
+        if observed_at_unix_ms >= lease.expires_at_unix_ms {
+            return Err(ScoringJobError::LeaseExpired);
+        }
+        Ok(())
     }
 
     fn finish_failed_attempt(&mut self, retry_at_unix_ms: u64) -> ScoringJobState {
@@ -404,6 +417,8 @@ pub enum ScoringJobError {
     NotLeased,
     /// A worker presented a fencing token from a different lease attempt.
     StaleLease,
+    /// A worker command was observed after the presenting lease expired.
+    LeaseExpired,
     /// Lease expiry was requested before the active lease expired.
     LeaseStillActive,
     /// Completed immutable evidence was replayed with a different result or token.
@@ -430,6 +445,7 @@ impl Display for ScoringJobError {
             Self::NotLeaseable => "scoring job is not available for a new lease",
             Self::NotLeased => "scoring job has no active lease",
             Self::StaleLease => "scoring job lease fencing token is stale",
+            Self::LeaseExpired => "scoring job lease authority has expired",
             Self::LeaseStillActive => "scoring job lease has not expired",
             Self::ConflictingCompletion => {
                 "scoring job already completed with different result evidence"
