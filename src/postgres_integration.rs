@@ -49,6 +49,8 @@ pub enum PersistenceError {
     InvalidAttemptLimit,
     /// A runtime value cannot be represented by the bounded `PostgreSQL` column.
     ValueOutOfRange,
+    /// The caller's transaction isolation cannot preserve this adapter's replay semantics.
+    UnsupportedIsolationLevel,
     /// An idempotency identity already exists with different immutable evidence.
     ConflictingReplay,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
@@ -62,6 +64,9 @@ impl Display for PersistenceError {
             Self::InvalidTimestamp => "persistence timestamps must be greater than zero",
             Self::InvalidAttemptLimit => "outbox maximum attempts must be greater than zero",
             Self::ValueOutOfRange => "persistence value exceeds the supported PostgreSQL range",
+            Self::UnsupportedIsolationLevel => {
+                "PostgreSQL integration persistence requires read committed isolation"
+            }
             Self::ConflictingReplay => {
                 "persistence idempotency identity was replayed with conflicting evidence"
             }
@@ -98,10 +103,16 @@ pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<()
 /// closed. The function uses the caller-owned client/transaction, so a domain
 /// mutation and this outbox insert can be committed atomically by the caller.
 ///
+/// The current insert-then-inspect replay algorithm requires PostgreSQL `READ
+/// COMMITTED` isolation. That isolation refreshes the statement snapshot after an
+/// `ON CONFLICT DO NOTHING` wait so the exact conflicting row can be inspected.
+/// Stronger transaction isolation is rejected rather than misclassifying a replay.
+///
 /// # Errors
 ///
 /// Returns [`PersistenceError`] for an invalid attempt limit, a value outside the
-/// supported `PostgreSQL` integer range, conflicting replay, or a database failure.
+/// supported `PostgreSQL` integer range, unsupported transaction isolation,
+/// conflicting replay, or a database failure.
 pub fn enqueue_outbox_event(
     client: &mut impl GenericClient,
     event: &IntegrationEvent,
@@ -113,6 +124,7 @@ pub fn enqueue_outbox_event(
     let occurred_at_unix_ms = postgres_bigint(event.occurred_at_unix_ms())?;
     let max_attempts =
         i32::try_from(max_attempts).map_err(|_| PersistenceError::ValueOutOfRange)?;
+    require_read_committed(client)?;
     let causation_ref = event.causation_ref();
     let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
         &event.event_ref(),
@@ -158,10 +170,15 @@ pub fn enqueue_outbox_event(
 /// a replay with different event type, schema version, subject, or payload digest
 /// fails closed.
 ///
+/// The current insert-then-inspect replay algorithm requires PostgreSQL `READ
+/// COMMITTED` isolation for the same statement-snapshot reason as
+/// [`enqueue_outbox_event`].
+///
 /// # Errors
 ///
 /// Returns [`PersistenceError`] for invalid consumer identity, invalid/out-of-range
-/// receive time, conflicting replay evidence, or database failure.
+/// receive time, unsupported transaction isolation, conflicting replay evidence,
+/// or database failure.
 pub fn accept_inbox_event(
     client: &mut impl GenericClient,
     consumer_ref: &str,
@@ -174,6 +191,7 @@ pub fn accept_inbox_event(
         return Err(PersistenceError::InvalidTimestamp);
     }
     let received_at_unix_ms = postgres_bigint(received_at_unix_ms)?;
+    require_read_committed(client)?;
     let params: &[&(dyn postgres::types::ToSql + Sync)] = &[
         &consumer_ref,
         &event.source(),
@@ -204,6 +222,16 @@ pub fn accept_inbox_event(
         Ok(InboxDisposition::Duplicate)
     } else {
         Err(PersistenceError::ConflictingReplay)
+    }
+}
+
+fn require_read_committed(client: &mut impl GenericClient) -> Result<(), PersistenceError> {
+    let row = client.query_one("SHOW transaction_isolation", &[])?;
+    let isolation_level: String = row.get(0);
+    if isolation_level == "read committed" {
+        Ok(())
+    } else {
+        Err(PersistenceError::UnsupportedIsolationLevel)
     }
 }
 
