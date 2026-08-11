@@ -112,7 +112,7 @@ pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<()
 /// The function uses the caller-owned client/transaction, so a domain mutation and
 /// this outbox insert can be committed atomically by the caller.
 ///
-/// The current insert-then-inspect replay algorithm requires PostgreSQL `READ
+/// The current insert-then-inspect replay algorithm requires `PostgreSQL` `READ
 /// COMMITTED` isolation. That isolation refreshes the statement snapshot after an
 /// `ON CONFLICT DO NOTHING` wait so the exact conflicting row can be inspected.
 /// Stronger transaction isolation is rejected rather than misclassifying a replay.
@@ -179,7 +179,7 @@ pub fn enqueue_outbox_event(
 /// a replay with different event type, schema version, subject, or payload digest
 /// fails closed.
 ///
-/// The current insert-then-inspect replay algorithm requires PostgreSQL `READ
+/// The current insert-then-inspect replay algorithm requires `PostgreSQL` `READ
 /// COMMITTED` isolation for the same statement-snapshot reason as
 /// [`enqueue_outbox_event`].
 ///
