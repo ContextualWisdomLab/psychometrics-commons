@@ -335,6 +335,7 @@ fn verify_persistence_error_messages() {
         PersistenceError::InvalidReference.to_string(),
         "persistence references must be opaque non-numeric values"
     );
+    assert!(std::error::Error::source(&PersistenceError::InvalidReference).is_none());
     assert_eq!(
         PersistenceError::InvalidTimestamp.to_string(),
         "persistence timestamps must be greater than zero"
@@ -357,7 +358,10 @@ fn verify_persistence_error_messages() {
     );
 }
 
-fn verify_database_failures(client: &mut Client, tenant_alpha: &IntegrationEvent) {
+fn verify_database_failures_after_dropping_schema(
+    client: &mut Client,
+    tenant_alpha: &IntegrationEvent,
+) {
     client
         .batch_execute(
             "DROP TABLE integration_inbox;\
@@ -374,6 +378,7 @@ fn verify_database_failures(client: &mut Client, tenant_alpha: &IntegrationEvent
         outbox_database_error.to_string(),
         "PostgreSQL persistence operation failed"
     );
+    assert!(std::error::Error::source(&outbox_database_error).is_some());
     assert!(matches!(
         accept_inbox_event(client, "consumer_alpha", tenant_alpha, 15_000),
         Err(PersistenceError::Database(_))
@@ -393,5 +398,5 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
     verify_database_constraints(&mut client);
     verify_transaction_isolation_contract(&mut client, &tenant_alpha);
     verify_persistence_error_messages();
-    verify_database_failures(&mut client, &tenant_alpha);
+    verify_database_failures_after_dropping_schema(&mut client, &tenant_alpha);
 }
