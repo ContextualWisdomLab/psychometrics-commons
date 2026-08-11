@@ -62,6 +62,16 @@ fn capability_state_alone_cannot_claim_new_work_is_safe() {
 }
 
 #[test]
+fn unavailable_or_unknown_capability_cannot_claim_new_work_is_safe() {
+    for state in [CapabilityState::Unavailable, CapabilityState::Unknown] {
+        assert_eq!(
+            CapabilityHealth::new("scoring", state, true),
+            Err(HealthContractError::InconsistentCapabilityReadiness)
+        );
+    }
+}
+
+#[test]
 fn integrity_and_backlog_failures_block_state_changing_readiness() {
     let capability = CapabilityHealth::new("scoring", CapabilityState::Available, true).unwrap();
 
@@ -148,5 +158,9 @@ fn health_contract_errors_have_stable_safe_display_text() {
     assert_eq!(
         HealthContractError::DuplicateCapabilityReference.to_string(),
         "health capability references must be unique within one snapshot"
+    );
+    assert_eq!(
+        HealthContractError::InconsistentCapabilityReadiness.to_string(),
+        "unavailable or unknown capability cannot accept new work"
     );
 }
