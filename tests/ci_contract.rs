@@ -18,10 +18,21 @@ fn postgres_service_image_is_immutably_pinned() {
     const PINNED_IMAGE: &str =
         "image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15";
     assert_eq!(CI_WORKFLOW.matches(PINNED_IMAGE).count(), 3);
-    assert_eq!(
-        CI_WORKFLOW.matches("image: postgres:18-alpine\n").count(),
-        0
-    );
+
+    let postgres_images: Vec<_> = CI_WORKFLOW
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("image: postgres"))
+        .collect();
+    assert_eq!(postgres_images.len(), 3);
+    assert!(postgres_images
+        .iter()
+        .all(|image| image.contains("@sha256:")));
+}
+
+#[test]
+fn postgres_health_checks_allow_initialization_restart() {
+    assert_eq!(CI_WORKFLOW.matches("--health-start-period 5s").count(), 3);
 }
 
 #[test]
