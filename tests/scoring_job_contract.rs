@@ -137,7 +137,7 @@ fn retry_schedule_blocks_early_claim_and_invalidates_stale_workers() {
 
     assert_eq!(
         scoring_job
-            .record_success(first.fencing_token(), "scoring_result_alpha")
+            .record_success(first.fencing_token(), "scoring_result_alpha", 16_000)
             .unwrap_err(),
         ScoringJobError::StaleLease
     );
@@ -152,29 +152,39 @@ fn successful_completion_is_idempotent_only_for_the_same_result_and_fence() {
 
     assert_eq!(
         scoring_job
-            .record_success(lease.fencing_token(), "123")
+            .record_success(lease.fencing_token(), "123", 11_000)
             .unwrap_err(),
         ScoringJobError::InvalidReference
     );
+    assert_eq!(
+        scoring_job
+            .record_success(lease.fencing_token(), "scoring_result_alpha", 0)
+            .unwrap_err(),
+        ScoringJobError::InvalidTimestamp
+    );
     scoring_job
-        .record_success(lease.fencing_token(), "scoring_result_alpha")
+        .record_success(lease.fencing_token(), "scoring_result_alpha", 11_000)
         .unwrap();
     assert_eq!(scoring_job.state(), ScoringJobState::Completed);
     assert_eq!(scoring_job.result_ref(), Some("scoring_result_alpha"));
     assert!(scoring_job.active_lease().is_none());
 
     scoring_job
-        .record_success(lease.fencing_token(), "scoring_result_alpha")
+        .record_success(lease.fencing_token(), "scoring_result_alpha", 11_000)
         .unwrap();
     assert_eq!(
         scoring_job
-            .record_success(lease.fencing_token() + 1, "scoring_result_alpha")
+            .record_success(
+                lease.fencing_token() + 1,
+                "scoring_result_alpha",
+                11_000,
+            )
             .unwrap_err(),
         ScoringJobError::ConflictingCompletion
     );
     assert_eq!(
         scoring_job
-            .record_success(lease.fencing_token(), "scoring_result_beta")
+            .record_success(lease.fencing_token(), "scoring_result_beta", 11_000)
             .unwrap_err(),
         ScoringJobError::ConflictingCompletion
     );
@@ -209,7 +219,7 @@ fn lease_expiry_retries_then_quarantines_when_attempts_are_exhausted() {
     assert_eq!(scoring_job.last_failure_code(), Some("lease_expired"));
     assert_eq!(
         scoring_job
-            .record_success(first.fencing_token(), "scoring_result_stale")
+            .record_success(first.fencing_token(), "scoring_result_stale", 20_001)
             .unwrap_err(),
         ScoringJobError::NotLeased
     );
@@ -240,25 +250,35 @@ fn permanent_failure_and_cancellation_are_terminal_and_fence_active_work() {
         .unwrap();
     assert_eq!(
         failed_job
-            .record_permanent_failure(lease.fencing_token() + 1, "invalid_contract")
+            .record_permanent_failure(
+                lease.fencing_token() + 1,
+                "invalid_contract",
+                11_000,
+            )
             .unwrap_err(),
         ScoringJobError::StaleLease
     );
     assert_eq!(
         failed_job
-            .record_permanent_failure(lease.fencing_token(), "1e5")
+            .record_permanent_failure(lease.fencing_token(), "1e5", 11_000)
             .unwrap_err(),
         ScoringJobError::InvalidReference
     );
+    assert_eq!(
+        failed_job
+            .record_permanent_failure(lease.fencing_token(), "invalid_contract", 0)
+            .unwrap_err(),
+        ScoringJobError::InvalidTimestamp
+    );
     failed_job
-        .record_permanent_failure(lease.fencing_token(), "invalid_contract")
+        .record_permanent_failure(lease.fencing_token(), "invalid_contract", 11_000)
         .unwrap();
     assert_eq!(failed_job.state(), ScoringJobState::Quarantined);
     assert_eq!(failed_job.last_failure_code(), Some("invalid_contract"));
     assert!(failed_job.active_lease().is_none());
     assert_eq!(
         failed_job
-            .record_permanent_failure(lease.fencing_token(), "invalid_contract")
+            .record_permanent_failure(lease.fencing_token(), "invalid_contract", 11_000)
             .unwrap_err(),
         ScoringJobError::NotLeased
     );
@@ -272,7 +292,7 @@ fn permanent_failure_and_cancellation_are_terminal_and_fence_active_work() {
     assert!(cancelled_job.active_lease().is_none());
     assert_eq!(
         cancelled_job
-            .record_success(active.fencing_token(), "scoring_result_late")
+            .record_success(active.fencing_token(), "scoring_result_late", 11_000)
             .unwrap_err(),
         ScoringJobError::NotLeased
     );
@@ -290,18 +310,58 @@ fn permanent_failure_and_cancellation_are_terminal_and_fence_active_work() {
 #[test]
 fn error_messages_are_stable_for_operator_classification() {
     let expectations = [
-        (ScoringJobError::InvalidReference, "scoring job references must be opaque non-numeric values"),
-        (ScoringJobError::InvalidAttemptLimit, "scoring job maximum attempts must be greater than zero"),
-        (ScoringJobError::InvalidTimestamp, "scoring job timestamps must be greater than zero"),
-        (ScoringJobError::InvalidLeaseWindow, "scoring lease expiry must be later than claim time"),
-        (ScoringJobError::InvalidRetryWindow, "scoring retry time must not precede failure time"),
-        (ScoringJobError::LeaseNotDue, "scoring job retry is not due yet"),
-        (ScoringJobError::NotLeaseable, "scoring job is not available for a new lease"),
-        (ScoringJobError::NotLeased, "scoring job has no active lease"),
-        (ScoringJobError::StaleLease, "scoring job lease fencing token is stale"),
-        (ScoringJobError::LeaseStillActive, "scoring job lease has not expired"),
-        (ScoringJobError::ConflictingCompletion, "scoring job already completed with different result evidence"),
-        (ScoringJobError::TerminalState, "scoring job terminal state cannot accept this command"),
+        (
+            ScoringJobError::InvalidReference,
+            "scoring job references must be opaque non-numeric values",
+        ),
+        (
+            ScoringJobError::InvalidAttemptLimit,
+            "scoring job maximum attempts must be greater than zero",
+        ),
+        (
+            ScoringJobError::InvalidTimestamp,
+            "scoring job timestamps must be greater than zero",
+        ),
+        (
+            ScoringJobError::InvalidLeaseWindow,
+            "scoring lease expiry must be later than claim time",
+        ),
+        (
+            ScoringJobError::InvalidRetryWindow,
+            "scoring retry time must not precede failure time",
+        ),
+        (
+            ScoringJobError::LeaseNotDue,
+            "scoring job retry is not due yet",
+        ),
+        (
+            ScoringJobError::NotLeaseable,
+            "scoring job is not available for a new lease",
+        ),
+        (
+            ScoringJobError::NotLeased,
+            "scoring job has no active lease",
+        ),
+        (
+            ScoringJobError::StaleLease,
+            "scoring job lease fencing token is stale",
+        ),
+        (
+            ScoringJobError::LeaseExpired,
+            "scoring job lease authority has expired",
+        ),
+        (
+            ScoringJobError::LeaseStillActive,
+            "scoring job lease has not expired",
+        ),
+        (
+            ScoringJobError::ConflictingCompletion,
+            "scoring job already completed with different result evidence",
+        ),
+        (
+            ScoringJobError::TerminalState,
+            "scoring job terminal state cannot accept this command",
+        ),
     ];
     for (error, message) in expectations {
         assert_eq!(error.to_string(), message);
