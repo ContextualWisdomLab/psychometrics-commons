@@ -67,6 +67,8 @@ pub enum HealthContractError {
     InvalidReference,
     /// One snapshot repeated the same capability reference.
     DuplicateCapabilityReference,
+    /// An unavailable/unknown capability was incorrectly marked safe for new work.
+    InconsistentCapabilityReadiness,
 }
 
 impl Display for HealthContractError {
@@ -77,6 +79,9 @@ impl Display for HealthContractError {
             }
             Self::DuplicateCapabilityReference => {
                 "health capability references must be unique within one snapshot"
+            }
+            Self::InconsistentCapabilityReadiness => {
+                "unavailable or unknown capability cannot accept new work"
             }
         })
     }
@@ -97,12 +102,15 @@ impl CapabilityHealth {
     ///
     /// `accepts_new_work` is kept separate from the descriptive state so an impaired
     /// capability can explicitly remain usable for a bounded operation without
-    /// treating every `Degraded` state as globally ready.
+    /// treating every `Degraded` state as globally ready. An `Unavailable` or
+    /// `Unknown` capability can never claim readiness.
     ///
     /// # Errors
     ///
     /// Returns [`HealthContractError::InvalidReference`] when `capability_ref` is not
-    /// an opaque product reference.
+    /// an opaque product reference, or
+    /// [`HealthContractError::InconsistentCapabilityReadiness`] for contradictory
+    /// unavailable/unknown readiness evidence.
     pub fn new(
         capability_ref: &str,
         state: CapabilityState,
@@ -110,6 +118,10 @@ impl CapabilityHealth {
     ) -> Result<Self, HealthContractError> {
         let capability_ref = normalized_reference(capability_ref)
             .ok_or(HealthContractError::InvalidReference)?;
+        if accepts_new_work && matches!(state, CapabilityState::Unavailable | CapabilityState::Unknown)
+        {
+            return Err(HealthContractError::InconsistentCapabilityReadiness);
+        }
         Ok(Self {
             capability_ref: capability_ref.to_owned(),
             state,
