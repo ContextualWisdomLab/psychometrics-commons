@@ -30,7 +30,8 @@ fn liveness_is_distinct_from_operation_readiness() {
 #[test]
 fn optional_dependency_outage_does_not_block_unrelated_work() {
     let snapshot = healthy_snapshot(vec![
-        CapabilityHealth::new("authenticated_linking", CapabilityState::Unavailable, false).unwrap(),
+        CapabilityHealth::new("authenticated_linking", CapabilityState::Unavailable, false)
+            .unwrap(),
         CapabilityHealth::new("scoring", CapabilityState::Available, true).unwrap(),
     ]);
 
@@ -41,22 +42,31 @@ fn optional_dependency_outage_does_not_block_unrelated_work() {
 
 #[test]
 fn degraded_capability_can_explicitly_remain_safe_for_new_work() {
-    let snapshot = healthy_snapshot(vec![
-        CapabilityHealth::new("research_registration", CapabilityState::Degraded, true).unwrap(),
-    ]);
+    let snapshot = healthy_snapshot(vec![CapabilityHealth::new(
+        "research_registration",
+        CapabilityState::Degraded,
+        true,
+    )
+    .unwrap()]);
 
     assert!(snapshot.is_ready_for(&["research_registration"]));
     assert_eq!(
-        snapshot.capability("research_registration").unwrap().state(),
+        snapshot
+            .capability("research_registration")
+            .unwrap()
+            .state(),
         CapabilityState::Degraded
     );
 }
 
 #[test]
 fn capability_state_alone_cannot_claim_new_work_is_safe() {
-    let snapshot = healthy_snapshot(vec![
-        CapabilityHealth::new("temporal_analysis", CapabilityState::Degraded, false).unwrap(),
-    ]);
+    let snapshot = healthy_snapshot(vec![CapabilityHealth::new(
+        "temporal_analysis",
+        CapabilityState::Degraded,
+        false,
+    )
+    .unwrap()]);
 
     assert!(!snapshot.is_ready_for(&["temporal_analysis"]));
 }
@@ -75,7 +85,10 @@ fn unavailable_or_unknown_capability_cannot_claim_new_work_is_safe() {
 fn integrity_and_backlog_failures_block_state_changing_readiness() {
     let capability = CapabilityHealth::new("scoring", CapabilityState::Available, true).unwrap();
 
-    for integrity in [DataIntegrityHealth::Unknown, DataIntegrityHealth::Incompatible] {
+    for integrity in [
+        DataIntegrityHealth::Unknown,
+        DataIntegrityHealth::Incompatible,
+    ] {
         let snapshot = RuntimeHealthSnapshot::new(
             true,
             BacklogHealth::WithinBounds,
