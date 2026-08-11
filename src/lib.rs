@@ -19,4 +19,5 @@ mod reference;
 pub mod response;
 pub mod result;
 pub mod scoring;
+pub mod scoring_job;
 pub mod session;
