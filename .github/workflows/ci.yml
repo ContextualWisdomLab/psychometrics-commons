@@ -69,6 +69,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --health-start-period 5s
     steps:
       - name: Checkout exact head
         uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
@@ -82,15 +83,16 @@ jobs:
       - name: Compile all targets
         run: cargo check --all-targets
       - name: Require committed Cargo lockfile
+        id: cargo_lock_gate
         run: git diff --exit-code -- Cargo.lock
       - name: Emit resolved Cargo lock evidence when the lock gate fails
-        if: failure()
+        if: failure() && steps.cargo_lock_gate.outcome == 'failure'
         run: |
           printf 'RESOLVED_CARGO_LOCK_BASE64='
           base64 -w0 Cargo.lock
           printf '\n'
       - name: Preserve resolved lockfile when the lock gate fails
-        if: failure()
+        if: failure() && steps.cargo_lock_gate.outcome == 'failure'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: resolved-cargo-lock-${{ github.event.pull_request.head.sha || github.sha }}
@@ -124,6 +126,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --health-start-period 5s
     steps:
       - name: Checkout exact head
         uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
@@ -198,6 +201,7 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+          --health-start-period 5s
     steps:
       - name: Checkout exact head
         uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
