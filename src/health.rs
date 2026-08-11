@@ -116,9 +116,13 @@ impl CapabilityHealth {
         state: CapabilityState,
         accepts_new_work: bool,
     ) -> Result<Self, HealthContractError> {
-        let capability_ref = normalized_reference(capability_ref)
-            .ok_or(HealthContractError::InvalidReference)?;
-        if accepts_new_work && matches!(state, CapabilityState::Unavailable | CapabilityState::Unknown)
+        let capability_ref =
+            normalized_reference(capability_ref).ok_or(HealthContractError::InvalidReference)?;
+        if accepts_new_work
+            && matches!(
+                state,
+                CapabilityState::Unavailable | CapabilityState::Unknown
+            )
         {
             return Err(HealthContractError::InconsistentCapabilityReadiness);
         }
