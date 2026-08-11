@@ -39,8 +39,7 @@ fn line_coverage_failure_diagnostic_exposes_instantiation_gaps() {
 
 #[test]
 fn line_coverage_failure_diagnostic_emits_machine_readable_annotations() {
-    assert!(CI_WORKFLOW
-        .contains("cargo llvm-cov report --lcov --output-path coverage-lines.lcov"));
+    assert!(CI_WORKFLOW.contains("cargo llvm-cov report --lcov --output-path coverage-lines.lcov"));
     assert!(CI_WORKFLOW.contains("raw_line.startswith(\"DA:\")"));
     assert!(CI_WORKFLOW.contains("hits == \"0\""));
     assert!(CI_WORKFLOW.contains("::error file={source},line={line}::uncovered production line"));
