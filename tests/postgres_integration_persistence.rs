@@ -1,4 +1,4 @@
-//! Real PostgreSQL persistence contract for durable integration evidence.
+//! Real `PostgreSQL` persistence contract for durable integration evidence.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::{InboxDisposition, IntegrationEvent};
@@ -41,9 +41,7 @@ fn test_client() -> Client {
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
 }
 
-#[test]
-fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
-    let mut client = test_client();
+fn reset_integration_tables(client: &mut Client) {
     client
         .batch_execute(
             "DROP TABLE IF EXISTS integration_inbox;\
@@ -51,41 +49,40 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
              DROP TABLE IF EXISTS integration_outbox;",
         )
         .unwrap();
+}
 
-    apply_integration_migration(&mut client).unwrap();
-    apply_integration_migration(&mut client).unwrap();
-
+fn verify_outbox_contract(client: &mut Client) -> IntegrationEvent {
     let tenant_alpha = event("event_alpha", "tenant_alpha", DIGEST_A);
     assert!(matches!(
-        enqueue_outbox_event(&mut client, &tenant_alpha, 0),
+        enqueue_outbox_event(client, &tenant_alpha, 0),
         Err(PersistenceError::InvalidAttemptLimit)
     ));
     assert!(matches!(
-        enqueue_outbox_event(&mut client, &tenant_alpha, i32::MAX as usize + 1),
+        enqueue_outbox_event(client, &tenant_alpha, i32::MAX as usize + 1),
         Err(PersistenceError::ValueOutOfRange)
     ));
     let out_of_range_event = event_at("event_range", "tenant_alpha", DIGEST_A, u64::MAX);
     assert!(matches!(
-        enqueue_outbox_event(&mut client, &out_of_range_event, 3),
+        enqueue_outbox_event(client, &out_of_range_event, 3),
         Err(PersistenceError::ValueOutOfRange)
     ));
 
     assert_eq!(
-        enqueue_outbox_event(&mut client, &tenant_alpha, 3).unwrap(),
+        enqueue_outbox_event(client, &tenant_alpha, 3).unwrap(),
         PersistenceDisposition::Inserted
     );
     assert_eq!(
-        enqueue_outbox_event(&mut client, &tenant_alpha, 3).unwrap(),
+        enqueue_outbox_event(client, &tenant_alpha, 3).unwrap(),
         PersistenceDisposition::Duplicate
     );
 
     let conflicting = event("event_alpha", "tenant_alpha", DIGEST_B);
     assert!(matches!(
-        enqueue_outbox_event(&mut client, &conflicting, 3),
+        enqueue_outbox_event(client, &conflicting, 3),
         Err(PersistenceError::ConflictingReplay)
     ));
     assert!(matches!(
-        enqueue_outbox_event(&mut client, &tenant_alpha, 4),
+        enqueue_outbox_event(client, &tenant_alpha, 4),
         Err(PersistenceError::ConflictingReplay)
     ));
 
@@ -107,40 +104,46 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         .get(0);
     assert_eq!(rolled_back_count, 0);
 
+    tenant_alpha
+}
+
+fn verify_inbox_contract(client: &mut Client, tenant_alpha: &IntegrationEvent) {
     assert!(matches!(
-        accept_inbox_event(&mut client, "123", &tenant_alpha, 11_000),
+        accept_inbox_event(client, "123", tenant_alpha, 11_000),
         Err(PersistenceError::InvalidReference)
     ));
     assert!(matches!(
-        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, 0),
+        accept_inbox_event(client, "consumer_alpha", tenant_alpha, 0),
         Err(PersistenceError::InvalidTimestamp)
     ));
     assert!(matches!(
-        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, u64::MAX),
+        accept_inbox_event(client, "consumer_alpha", tenant_alpha, u64::MAX),
         Err(PersistenceError::ValueOutOfRange)
     ));
 
     assert_eq!(
-        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, 11_000).unwrap(),
+        accept_inbox_event(client, "consumer_alpha", tenant_alpha, 11_000).unwrap(),
         InboxDisposition::Accepted
     );
     assert_eq!(
-        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, 12_000).unwrap(),
+        accept_inbox_event(client, "consumer_alpha", tenant_alpha, 12_000).unwrap(),
         InboxDisposition::Duplicate
     );
 
     let tenant_beta = event("event_alpha", "tenant_beta", DIGEST_B);
     assert_eq!(
-        accept_inbox_event(&mut client, "consumer_alpha", &tenant_beta, 13_000).unwrap(),
+        accept_inbox_event(client, "consumer_alpha", &tenant_beta, 13_000).unwrap(),
         InboxDisposition::Accepted
     );
 
     let conflicting_inbox = event("event_alpha", "tenant_alpha", DIGEST_B);
     assert!(matches!(
-        accept_inbox_event(&mut client, "consumer_alpha", &conflicting_inbox, 14_000),
+        accept_inbox_event(client, "consumer_alpha", &conflicting_inbox, 14_000),
         Err(PersistenceError::ConflictingReplay)
     ));
+}
 
+fn verify_persisted_row_counts(client: &mut Client) {
     let outbox_count: i64 = client
         .query_one("SELECT count(*) FROM integration_outbox", &[])
         .unwrap()
@@ -151,7 +154,9 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         .get(0);
     assert_eq!(outbox_count, 1);
     assert_eq!(inbox_count, 2);
+}
 
+fn verify_database_constraints(client: &mut Client) {
     let invalid_reference = client.execute(
         "INSERT INTO integration_outbox (\
              event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,\
@@ -174,7 +179,9 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         &[],
     );
     assert!(invalid_digest.is_err());
+}
 
+fn verify_persistence_error_messages() {
     assert_eq!(
         PersistenceError::InvalidReference.to_string(),
         "persistence references must be opaque non-numeric values"
@@ -195,7 +202,9 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         PersistenceError::ConflictingReplay.to_string(),
         "persistence idempotency identity was replayed with conflicting evidence"
     );
+}
 
+fn verify_database_failures(client: &mut Client, tenant_alpha: &IntegrationEvent) {
     client
         .batch_execute(
             "DROP TABLE integration_inbox;\
@@ -203,7 +212,7 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
              DROP TABLE integration_outbox;",
         )
         .unwrap();
-    let outbox_database_error = enqueue_outbox_event(&mut client, &tenant_alpha, 3).unwrap_err();
+    let outbox_database_error = enqueue_outbox_event(client, tenant_alpha, 3).unwrap_err();
     assert!(matches!(
         outbox_database_error,
         PersistenceError::Database(_)
@@ -213,7 +222,22 @@ fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
         "PostgreSQL persistence operation failed"
     );
     assert!(matches!(
-        accept_inbox_event(&mut client, "consumer_alpha", &tenant_alpha, 15_000),
+        accept_inbox_event(client, "consumer_alpha", tenant_alpha, 15_000),
         Err(PersistenceError::Database(_))
     ));
+}
+
+#[test]
+fn integration_evidence_persists_with_exact_replay_and_tenant_isolation() {
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut client).unwrap();
+
+    let tenant_alpha = verify_outbox_contract(&mut client);
+    verify_inbox_contract(&mut client, &tenant_alpha);
+    verify_persisted_row_counts(&mut client);
+    verify_database_constraints(&mut client);
+    verify_persistence_error_messages();
+    verify_database_failures(&mut client, &tenant_alpha);
 }
