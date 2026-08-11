@@ -72,7 +72,7 @@ pub struct ScoringJob {
     state: ScoringJobState,
     attempt_count: u32,
     max_attempts: u32,
-    next_attempt_at_unix_ms: Option<u64>,
+    next_attempt_at_unix_ms: u64,
     last_failure_code: Option<String>,
     active_lease: Option<ScoringLease>,
     result_ref: Option<String>,
@@ -106,7 +106,7 @@ impl ScoringJob {
             state: ScoringJobState::Queued,
             attempt_count: 0,
             max_attempts,
-            next_attempt_at_unix_ms: None,
+            next_attempt_at_unix_ms: 0,
             last_failure_code: None,
             active_lease: None,
             result_ref: None,
@@ -147,7 +147,11 @@ impl ScoringJob {
     /// Return the earliest time at which a retry may be leased.
     #[must_use]
     pub const fn next_attempt_at_unix_ms(&self) -> Option<u64> {
-        self.next_attempt_at_unix_ms
+        if self.next_attempt_at_unix_ms == 0 {
+            None
+        } else {
+            Some(self.next_attempt_at_unix_ms)
+        }
     }
 
     /// Return the latest typed failure cause retained for reconciliation.
@@ -197,10 +201,7 @@ impl ScoringJob {
         match self.state {
             ScoringJobState::Queued => {}
             ScoringJobState::RetryScheduled => {
-                let due = self
-                    .next_attempt_at_unix_ms
-                    .expect("retry-scheduled jobs always retain a due time");
-                if claimed_at_unix_ms < due {
+                if claimed_at_unix_ms < self.next_attempt_at_unix_ms {
                     return Err(ScoringJobError::LeaseNotDue);
                 }
             }
@@ -216,7 +217,7 @@ impl ScoringJob {
             expires_at_unix_ms,
         };
         self.state = ScoringJobState::Leased;
-        self.next_attempt_at_unix_ms = None;
+        self.next_attempt_at_unix_ms = 0;
         self.active_lease = Some(lease.clone());
         Ok(lease)
     }
@@ -265,7 +266,7 @@ impl ScoringJob {
         self.require_fencing_token(fencing_token)?;
         self.last_failure_code = Some(cause_code.to_owned());
         self.active_lease = None;
-        self.next_attempt_at_unix_ms = None;
+        self.next_attempt_at_unix_ms = 0;
         self.state = ScoringJobState::Quarantined;
         Ok(())
     }
@@ -287,10 +288,9 @@ impl ScoringJob {
     ) -> Result<(), ScoringJobError> {
         let scoring_result_ref = required_reference(scoring_result_ref)?;
         if self.state == ScoringJobState::Completed {
-            if self.result_ref.as_deref() != Some(scoring_result_ref) {
-                return Err(ScoringJobError::ConflictingCompletion);
-            }
-            if self.completed_fencing_token != Some(fencing_token) {
+            if self.result_ref.as_deref() != Some(scoring_result_ref)
+                || self.completed_fencing_token != Some(fencing_token)
+            {
                 return Err(ScoringJobError::ConflictingCompletion);
             }
             return Ok(());
@@ -300,7 +300,7 @@ impl ScoringJob {
         self.result_ref = Some(scoring_result_ref.to_owned());
         self.completed_fencing_token = Some(fencing_token);
         self.active_lease = None;
-        self.next_attempt_at_unix_ms = None;
+        self.next_attempt_at_unix_ms = 0;
         self.state = ScoringJobState::Completed;
         Ok(())
     }
@@ -349,16 +349,13 @@ impl ScoringJob {
             | ScoringJobState::RetryScheduled => {
                 self.state = ScoringJobState::Cancelled;
                 self.active_lease = None;
-                self.next_attempt_at_unix_ms = None;
+                self.next_attempt_at_unix_ms = 0;
                 Ok(())
             }
         }
     }
 
     fn require_active_lease(&self) -> Result<&ScoringLease, ScoringJobError> {
-        if self.state != ScoringJobState::Leased {
-            return Err(ScoringJobError::NotLeased);
-        }
         self.active_lease
             .as_ref()
             .ok_or(ScoringJobError::NotLeased)
@@ -376,10 +373,10 @@ impl ScoringJob {
     fn finish_failed_attempt(&mut self, retry_at_unix_ms: u64) -> ScoringJobState {
         if self.attempt_count >= self.max_attempts {
             self.state = ScoringJobState::Quarantined;
-            self.next_attempt_at_unix_ms = None;
+            self.next_attempt_at_unix_ms = 0;
         } else {
             self.state = ScoringJobState::RetryScheduled;
-            self.next_attempt_at_unix_ms = Some(retry_at_unix_ms);
+            self.next_attempt_at_unix_ms = retry_at_unix_ms;
         }
         self.state
     }
