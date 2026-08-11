@@ -48,7 +48,6 @@ env:
   RUSTFLAGS: -Dwarnings
   RUSTDOCFLAGS: -Dwarnings
   CARGO_LLVM_COV_VERSION: "0.8.6"
-  TEST_DATABASE_URL: host=localhost user=postgres password=postgres dbname=psychometrics_commons_test
 
 jobs:
   rust-quality:
@@ -60,7 +59,7 @@ jobs:
         image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}
           POSTGRES_DB: psychometrics_commons_test
         ports:
           - 5432:5432
@@ -76,6 +75,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Configure ephemeral PostgreSQL test connection
+        shell: bash
+        run: |
+          printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt
       - name: Check formatting
@@ -117,7 +121,7 @@ jobs:
         image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}
           POSTGRES_DB: psychometrics_commons_test
         ports:
           - 5432:5432
@@ -133,6 +137,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Configure ephemeral PostgreSQL test connection
+        shell: bash
+        run: |
+          printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned Rust toolchain with LLVM tools
         run: rustup toolchain install 1.97.1 --profile minimal --component llvm-tools-preview
       - name: Install pinned cargo-llvm-cov
@@ -192,7 +201,7 @@ jobs:
         image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}
           POSTGRES_DB: psychometrics_commons_test
         ports:
           - 5432:5432
@@ -208,6 +217,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Configure ephemeral PostgreSQL test connection
+        shell: bash
+        run: |
+          printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned nightly with LLVM tools
         run: rustup toolchain install nightly-2026-08-01 --profile minimal --component llvm-tools-preview
       - name: Install pinned cargo-llvm-cov
