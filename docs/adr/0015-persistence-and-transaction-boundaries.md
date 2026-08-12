@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main contains in-memory/domain lifecycle primitives only; no physical product database migrations or durable outbox/inbox adapter are implemented yet
+- Current/as-built status: protected main contains in-memory/domain lifecycle primitives only; active PR #24 carries the first PostgreSQL integration-evidence migration/adapter but is not protected-main truth until merged
 - Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
-- Migration status: no product schema exists to migrate yet; the first persistence implementation must establish the physical schema from the logical ERD and this ADR without synthetic provenance backfills
+- Migration status: active PR #24 introduces only the bounded integration-evidence slice; the remaining product schema still must be established from the logical ERD and this ADR without synthetic provenance backfills
 
 ## Context
 
@@ -25,6 +25,8 @@ The TRD and ADR-0011 already require service-owned databases and transactional o
 5. No distributed two-phase commit is used across CWL bounded contexts.
 6. No service receives another service's normal application-database credentials. Cross-service state is exchanged through versioned APIs, events, or immutable artifacts.
 7. Published/frozen scientific/product artifacts are append-only or superseded rather than updated in place.
+8. The first integration-evidence adapter uses the scoped outbox identity `(source_ref, tenant_ref, event_ref)`. `event_ref` is not assumed globally unique across sources or tenants.
+9. The first integration-evidence adapter's insert-then-inspect duplicate classifier supports PostgreSQL **READ COMMITTED** isolation only. The adapter verifies the effective transaction isolation and fails closed on `REPEATABLE READ`, `SERIALIZABLE`, or an unknown value. A future implementation may support stronger isolation only if its SQL algorithm and real concurrent replay tests prove identical duplicate-versus-conflict semantics.
 
 ## Ownership and boundaries
 
@@ -44,9 +46,12 @@ The first persistence adapter targets upstream PostgreSQL 18.x only and relies o
 - unique/foreign-key/check constraints needed for idempotency and tenant/resource integrity;
 - row-level locking or optimistic version checks selected per aggregate;
 - transaction-scoped outbox creation;
+- `READ COMMITTED` statement-snapshot refresh for the first integration-evidence adapter's two-statement insert/replay-classification sequence;
 - JSON/JSONB only where a reviewed schema requires it, never as an excuse to avoid versioned typed contracts;
 - transactional DDL characteristics only where migrations explicitly depend on them;
 - indexes and partial/expression indexes only when the migration and supported-query contract require them.
+
+The integration-evidence adapter verifies `SHOW transaction_isolation` before a persistence effect after deterministic input validation. This prevents a caller-owned stronger-isolation transaction from silently misclassifying a concurrent exact replay whose row is not visible in the transaction's fixed snapshot.
 
 Every supported minor version is tested through the same real-database migration/concurrency/crash suite. PostgreSQL 19 or any other major version is not added merely because it exists; support requires a compatibility PR that runs the full persistence acceptance suite and updates the supported-version contract. Cloud products or forks may be added later only with an explicit capability matrix covering transaction isolation, locking, constraints, JSON semantics, migrations/DDL, indexes, backup/restore, connection/proxy behavior, and the exact features this product uses.
 
@@ -88,12 +93,20 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
+### Integration outbox enqueue
+
+The first physical integration slice inserts an immutable outbox row under the composite identity `(source_ref, tenant_ref, event_ref)`. `INSERT ... ON CONFLICT DO NOTHING` is followed by an exact immutable-evidence query only when the insert did not create a row. Because a caller may supply its own transaction, this algorithm explicitly requires `READ COMMITTED`, where each statement receives a fresh command snapshot after a conflicting transaction completes. Stronger isolation is rejected rather than converting an invisible concurrent duplicate into a false `ConflictingReplay` result.
+
+Delivery-attempt rows reference the same composite outbox identity. An identical `event_ref` from another tenant or source is therefore an independent event rather than a collision.
+
 ### Inbox consumption and external effects
 
 On receipt, a consumer validates source/schema/digest/tenant/resource identity and creates or finds the deduplication record. Processing then follows one of two safe patterns:
 
 1. **Local effect:** the domain change and transition of the inbox record to `completed` happen in the same PostgreSQL transaction.
 2. **Non-local effect:** the consumer transaction records `processing` plus a local durable outbox/work item carrying the external operation's stable idempotency key. A worker retries that operation after crashes. The inbox becomes `completed` only after verifiable completion evidence is recorded. If the external service itself exposes a durable idempotency-key result, a retry queries/reuses that result rather than guessing whether the effect happened.
+
+The first physical inbox deduplication slice also uses an insert-then-inspect duplicate classifier and therefore has the same explicit `READ COMMITTED` requirement as outbox enqueue.
 
 An inbox row that merely proves receipt is never marked `completed` before the required effect is locally atomic or durably recoverable. Unknown/mismatched semantics are quarantined without applying the effect.
 
@@ -109,7 +122,8 @@ Physical constraints must enforce equivalents of:
 - unique `(session_ref, server_sequence)`;
 - unique server/public event references within their documented source/tenant scope;
 - one canonical frozen response snapshot per completion/supersession policy;
-- unique outbox event reference;
+- unique outbox identity `(source_ref, tenant_ref, event_ref)` for the first integration persistence slice;
+- delivery attempts foreign-keyed to that same scoped outbox identity;
 - tenant-bound consumer deduplication identity consistent with ADR-0014;
 - tenant/resource-scoped request idempotency keys;
 - manifest/result content digest consistency;
@@ -123,8 +137,9 @@ Physical constraints must enforce equivalents of:
 4. A stale worker may not mark a job/inbox/outbox effect completed after a newer lease/fencing token supersedes it.
 5. Isolation/locking choices must be demonstrated by real PostgreSQL tests; in-memory mutex behavior is not evidence.
 6. Deadlock/serialization errors are classified as bounded retryable only when the same immutable command/idempotency identity can be retried safely.
+7. A persistence function may not silently assume a caller-owned transaction uses an isolation level compatible with its SQL algorithm; supported isolation is checked or the algorithm must be isolation-independent.
 
-Optimistic or pessimistic locking may be selected per aggregate, but the chosen adapter must have deterministic concurrency tests and documented lock/timeout policy.
+The initial integration-evidence adapter is deliberately narrower than the eventual aggregate persistence layer: `READ COMMITTED` is the only accepted isolation level for its two-statement replay classifier. Other aggregates may select optimistic locking, row locking, or a stronger isolation level when their own adapter semantics and real-database tests prove the required invariants.
 
 ## Immutable payloads and large content
 
@@ -134,7 +149,7 @@ The adapter must bind payload/reference to digest and preserve authorization, en
 
 ## Data and persistence impact
 
-This ADR is the target persistence contract; physical migrations do not yet exist. The first migration set must map every actually persisted entity to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
+Protected main still has no physical product persistence. Active PR #24 introduces only three bounded integration-evidence tables and their adapter; it does not establish the complete product schema. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
 
 ## Migration policy
 
@@ -146,9 +161,12 @@ This ADR is the target persistence contract; physical migrations do not yet exis
 - Published scientific payloads are not rewritten merely to simplify a schema transition.
 - PostgreSQL major-version upgrades are operational migrations and require full persistence/concurrency/restore acceptance on the target major before support is declared.
 
+The first migration is a clean-install migration only because protected main has no prior physical product schema. Before that migration may be treated as shipped, its composite outbox identity, delivery-attempt foreign key, tenant/source-scoped inbox identity, opaque-reference checks, digest checks, bounded states, and replay behavior must pass real PostgreSQL tests on the exact reviewed head.
+
 ## Failure and degraded modes
 
 - Transaction failure: no partial domain transition and no orphan outbox event.
+- Unsupported transaction isolation for an adapter path: fail before the persistence effect with a typed safe error; do not silently downgrade the caller's transaction.
 - Outbox publication failure: local committed resource remains valid; dispatch retries are bounded and observable.
 - Duplicate message: inbox deduplication reuses existing processing/completion evidence and prevents duplicate logical effect.
 - Consumer crash after receipt but before local effect: pending/processing evidence remains retryable; receipt alone does not suppress the effect.
@@ -166,10 +184,13 @@ This ADR is the target persistence contract; physical migrations do not yet exis
 - Routine logs and outbox metadata contain resource references/digests rather than raw sensitive assessment content.
 - Backup copies retain the same classification and access obligations as primary data.
 - Tenant/resource binding is validated before event consumption and included in physical uniqueness/authorization constraints where appropriate.
+- Outbox `event_ref` is scoped by both `source_ref` and `tenant_ref`; one source/tenant cannot suppress another source/tenant solely by reusing the same opaque event reference.
 
 ## Deployment and operations impact
 
 The Community, Hosted, and Enterprise profiles may package PostgreSQL differently, but the initial product persistence contract remains upstream PostgreSQL 18.x unless a later adapter decision expands support. Operators must expose database compatibility, migration status, pool health, transaction/lock timeout failures, outbox/inbox age, processing leases, quarantine, and restore readiness without exposing sensitive payloads. Connection pool settings and retry budgets must be bounded to prevent overload amplification.
+
+The integration-evidence adapter additionally requires its caller/session configuration to use `READ COMMITTED`. A profile that forces a different isolation policy is incompatible with this adapter until an isolation-independent implementation or separately proven stronger-isolation algorithm lands.
 
 ## Validation and release evidence
 
@@ -178,22 +199,25 @@ When physical persistence exists, required evidence includes:
 - clean install and migration on upstream PostgreSQL 18.x current supported minor;
 - migration upgrade/rollback or tested roll-forward strategy;
 - real-database concurrency/idempotency tests;
+- exact replay and conflicting replay tests scoped by `(source_ref, tenant_ref, event_ref)`;
+- proof that identical `event_ref` values from different tenants and sources persist independently;
+- contract tests proving the current integration adapter accepts `READ COMMITTED` and fails closed on `REPEATABLE READ` and `SERIALIZABLE` before the persistence effect;
 - crash tests around transaction/outbox/inbox/worker boundaries;
 - inbox pending/processing/completed/quarantine replay tests;
 - external side-effect idempotency/recovery tests using a deterministic contract test service;
 - cross-tenant database/API negative tests;
 - immutable snapshot/result/release constraint tests;
-- lock/deadlock/serialization-retry tests under bounded timeouts;
+- lock/deadlock/serialization-retry tests under bounded timeouts for adapters that actually support those retry classes;
 - restore tests preserving deduplication, tenant, provenance, and restricted-linkage boundaries;
 - schema-to-logical-ERD fitness validation;
 - unsupported database/fork/major-version rejection tests until separately supported.
 
 ## Architecture-view impact
 
-- `docs/architecture/ERD.md` must reflect tenant-bound outbox/inbox and processing evidence.
+- `docs/architecture/ERD.md` must reflect tenant-bound outbox/inbox and processing evidence, including source/tenant-scoped event identity.
 - `docs/architecture/UML.md` sequences must not imply that receipt alone completes non-local effects.
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` must name PostgreSQL 18.x as the initial validated store rather than an undefined compatible class.
-- `docs/TRACEABILITY.md` must remain Target for physical persistence until migrations and real-database tests land.
+- `docs/TRACEABILITY.md` must classify active-PR persistence separately from protected-main implementation until migrations and real-database tests land on protected main.
 
 ## Alternatives considered
 
@@ -213,6 +237,14 @@ Rejected. It bypasses bounded contexts, expands credential blast radius, and pre
 
 Rejected. It couples independent availability and deployment domains and is unnecessary when durable outbox/inbox plus reconciliation preserve product semantics.
 
+### Globally unique `event_ref` without source/tenant scope
+
+Rejected. The domain contract does not guarantee global uniqueness across bounded-context sources or tenants. A single-column primary key could reject a valid event in one tenant because another source or tenant used the same opaque event reference.
+
+### Allow stronger isolation without changing the replay classifier
+
+Rejected. `REPEATABLE READ` and `SERIALIZABLE` retain transaction snapshots that can make the post-conflict inspection unable to observe the row that caused `ON CONFLICT DO NOTHING`. The adapter fails closed instead of reporting a deterministic duplicate/conflict result it cannot prove.
+
 ### Mark inbox completed at receipt before non-local side effect
 
 Rejected. A crash after receipt but before the side effect could make retries suppress an effect that never happened.
@@ -230,6 +262,8 @@ Not selected as a universal storage pattern. Append-only evidence is required wh
 Positive:
 
 - precise database compatibility instead of an unverifiable “compatible” claim;
+- tenant/source-scoped outbox identity aligned with the event-domain contract;
+- fail-closed, explicit isolation behavior for caller-owned transactions;
 - clear ownership and recovery boundaries;
 - crash-safe cross-service propagation;
 - independent service deployability;
@@ -238,6 +272,7 @@ Positive:
 Costs:
 
 - PostgreSQL 18.x becomes an explicit initial operational dependency;
+- the first integration adapter is intentionally limited to `READ COMMITTED` until redesigned/proven otherwise;
 - explicit worker/reconciliation machinery;
 - duplicate/idempotency/processing state;
 - migration, concurrency, crash, and restore testing burden;
@@ -245,9 +280,11 @@ Costs:
 
 ## Follow-up work
 
-- implement the first PostgreSQL 18.x migrations and typed repository adapters from `docs/architecture/ERD.md`;
+- complete and merge the first PostgreSQL 18.x integration-evidence migration/adapter only after exact-head review and evidence gates pass;
+- implement the remaining typed repository adapters from `docs/architecture/ERD.md`;
 - add real PostgreSQL concurrency/crash tests for response completion, outbox, inbox, and worker leases;
-- implement tenant-bound event identity and consumption state consistent with ADR-0014;
+- implement durable inbox processing states and delivery-attempt APIs consistent with ADR-0014;
+- evaluate whether a single-statement replay classifier can safely remove the integration adapter's `READ COMMITTED` restriction without weakening duplicate/conflict semantics;
 - add profile-specific database install/upgrade/restore runbooks;
 - evaluate additional managed PostgreSQL services only when a concrete deployment need exists and record a capability/conformance matrix before claiming support.
 
@@ -262,7 +299,7 @@ Costs:
 
 ## Reversal conditions
 
-The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed.
+The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed. The `READ COMMITTED` restriction may be removed only when a replacement replay algorithm is proven isolation-correct by real concurrent PostgreSQL tests and the documentation/traceability contract is updated in the same change.
 
 ## References
 
