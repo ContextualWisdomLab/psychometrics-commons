@@ -65,9 +65,9 @@ impl DeliveryAttemptPersistence {
 /// so constructing this lightweight value never bypasses persistence checks.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OutboxPersistenceIdentity<'a> {
-    source_ref: &'a str,
-    tenant_ref: &'a str,
-    event_ref: &'a str,
+    source: &'a str,
+    tenant: &'a str,
+    event: &'a str,
 }
 
 impl<'a> OutboxPersistenceIdentity<'a> {
@@ -75,9 +75,9 @@ impl<'a> OutboxPersistenceIdentity<'a> {
     #[must_use]
     pub const fn new(source_ref: &'a str, tenant_ref: &'a str, event_ref: &'a str) -> Self {
         Self {
-            source_ref,
-            tenant_ref,
-            event_ref,
+            source: source_ref,
+            tenant: tenant_ref,
+            event: event_ref,
         }
     }
 }
@@ -257,9 +257,9 @@ pub fn record_outbox_delivery_attempt(
     occurred_at_unix_ms: u64,
     cause_code: Option<&str>,
 ) -> Result<DeliveryAttemptPersistence, PersistenceError> {
-    let source_ref = required_persistence_reference(identity.source_ref)?;
-    let tenant_ref = required_persistence_reference(identity.tenant_ref)?;
-    let event_ref = required_persistence_reference(identity.event_ref)?;
+    let source_ref = required_persistence_reference(identity.source)?;
+    let tenant_ref = required_persistence_reference(identity.tenant)?;
+    let event_ref = required_persistence_reference(identity.event)?;
     let attempt_ref = required_persistence_reference(attempt_ref)?;
     if occurred_at_unix_ms == 0 {
         return Err(PersistenceError::InvalidTimestamp);
@@ -311,27 +311,27 @@ pub fn record_outbox_delivery_attempt(
         return Err(PersistenceError::NonMonotonicTimestamp);
     }
 
-    transaction.execute(
-        "INSERT INTO integration_delivery_attempt (\
-             source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome,\
-             occurred_at_unix_ms, cause_code\
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        &[
-            &source_ref,
-            &tenant_ref,
-            &event_ref,
-            &attempt_ref,
-            &outcome_name,
-            &occurred_at_unix_ms,
-            &cause_code,
-        ],
-    )?;
-
     let attempt_count: i64 = transaction
         .query_one(
-            "SELECT count(*) FROM integration_delivery_attempt \
+            "WITH inserted_attempt AS (\
+                 INSERT INTO integration_delivery_attempt (\
+                     source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome,\
+                     occurred_at_unix_ms, cause_code\
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                 RETURNING 1\
+             ) \
+             SELECT count(*) + (SELECT count(*) FROM inserted_attempt) \
+             FROM integration_delivery_attempt \
              WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
-            &[&source_ref, &tenant_ref, &event_ref],
+            &[
+                &source_ref,
+                &tenant_ref,
+                &event_ref,
+                &attempt_ref,
+                &outcome_name,
+                &occurred_at_unix_ms,
+                &cause_code,
+            ],
         )?
         .get(0);
     let next_state = match outcome {
