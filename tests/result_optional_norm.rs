@@ -9,7 +9,7 @@ use psychometrics_commons_runtime::session::SessionState;
 
 #[test]
 fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,

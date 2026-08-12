@@ -10,7 +10,7 @@ use psychometrics_commons_runtime::scoring::{
 use psychometrics_commons_runtime::session::SessionState;
 
 fn request_and_result() -> (ScoringRequest, ScoringResult) {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
