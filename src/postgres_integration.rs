@@ -5,9 +5,7 @@
 //! preserve the immutable integration-event, outbox, and inbox contracts defined
 //! by [`crate::integration`].
 
-use crate::integration::{
-    DeliveryOutcome, InboxDisposition, IntegrationEvent, OutboxState,
-};
+use crate::integration::{DeliveryOutcome, InboxDisposition, IntegrationEvent, OutboxState};
 use crate::reference::normalized_reference;
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
@@ -244,9 +242,7 @@ pub fn record_outbox_delivery_attempt(
     if occurred_at_unix_ms == 0 {
         return Err(PersistenceError::InvalidTimestamp);
     }
-    let cause_code = cause_code
-        .map(required_persistence_reference)
-        .transpose()?;
+    let cause_code = cause_code.map(required_persistence_reference).transpose()?;
     let occurred_at_unix_ms = postgres_bigint(occurred_at_unix_ms)?;
     require_read_committed(transaction)?;
 
