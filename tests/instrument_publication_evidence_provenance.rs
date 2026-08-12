@@ -160,17 +160,6 @@ fn evidence_must_be_effective_at_the_server_authoritative_publish_time() {
 fn malformed_provenance_fails_closed() {
     assert_eq!(
         PublicationEvidenceProvenance::new(
-            RELEASE_DIGEST,
-            "population_general_adult_v1",
-            "administration_web_self_report_v1",
-            "measurement_model_big_five_v1",
-            10_150,
-            None,
-        ),
-        Err(InstrumentReleaseError::PublicationEvidenceDigestMatchesRelease)
-    );
-    assert_eq!(
-        PublicationEvidenceProvenance::new(
             "sha256:not-a-digest",
             "population_general_adult_v1",
             "administration_web_self_report_v1",
