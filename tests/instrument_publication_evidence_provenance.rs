@@ -218,6 +218,44 @@ fn reactivation_requires_evidence_effective_at_reactivation_time() {
 }
 
 #[test]
+fn reactivation_event_rebinds_exact_evidence_identity_digest_and_policy() {
+    let mut release = reviewed_release();
+    release
+        .bind_publication_evidence(
+            evidence(
+                &["item_version_001", "item_version_002"],
+                RELEASE_DIGEST,
+                "ko-KR",
+                provenance(10_150, Some(10_300)).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    release
+        .apply_command("publish_event", PublicationCommand::Publish, 10_200)
+        .unwrap();
+    release
+        .apply_command("suspend_event", PublicationCommand::Suspend, 10_220)
+        .unwrap();
+    release
+        .apply_command("reactivate_event", PublicationCommand::Reactivate, 10_240)
+        .unwrap();
+
+    let event = release.events().last().unwrap();
+    assert_eq!(release.state(), PublicationState::Published);
+    assert_eq!(event.command(), PublicationCommand::Reactivate);
+    assert_eq!(
+        event.publication_evidence_ref(),
+        Some("publication_evidence_big_five_ko_v1")
+    );
+    assert_eq!(
+        event.evidence_policy_ref(),
+        Some("evidence_policy_self_reflection_v1")
+    );
+    assert_eq!(event.publication_evidence_digest(), Some(EVIDENCE_DIGEST));
+}
+
+#[test]
 fn malformed_provenance_fails_closed() {
     assert_eq!(
         PublicationEvidenceProvenance::new(
