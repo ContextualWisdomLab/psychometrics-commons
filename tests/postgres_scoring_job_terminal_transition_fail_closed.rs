@@ -45,17 +45,17 @@ fn test_client(schema: &str, job_ref: &str, request_ref: &str) -> Client {
 fn suppress_terminal_updates(client: &mut Client) {
     client
         .batch_execute(
-            "CREATE FUNCTION suppress_terminal_update() RETURNS trigger AS $$\
-             BEGIN\
-                 IF NEW.scoring_state IN ('completed', 'quarantined') THEN\
-                     RETURN NULL;\
-                 END IF;\
-                 RETURN NEW;\
-             END;\
-             $$ LANGUAGE plpgsql;\
-             CREATE TRIGGER suppress_terminal_update\
-             BEFORE UPDATE ON scoring_job_state\
-             FOR EACH ROW EXECUTE FUNCTION suppress_terminal_update();",
+            r#"CREATE FUNCTION suppress_terminal_update() RETURNS trigger AS $$
+BEGIN
+    IF NEW.scoring_state IN ('completed', 'quarantined') THEN
+        RETURN NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER suppress_terminal_update
+BEFORE UPDATE ON scoring_job_state
+FOR EACH ROW EXECUTE FUNCTION suppress_terminal_update();"#,
         )
         .unwrap();
 }
