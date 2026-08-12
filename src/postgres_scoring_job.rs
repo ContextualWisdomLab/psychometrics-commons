@@ -243,6 +243,7 @@ pub fn claim_scoring_job(
          SET scoring_state = 'leased',\
              attempt_count = attempt_count + 1,\
              next_attempt_at_unix_ms = NULL,\
+             last_failure_code = NULL,\
              active_worker_ref = $2,\
              active_lease_ref = $3,\
              active_fencing_token = attempt_count + 1,\
@@ -345,7 +346,7 @@ pub fn record_retryable_scoring_failure(
              END,\
              next_attempt_at_unix_ms = CASE \
                  WHEN attempt_count >= max_attempts THEN NULL \
-                 ELSE $4 \
+                 ELSE $4::BIGINT \
              END,\
              last_failure_code = $3,\
              active_worker_ref = NULL,\
@@ -357,7 +358,7 @@ pub fn record_retryable_scoring_failure(
            AND scoring_state = 'leased' \
            AND active_fencing_token = $2 \
            AND active_lease_expires_at_unix_ms > $5 \
-         RETURNING scoring_state",
+         RETURNING attempt_count >= max_attempts AS quarantined",
         &[
             &scoring_job_ref,
             &fencing_token,
@@ -368,12 +369,12 @@ pub fn record_retryable_scoring_failure(
     )?;
 
     if let Some(row) = transitioned {
-        let persisted_state: String = row.get(0);
-        return match persisted_state.as_str() {
-            "retry_scheduled" => Ok(ScoringJobState::RetryScheduled),
-            "quarantined" => Ok(ScoringJobState::Quarantined),
-            _ => Err(ScoringJobPersistenceError::NotLeaseable),
-        };
+        let quarantined: bool = row.get(0);
+        return Ok(if quarantined {
+            ScoringJobState::Quarantined
+        } else {
+            ScoringJobState::RetryScheduled
+        });
     }
 
     classify_worker_transition_failure(
