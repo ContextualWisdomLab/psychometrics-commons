@@ -61,9 +61,6 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
         )
         .unwrap_err();
     let error = ScoringJobPersistenceError::from(database_error);
-    assert_eq!(
-        error.to_string(),
-        "PostgreSQL scoring-job persistence failed"
-    );
+    assert_eq!(error.to_string(), "PostgreSQL scoring-job persistence failed");
     assert!(std::error::Error::source(&error).is_some());
 }
