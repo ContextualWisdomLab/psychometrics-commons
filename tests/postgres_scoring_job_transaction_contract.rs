@@ -106,3 +106,123 @@ fn persistence_operations_wrap_missing_table_failures() {
         .batch_execute("DROP SCHEMA scoring_job_database_error_test CASCADE;")
         .unwrap();
 }
+
+#[test]
+fn enqueue_classification_wraps_a_second_statement_database_failure() {
+    let mut client = isolated_client(
+        "DROP SCHEMA IF EXISTS scoring_job_enqueue_classification_test CASCADE;\
+         DROP SCHEMA IF EXISTS scoring_job_enqueue_failure_sink CASCADE;\
+         CREATE SCHEMA scoring_job_enqueue_classification_test;\
+         CREATE SCHEMA scoring_job_enqueue_failure_sink;\
+         SET search_path TO scoring_job_enqueue_classification_test;",
+    );
+    apply_scoring_job_migration(&mut client).unwrap();
+
+    let job = queued_job(
+        "scoring_job_enqueue_classification",
+        "scoring_request_enqueue_classification",
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_scoring_job(&mut transaction, &job).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute(
+            "CREATE FUNCTION redirect_after_insert() RETURNS trigger LANGUAGE plpgsql AS $$\
+             BEGIN\
+                 PERFORM set_config('search_path', 'scoring_job_enqueue_failure_sink', true);\
+                 RETURN NULL;\
+             END\
+             $$;\
+             CREATE TRIGGER redirect_after_insert\
+             AFTER INSERT ON scoring_job_state\
+             FOR EACH STATEMENT EXECUTE FUNCTION redirect_after_insert();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_scoring_job(&mut transaction, &job),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "DROP SCHEMA scoring_job_enqueue_classification_test CASCADE;\
+             DROP SCHEMA scoring_job_enqueue_failure_sink CASCADE;",
+        )
+        .unwrap();
+}
+
+#[test]
+fn claim_classification_wraps_a_second_statement_database_failure() {
+    let mut client = isolated_client(
+        "DROP SCHEMA IF EXISTS scoring_job_claim_classification_test CASCADE;\
+         DROP SCHEMA IF EXISTS scoring_job_claim_failure_sink CASCADE;\
+         CREATE SCHEMA scoring_job_claim_classification_test;\
+         CREATE SCHEMA scoring_job_claim_failure_sink;\
+         SET search_path TO scoring_job_claim_classification_test;",
+    );
+    apply_scoring_job_migration(&mut client).unwrap();
+
+    let job = queued_job(
+        "scoring_job_claim_classification",
+        "scoring_request_claim_classification",
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_scoring_job(&mut transaction, &job).unwrap();
+        transaction.commit().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        claim_scoring_job(
+            &mut transaction,
+            "scoring_job_claim_classification",
+            "worker_claim_classification",
+            "scoring_lease_claim_classification",
+            10_000,
+            11_000,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute(
+            "CREATE FUNCTION redirect_after_update() RETURNS trigger LANGUAGE plpgsql AS $$\
+             BEGIN\
+                 PERFORM set_config('search_path', 'scoring_job_claim_failure_sink', true);\
+                 RETURN NULL;\
+             END\
+             $$;\
+             CREATE TRIGGER redirect_after_update\
+             AFTER UPDATE ON scoring_job_state\
+             FOR EACH STATEMENT EXECUTE FUNCTION redirect_after_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        claim_scoring_job(
+            &mut transaction,
+            "scoring_job_claim_classification",
+            "worker_claim_classification_retry",
+            "scoring_lease_claim_classification_retry",
+            10_500,
+            11_500,
+        ),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "DROP SCHEMA scoring_job_claim_classification_test CASCADE;\
+             DROP SCHEMA scoring_job_claim_failure_sink CASCADE;",
+        )
+        .unwrap();
+}
