@@ -350,9 +350,7 @@ impl ScoringJob {
             ScoringJobState::Completed | ScoringJobState::Quarantined => {
                 Err(ScoringJobError::TerminalState)
             }
-            ScoringJobState::Queued
-            | ScoringJobState::Leased
-            | ScoringJobState::RetryScheduled => {
+            ScoringJobState::Queued | ScoringJobState::Leased | ScoringJobState::RetryScheduled => {
                 self.state = ScoringJobState::Cancelled;
                 self.active_lease = None;
                 self.next_attempt_at_unix_ms = 0;
@@ -362,9 +360,7 @@ impl ScoringJob {
     }
 
     fn require_active_lease(&self) -> Result<&ScoringLease, ScoringJobError> {
-        self.active_lease
-            .as_ref()
-            .ok_or(ScoringJobError::NotLeased)
+        self.active_lease.as_ref().ok_or(ScoringJobError::NotLeased)
     }
 
     fn require_live_fencing_token(
@@ -430,17 +426,11 @@ pub enum ScoringJobError {
 impl Display for ScoringJobError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => {
-                "scoring job references must be opaque non-numeric values"
-            }
-            Self::InvalidAttemptLimit => {
-                "scoring job maximum attempts must be greater than zero"
-            }
+            Self::InvalidReference => "scoring job references must be opaque non-numeric values",
+            Self::InvalidAttemptLimit => "scoring job maximum attempts must be greater than zero",
             Self::InvalidTimestamp => "scoring job timestamps must be greater than zero",
             Self::InvalidLeaseWindow => "scoring lease expiry must be later than claim time",
-            Self::InvalidRetryWindow => {
-                "scoring retry time must not precede failure time"
-            }
+            Self::InvalidRetryWindow => "scoring retry time must not precede failure time",
             Self::LeaseNotDue => "scoring job retry is not due yet",
             Self::NotLeaseable => "scoring job is not available for a new lease",
             Self::NotLeased => "scoring job has no active lease",

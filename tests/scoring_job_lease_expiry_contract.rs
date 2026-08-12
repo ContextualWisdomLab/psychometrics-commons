@@ -1,8 +1,6 @@
 //! Regression tests for time-bounded scoring-worker lease authority.
 
-use psychometrics_commons_runtime::scoring_job::{
-    ScoringJob, ScoringJobError, ScoringJobState,
-};
+use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobError, ScoringJobState};
 
 #[test]
 fn expired_lease_rejects_worker_terminal_evidence_until_recovered() {

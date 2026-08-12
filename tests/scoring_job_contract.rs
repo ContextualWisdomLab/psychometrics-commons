@@ -1,8 +1,6 @@
 //! Contract tests for asynchronous scoring-job ownership, retry, and fencing semantics.
 
-use psychometrics_commons_runtime::scoring_job::{
-    ScoringJob, ScoringJobError, ScoringJobState,
-};
+use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobError, ScoringJobState};
 
 fn job(max_attempts: u32) -> ScoringJob {
     ScoringJob::new("scoring_job_alpha", "scoring_request_alpha", max_attempts).unwrap()
@@ -174,11 +172,7 @@ fn successful_completion_is_idempotent_only_for_the_same_result_and_fence() {
         .unwrap();
     assert_eq!(
         scoring_job
-            .record_success(
-                lease.fencing_token() + 1,
-                "scoring_result_alpha",
-                11_000,
-            )
+            .record_success(lease.fencing_token() + 1, "scoring_result_alpha", 11_000,)
             .unwrap_err(),
         ScoringJobError::ConflictingCompletion
     );
@@ -194,7 +188,10 @@ fn successful_completion_is_idempotent_only_for_the_same_result_and_fence() {
             .unwrap_err(),
         ScoringJobError::NotLeased
     );
-    assert_eq!(scoring_job.cancel().unwrap_err(), ScoringJobError::TerminalState);
+    assert_eq!(
+        scoring_job.cancel().unwrap_err(),
+        ScoringJobError::TerminalState
+    );
 }
 
 #[test]
@@ -250,11 +247,7 @@ fn permanent_failure_and_cancellation_are_terminal_and_fence_active_work() {
         .unwrap();
     assert_eq!(
         failed_job
-            .record_permanent_failure(
-                lease.fencing_token() + 1,
-                "invalid_contract",
-                11_000,
-            )
+            .record_permanent_failure(lease.fencing_token() + 1, "invalid_contract", 11_000,)
             .unwrap_err(),
         ScoringJobError::StaleLease
     );
