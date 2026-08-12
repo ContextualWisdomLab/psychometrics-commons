@@ -2,7 +2,7 @@
 
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseError, InstrumentReleaseManifest, PublicationCommand,
-    PublicationState,
+    PublicationEvidenceRecord, PublicationEvidenceStatus, PublicationState,
 };
 
 const VALID_DIGEST: &str =
@@ -27,6 +27,35 @@ fn manifest() -> InstrumentReleaseManifest {
         VALID_DIGEST,
     )
     .unwrap()
+}
+
+fn approved_publication_evidence() -> PublicationEvidenceRecord {
+    PublicationEvidenceRecord::new(
+        "publication_evidence_big_five_ko_v1",
+        "evidence_policy_self_reflection_v1",
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        &["item_version_001", "item_version_002"],
+        VALID_DIGEST,
+        "ko-KR",
+        "intended_use_self_reflection_v1",
+        "assessment_spec_big_five_v1",
+        "scoring_version_big_five_v1",
+        "calibration_big_five_ko_v1",
+        Some("norm_version_big_five_ko_v1"),
+        "limitations_nonclinical_v1",
+        &["rights_ipip_big_five_v1"],
+        &["recovery_big_five_ko_v1"],
+        &["approval_psychometrics_big_five_ko_v1"],
+        PublicationEvidenceStatus::Approved,
+    )
+    .unwrap()
+}
+
+fn bind_approved_publication_evidence(release: &mut InstrumentRelease) {
+    release
+        .bind_publication_evidence(approved_publication_evidence())
+        .unwrap();
 }
 
 fn custom_manifest(
@@ -287,6 +316,7 @@ fn publication_requires_review_and_controls_new_session_eligibility() {
         )
         .unwrap();
     assert_eq!(release.state(), PublicationState::Review);
+    bind_approved_publication_evidence(&mut release);
 
     release
         .apply_command("publish_event", PublicationCommand::Publish, 10_200)
@@ -360,6 +390,7 @@ fn suspended_release_can_retire_without_reactivation() {
             18_100,
         )
         .unwrap();
+    bind_approved_publication_evidence(&mut release);
     release
         .apply_command("publish_event", PublicationCommand::Publish, 18_200)
         .unwrap();
@@ -384,6 +415,7 @@ fn event_replay_is_idempotent_and_never_reopens_later_state() {
             20_100,
         )
         .unwrap();
+    bind_approved_publication_evidence(&mut release);
     release
         .apply_command("publish_event", PublicationCommand::Publish, 20_200)
         .unwrap();
@@ -425,6 +457,7 @@ fn event_time_is_server_monotonic_and_retirement_is_terminal() {
             30_100,
         )
         .unwrap();
+    bind_approved_publication_evidence(&mut release);
     release
         .apply_command("publish_event", PublicationCommand::Publish, 30_200)
         .unwrap();
@@ -473,6 +506,22 @@ fn instrument_release_errors_have_stable_safe_display_text() {
         (
             InstrumentReleaseError::InvalidDigest,
             "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits",
+        ),
+        (
+            InstrumentReleaseError::IncompletePublicationEvidence,
+            "approved publication evidence must include content or rights, scientific, and approval references",
+        ),
+        (
+            InstrumentReleaseError::PublicationEvidenceMismatch,
+            "publication evidence must match the exact immutable instrument release bundle",
+        ),
+        (
+            InstrumentReleaseError::MissingPublicationEvidence,
+            "reviewed instrument release requires bound publication evidence before publication",
+        ),
+        (
+            InstrumentReleaseError::PublicationEvidenceNotApproved,
+            "instrument publication evidence must be policy-approved before publication",
         ),
         (
             InstrumentReleaseError::InvalidTimestamp,
