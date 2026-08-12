@@ -19,10 +19,7 @@ fn test_client() -> Client {
 fn database_test_guard() -> Client {
     let mut client = test_client();
     client
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&DATABASE_TEST_LOCK_KEY],
-        )
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL integration-test advisory lock should be acquired");
     client
 }
