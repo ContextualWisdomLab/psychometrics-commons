@@ -53,8 +53,6 @@ pub enum StyleAssignmentIdentityError {
     InvalidReference,
     /// A digest or locale contained noncanonical whitespace/control content or was blank.
     NonCanonicalToken,
-    /// One serialized field exceeded the canonical unsigned 64-bit length representation.
-    ValueOutOfRange,
 }
 
 impl Display for StyleAssignmentIdentityError {
@@ -66,7 +64,6 @@ impl Display for StyleAssignmentIdentityError {
             Self::NonCanonicalToken => {
                 "style-assignment digests and locale must be nonblank canonical tokens"
             }
-            Self::ValueOutOfRange => "style-assignment canonical field length is out of range",
         })
     }
 }
@@ -84,8 +81,8 @@ impl StyleAssignmentIdentity<'_> {
     ///
     /// # Errors
     ///
-    /// Returns [`StyleAssignmentIdentityError`] when an opaque reference is invalid, an exact
-    /// token is blank/noncanonical, or a field length cannot fit the canonical representation.
+    /// Returns [`StyleAssignmentIdentityError`] when an opaque reference is invalid or an exact
+    /// token is blank/noncanonical.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, StyleAssignmentIdentityError> {
         let (score_identity_kind, score_identity) = match self.score_identity {
             ScoreIdentity::ScoreProfileRef(reference) => {
@@ -106,35 +103,35 @@ impl StyleAssignmentIdentity<'_> {
 
         let mut canonical = Vec::with_capacity(384);
         canonical.extend_from_slice(STYLE_ASSIGNMENT_IDENTITY_DOMAIN);
-        append_field(&mut canonical, "score_identity_kind", score_identity_kind)?;
-        append_field(&mut canonical, "score_identity", score_identity)?;
+        append_field(&mut canonical, "score_identity_kind", score_identity_kind);
+        append_field(&mut canonical, "score_identity", score_identity);
         append_field(
             &mut canonical,
             "instrument_version_ref",
             instrument_version_ref,
-        )?;
-        append_field(&mut canonical, "scoring_version_ref", scoring_version_ref)?;
+        );
+        append_field(&mut canonical, "scoring_version_ref", scoring_version_ref);
         append_field(
             &mut canonical,
             "norm_version_ref_present",
             if norm_version_ref.is_some() { "1" } else { "0" },
-        )?;
+        );
         append_field(
             &mut canonical,
             "norm_version_ref",
             norm_version_ref.unwrap_or_default(),
-        )?;
+        );
         append_field(
             &mut canonical,
             "style_mapping_version_ref",
             style_mapping_version_ref,
-        )?;
+        );
         append_field(
             &mut canonical,
             "interpretation_rule_bundle_digest",
             interpretation_rule_bundle_digest,
-        )?;
-        append_field(&mut canonical, "locale", locale)?;
+        );
+        append_field(&mut canonical, "locale", locale);
         Ok(canonical)
     }
 }
@@ -155,15 +152,10 @@ fn required_exact_token(token: &str) -> Result<&str, StyleAssignmentIdentityErro
     }
 }
 
-fn append_field(
-    target: &mut Vec<u8>,
-    field_name: &str,
-    value: &str,
-) -> Result<(), StyleAssignmentIdentityError> {
-    let value_length =
-        u64::try_from(value.len()).map_err(|_| StyleAssignmentIdentityError::ValueOutOfRange)?;
+fn append_field(target: &mut Vec<u8>, field_name: &str, value: &str) {
+    let value_length = u64::try_from(value.len())
+        .expect("Rust string lengths must fit the canonical unsigned 64-bit length field");
     target.extend_from_slice(field_name.as_bytes());
     target.extend_from_slice(&value_length.to_be_bytes());
     target.extend_from_slice(value.as_bytes());
-    Ok(())
 }
