@@ -1,5 +1,14 @@
 CREATE TABLE IF NOT EXISTS scoring_job (
-    scoring_job_ref TEXT PRIMARY KEY
+    tenant_ref TEXT NOT NULL
+        CHECK (
+            tenant_ref = btrim(tenant_ref)
+            AND tenant_ref <> ''
+            AND NOT (
+                tenant_ref ~ '[[:digit:]]'
+                AND tenant_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
+    scoring_job_ref TEXT NOT NULL
         CHECK (
             scoring_job_ref = btrim(scoring_job_ref)
             AND scoring_job_ref <> ''
@@ -8,7 +17,7 @@ CREATE TABLE IF NOT EXISTS scoring_job (
                 AND scoring_job_ref ~ '^[[:digit:]+,.eE-]+$'
             )
         ),
-    scoring_request_ref TEXT NOT NULL UNIQUE
+    scoring_request_ref TEXT NOT NULL
         CHECK (
             scoring_request_ref = btrim(scoring_request_ref)
             AND scoring_request_ref <> ''
@@ -30,7 +39,7 @@ CREATE TABLE IF NOT EXISTS scoring_job (
                 AND active_worker_ref ~ '^[[:digit:]+,.eE-]+$'
             )
         )),
-    active_lease_ref TEXT UNIQUE
+    active_lease_ref TEXT
         CHECK (active_lease_ref IS NULL OR (
             active_lease_ref = btrim(active_lease_ref)
             AND active_lease_ref <> ''
@@ -66,6 +75,9 @@ CREATE TABLE IF NOT EXISTS scoring_job (
     completed_at_unix_ms BIGINT CHECK (completed_at_unix_ms IS NULL OR completed_at_unix_ms > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (tenant_ref, scoring_job_ref),
+    UNIQUE (tenant_ref, scoring_request_ref),
+    UNIQUE (tenant_ref, active_lease_ref),
     CHECK (attempt_count <= max_attempts),
     CHECK (
         (current_state = 'queued'
