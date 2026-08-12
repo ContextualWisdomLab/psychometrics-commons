@@ -53,7 +53,10 @@ fn scoring_job_migration_rejects_weakened_same_name_constraint() {
         )
         .unwrap()
         .get(0);
-    assert!(relation_exists, "migration did not create the schema-qualified table");
+    assert!(
+        relation_exists,
+        "migration did not create the schema-qualified table"
+    );
 
     client
         .batch_execute(
