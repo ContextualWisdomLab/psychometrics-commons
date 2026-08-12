@@ -2,7 +2,7 @@
 
 - Status: Normative evidence map
 - Date: 2026-08-12
-- Protected-main baseline: `1733aac738e455214891a51137a3d0bbe092414c`
+- Protected-main baseline: `feb34f2d9e497b0b25cf128b9df222b844ae8b09`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
@@ -33,9 +33,9 @@ The active slice persists:
 - lease expiry evidence;
 - database constraints rejecting impossible lifecycle state shapes.
 
-Migration reapplication does not trust relation existence or constraint names alone as schema evidence. On initial creation, migration `0002` validates the ordered column/type/nullability contract, expected defaults, enforced/validated primary/check constraint names, and a live invalid-state probe, then records the PostgreSQL-normalized `name:definition` constraint manifest on the owned relation. Reapplication recomputes the normalized manifest and compares it with that creation-time evidence. Incompatible pre-existing relations, missing manifest evidence, renamed/removed constraints, and same-name weakened constraint definitions therefore fail closed rather than being accepted as successful migration state.
+Migration reapplication does not trust relation existence or constraint names alone as schema evidence. On initial creation, migration `0002` validates the ordered column/type/nullability contract, expected defaults, the complete contract-relevant PostgreSQL constraint inventory (CHECK, PRIMARY KEY, UNIQUE, FOREIGN KEY, EXCLUDE, and PostgreSQL 18 NOT NULL entries, including validation/enforcement state), and a live invalid-state probe, then records the PostgreSQL-normalized `name:definition` constraint manifest on the owned relation. Reapplication recomputes that inventory and normalized manifest and compares them with the creation-time evidence. Incompatible pre-existing relations, missing manifest evidence, renamed/removed or unexpected constraints, non-validated/non-enforced constraints, and same-name weakened constraint definitions therefore fail closed rather than being accepted as successful migration state.
 
-Real PostgreSQL tests on the active branch cover exact replay/conflicting replay, enqueue and claim isolation contracts, fail-closed invalid evidence, per-test-suite schema isolation, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint-definition weakening, database lifecycle-shape constraints, first- and second-statement database error propagation, and stable non-sensitive error/source contracts. These are review-time facts only until the unchanged head is integrated.
+Real PostgreSQL tests on the active branch cover exact replay/conflicting replay, enqueue and claim isolation contracts, fail-closed invalid evidence, per-test-suite schema isolation, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint-definition weakening, unexpected CHECK/UNIQUE/FOREIGN KEY/EXCLUDE/NOT NULL constraint rejection, database lifecycle-shape constraints, first- and second-statement database error propagation, and stable non-sensitive error/source contracts. These are review-time facts only until the unchanged head is integrated.
 
 The active slice deliberately does **not** claim durable retry scheduling/reclaim, completion, permanent failure/quarantine transitions, expired-lease recovery, crash/restart recovery, result persistence, or live fast-mlsirm execution. Those remain Target.
 
