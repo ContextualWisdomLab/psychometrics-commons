@@ -2,16 +2,15 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
-    apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
-    ScoringJobPersistenceError,
+    apply_scoring_job_migration, claim_scoring_job, persist_scoring_job, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
 fn isolated_client(schema_sql: &str) -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client =
-        Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
     client.batch_execute(schema_sql).unwrap();
     client
 }
@@ -79,7 +78,10 @@ fn persistence_operations_wrap_missing_table_failures() {
          CREATE SCHEMA scoring_job_database_error_test;\
          SET search_path TO scoring_job_database_error_test;",
     );
-    let job = queued_job("scoring_job_database_error", "scoring_request_database_error");
+    let job = queued_job(
+        "scoring_job_database_error",
+        "scoring_request_database_error",
+    );
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
