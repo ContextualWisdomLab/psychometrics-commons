@@ -17,7 +17,7 @@ fn test_client(schema: &str) -> Client {
         .batch_execute(&format!(
             "CREATE SCHEMA IF NOT EXISTS {schema};\
              SET search_path TO {schema};\
-             DROP TABLE IF EXISTS scoring_job_state;"
+             DROP TABLE IF EXISTS scoring_job_state;",
         ))
         .unwrap();
     apply_scoring_job_migration(&mut client).unwrap();
