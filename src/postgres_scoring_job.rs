@@ -3,7 +3,7 @@
 //! This adapter persists product orchestration state only. Psychometric scoring remains
 //! owned by `fast-mlsirm`. The caller owns the database connection, credentials, and
 //! transaction boundary. Enqueue replay, worker claims, and retry transitions require
-//! `READ COMMITTED`; conditional updates preserve stale-worker fencing in the database.
+//! `READ COMMITTED`; row locks and conditional updates preserve stale-worker fencing.
 
 use crate::reference::normalized_reference;
 use crate::scoring_job::{ScoringJob, ScoringJobState};
@@ -283,32 +283,32 @@ pub fn claim_scoring_job(
     }
 
     let row = transaction.query_opt(
-        "SELECT scoring_state, next_attempt_at_unix_ms \
+        "SELECT COALESCE(\
+             scoring_state = 'retry_scheduled' \
+             AND next_attempt_at_unix_ms > $2,\
+             FALSE\
+         ) AS lease_not_due \
          FROM scoring_job_state WHERE scoring_job_ref = $1",
-        &[&scoring_job_ref],
+        &[&scoring_job_ref, &claimed_at_unix_ms],
     )?;
     let Some(row) = row else {
         return Err(ScoringJobPersistenceError::JobNotFound);
     };
-    let scoring_state: String = row.get(0);
-    let next_attempt_at_unix_ms: Option<i64> = row.get(1);
-    if scoring_state == "retry_scheduled" {
-        if let Some(next_attempt_at_unix_ms) = next_attempt_at_unix_ms {
-            if claimed_at_unix_ms < next_attempt_at_unix_ms {
-                return Err(ScoringJobPersistenceError::LeaseNotDue);
-            }
-        }
+    let lease_not_due: bool = row.get(0);
+    if lease_not_due {
+        Err(ScoringJobPersistenceError::LeaseNotDue)
+    } else {
+        Err(ScoringJobPersistenceError::NotLeaseable)
     }
-    Err(ScoringJobPersistenceError::NotLeaseable)
 }
 
 /// Persist a retryable failure for the worker that owns the current fenced lease.
 ///
-/// The transition is one compare-and-set update guarded by state, fencing token, and
-/// persisted lease expiry. When attempt budget remains, the row becomes `retry_scheduled`
-/// at the requested future instant; exhausting the budget moves it directly to
-/// `quarantined`. In both cases the former lease evidence is cleared atomically so a stale
-/// worker cannot retain ownership after failure is accepted.
+/// The transition locks the current scoring-job row, validates state, fencing token, and
+/// persisted lease expiry, then updates the row inside the same caller-owned transaction.
+/// When attempt budget remains, the row becomes `retry_scheduled` at the requested future
+/// instant; exhausting the budget moves it directly to `quarantined`. In both cases the
+/// former lease evidence is cleared atomically so a stale worker cannot retain ownership.
 ///
 /// # Errors
 ///
@@ -337,8 +337,14 @@ pub fn record_retryable_scoring_failure(
         return Err(ScoringJobPersistenceError::InvalidRetryWindow);
     }
     require_read_committed(transaction)?;
+    require_current_scoring_lease(
+        transaction,
+        scoring_job_ref,
+        fencing_token,
+        failed_at_unix_ms,
+    )?;
 
-    let transitioned = transaction.query_opt(
+    let transitioned = transaction.query_one(
         "UPDATE scoring_job_state \
          SET scoring_state = CASE \
                  WHEN attempt_count >= max_attempts THEN 'quarantined' \
@@ -368,52 +374,44 @@ pub fn record_retryable_scoring_failure(
         ],
     )?;
 
-    if let Some(row) = transitioned {
-        let quarantined: bool = row.get(0);
-        return Ok(if quarantined {
-            ScoringJobState::Quarantined
-        } else {
-            ScoringJobState::RetryScheduled
-        });
-    }
-
-    classify_worker_transition_failure(
-        transaction,
-        scoring_job_ref,
-        fencing_token,
-        failed_at_unix_ms,
-    )
+    let quarantined: bool = transitioned.get(0);
+    Ok(if quarantined {
+        ScoringJobState::Quarantined
+    } else {
+        ScoringJobState::RetryScheduled
+    })
 }
 
-fn classify_worker_transition_failure(
+fn require_current_scoring_lease(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
     fencing_token: i64,
     observed_at_unix_ms: i64,
-) -> Result<ScoringJobState, ScoringJobPersistenceError> {
+) -> Result<(), ScoringJobPersistenceError> {
     let row = transaction.query_opt(
-        "SELECT scoring_state, active_fencing_token, active_lease_expires_at_unix_ms \
-         FROM scoring_job_state WHERE scoring_job_ref = $1",
-        &[&scoring_job_ref],
+        "SELECT scoring_state = 'leased' AS leased,\
+                COALESCE(active_fencing_token = $2, FALSE) AS current_fence,\
+                COALESCE(active_lease_expires_at_unix_ms > $3, FALSE) AS lease_unexpired \
+         FROM scoring_job_state WHERE scoring_job_ref = $1 \
+         FOR UPDATE",
+        &[&scoring_job_ref, &fencing_token, &observed_at_unix_ms],
     )?;
     let Some(row) = row else {
         return Err(ScoringJobPersistenceError::JobNotFound);
     };
-    let scoring_state: String = row.get(0);
-    if scoring_state != "leased" {
+    let leased: bool = row.get(0);
+    if !leased {
         return Err(ScoringJobPersistenceError::NotLeased);
     }
-    let active_fencing_token: Option<i64> = row.get(1);
-    if active_fencing_token != Some(fencing_token) {
+    let current_fence: bool = row.get(1);
+    if !current_fence {
         return Err(ScoringJobPersistenceError::StaleLease);
     }
-    let active_lease_expires_at_unix_ms: Option<i64> = row.get(2);
-    if active_lease_expires_at_unix_ms
-        .is_some_and(|expires_at_unix_ms| observed_at_unix_ms >= expires_at_unix_ms)
-    {
+    let lease_unexpired: bool = row.get(2);
+    if !lease_unexpired {
         return Err(ScoringJobPersistenceError::LeaseExpired);
     }
-    Err(ScoringJobPersistenceError::NotLeased)
+    Ok(())
 }
 
 fn required_reference(reference: &str) -> Result<&str, ScoringJobPersistenceError> {
