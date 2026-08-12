@@ -10,7 +10,7 @@ use psychometrics_commons_runtime::scoring::{
 use psychometrics_commons_runtime::session::SessionState;
 
 fn ledger_with_one_response() -> ResponseLedger {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
@@ -53,6 +53,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
     );
 
     let empty_bound = ResponseLedger::new("session_ref")
+        .unwrap()
         .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
     let empty_error =
