@@ -68,7 +68,7 @@ fn persist_due_retry(client: &mut Client) {
 }
 
 fn claim_due_retry(
-    barrier: Arc<Barrier>,
+    barrier: &Arc<Barrier>,
     worker_ref: &'static str,
     lease_ref: &'static str,
 ) -> Option<ClaimEvidence> {
@@ -116,7 +116,7 @@ fn concurrent_due_retry_claimers_receive_exactly_one_second_fence() {
     .into_iter()
     .map(|(worker_ref, lease_ref)| {
         let barrier = Arc::clone(&barrier);
-        thread::spawn(move || claim_due_retry(barrier, worker_ref, lease_ref))
+        thread::spawn(move || claim_due_retry(&barrier, worker_ref, lease_ref))
     })
     .collect::<Vec<_>>();
 
