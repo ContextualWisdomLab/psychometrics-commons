@@ -16,7 +16,7 @@ BEGIN
     IF created_table THEN
         EXECUTE $create_scoring_job_state$
 CREATE TABLE scoring_job_state (
-    scoring_job_ref TEXT NOT NULL
+    scoring_job_ref TEXT CONSTRAINT scoring_job_ref_not_null NOT NULL
         CONSTRAINT scoring_job_ref_format_check CHECK (
             scoring_job_ref = btrim(scoring_job_ref)
             AND scoring_job_ref <> ''
@@ -25,7 +25,7 @@ CREATE TABLE scoring_job_state (
                 AND scoring_job_ref ~ '^[[:digit:]+,.eE-]+$'
             )
         ),
-    scoring_request_ref TEXT NOT NULL
+    scoring_request_ref TEXT CONSTRAINT scoring_request_ref_not_null NOT NULL
         CONSTRAINT scoring_request_ref_format_check CHECK (
             scoring_request_ref = btrim(scoring_request_ref)
             AND scoring_request_ref <> ''
@@ -34,7 +34,7 @@ CREATE TABLE scoring_job_state (
                 AND scoring_request_ref ~ '^[[:digit:]+,.eE-]+$'
             )
         ),
-    scoring_state TEXT NOT NULL
+    scoring_state TEXT CONSTRAINT scoring_state_not_null NOT NULL
         CONSTRAINT scoring_state_value_check CHECK (
             scoring_state IN (
                 'queued',
@@ -45,9 +45,9 @@ CREATE TABLE scoring_job_state (
                 'cancelled'
             )
         ),
-    attempt_count INTEGER NOT NULL DEFAULT 0
+    attempt_count INTEGER CONSTRAINT scoring_attempt_count_not_null NOT NULL DEFAULT 0
         CONSTRAINT scoring_attempt_count_nonnegative_check CHECK (attempt_count >= 0),
-    max_attempts INTEGER NOT NULL
+    max_attempts INTEGER CONSTRAINT scoring_max_attempts_not_null NOT NULL
         CONSTRAINT scoring_max_attempts_positive_check CHECK (max_attempts > 0),
     next_attempt_at_unix_ms BIGINT
         CONSTRAINT scoring_next_attempt_positive_check CHECK (next_attempt_at_unix_ms > 0),
@@ -84,8 +84,8 @@ CREATE TABLE scoring_job_state (
     active_lease_expires_at_unix_ms BIGINT,
     result_ref TEXT,
     completed_fencing_token BIGINT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    created_at TIMESTAMPTZ CONSTRAINT scoring_created_at_not_null NOT NULL DEFAULT clock_timestamp(),
+    updated_at TIMESTAMPTZ CONSTRAINT scoring_updated_at_not_null NOT NULL DEFAULT clock_timestamp(),
     CONSTRAINT scoring_job_state_pkey PRIMARY KEY (scoring_job_ref),
     CONSTRAINT scoring_attempt_budget_check CHECK (attempt_count <= max_attempts),
     CONSTRAINT scoring_active_lease_shape_check CHECK (
@@ -233,9 +233,7 @@ $create_scoring_job_state$;
         SELECT constraint_record.conname::TEXT
         FROM pg_constraint AS constraint_record
         WHERE constraint_record.conrelid = relation_ref
-          AND constraint_record.contype IN ('c', 'p')
-          AND constraint_record.convalidated
-          AND constraint_record.conenforced
+          AND constraint_record.contype IN ('c', 'f', 'n', 'p', 'u', 'x')
         ORDER BY constraint_record.conname
     ) INTO actual_constraint_names;
 
@@ -243,20 +241,27 @@ $create_scoring_job_state$;
         'scoring_active_lease_shape_check',
         'scoring_attempt_budget_check',
         'scoring_attempt_count_nonnegative_check',
+        'scoring_attempt_count_not_null',
         'scoring_completed_fence_positive_check',
+        'scoring_created_at_not_null',
         'scoring_failure_code_format_check',
         'scoring_fencing_attempt_match_check',
         'scoring_fencing_token_positive_check',
         'scoring_job_ref_format_check',
+        'scoring_job_ref_not_null',
         'scoring_job_state_pkey',
         'scoring_lease_expiry_positive_check',
         'scoring_lease_ref_format_check',
+        'scoring_max_attempts_not_null',
         'scoring_max_attempts_positive_check',
         'scoring_next_attempt_positive_check',
         'scoring_request_ref_format_check',
+        'scoring_request_ref_not_null',
         'scoring_result_ref_format_check',
+        'scoring_state_not_null',
         'scoring_state_shape_check',
         'scoring_state_value_check',
+        'scoring_updated_at_not_null',
         'scoring_worker_ref_format_check'
     ]::TEXT[] THEN
         RAISE EXCEPTION USING
@@ -266,15 +271,16 @@ $create_scoring_job_state$;
 
     SELECT ARRAY(
         SELECT format(
-            '%s:%s',
+            '%s:%s:%s:%s:%s',
             constraint_record.conname,
+            constraint_record.contype,
+            constraint_record.convalidated,
+            constraint_record.conenforced,
             pg_get_constraintdef(constraint_record.oid)
         )
         FROM pg_constraint AS constraint_record
         WHERE constraint_record.conrelid = relation_ref
-          AND constraint_record.contype IN ('c', 'p')
-          AND constraint_record.convalidated
-          AND constraint_record.conenforced
+          AND constraint_record.contype IN ('c', 'f', 'n', 'p', 'u', 'x')
         ORDER BY constraint_record.conname
     ) INTO actual_constraints;
 
