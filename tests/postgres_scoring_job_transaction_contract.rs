@@ -2,7 +2,8 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
-    apply_scoring_job_migration, claim_scoring_job, persist_scoring_job, ScoringJobPersistenceError,
+    apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
+    record_retryable_scoring_failure, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
@@ -226,5 +227,78 @@ fn claim_classification_wraps_a_second_statement_database_failure() {
             "DROP SCHEMA scoring_job_claim_classification_test CASCADE;\
              DROP SCHEMA scoring_job_claim_failure_sink CASCADE;",
         )
+        .unwrap();
+}
+
+#[test]
+fn retry_transition_wraps_update_database_failure_after_lease_validation() {
+    let mut client = isolated_client(
+        "DROP SCHEMA IF EXISTS scoring_job_retry_transition_failure_test CASCADE;\
+         CREATE SCHEMA scoring_job_retry_transition_failure_test;\
+         SET search_path TO scoring_job_retry_transition_failure_test;",
+    );
+    apply_scoring_job_migration(&mut client).unwrap();
+
+    let job = queued_job(
+        "scoring_job_retry_transition_failure",
+        "scoring_request_retry_transition_failure",
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_scoring_job(&mut transaction, &job).unwrap();
+        claim_scoring_job(
+            &mut transaction,
+            "scoring_job_retry_transition_failure",
+            "worker_retry_transition_failure",
+            "scoring_lease_retry_transition_failure",
+            10_000,
+            11_000,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute(
+            r"CREATE FUNCTION fail_retry_update() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                RAISE EXCEPTION 'forced retry transition failure';
+                RETURN NULL;
+            END
+            $$;
+            CREATE TRIGGER fail_retry_update
+            BEFORE UPDATE ON scoring_job_state
+            FOR EACH STATEMENT EXECUTE FUNCTION fail_retry_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        record_retryable_scoring_failure(
+            &mut transaction,
+            "scoring_job_retry_transition_failure",
+            1,
+            "provider_timeout",
+            10_500,
+            12_000,
+        ),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT scoring_state, attempt_count, last_failure_code \
+             FROM scoring_job_state \
+             WHERE scoring_job_ref = 'scoring_job_retry_transition_failure'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "leased");
+    assert_eq!(row.get::<_, i32>(1), 1);
+    assert_eq!(row.get::<_, Option<String>>(2), None);
+
+    client
+        .batch_execute("DROP SCHEMA scoring_job_retry_transition_failure_test CASCADE;")
         .unwrap();
 }
