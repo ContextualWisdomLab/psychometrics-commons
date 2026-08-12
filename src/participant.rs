@@ -3,16 +3,20 @@
 //! Psychometrics Commons owns stable operational participant references. Keyverse
 //! owns credentials and authentication proof. Linking records an identity issuer
 //! together with a provider-scoped subject: the subject is an account identifier
-//! that is only unique within that issuer. A proof-of-control reference points to
-//! durable evidence that the caller controlled an identity; it is not the credential
-//! itself. Linking never replaces the historical product-owned participant identifier.
-//! Exact replay is idempotent, meaning the same event with the same evidence succeeds
-//! without changing state again. Invalid or conflicting evidence fails closed: it is
-//! rejected without changing the existing link. Successful account-link evidence is
-//! retained in append-only domain history so later projections cannot erase the audit
-//! fact that linked the stable participant to an authenticated account. Rebinding means
-//! replacing an already linked issuer/subject pair, which this primitive does not allow
-//! silently.
+//! that is only unique within that issuer. A proof artifact is durable evidence held
+//! outside this domain object; this module stores only an opaque reference to that
+//! evidence and never stores the credential itself. Opaque means the reference is a
+//! non-numeric identifier whose internal meaning is not interpreted by this module.
+//! Linking never replaces the historical product-owned participant identifier.
+//! Replay detection compares the supplied account-link event reference and evidence
+//! with the stored link. An exact replay is idempotent: retrying the same event with
+//! the same evidence succeeds without adding another history event or changing the
+//! current projection. Invalid or conflicting evidence fails closed without changing
+//! the existing link. Successful evidence is append-only: one event is added to
+//! domain history and callers receive only read-only access to that history. An
+//! audited lifecycle means any future unlink or relink must be a separate explicitly
+//! recorded operation; this primitive does not delete, edit, or silently replace a
+//! prior link.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -63,9 +67,14 @@ impl Error for AccountLinkError {}
 
 /// Immutable audit evidence for one successful participant account link.
 ///
-/// The event records references to proof artifacts, never raw credentials. The
-/// participant identifier remains owned by the enclosing [`ParticipantRecord`], so
-/// retaining this event cannot replace or renumber historical product identity.
+/// A proof artifact is durable evidence that control was established; this value stores
+/// only the artifact reference, never the credential or proof bytes. Event, issuer,
+/// subject, and proof references are opaque: they are non-numeric identifiers whose
+/// internal meaning is not interpreted or rewritten here. The participant identifier
+/// remains owned by the enclosing [`ParticipantRecord`], so retaining this event cannot
+/// replace or renumber historical product identity. Successful events are retained in
+/// append-only history and exposed through read-only accessors, so callers cannot edit
+/// or remove prior audit evidence through this API.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountLinkEvent {
     link_event_ref: String,
@@ -78,6 +87,9 @@ pub struct AccountLinkEvent {
 
 impl AccountLinkEvent {
     /// Return the opaque event reference used for replay detection.
+    ///
+    /// Replay detection compares this stored reference with a retry. Matching reference
+    /// and evidence is treated as the same event; changed evidence is rejected.
     #[must_use]
     pub fn link_event_ref(&self) -> &str {
         &self.link_event_ref
@@ -95,13 +107,19 @@ impl AccountLinkEvent {
         &self.subject_ref
     }
 
-    /// Return proof that the caller controlled the anonymous participant session.
+    /// Return the reference to proof that controlled the anonymous participant session.
+    ///
+    /// The referenced proof artifact is stored elsewhere; this history stores only the
+    /// opaque reference and exposes it read-only.
     #[must_use]
     pub fn anonymous_proof_ref(&self) -> &str {
         &self.anonymous_proof_ref
     }
 
-    /// Return proof that the caller controlled the authenticated account.
+    /// Return the reference to proof that controlled the authenticated account.
+    ///
+    /// The referenced proof artifact is stored elsewhere; this history stores only the
+    /// opaque reference and exposes it read-only.
     #[must_use]
     pub fn authenticated_proof_ref(&self) -> &str {
         &self.authenticated_proof_ref
@@ -222,8 +240,11 @@ impl ParticipantRecord {
 
     /// Return append-only successful account-link audit history.
     ///
-    /// Exact idempotent replay never adds a second event, and rejected conflicting
-    /// replay or rebinding never mutates this history.
+    /// Append-only means a successful first link adds one event and this API provides
+    /// no edit or delete operation for prior events. Exact idempotent replay is a retry
+    /// of the same event with the same evidence; it succeeds without adding a second
+    /// event. Rejected conflicting replay or rebinding never mutates this history. The
+    /// returned slice is read-only, so callers can inspect but cannot replace events.
     #[must_use]
     pub fn link_history(&self) -> &[AccountLinkEvent] {
         &self.link_history
@@ -235,13 +256,14 @@ impl ParticipantRecord {
     /// only unique within its issuer. Both proof references are mandatory and must
     /// differ because they point to separate evidence that the caller controlled the
     /// anonymous participant and the authenticated account. Replaying the exact same
-    /// event and evidence is idempotent: it succeeds without changing state again.
-    /// Reusing the event with changed issuer, subject, proof, or time evidence fails
-    /// closed, meaning the operation returns an error and leaves the existing link
-    /// unchanged. Once linked, a different event also cannot silently rebind, or
-    /// replace, the participant's issuer/subject pair; future unlink/relink policy
-    /// requires an explicit audited lifecycle. A successful first link appends one
-    /// immutable audit event before exposing the current-link projection.
+    /// event and evidence is idempotent: it is a safe retry that succeeds without
+    /// changing state or appending history again. Reusing the event with changed issuer,
+    /// subject, proof, or time evidence fails closed and leaves the existing link
+    /// unchanged. Once linked, a different event also cannot silently rebind, or replace,
+    /// the participant's issuer/subject pair. An audited lifecycle requires any future
+    /// unlink or relink to be a separate explicitly recorded operation rather than an
+    /// in-place edit of this stored event. A successful first link appends one immutable
+    /// audit event before exposing the current-link projection.
     ///
     /// # Errors
     ///
