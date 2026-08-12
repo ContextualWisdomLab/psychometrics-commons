@@ -2,8 +2,8 @@
 //!
 //! This adapter persists product orchestration state only. Psychometric scoring remains
 //! owned by `fast-mlsirm`. The caller owns the database connection, credentials, and
-//! transaction boundary. Enqueue replay is checked under `READ COMMITTED`, while worker
-//! claim uses one conditional `UPDATE` so only one transaction can acquire a queued job.
+//! transaction boundary. Enqueue replay and worker claims require `READ COMMITTED`; a
+//! claim then uses one conditional `UPDATE` so only one transaction can acquire a queued job.
 
 use crate::reference::normalized_reference;
 use crate::scoring_job::{ScoringJob, ScoringJobState};
@@ -74,7 +74,7 @@ pub enum ScoringJobPersistenceError {
     UnsupportedInitialState,
     /// Enqueue replay reused a job identity with different immutable evidence.
     ConflictingReplay,
-    /// Enqueue replay classification requires `PostgreSQL` `READ COMMITTED` isolation.
+    /// Scoring-job persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// The requested scoring job does not exist.
     JobNotFound,
@@ -96,7 +96,7 @@ impl Display for ScoringJobPersistenceError {
                 "scoring job identity was replayed with conflicting evidence"
             }
             Self::UnsupportedIsolationLevel => {
-                "scoring job enqueue replay requires read committed isolation"
+                "scoring job persistence requires read committed isolation"
             }
             Self::JobNotFound => "scoring job does not exist",
             Self::NotLeaseable => "scoring job is not currently leaseable",
@@ -194,6 +194,8 @@ pub fn persist_scoring_job(
 /// count, and binds worker/lease/fencing plus caller-supplied expiry evidence in the same
 /// row lock. Concurrent claimers cannot both receive ownership. `claimed_at_unix_ms` is
 /// used to validate the supplied lease window but is not persisted as lease-start evidence.
+/// `READ COMMITTED` is required so claim result classification has one documented isolation
+/// contract instead of exposing serialization failures as database errors.
 /// This first slice intentionally does not recover expired leases or persist retry/completion
 /// transitions; those remain separate bounded follow-up work so the adapter cannot claim
 /// recovery semantics it does not implement.
@@ -201,8 +203,8 @@ pub fn persist_scoring_job(
 /// # Errors
 ///
 /// Returns [`ScoringJobPersistenceError`] for invalid references/timestamps, an invalid
-/// lease window, an unknown/non-leaseable job, out-of-range database values, or a database
-/// failure.
+/// lease window, unsupported isolation, an unknown/non-leaseable job, out-of-range database
+/// values, or a database failure.
 pub fn claim_scoring_job(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
@@ -219,6 +221,7 @@ pub fn claim_scoring_job(
     if expires_at_unix_ms <= claimed_at_unix_ms {
         return Err(ScoringJobPersistenceError::InvalidLeaseWindow);
     }
+    require_read_committed(transaction)?;
 
     let claimed = transaction.query_opt(
         "UPDATE scoring_job_state \
