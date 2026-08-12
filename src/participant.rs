@@ -8,8 +8,11 @@
 //! itself. Linking never replaces the historical product-owned participant identifier.
 //! Exact replay is idempotent, meaning the same event with the same evidence succeeds
 //! without changing state again. Invalid or conflicting evidence fails closed: it is
-//! rejected without changing the existing link. Rebinding means replacing an already
-//! linked issuer/subject pair, which this primitive does not allow silently.
+//! rejected without changing the existing link. Successful account-link evidence is
+//! retained in append-only domain history so later projections cannot erase the audit
+//! fact that linked the stable participant to an authenticated account. Rebinding means
+//! replacing an already linked issuer/subject pair, which this primitive does not allow
+//! silently.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -58,6 +61,59 @@ impl Display for AccountLinkError {
 
 impl Error for AccountLinkError {}
 
+/// Immutable audit evidence for one successful participant account link.
+///
+/// The event records references to proof artifacts, never raw credentials. The
+/// participant identifier remains owned by the enclosing [`ParticipantRecord`], so
+/// retaining this event cannot replace or renumber historical product identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountLinkEvent {
+    link_event_ref: String,
+    issuer_ref: String,
+    subject_ref: String,
+    anonymous_proof_ref: String,
+    authenticated_proof_ref: String,
+    linked_at_unix_ms: u64,
+}
+
+impl AccountLinkEvent {
+    /// Return the opaque event reference used for replay detection.
+    #[must_use]
+    pub fn link_event_ref(&self) -> &str {
+        &self.link_event_ref
+    }
+
+    /// Return the identity issuer that scopes the external subject reference.
+    #[must_use]
+    pub fn issuer_ref(&self) -> &str {
+        &self.issuer_ref
+    }
+
+    /// Return the authenticated account identifier within its issuer.
+    #[must_use]
+    pub fn subject_ref(&self) -> &str {
+        &self.subject_ref
+    }
+
+    /// Return proof that the caller controlled the anonymous participant session.
+    #[must_use]
+    pub fn anonymous_proof_ref(&self) -> &str {
+        &self.anonymous_proof_ref
+    }
+
+    /// Return proof that the caller controlled the authenticated account.
+    #[must_use]
+    pub fn authenticated_proof_ref(&self) -> &str {
+        &self.authenticated_proof_ref
+    }
+
+    /// Return the server-authoritative time at which the link was recorded.
+    #[must_use]
+    pub const fn linked_at_unix_ms(&self) -> u64 {
+        self.linked_at_unix_ms
+    }
+}
+
 /// Stable product-owned participant identity with optional issuer-scoped account linkage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParticipantRecord {
@@ -70,6 +126,7 @@ pub struct ParticipantRecord {
     anonymous_proof_ref: Option<String>,
     authenticated_proof_ref: Option<String>,
     linked_at_unix_ms: Option<u64>,
+    link_history: Vec<AccountLinkEvent>,
 }
 
 impl ParticipantRecord {
@@ -98,6 +155,7 @@ impl ParticipantRecord {
             anonymous_proof_ref: None,
             authenticated_proof_ref: None,
             linked_at_unix_ms: None,
+            link_history: Vec::new(),
         })
     }
 
@@ -162,6 +220,15 @@ impl ParticipantRecord {
         self.linked_at_unix_ms
     }
 
+    /// Return append-only successful account-link audit history.
+    ///
+    /// Exact idempotent replay never adds a second event, and rejected conflicting
+    /// replay or rebinding never mutates this history.
+    #[must_use]
+    pub fn link_history(&self) -> &[AccountLinkEvent] {
+        &self.link_history
+    }
+
     /// Link this stable participant identity to one issuer-scoped authenticated subject.
     ///
     /// The issuer and subject together identify the external account; the subject is
@@ -173,7 +240,8 @@ impl ParticipantRecord {
     /// closed, meaning the operation returns an error and leaves the existing link
     /// unchanged. Once linked, a different event also cannot silently rebind, or
     /// replace, the participant's issuer/subject pair; future unlink/relink policy
-    /// requires an explicit audited lifecycle.
+    /// requires an explicit audited lifecycle. A successful first link appends one
+    /// immutable audit event before exposing the current-link projection.
     ///
     /// # Errors
     ///
@@ -220,6 +288,14 @@ impl ParticipantRecord {
             return Err(AccountLinkError::NonMonotonicTimestamp);
         }
 
+        self.link_history.push(AccountLinkEvent {
+            link_event_ref: link_event_ref.to_owned(),
+            issuer_ref: issuer_ref.to_owned(),
+            subject_ref: subject_ref.to_owned(),
+            anonymous_proof_ref: anonymous_proof_ref.to_owned(),
+            authenticated_proof_ref: authenticated_proof_ref.to_owned(),
+            linked_at_unix_ms,
+        });
         self.linked_issuer_ref = Some(issuer_ref.to_owned());
         self.linked_subject_ref = Some(subject_ref.to_owned());
         self.link_event_ref = Some(link_event_ref.to_owned());
