@@ -1,4 +1,6 @@
-//! Real `PostgreSQL` concurrency contract for reclaiming due scoring retries.
+//! Verifies that two workers cannot both reclaim the same due retry in real `PostgreSQL`.
+//! Two concurrent claim transactions race on one retry-scheduled job; exactly one receives
+//! the next lease and fencing token while the other is rejected without duplicate ownership.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
