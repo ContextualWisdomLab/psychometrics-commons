@@ -51,7 +51,7 @@ impl PersistedScoringLease {
         self.fencing_token
     }
 
-    /// Return the server-authoritative lease expiry instant.
+    /// Return the caller-supplied lease expiry instant persisted with the claim.
     #[must_use]
     pub const fn expires_at_unix_ms(&self) -> u64 {
         self.expires_at_unix_ms
@@ -64,7 +64,7 @@ impl PersistedScoringLease {
 pub enum ScoringJobPersistenceError {
     /// A job, worker, or lease identity was blank or numeric-like.
     InvalidReference,
-    /// A server-authoritative timestamp was zero.
+    /// A caller-supplied lease timestamp was zero.
     InvalidTimestamp,
     /// A timestamp or counter cannot be represented by the bounded database column.
     ValueOutOfRange,
@@ -191,10 +191,12 @@ pub fn persist_scoring_job(
 /// Atomically claim one queued scoring job for a worker.
 ///
 /// One conditional `UPDATE` changes `queued -> leased`, increments the persisted attempt
-/// count, and binds worker/lease/fencing/expiry evidence in the same row lock. Concurrent
-/// claimers cannot both receive ownership. This first slice intentionally does not recover
-/// expired leases or persist retry/completion transitions; those remain separate bounded
-/// follow-up work so the adapter cannot claim recovery semantics it does not implement.
+/// count, and binds worker/lease/fencing plus caller-supplied expiry evidence in the same
+/// row lock. Concurrent claimers cannot both receive ownership. `claimed_at_unix_ms` is
+/// used to validate the supplied lease window but is not persisted as lease-start evidence.
+/// This first slice intentionally does not recover expired leases or persist retry/completion
+/// transitions; those remain separate bounded follow-up work so the adapter cannot claim
+/// recovery semantics it does not implement.
 ///
 /// # Errors
 ///
