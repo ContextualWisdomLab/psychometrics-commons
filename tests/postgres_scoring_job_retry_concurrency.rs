@@ -11,6 +11,8 @@ use std::thread;
 
 static RETRY_CONCURRENCY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+type ClaimEvidence = (String, String, u64);
+
 fn retry_concurrency_test_guard() -> MutexGuard<'static, ()> {
     RETRY_CONCURRENCY_TEST_LOCK
         .lock()
@@ -37,40 +39,74 @@ fn reset_scoring_job_table(client: &mut Client) {
         .unwrap();
 }
 
+fn persist_due_retry(client: &mut Client) {
+    let job = ScoringJob::new("scoring_job_retry_race", "scoring_request_retry_race", 3).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_job(&mut transaction, &job).unwrap();
+    claim_scoring_job(
+        &mut transaction,
+        "scoring_job_retry_race",
+        "worker_initial_race",
+        "scoring_lease_initial_race",
+        10_000,
+        11_000,
+    )
+    .unwrap();
+    assert_eq!(
+        record_retryable_scoring_failure(
+            &mut transaction,
+            "scoring_job_retry_race",
+            1,
+            "provider_timeout_race",
+            10_500,
+            12_000,
+        )
+        .unwrap(),
+        ScoringJobState::RetryScheduled
+    );
+    transaction.commit().unwrap();
+}
+
+fn claim_due_retry(
+    barrier: Arc<Barrier>,
+    worker_ref: &'static str,
+    lease_ref: &'static str,
+) -> Option<ClaimEvidence> {
+    let mut client = test_client();
+    barrier.wait();
+    let mut transaction = client.transaction().unwrap();
+    match claim_scoring_job(
+        &mut transaction,
+        "scoring_job_retry_race",
+        worker_ref,
+        lease_ref,
+        12_000,
+        13_000,
+    ) {
+        Ok(lease) => {
+            let evidence = (
+                lease.worker_ref().to_owned(),
+                lease.lease_ref().to_owned(),
+                lease.fencing_token(),
+            );
+            transaction.commit().unwrap();
+            Some(evidence)
+        }
+        Err(ScoringJobPersistenceError::NotLeaseable) => {
+            transaction.rollback().unwrap();
+            None
+        }
+        Err(error) => panic!("unexpected concurrent retry claim error: {error:?}"),
+    }
+}
+
 #[test]
 fn concurrent_due_retry_claimers_receive_exactly_one_second_fence() {
     let _guard = retry_concurrency_test_guard();
     let mut setup_client = test_client();
     reset_scoring_job_table(&mut setup_client);
     apply_scoring_job_migration(&mut setup_client).unwrap();
-
-    let job = ScoringJob::new("scoring_job_retry_race", "scoring_request_retry_race", 3).unwrap();
-    {
-        let mut transaction = setup_client.transaction().unwrap();
-        persist_scoring_job(&mut transaction, &job).unwrap();
-        claim_scoring_job(
-            &mut transaction,
-            "scoring_job_retry_race",
-            "worker_initial_race",
-            "scoring_lease_initial_race",
-            10_000,
-            11_000,
-        )
-        .unwrap();
-        assert_eq!(
-            record_retryable_scoring_failure(
-                &mut transaction,
-                "scoring_job_retry_race",
-                1,
-                "provider_timeout_race",
-                10_500,
-                12_000,
-            )
-            .unwrap(),
-            ScoringJobState::RetryScheduled
-        );
-        transaction.commit().unwrap();
-    }
+    persist_due_retry(&mut setup_client);
 
     let barrier = Arc::new(Barrier::new(2));
     let handles = [
@@ -80,34 +116,7 @@ fn concurrent_due_retry_claimers_receive_exactly_one_second_fence() {
     .into_iter()
     .map(|(worker_ref, lease_ref)| {
         let barrier = Arc::clone(&barrier);
-        thread::spawn(move || {
-            let mut client = test_client();
-            barrier.wait();
-            let mut transaction = client.transaction().unwrap();
-            match claim_scoring_job(
-                &mut transaction,
-                "scoring_job_retry_race",
-                worker_ref,
-                lease_ref,
-                12_000,
-                13_000,
-            ) {
-                Ok(lease) => {
-                    let evidence = (
-                        lease.worker_ref().to_owned(),
-                        lease.lease_ref().to_owned(),
-                        lease.fencing_token(),
-                    );
-                    transaction.commit().unwrap();
-                    Some(evidence)
-                }
-                Err(ScoringJobPersistenceError::NotLeaseable) => {
-                    transaction.rollback().unwrap();
-                    None
-                }
-                Err(error) => panic!("unexpected concurrent retry claim error: {error:?}"),
-            }
-        })
+        thread::spawn(move || claim_due_retry(barrier, worker_ref, lease_ref))
     })
     .collect::<Vec<_>>();
 
