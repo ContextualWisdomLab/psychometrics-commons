@@ -29,6 +29,31 @@ fn scoring_job_migration_rejects_incompatible_preexisting_schema() {
 }
 
 #[test]
+fn scoring_job_migration_rejects_weakened_same_name_constraint() {
+    let mut client = test_client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS scoring_job_constraint_drift_test CASCADE;\
+             CREATE SCHEMA scoring_job_constraint_drift_test;\
+             SET search_path TO scoring_job_constraint_drift_test, public;",
+        )
+        .unwrap();
+    apply_scoring_job_migration(&mut client).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_state_shape_check;\
+             ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_state_shape_check CHECK (true);",
+        )
+        .unwrap();
+
+    assert!(apply_scoring_job_migration(&mut client).is_err());
+
+    client
+        .batch_execute("DROP SCHEMA scoring_job_constraint_drift_test CASCADE;")
+        .unwrap();
+}
+
+#[test]
 fn impossible_scoring_job_state_shapes_are_rejected_by_postgres() {
     let mut client = test_client();
     client
