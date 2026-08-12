@@ -1,6 +1,6 @@
 //! Regression contract for fail-closed scoring terminal persistence.
 //!
-//! PostgreSQL row-level triggers can suppress an `UPDATE` by returning `NULL`. A terminal
+//! `PostgreSQL` row-level triggers can suppress an `UPDATE` by returning `NULL`. A terminal
 //! scoring API must not report success when its guarded update affects zero rows after the
 //! worker lease was validated and locked.
 
