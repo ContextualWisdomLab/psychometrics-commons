@@ -2,11 +2,14 @@
 
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseError, InstrumentReleaseManifest, PublicationCommand,
-    PublicationEvidenceRecord, PublicationEvidenceStatus, PublicationState,
+    PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
+    PublicationState,
 };
 
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const EVIDENCE_DIGEST: &str =
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn manifest() -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
@@ -44,6 +47,15 @@ fn approved_publication_evidence() -> PublicationEvidenceRecord {
         "calibration_big_five_ko_v1",
         Some("norm_version_big_five_ko_v1"),
         "limitations_nonclinical_v1",
+        PublicationEvidenceProvenance::new(
+            EVIDENCE_DIGEST,
+            "population_general_adult_v1",
+            "administration_web_self_report_v1",
+            "measurement_model_big_five_v1",
+            10_050,
+            None,
+        )
+        .unwrap(),
         &["rights_ipip_big_five_v1"],
         &["recovery_big_five_ko_v1"],
         &["approval_psychometrics_big_five_ko_v1"],
@@ -364,6 +376,9 @@ fn release_metadata_and_publication_events_are_auditable() {
     assert_eq!(event.event_ref(), "submit_review_event");
     assert_eq!(event.command(), PublicationCommand::SubmitReview);
     assert_eq!(event.occurred_at_unix_ms(), 15_100);
+    assert_eq!(event.publication_evidence_ref(), None);
+    assert_eq!(event.evidence_policy_ref(), None);
+    assert_eq!(event.publication_evidence_digest(), None);
 }
 
 #[test]
@@ -508,6 +523,14 @@ fn instrument_release_errors_have_stable_safe_display_text() {
             "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits",
         ),
         (
+            InstrumentReleaseError::InvalidEvidenceDigest,
+            "publication evidence digest must be sha256 followed by 64 lowercase hexadecimal digits",
+        ),
+        (
+            InstrumentReleaseError::InvalidEvidenceWindow,
+            "publication evidence validity must not end before its evaluation time",
+        ),
+        (
             InstrumentReleaseError::IncompletePublicationEvidence,
             "approved publication evidence must include content or rights, scientific, and approval references",
         ),
@@ -522,6 +545,10 @@ fn instrument_release_errors_have_stable_safe_display_text() {
         (
             InstrumentReleaseError::PublicationEvidenceNotApproved,
             "instrument publication evidence must be policy-approved before publication",
+        ),
+        (
+            InstrumentReleaseError::PublicationEvidenceNotEffective,
+            "approved publication evidence must be effective at the publication time",
         ),
         (
             InstrumentReleaseError::InvalidTimestamp,

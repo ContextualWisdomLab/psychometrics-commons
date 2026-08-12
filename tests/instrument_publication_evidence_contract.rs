@@ -2,13 +2,16 @@
 
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseError, InstrumentReleaseManifest, PublicationCommand,
-    PublicationEvidenceRecord, PublicationEvidenceStatus, PublicationState,
+    PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
+    PublicationState,
 };
 
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_DIGEST: &str =
     "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const EVIDENCE_DIGEST: &str =
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn manifest() -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
@@ -27,6 +30,18 @@ fn manifest() -> InstrumentReleaseManifest {
         "intended_use_self_reflection_v1",
         "limitations_nonclinical_v1",
         VALID_DIGEST,
+    )
+    .unwrap()
+}
+
+fn provenance() -> PublicationEvidenceProvenance {
+    PublicationEvidenceProvenance::new(
+        EVIDENCE_DIGEST,
+        "population_general_adult_v1",
+        "administration_web_self_report_v1",
+        "measurement_model_big_five_v1",
+        10_050,
+        None,
     )
     .unwrap()
 }
@@ -52,6 +67,7 @@ fn evidence(
         "calibration_big_five_ko_v1",
         Some("norm_version_big_five_ko_v1"),
         "limitations_nonclinical_v1",
+        provenance(),
         content_rights_evidence_refs,
         scientific_evidence_refs,
         approval_refs,

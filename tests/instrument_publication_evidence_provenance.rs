@@ -99,7 +99,10 @@ fn publish_event_binds_exact_evidence_identity_digest_and_policy() {
 
     let audit = approved.provenance();
     assert_eq!(audit.evidence_digest(), EVIDENCE_DIGEST);
-    assert_eq!(audit.population_context_ref(), "population_general_adult_v1");
+    assert_eq!(
+        audit.population_context_ref(),
+        "population_general_adult_v1"
+    );
     assert_eq!(
         audit.administration_mode_ref(),
         "administration_web_self_report_v1"
