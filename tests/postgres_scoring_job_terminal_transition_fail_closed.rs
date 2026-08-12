@@ -70,16 +70,22 @@ fn permanent_failure_rejects_a_suppressed_terminal_update() {
     suppress_terminal_updates(&mut client);
 
     let mut transaction = client.transaction().unwrap();
+    let error = record_permanent_scoring_failure(
+        &mut transaction,
+        "scoring_job_permanent_transition_fail_closed",
+        1,
+        "scientific_failure_permanent",
+        10_500,
+    )
+    .unwrap_err();
     assert!(matches!(
-        record_permanent_scoring_failure(
-            &mut transaction,
-            "scoring_job_permanent_transition_fail_closed",
-            1,
-            "scientific_failure_permanent",
-            10_500,
-        ),
-        Err(ScoringJobPersistenceError::TransitionNotApplied)
+        error,
+        ScoringJobPersistenceError::TransitionNotApplied
     ));
+    assert_eq!(
+        error.to_string(),
+        "scoring terminal transition was not applied"
+    );
     transaction.rollback().unwrap();
 }
 
