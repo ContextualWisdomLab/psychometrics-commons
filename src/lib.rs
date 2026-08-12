@@ -16,6 +16,7 @@ pub mod integration;
 pub mod item_delivery;
 pub mod participant;
 pub mod postgres_integration;
+pub mod postgres_scoring_job;
 mod reference;
 pub mod response;
 pub mod result;
