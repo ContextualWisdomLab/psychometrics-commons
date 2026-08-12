@@ -71,8 +71,7 @@ fn evidence(
     .unwrap()
 }
 
-#[test]
-fn suspended_release_can_bind_renewed_evidence_before_reactivation() {
+fn published_release() -> InstrumentRelease {
     let mut release = InstrumentRelease::new(manifest(), 10_000).unwrap();
     release
         .apply_command(
@@ -92,6 +91,12 @@ fn suspended_release_can_bind_renewed_evidence_before_reactivation() {
     release
         .apply_command("publish_event", PublicationCommand::Publish, 10_200)
         .unwrap();
+    release
+}
+
+#[test]
+fn suspended_release_can_bind_renewed_evidence_before_reactivation() {
+    let mut release = published_release();
     release
         .apply_command("suspend_event", PublicationCommand::Suspend, 10_220)
         .unwrap();
@@ -145,5 +150,33 @@ fn suspended_release_can_bind_renewed_evidence_before_reactivation() {
     assert_eq!(
         reactivation.publication_evidence_digest(),
         Some(RENEWED_EVIDENCE_DIGEST)
+    );
+}
+
+#[test]
+fn published_release_cannot_replace_its_bound_publication_evidence() {
+    let mut release = published_release();
+    let initially_bound_ref = release
+        .publication_evidence()
+        .unwrap()
+        .publication_evidence_ref()
+        .to_owned();
+
+    assert_eq!(
+        release.bind_publication_evidence(evidence(
+            "publication_evidence_big_five_ko_renewed",
+            RENEWED_EVIDENCE_DIGEST,
+            10_210,
+            10_350,
+        )),
+        Err(InstrumentReleaseError::InvalidTransition)
+    );
+    assert_eq!(release.state(), PublicationState::Published);
+    assert_eq!(
+        release
+            .publication_evidence()
+            .unwrap()
+            .publication_evidence_ref(),
+        initially_bound_ref
     );
 }
