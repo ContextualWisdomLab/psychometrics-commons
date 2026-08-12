@@ -1,6 +1,6 @@
 //! Real `PostgreSQL` contract for durable scoring-job enqueue and lease fencing.
 
-use postgres::{Client, NoTls};
+use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
     ScoringJobPersistenceDisposition, ScoringJobPersistenceError,
@@ -58,6 +58,49 @@ fn scoring_job_enqueue_is_exactly_idempotent_and_conflicts_fail_closed() {
 }
 
 #[test]
+fn enqueue_rejects_nonfresh_jobs_large_attempt_budgets_and_stronger_isolation() {
+    let mut client = test_client();
+    reset_scoring_job_table(&mut client);
+    apply_scoring_job_migration(&mut client).unwrap();
+
+    let mut leased_job = queued_job("scoring_job_nonfresh", "scoring_request_nonfresh", 3);
+    leased_job
+        .claim(
+            "worker_nonfresh",
+            "scoring_lease_nonfresh",
+            10_000,
+            11_000,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_scoring_job(&mut transaction, &leased_job),
+        Err(ScoringJobPersistenceError::UnsupportedInitialState)
+    ));
+    transaction.rollback().unwrap();
+
+    let oversized_job = queued_job("scoring_job_oversized", "scoring_request_oversized", u32::MAX);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_scoring_job(&mut transaction, &oversized_job),
+        Err(ScoringJobPersistenceError::ValueOutOfRange)
+    ));
+    transaction.rollback().unwrap();
+
+    let serializable_job = queued_job("scoring_job_serializable", "scoring_request_serializable", 3);
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        persist_scoring_job(&mut transaction, &serializable_job),
+        Err(ScoringJobPersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn claim_is_atomic_and_issues_monotonic_fencing_evidence() {
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
@@ -89,6 +132,15 @@ fn claim_is_atomic_and_issues_monotonic_fencing_evidence() {
     assert_eq!(lease.fencing_token(), 1);
     assert_eq!(lease.expires_at_unix_ms(), 11_000);
 
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_scoring_job(&mut transaction, &job).unwrap(),
+            ScoringJobPersistenceDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         claim_scoring_job(
@@ -117,8 +169,9 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
         transaction.commit().unwrap();
     }
 
-    for (worker_ref, lease_ref, claimed_at, expires_at, expected) in [
+    for (job_ref, worker_ref, lease_ref, claimed_at, expires_at, expected) in [
         (
+            "scoring_job_invalid",
             "123",
             "scoring_lease_invalid",
             10_000,
@@ -126,6 +179,23 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
             ScoringJobPersistenceError::InvalidReference,
         ),
         (
+            "123",
+            "worker_invalid",
+            "scoring_lease_invalid",
+            10_000,
+            11_000,
+            ScoringJobPersistenceError::InvalidReference,
+        ),
+        (
+            "scoring_job_invalid",
+            "worker_invalid",
+            "123",
+            10_000,
+            11_000,
+            ScoringJobPersistenceError::InvalidReference,
+        ),
+        (
+            "scoring_job_invalid",
             "worker_invalid",
             "scoring_lease_invalid",
             0,
@@ -133,6 +203,15 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
             ScoringJobPersistenceError::InvalidTimestamp,
         ),
         (
+            "scoring_job_invalid",
+            "worker_invalid",
+            "scoring_lease_invalid",
+            u64::MAX,
+            u64::MAX,
+            ScoringJobPersistenceError::ValueOutOfRange,
+        ),
+        (
+            "scoring_job_invalid",
             "worker_invalid",
             "scoring_lease_invalid",
             10_000,
@@ -143,7 +222,7 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
         let mut transaction = client.transaction().unwrap();
         let error = claim_scoring_job(
             &mut transaction,
-            "scoring_job_invalid",
+            job_ref,
             worker_ref,
             lease_ref,
             claimed_at,
@@ -153,6 +232,20 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
         assert_eq!(discriminant(&error), discriminant(&expected));
         transaction.rollback().unwrap();
     }
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        claim_scoring_job(
+            &mut transaction,
+            "scoring_job_missing",
+            "worker_missing",
+            "scoring_lease_missing",
+            10_000,
+            11_000,
+        ),
+        Err(ScoringJobPersistenceError::JobNotFound)
+    ));
+    transaction.rollback().unwrap();
 
     let row = client
         .query_one(
@@ -164,4 +257,50 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
     assert_eq!(row.get::<_, String>(0), "queued");
     assert_eq!(row.get::<_, i32>(1), 0);
     assert_eq!(row.get::<_, Option<String>>(2), None);
+}
+
+#[test]
+fn database_constraints_reject_invalid_lease_identity_and_fencing_shape() {
+    let mut client = test_client();
+    reset_scoring_job_table(&mut client);
+    apply_scoring_job_migration(&mut client).unwrap();
+
+    let invalid_worker = client.execute(
+        "INSERT INTO scoring_job_state (\
+             scoring_job_ref, scoring_request_ref, scoring_state, attempt_count, max_attempts,\
+             active_worker_ref, active_lease_ref, active_fencing_token,\
+             active_lease_expires_at_unix_ms\
+         ) VALUES (\
+             'scoring_job_bad_worker', 'scoring_request_bad_worker', 'leased', 1, 3,\
+             '123', 'scoring_lease_bad_worker', 1, 11000\
+         )",
+        &[],
+    );
+    assert!(invalid_worker.is_err());
+
+    let invalid_lease = client.execute(
+        "INSERT INTO scoring_job_state (\
+             scoring_job_ref, scoring_request_ref, scoring_state, attempt_count, max_attempts,\
+             active_worker_ref, active_lease_ref, active_fencing_token,\
+             active_lease_expires_at_unix_ms\
+         ) VALUES (\
+             'scoring_job_bad_lease', 'scoring_request_bad_lease', 'leased', 1, 3,\
+             'worker_bad_lease', '123', 1, 11000\
+         )",
+        &[],
+    );
+    assert!(invalid_lease.is_err());
+
+    let mismatched_fence = client.execute(
+        "INSERT INTO scoring_job_state (\
+             scoring_job_ref, scoring_request_ref, scoring_state, attempt_count, max_attempts,\
+             active_worker_ref, active_lease_ref, active_fencing_token,\
+             active_lease_expires_at_unix_ms\
+         ) VALUES (\
+             'scoring_job_bad_fence', 'scoring_request_bad_fence', 'leased', 1, 3,\
+             'worker_bad_fence', 'scoring_lease_bad_fence', 2, 11000\
+         )",
+        &[],
+    );
+    assert!(mismatched_fence.is_err());
 }
