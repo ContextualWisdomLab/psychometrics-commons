@@ -4,7 +4,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent, OutboxState};
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, enqueue_outbox_event, record_outbox_delivery_attempt,
-    PersistenceDisposition, PersistenceError,
+    OutboxPersistenceIdentity, PersistenceDisposition, PersistenceError,
 };
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -31,6 +31,14 @@ fn event() -> IntegrationEvent {
     .unwrap()
 }
 
+fn identity() -> OutboxPersistenceIdentity<'static> {
+    OutboxPersistenceIdentity::new(
+        "psychometrics_commons",
+        "tenant_alpha",
+        "event_quarantined_replay",
+    )
+}
+
 #[test]
 fn exact_replay_after_quarantine_remains_idempotent() {
     let mut client = test_client();
@@ -47,9 +55,7 @@ fn exact_replay_after_quarantine_remains_idempotent() {
     let mut first = client.transaction().unwrap();
     let inserted = record_outbox_delivery_attempt(
         &mut first,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_quarantined_replay",
+        identity(),
         "attempt_retry",
         DeliveryOutcome::RetryableFailure,
         10_001,
@@ -63,9 +69,7 @@ fn exact_replay_after_quarantine_remains_idempotent() {
     let mut replay = client.transaction().unwrap();
     let duplicate = record_outbox_delivery_attempt(
         &mut replay,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_quarantined_replay",
+        identity(),
         "attempt_retry",
         DeliveryOutcome::RetryableFailure,
         10_001,
