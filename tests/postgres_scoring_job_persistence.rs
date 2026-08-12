@@ -7,7 +7,8 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::mem::discriminant;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::thread;
 
 static SCORING_JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -174,6 +175,74 @@ fn claim_is_atomic_and_issues_monotonic_fencing_evidence() {
         Err(ScoringJobPersistenceError::NotLeaseable)
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn concurrent_claimers_receive_exactly_one_persisted_lease() {
+    let _guard = scoring_job_test_guard();
+    let mut setup_client = test_client();
+    reset_scoring_job_table(&mut setup_client);
+    apply_scoring_job_migration(&mut setup_client).unwrap();
+
+    let job = queued_job("scoring_job_concurrent", "scoring_request_concurrent", 3);
+    {
+        let mut transaction = setup_client.transaction().unwrap();
+        persist_scoring_job(&mut transaction, &job).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let barrier = Arc::new(Barrier::new(2));
+    let handles = [
+        ("worker_concurrent_alpha", "scoring_lease_concurrent_alpha"),
+        ("worker_concurrent_beta", "scoring_lease_concurrent_beta"),
+    ]
+    .into_iter()
+    .map(|(worker_ref, lease_ref)| {
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            let mut client = test_client();
+            barrier.wait();
+            let mut transaction = client.transaction().unwrap();
+            match claim_scoring_job(
+                &mut transaction,
+                "scoring_job_concurrent",
+                worker_ref,
+                lease_ref,
+                20_000,
+                21_000,
+            ) {
+                Ok(lease) => {
+                    let fencing_token = lease.fencing_token();
+                    transaction.commit().unwrap();
+                    Some(fencing_token)
+                }
+                Err(ScoringJobPersistenceError::NotLeaseable) => {
+                    transaction.rollback().unwrap();
+                    None
+                }
+                Err(error) => panic!("unexpected concurrent claim error: {error:?}"),
+            }
+        })
+    })
+    .collect::<Vec<_>>();
+
+    let mut successful_tokens = handles
+        .into_iter()
+        .filter_map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    successful_tokens.sort_unstable();
+    assert_eq!(successful_tokens, vec![1]);
+
+    let row = setup_client
+        .query_one(
+            "SELECT scoring_state, attempt_count, active_fencing_token \
+             FROM scoring_job_state WHERE scoring_job_ref = 'scoring_job_concurrent'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "leased");
+    assert_eq!(row.get::<_, i32>(1), 1);
+    assert_eq!(row.get::<_, i64>(2), 1);
 }
 
 #[test]
