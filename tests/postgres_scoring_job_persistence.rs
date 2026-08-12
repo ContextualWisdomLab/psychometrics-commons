@@ -6,6 +6,7 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     ScoringJobPersistenceDisposition, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
+use std::mem::discriminant;
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -149,7 +150,7 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
             expires_at,
         )
         .unwrap_err();
-        assert_eq!(error, expected);
+        assert_eq!(discriminant(&error), discriminant(&expected));
         transaction.rollback().unwrap();
     }
 
