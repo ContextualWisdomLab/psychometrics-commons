@@ -4,7 +4,7 @@
 - Date: 2026-08-12
 - Protected-main baseline: `1733aac738e455214891a51137a3d0bbe092414c`
 
-This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist.
+This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
 ## Protected-main physical schema
 
@@ -21,7 +21,7 @@ The protected-main integration identity is source- and tenant-scoped. A physical
 
 ## Active PR #31 physical schema
 
-PR #31 (`feat: persist PostgreSQL scoring-job leases`) is **IMPLEMENTED_ON_ACTIVE_PR**, not protected-main truth. Its current migration `migrations/0002_scoring_job_state.sql` maps a bounded physical subset of the logical `scoring_job` aggregate into `scoring_job_state` and the `src/postgres_scoring_job.rs` adapter.
+PR #31 (`feat: persist PostgreSQL scoring-job leases`) is **Active PR**, not protected-main truth. Its current migration `migrations/0002_scoring_job_state.sql` maps a bounded physical subset of the logical `scoring_job` aggregate into `scoring_job_state` and the `src/postgres_scoring_job.rs` adapter.
 
 The active slice persists:
 
@@ -33,9 +33,9 @@ The active slice persists:
 - lease expiry evidence;
 - database constraints rejecting impossible lifecycle state shapes.
 
-Migration reapplication does not trust `CREATE TABLE IF NOT EXISTS` as schema evidence. The active migration verifies the ordered column/type/nullability contract, expected defaults, and the enforced/validated named primary/check constraint set, then executes an invalid-state semantic probe. Incompatible pre-existing relations and a same-name weakened state constraint therefore fail closed rather than being accepted as successful migration state.
+Migration reapplication does not trust relation existence or constraint names alone as schema evidence. On initial creation, migration `0002` validates the ordered column/type/nullability contract, expected defaults, enforced/validated primary/check constraint names, and a live invalid-state probe, then records the PostgreSQL-normalized `name:definition` constraint manifest on the owned relation. Reapplication recomputes the normalized manifest and compares it with that creation-time evidence. Incompatible pre-existing relations, missing manifest evidence, renamed/removed constraints, and same-name weakened constraint definitions therefore fail closed rather than being accepted as successful migration state.
 
-Real PostgreSQL tests on the active branch cover exact replay/conflicting replay, unsupported transaction isolation, fail-closed invalid evidence, shared-fixture serialization, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint weakening, database lifecycle-shape constraints, and stable non-sensitive error/source contracts. These are review-time facts only until the unchanged head is integrated.
+Real PostgreSQL tests on the active branch cover exact replay/conflicting replay, enqueue and claim isolation contracts, fail-closed invalid evidence, per-test-suite schema isolation, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint-definition weakening, database lifecycle-shape constraints, first- and second-statement database error propagation, and stable non-sensitive error/source contracts. These are review-time facts only until the unchanged head is integrated.
 
 The active slice deliberately does **not** claim durable retry scheduling/reclaim, completion, permanent failure/quarantine transitions, expired-lease recovery, crash/restart recovery, result persistence, or live fast-mlsirm execution. Those remain Target.
 
@@ -53,4 +53,4 @@ A table may combine multiple logical value objects or lifecycle fields, but phys
 
 ## Reconciliation obligations
 
-When a physical migration merges, the same workstream must reconcile this map, `ERD.md`, `TRACEABILITY.md`, ADR-0015, migration/rollback guidance, and any UML sequence whose transactional semantics changed. A later protected-main commit, not this active PR statement, is what changes an item from `IMPLEMENTED_ON_ACTIVE_PR` to `IMPLEMENTED_ON_PROTECTED_MAIN`.
+When a physical migration merges, the same workstream must reconcile this map, `ERD.md`, `TRACEABILITY.md`, ADR-0015, migration/rollback guidance, and any UML sequence whose transactional semantics changed. A later protected-main commit, not this active PR statement, changes an item from **Active PR** to **Implemented** after evidence exists on the named protected-main baseline.
