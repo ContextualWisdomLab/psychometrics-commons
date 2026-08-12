@@ -15,7 +15,7 @@ static SCORING_JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
 fn scoring_job_test_guard() -> MutexGuard<'static, ()> {
     SCORING_JOB_TEST_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn test_client() -> Client {
