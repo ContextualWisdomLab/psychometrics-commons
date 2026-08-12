@@ -73,6 +73,12 @@ fn persisted_state(client: &mut Client, event_ref: &str) -> String {
         .get(0)
 }
 
+fn assert_database_failure<T: std::fmt::Debug>(result: Result<T, PersistenceError>) {
+    let error = result.unwrap_err();
+    assert!(matches!(error, PersistenceError::Database(_)));
+    assert!(std::error::Error::source(&error).is_some());
+}
+
 #[test]
 fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
     let _database_guard = database_test_guard();
@@ -108,6 +114,34 @@ fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
     assert_eq!(duplicate.disposition(), PersistenceDisposition::Duplicate);
     assert_eq!(duplicate.outbox_state(), OutboxState::Delivered);
     replay.rollback().unwrap();
+
+    let mut timestamp_conflict = client.transaction().unwrap();
+    assert!(matches!(
+        record_outbox_delivery_attempt(
+            &mut timestamp_conflict,
+            identity("event_delivered"),
+            "attempt_alpha",
+            DeliveryOutcome::Delivered,
+            10_002,
+            None,
+        ),
+        Err(PersistenceError::ConflictingReplay)
+    ));
+    timestamp_conflict.rollback().unwrap();
+
+    let mut cause_conflict = client.transaction().unwrap();
+    assert!(matches!(
+        record_outbox_delivery_attempt(
+            &mut cause_conflict,
+            identity("event_delivered"),
+            "attempt_alpha",
+            DeliveryOutcome::Delivered,
+            10_001,
+            Some("provider_rejected"),
+        ),
+        Err(PersistenceError::ConflictingReplay)
+    ));
+    cause_conflict.rollback().unwrap();
 
     let mut conflicting = client.transaction().unwrap();
     assert!(matches!(
@@ -289,6 +323,83 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
 }
 
 #[test]
+fn delivery_attempt_surfaces_attempt_lookup_database_failure() {
+    let _database_guard = database_test_guard();
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    enqueue(&mut client, "event_lookup_error", 3);
+    client
+        .batch_execute("DROP TABLE integration_delivery_attempt")
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert_database_failure(record_outbox_delivery_attempt(
+        &mut transaction,
+        identity("event_lookup_error"),
+        "attempt_lookup_error",
+        DeliveryOutcome::Delivered,
+        10_001,
+        None,
+    ));
+    transaction.rollback().unwrap();
+    reset_integration_tables(&mut client);
+}
+
+#[test]
+fn delivery_attempt_surfaces_attempt_insert_database_failure() {
+    let _database_guard = database_test_guard();
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    enqueue(&mut client, "event_insert_error", 3);
+    client
+        .batch_execute(
+            "ALTER TABLE integration_delivery_attempt \
+             ADD CONSTRAINT integration_delivery_attempt_test_reject \
+             CHECK (attempt_ref <> 'attempt_rejected')",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert_database_failure(record_outbox_delivery_attempt(
+        &mut transaction,
+        identity("event_insert_error"),
+        "attempt_rejected",
+        DeliveryOutcome::Delivered,
+        10_001,
+        None,
+    ));
+    transaction.rollback().unwrap();
+    reset_integration_tables(&mut client);
+}
+
+#[test]
+fn delivery_attempt_surfaces_outbox_update_database_failure() {
+    let _database_guard = database_test_guard();
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    enqueue(&mut client, "event_update_error", 3);
+    client
+        .batch_execute(
+            "ALTER TABLE integration_outbox \
+             ADD CONSTRAINT integration_outbox_test_pending_only \
+             CHECK (current_state = 'pending')",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert_database_failure(record_outbox_delivery_attempt(
+        &mut transaction,
+        identity("event_update_error"),
+        "attempt_update_error",
+        DeliveryOutcome::Delivered,
+        10_001,
+        None,
+    ));
+    transaction.rollback().unwrap();
+    reset_integration_tables(&mut client);
+}
+
+#[test]
 fn delivery_attempt_requires_read_committed_and_surfaces_database_failure() {
     let _database_guard = database_test_guard();
     let mut client = test_client();
@@ -321,16 +432,13 @@ fn delivery_attempt_requires_read_committed_and_surfaces_database_failure() {
         )
         .unwrap();
     let mut transaction = client.transaction().unwrap();
-    let database_error = record_outbox_delivery_attempt(
+    assert_database_failure(record_outbox_delivery_attempt(
         &mut transaction,
         identity("event_isolation"),
         "attempt_database_error",
         DeliveryOutcome::Delivered,
         10_001,
         None,
-    )
-    .unwrap_err();
-    assert!(matches!(database_error, PersistenceError::Database(_)));
-    assert!(std::error::Error::source(&database_error).is_some());
+    ));
     transaction.rollback().unwrap();
 }
