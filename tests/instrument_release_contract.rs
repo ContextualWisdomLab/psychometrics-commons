@@ -33,6 +33,12 @@ fn manifest() -> InstrumentReleaseManifest {
 }
 
 fn approved_publication_evidence() -> PublicationEvidenceRecord {
+    approved_publication_evidence_with_valid_until(None)
+}
+
+fn approved_publication_evidence_with_valid_until(
+    valid_until_unix_ms: Option<u64>,
+) -> PublicationEvidenceRecord {
     PublicationEvidenceRecord::new(
         "publication_evidence_big_five_ko_v1",
         "evidence_policy_self_reflection_v1",
@@ -53,7 +59,7 @@ fn approved_publication_evidence() -> PublicationEvidenceRecord {
             "administration_web_self_report_v1",
             "measurement_model_big_five_v1",
             10_050,
-            None,
+            valid_until_unix_ms,
         )
         .unwrap(),
         &["rights_ipip_big_five_v1"],
@@ -354,6 +360,34 @@ fn publication_requires_review_and_controls_new_session_eligibility() {
     assert_eq!(release.state(), PublicationState::Retired);
     assert!(!release.accepts_new_sessions());
     assert!(release.state().is_terminal());
+}
+
+#[test]
+fn expired_evidence_cannot_reactivate_suspended_release() {
+    let mut release = InstrumentRelease::new(manifest(), 10_000).unwrap();
+    release
+        .apply_command(
+            "submit_review_event",
+            PublicationCommand::SubmitReview,
+            10_100,
+        )
+        .unwrap();
+    release
+        .bind_publication_evidence(approved_publication_evidence_with_valid_until(Some(10_250)))
+        .unwrap();
+    release
+        .apply_command("publish_event", PublicationCommand::Publish, 10_200)
+        .unwrap();
+    release
+        .apply_command("suspend_event", PublicationCommand::Suspend, 10_300)
+        .unwrap();
+
+    assert_eq!(
+        release.apply_command("reactivate_event", PublicationCommand::Reactivate, 10_400,),
+        Err(InstrumentReleaseError::PublicationEvidenceNotEffective)
+    );
+    assert_eq!(release.state(), PublicationState::Suspended);
+    assert_eq!(release.events().len(), 3);
 }
 
 #[test]
