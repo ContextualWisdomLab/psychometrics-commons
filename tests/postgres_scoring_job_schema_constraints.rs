@@ -39,6 +39,7 @@ fn impossible_scoring_job_state_shapes_are_rejected_by_postgres() {
         )
         .unwrap();
     apply_scoring_job_migration(&mut client).unwrap();
+    apply_scoring_job_migration(&mut client).unwrap();
 
     for statement in [
         "INSERT INTO scoring_job_state (scoring_job_ref, scoring_request_ref, scoring_state, attempt_count, max_attempts) VALUES ('scoring_job_bad_queued_attempt', 'scoring_request_bad_queued_attempt', 'queued', 1, 3)",
