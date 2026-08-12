@@ -26,8 +26,12 @@ fn test_client() -> Client {
 fn retry_reclaim_clears_previous_attempt_failure_code() {
     let mut client = test_client();
     apply_scoring_job_migration(&mut client).unwrap();
-    let job = ScoringJob::new("scoring_job_failure_reset", "scoring_request_failure_reset", 3)
-        .unwrap();
+    let job = ScoringJob::new(
+        "scoring_job_failure_reset",
+        "scoring_request_failure_reset",
+        3,
+    )
+    .unwrap();
 
     {
         let mut transaction = client.transaction().unwrap();
