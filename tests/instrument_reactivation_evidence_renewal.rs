@@ -258,3 +258,48 @@ fn published_release_cannot_replace_its_bound_publication_evidence() {
         initially_bound_digest
     );
 }
+
+#[test]
+fn retired_release_cannot_bind_renewed_publication_evidence() {
+    let mut release = published_release();
+    release
+        .apply_command("retire_event", PublicationCommand::Retire, 10_220)
+        .unwrap();
+    let initially_bound_ref = release
+        .publication_evidence()
+        .unwrap()
+        .publication_evidence_ref()
+        .to_owned();
+    let initially_bound_digest = release
+        .publication_evidence()
+        .unwrap()
+        .provenance()
+        .evidence_digest()
+        .to_owned();
+
+    assert_eq!(
+        release.bind_publication_evidence(evidence(
+            "publication_evidence_big_five_ko_renewed",
+            RENEWED_EVIDENCE_DIGEST,
+            10_210,
+            10_350,
+        )),
+        Err(InstrumentReleaseError::InvalidTransition)
+    );
+    assert_eq!(release.state(), PublicationState::Retired);
+    assert_eq!(
+        release
+            .publication_evidence()
+            .unwrap()
+            .publication_evidence_ref(),
+        initially_bound_ref
+    );
+    assert_eq!(
+        release
+            .publication_evidence()
+            .unwrap()
+            .provenance()
+            .evidence_digest(),
+        initially_bound_digest
+    );
+}
