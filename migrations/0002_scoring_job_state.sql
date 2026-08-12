@@ -1,4 +1,21 @@
-CREATE TABLE IF NOT EXISTS scoring_job_state (
+DO $scoring_job_schema$
+DECLARE
+    relation_ref REGCLASS := to_regclass('scoring_job_state');
+    created_table BOOLEAN := relation_ref IS NULL;
+    actual_columns TEXT[];
+    actual_defaults TEXT[];
+    actual_constraint_names TEXT[];
+    actual_constraints TEXT[];
+    actual_constraint_manifest TEXT;
+    stored_constraint_manifest TEXT;
+    constraint_manifest_prefix CONSTANT TEXT :=
+        'psychometrics-commons:migration-0002:constraint-manifest:';
+    probe_job_ref TEXT := 'scoring_job_migration_probe_' || pg_backend_pid()::TEXT;
+    probe_request_ref TEXT := 'scoring_request_migration_probe_' || pg_backend_pid()::TEXT;
+BEGIN
+    IF created_table THEN
+        EXECUTE $create_scoring_job_state$
+CREATE TABLE scoring_job_state (
     scoring_job_ref TEXT NOT NULL
         CONSTRAINT scoring_job_ref_format_check CHECK (
             scoring_job_ref = btrim(scoring_job_ref)
@@ -141,17 +158,11 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             AND result_ref IS NULL
             AND completed_fencing_token IS NULL)
     )
-);
+)
+$create_scoring_job_state$;
+        relation_ref := to_regclass('scoring_job_state');
+    END IF;
 
-DO $scoring_job_schema$
-DECLARE
-    relation_ref REGCLASS := to_regclass('scoring_job_state');
-    actual_columns TEXT[];
-    actual_defaults TEXT[];
-    actual_constraints TEXT[];
-    probe_job_ref TEXT := 'scoring_job_migration_probe_' || pg_backend_pid()::TEXT;
-    probe_request_ref TEXT := 'scoring_request_migration_probe_' || pg_backend_pid()::TEXT;
-BEGIN
     IF relation_ref IS NULL THEN
         RAISE EXCEPTION USING
             ERRCODE = '55000',
@@ -226,9 +237,9 @@ BEGIN
           AND constraint_record.convalidated
           AND constraint_record.conenforced
         ORDER BY constraint_record.conname
-    ) INTO actual_constraints;
+    ) INTO actual_constraint_names;
 
-    IF actual_constraints IS DISTINCT FROM ARRAY[
+    IF actual_constraint_names IS DISTINCT FROM ARRAY[
         'scoring_active_lease_shape_check',
         'scoring_attempt_budget_check',
         'scoring_attempt_count_nonnegative_check',
@@ -253,6 +264,38 @@ BEGIN
             MESSAGE = 'scoring_job_state constraint contract does not match migration 0002';
     END IF;
 
+    SELECT ARRAY(
+        SELECT format(
+            '%s:%s',
+            constraint_record.conname,
+            pg_get_constraintdef(constraint_record.oid)
+        )
+        FROM pg_constraint AS constraint_record
+        WHERE constraint_record.conrelid = relation_ref
+          AND constraint_record.contype IN ('c', 'p')
+          AND constraint_record.convalidated
+          AND constraint_record.conenforced
+        ORDER BY constraint_record.conname
+    ) INTO actual_constraints;
+
+    actual_constraint_manifest := array_to_string(actual_constraints, E'\n');
+
+    IF NOT created_table THEN
+        stored_constraint_manifest := obj_description(relation_ref, 'pg_class');
+        IF stored_constraint_manifest IS NULL
+            OR left(stored_constraint_manifest, char_length(constraint_manifest_prefix))
+                IS DISTINCT FROM constraint_manifest_prefix
+            OR substring(
+                stored_constraint_manifest
+                FROM char_length(constraint_manifest_prefix) + 1
+            ) IS DISTINCT FROM actual_constraint_manifest
+        THEN
+            RAISE EXCEPTION USING
+                ERRCODE = '55000',
+                MESSAGE = 'scoring_job_state constraint contract does not match migration 0002';
+        END IF;
+    END IF;
+
     BEGIN
         INSERT INTO scoring_job_state (
             scoring_job_ref,
@@ -273,5 +316,13 @@ BEGIN
     EXCEPTION
         WHEN check_violation THEN NULL;
     END;
+
+    IF created_table THEN
+        EXECUTE format(
+            'COMMENT ON TABLE %s IS %L',
+            relation_ref,
+            constraint_manifest_prefix || actual_constraint_manifest
+        );
+    END IF;
 END
 $scoring_job_schema$;
