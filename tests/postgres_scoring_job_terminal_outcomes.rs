@@ -121,6 +121,16 @@ fn successful_completion_is_immutable_and_exact_replay_is_idempotent() {
         ),
         Err(ScoringJobPersistenceError::ConflictingCompletion)
     ));
+    assert!(matches!(
+        record_successful_scoring_completion(
+            &mut transaction,
+            "scoring_job_successful_completion",
+            2,
+            "scoring_result_successful_completion",
+            10_600,
+        ),
+        Err(ScoringJobPersistenceError::ConflictingCompletion)
+    ));
     transaction.rollback().unwrap();
 }
 
@@ -271,7 +281,9 @@ fn terminal_outcomes_propagate_database_failures() {
     let mut query_client = test_client("scoring_job_completion_query_failure_test");
     {
         let mut transaction = query_client.transaction().unwrap();
-        transaction.batch_execute("DROP TABLE scoring_job_state").unwrap();
+        transaction
+            .batch_execute("DROP TABLE scoring_job_state")
+            .unwrap();
         assert!(matches!(
             record_successful_scoring_completion(
                 &mut transaction,
