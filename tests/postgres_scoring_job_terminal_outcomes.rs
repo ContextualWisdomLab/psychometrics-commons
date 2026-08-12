@@ -27,6 +27,13 @@ fn test_client(schema: &str) -> Client {
     client
 }
 
+fn persist_job(client: &mut Client, job_ref: &str, request_ref: &str) {
+    let job = ScoringJob::new(job_ref, request_ref, 3).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_job(&mut transaction, &job).unwrap();
+    transaction.commit().unwrap();
+}
+
 fn persist_and_claim(client: &mut Client, job_ref: &str, request_ref: &str) {
     let job = ScoringJob::new(job_ref, request_ref, 3).unwrap();
     let mut transaction = client.transaction().unwrap();
@@ -198,4 +205,145 @@ fn stale_and_expired_workers_cannot_write_terminal_outcomes() {
         Err(ScoringJobPersistenceError::LeaseExpired)
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn successful_completion_rejects_missing_not_leased_and_expired_jobs() {
+    let mut missing_client = test_client("scoring_job_terminal_missing_test");
+    {
+        let mut transaction = missing_client.transaction().unwrap();
+        assert!(matches!(
+            record_successful_scoring_completion(
+                &mut transaction,
+                "scoring_job_missing_terminal_outcome",
+                1,
+                "scoring_result_missing_terminal_outcome",
+                10_500,
+            ),
+            Err(ScoringJobPersistenceError::JobNotFound)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    let mut queued_client = test_client("scoring_job_terminal_not_leased_test");
+    persist_job(
+        &mut queued_client,
+        "scoring_job_terminal_not_leased",
+        "scoring_request_terminal_not_leased",
+    );
+    {
+        let mut transaction = queued_client.transaction().unwrap();
+        assert!(matches!(
+            record_successful_scoring_completion(
+                &mut transaction,
+                "scoring_job_terminal_not_leased",
+                1,
+                "scoring_result_terminal_not_leased",
+                10_500,
+            ),
+            Err(ScoringJobPersistenceError::NotLeased)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    let mut expired_client = test_client("scoring_job_completion_expired_test");
+    persist_and_claim(
+        &mut expired_client,
+        "scoring_job_completion_expired",
+        "scoring_request_completion_expired",
+    );
+    let mut transaction = expired_client.transaction().unwrap();
+    assert!(matches!(
+        record_successful_scoring_completion(
+            &mut transaction,
+            "scoring_job_completion_expired",
+            1,
+            "scoring_result_completion_expired",
+            11_000,
+        ),
+        Err(ScoringJobPersistenceError::LeaseExpired)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn terminal_outcomes_propagate_database_failures() {
+    let mut query_client = test_client("scoring_job_completion_query_failure_test");
+    {
+        let mut transaction = query_client.transaction().unwrap();
+        transaction.batch_execute("DROP TABLE scoring_job_state").unwrap();
+        assert!(matches!(
+            record_successful_scoring_completion(
+                &mut transaction,
+                "scoring_job_query_failure",
+                1,
+                "scoring_result_query_failure",
+                10_500,
+            ),
+            Err(ScoringJobPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    let mut permanent_client = test_client("scoring_job_permanent_update_failure_test");
+    persist_and_claim(
+        &mut permanent_client,
+        "scoring_job_permanent_update_failure",
+        "scoring_request_permanent_update_failure",
+    );
+    permanent_client
+        .batch_execute(
+            "ALTER TABLE scoring_job_state \
+             ADD CONSTRAINT reject_quarantined_state \
+             CHECK (scoring_state <> 'quarantined')",
+        )
+        .unwrap();
+    {
+        let mut transaction = permanent_client.transaction().unwrap();
+        assert!(matches!(
+            record_permanent_scoring_failure(
+                &mut transaction,
+                "scoring_job_permanent_update_failure",
+                1,
+                "permanent_update_rejected",
+                10_500,
+            ),
+            Err(ScoringJobPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    let mut completion_client = test_client("scoring_job_completion_update_failure_test");
+    persist_and_claim(
+        &mut completion_client,
+        "scoring_job_completion_update_failure",
+        "scoring_request_completion_update_failure",
+    );
+    completion_client
+        .batch_execute(
+            "ALTER TABLE scoring_job_state \
+             ADD CONSTRAINT reject_result_ref \
+             CHECK (result_ref IS NULL)",
+        )
+        .unwrap();
+    let mut transaction = completion_client.transaction().unwrap();
+    assert!(matches!(
+        record_successful_scoring_completion(
+            &mut transaction,
+            "scoring_job_completion_update_failure",
+            1,
+            "scoring_result_completion_update_failure",
+            10_500,
+        ),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn conflicting_completion_error_is_operator_readable() {
+    assert_eq!(
+        ScoringJobPersistenceError::ConflictingCompletion.to_string(),
+        "scoring completion was replayed with conflicting immutable evidence"
+    );
 }
