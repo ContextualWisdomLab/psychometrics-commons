@@ -33,7 +33,9 @@ The active slice persists:
 - lease expiry evidence;
 - database constraints rejecting impossible lifecycle state shapes.
 
-Real PostgreSQL tests on the active branch cover exact replay/conflicting replay, unsupported transaction isolation, fail-closed invalid evidence, shared-fixture serialization, concurrent claim fencing, and database lifecycle-shape constraints. These are review-time facts only until the unchanged head is integrated.
+Migration reapplication does not trust `CREATE TABLE IF NOT EXISTS` as schema evidence. The active migration verifies the ordered column/type/nullability contract, expected defaults, and the enforced/validated named primary/check constraint set, then executes an invalid-state semantic probe. Incompatible pre-existing relations and a same-name weakened state constraint therefore fail closed rather than being accepted as successful migration state.
+
+Real PostgreSQL tests on the active branch cover exact replay/conflicting replay, unsupported transaction isolation, fail-closed invalid evidence, shared-fixture serialization, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint weakening, database lifecycle-shape constraints, and stable non-sensitive error/source contracts. These are review-time facts only until the unchanged head is integrated.
 
 The active slice deliberately does **not** claim durable retry scheduling/reclaim, completion, permanent failure/quarantine transitions, expired-lease recovery, crash/restart recovery, result persistence, or live fast-mlsirm execution. Those remain Target.
 
