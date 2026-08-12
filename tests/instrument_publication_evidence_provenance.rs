@@ -160,6 +160,68 @@ fn evidence_must_be_effective_at_the_server_authoritative_publish_time() {
 }
 
 #[test]
+fn evidence_is_effective_on_inclusive_window_boundaries() {
+    for provenance in [
+        provenance(10_200, None).unwrap(),
+        provenance(10_150, Some(10_200)).unwrap(),
+    ] {
+        let mut release = reviewed_release();
+        release
+            .bind_publication_evidence(
+                evidence(
+                    &["item_version_001", "item_version_002"],
+                    RELEASE_DIGEST,
+                    "ko-KR",
+                    provenance,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            release
+                .apply_command("publish_event", PublicationCommand::Publish, 10_200)
+                .unwrap(),
+            PublicationState::Published
+        );
+    }
+}
+
+#[test]
+fn reactivation_requires_evidence_effective_at_reactivation_time() {
+    let mut release = reviewed_release();
+    release
+        .bind_publication_evidence(
+            evidence(
+                &["item_version_001", "item_version_002"],
+                RELEASE_DIGEST,
+                "ko-KR",
+                provenance(10_150, Some(10_250)).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    release
+        .apply_command("publish_event", PublicationCommand::Publish, 10_200)
+        .unwrap();
+    release
+        .apply_command("suspend_event", PublicationCommand::Suspend, 10_220)
+        .unwrap();
+
+    assert_eq!(
+        release.apply_command(
+            "reactivate_event",
+            PublicationCommand::Reactivate,
+            10_251,
+        ),
+        Err(InstrumentReleaseError::PublicationEvidenceNotEffective)
+    );
+    assert_eq!(release.state(), PublicationState::Suspended);
+    assert!(!release.state().accepts_new_sessions());
+    assert_eq!(release.events().len(), 3);
+}
+
+#[test]
 fn malformed_provenance_fails_closed() {
     assert_eq!(
         PublicationEvidenceProvenance::new(
