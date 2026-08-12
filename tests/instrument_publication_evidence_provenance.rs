@@ -209,11 +209,7 @@ fn reactivation_requires_evidence_effective_at_reactivation_time() {
         .unwrap();
 
     assert_eq!(
-        release.apply_command(
-            "reactivate_event",
-            PublicationCommand::Reactivate,
-            10_251,
-        ),
+        release.apply_command("reactivate_event", PublicationCommand::Reactivate, 10_251,),
         Err(InstrumentReleaseError::PublicationEvidenceNotEffective)
     );
     assert_eq!(release.state(), PublicationState::Suspended);
