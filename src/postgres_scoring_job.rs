@@ -506,7 +506,10 @@ pub fn record_successful_scoring_completion(
         return Err(ScoringJobPersistenceError::StaleLease);
     }
     let active_lease_expires_at_unix_ms: Option<i64> = row.get(4);
-    if !matches!(active_lease_expires_at_unix_ms, Some(expiry) if expiry > completed_at_unix_ms) {
+    if !matches!(
+        active_lease_expires_at_unix_ms,
+        Some(expiry) if expiry > completed_at_unix_ms
+    ) {
         return Err(ScoringJobPersistenceError::LeaseExpired);
     }
 
