@@ -1,9 +1,15 @@
 //! Anonymous-first participant identity and optional account-link semantics.
 //!
 //! Psychometrics Commons owns stable operational participant references. Keyverse
-//! owns credentials and authentication proof. Linking therefore records durable
-//! references to proof-of-control for both the anonymous participant and the
-//! authenticated subject without replacing historical participant identifiers.
+//! owns credentials and authentication proof. Linking records an identity issuer
+//! together with a provider-scoped subject: the subject is an account identifier
+//! that is only unique within that issuer. A proof-of-control reference points to
+//! durable evidence that the caller controlled an identity; it is not the credential
+//! itself. Linking never replaces the historical product-owned participant identifier.
+//! Exact replay is idempotent, meaning the same event with the same evidence succeeds
+//! without changing state again. Invalid or conflicting evidence fails closed: it is
+//! rejected without changing the existing link. Rebinding means replacing an already
+//! linked issuer/subject pair, which this primitive does not allow silently.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -13,7 +19,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AccountLinkError {
-    /// A participant, tenant, subject, event, or proof reference was blank/numeric-only.
+    /// A participant, tenant, issuer, subject, event, or proof reference was invalid.
     InvalidReference,
     /// A server-authoritative timestamp was zero.
     InvalidTimestamp,
@@ -52,12 +58,13 @@ impl Display for AccountLinkError {
 
 impl Error for AccountLinkError {}
 
-/// Stable product-owned participant identity with optional Keyverse subject linkage.
+/// Stable product-owned participant identity with optional issuer-scoped account linkage.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParticipantRecord {
     participant_ref: String,
     tenant_ref: String,
     created_at_unix_ms: u64,
+    linked_issuer_ref: Option<String>,
     linked_subject_ref: Option<String>,
     link_event_ref: Option<String>,
     anonymous_proof_ref: Option<String>,
@@ -85,6 +92,7 @@ impl ParticipantRecord {
             participant_ref: required_reference(participant_ref)?.to_owned(),
             tenant_ref: required_reference(tenant_ref)?.to_owned(),
             created_at_unix_ms,
+            linked_issuer_ref: None,
             linked_subject_ref: None,
             link_event_ref: None,
             anonymous_proof_ref: None,
@@ -111,13 +119,26 @@ impl ParticipantRecord {
         self.created_at_unix_ms
     }
 
-    /// Return the linked authenticated subject reference, when present.
+    /// Return the identity issuer for the linked authenticated subject, when present.
+    #[must_use]
+    pub fn linked_issuer_ref(&self) -> Option<&str> {
+        self.linked_issuer_ref.as_deref()
+    }
+
+    /// Return the authenticated account identifier within its issuer, when present.
+    ///
+    /// The same subject text may legitimately identify different accounts under
+    /// different issuers, so callers must interpret it together with
+    /// [`Self::linked_issuer_ref`].
     #[must_use]
     pub fn linked_subject_ref(&self) -> Option<&str> {
         self.linked_subject_ref.as_deref()
     }
 
     /// Return the account-link event idempotency reference, when linked.
+    ///
+    /// Reusing this event reference with exactly the same evidence is a safe no-op;
+    /// reusing it with changed evidence is rejected.
     #[must_use]
     pub fn link_event_ref(&self) -> Option<&str> {
         self.link_event_ref.as_deref()
@@ -141,15 +162,18 @@ impl ParticipantRecord {
         self.linked_at_unix_ms
     }
 
-    /// Link this stable participant identity to one authenticated subject.
+    /// Link this stable participant identity to one issuer-scoped authenticated subject.
     ///
-    /// Both proof references are mandatory and must be distinct identities because
-    /// they represent separate evidence that the caller controlled the anonymous
-    /// participant and the authenticated subject. An exact event replay is
-    /// idempotent. Reusing the same event reference with altered evidence fails
-    /// closed. Once a participant is linked, a different event cannot silently
-    /// rebind it to another subject; a future unlink/relink policy requires an
-    /// explicit audited lifecycle.
+    /// The issuer and subject together identify the external account; the subject is
+    /// only unique within its issuer. Both proof references are mandatory and must
+    /// differ because they point to separate evidence that the caller controlled the
+    /// anonymous participant and the authenticated account. Replaying the exact same
+    /// event and evidence is idempotent: it succeeds without changing state again.
+    /// Reusing the event with changed issuer, subject, proof, or time evidence fails
+    /// closed, meaning the operation returns an error and leaves the existing link
+    /// unchanged. Once linked, a different event also cannot silently rebind, or
+    /// replace, the participant's issuer/subject pair; future unlink/relink policy
+    /// requires an explicit audited lifecycle.
     ///
     /// # Errors
     ///
@@ -158,12 +182,14 @@ impl ParticipantRecord {
     pub fn link_account(
         &mut self,
         link_event_ref: &str,
+        issuer_ref: &str,
         subject_ref: &str,
         anonymous_proof_ref: &str,
         authenticated_proof_ref: &str,
         linked_at_unix_ms: u64,
     ) -> Result<(), AccountLinkError> {
         let link_event_ref = required_reference(link_event_ref)?;
+        let issuer_ref = required_reference(issuer_ref)?;
         let subject_ref = required_reference(subject_ref)?;
         let anonymous_proof_ref = required_reference(anonymous_proof_ref)?;
         let authenticated_proof_ref = required_reference(authenticated_proof_ref)?;
@@ -173,7 +199,8 @@ impl ParticipantRecord {
 
         if let Some(existing_event_ref) = self.link_event_ref.as_deref() {
             if existing_event_ref == link_event_ref {
-                return if self.linked_subject_ref.as_deref() == Some(subject_ref)
+                return if self.linked_issuer_ref.as_deref() == Some(issuer_ref)
+                    && self.linked_subject_ref.as_deref() == Some(subject_ref)
                     && self.anonymous_proof_ref.as_deref() == Some(anonymous_proof_ref)
                     && self.authenticated_proof_ref.as_deref() == Some(authenticated_proof_ref)
                     && self.linked_at_unix_ms == Some(linked_at_unix_ms)
@@ -193,6 +220,7 @@ impl ParticipantRecord {
             return Err(AccountLinkError::NonMonotonicTimestamp);
         }
 
+        self.linked_issuer_ref = Some(issuer_ref.to_owned());
         self.linked_subject_ref = Some(subject_ref.to_owned());
         self.link_event_ref = Some(link_event_ref.to_owned());
         self.anonymous_proof_ref = Some(anonymous_proof_ref.to_owned());

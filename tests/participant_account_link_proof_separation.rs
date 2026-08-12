@@ -10,6 +10,7 @@ fn anonymous_and_authenticated_control_must_use_distinct_proof_references() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "shared_proof_alpha",
             "shared_proof_alpha",
@@ -17,6 +18,7 @@ fn anonymous_and_authenticated_control_must_use_distinct_proof_references() {
         ),
         Err(AccountLinkError::ProofReferenceReuse)
     );
+    assert_eq!(participant.linked_issuer_ref(), None);
     assert_eq!(participant.linked_subject_ref(), None);
     assert_eq!(
         AccountLinkError::ProofReferenceReuse.to_string(),
