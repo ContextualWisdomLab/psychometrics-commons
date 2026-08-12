@@ -733,24 +733,29 @@ impl InstrumentRelease {
         self.publication_evidence.as_ref()
     }
 
-    /// Bind policy-evaluated evidence to the exact immutable release under review.
+    /// Bind policy-evaluated evidence to the exact immutable release before publication.
     ///
-    /// Binding is deliberately separate from the `Publish` command so evidence may
-    /// be inspected before publication. Rebinding is permitted only while the
-    /// release remains in `Review`; a publish event records which current immutable
-    /// evidence record justified the transition.
+    /// Binding is deliberately separate from the `Publish`/`Reactivate` command so
+    /// evidence may be inspected before a state transition. Initial binding and
+    /// replacement are permitted in `Review`; a `Suspended` release may replace the
+    /// currently bound record with renewed evidence for the same immutable manifest
+    /// before reactivation. Already accepted publish/reactivation events retain the
+    /// evidence identity and digest that justified those historical transitions.
     ///
     /// # Errors
     ///
-    /// Returns [`InstrumentReleaseError::InvalidTransition`] outside `Review` and
-    /// [`InstrumentReleaseError::PublicationEvidenceMismatch`] when the record does
-    /// not bind the exact release version, item set, digest, locale, intended use,
-    /// scoring, calibration, norm, and limitations.
+    /// Returns [`InstrumentReleaseError::InvalidTransition`] outside `Review` or
+    /// `Suspended`, and [`InstrumentReleaseError::PublicationEvidenceMismatch`] when
+    /// the record does not bind the exact release version, item set, digest, locale,
+    /// intended use, scoring, calibration, norm, and limitations.
     pub fn bind_publication_evidence(
         &mut self,
         publication_evidence: PublicationEvidenceRecord,
     ) -> Result<(), InstrumentReleaseError> {
-        if self.state != PublicationState::Review {
+        if !matches!(
+            self.state,
+            PublicationState::Review | PublicationState::Suspended
+        ) {
             return Err(InstrumentReleaseError::InvalidTransition);
         }
         if !publication_evidence.matches_manifest(&self.manifest) {
