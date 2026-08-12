@@ -8,6 +8,8 @@ use psychometrics_commons_runtime::instrument::{
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const OTHER_RELEASE_DIGEST: &str =
+    "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 const INITIAL_EVIDENCE_DIGEST: &str =
     "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 const RENEWED_EVIDENCE_DIGEST: &str =
@@ -40,13 +42,29 @@ fn evidence(
     evaluated_at_unix_ms: u64,
     valid_until_unix_ms: u64,
 ) -> PublicationEvidenceRecord {
+    evidence_for_content_digest(
+        evidence_ref,
+        evidence_digest,
+        evaluated_at_unix_ms,
+        valid_until_unix_ms,
+        RELEASE_DIGEST,
+    )
+}
+
+fn evidence_for_content_digest(
+    evidence_ref: &str,
+    evidence_digest: &str,
+    evaluated_at_unix_ms: u64,
+    valid_until_unix_ms: u64,
+    content_digest: &str,
+) -> PublicationEvidenceRecord {
     PublicationEvidenceRecord::new(
         evidence_ref,
         "evidence_policy_self_reflection_v1",
         "release_big_five_ko_v1",
         "instrument_version_big_five_ko_v1",
         &["item_version_001", "item_version_002"],
-        RELEASE_DIGEST,
+        content_digest,
         "ko-KR",
         "intended_use_self_reflection_v1",
         "assessment_spec_big_five_v1",
@@ -150,6 +168,38 @@ fn suspended_release_can_bind_renewed_evidence_before_reactivation() {
     assert_eq!(
         reactivation.publication_evidence_digest(),
         Some(RENEWED_EVIDENCE_DIGEST)
+    );
+}
+
+#[test]
+fn mismatched_renewal_preserves_previously_bound_evidence() {
+    let mut release = published_release();
+    release
+        .apply_command("suspend_event", PublicationCommand::Suspend, 10_220)
+        .unwrap();
+    let initially_bound_ref = release
+        .publication_evidence()
+        .unwrap()
+        .publication_evidence_ref()
+        .to_owned();
+
+    assert_eq!(
+        release.bind_publication_evidence(evidence_for_content_digest(
+            "publication_evidence_big_five_ko_mismatched",
+            RENEWED_EVIDENCE_DIGEST,
+            10_240,
+            10_350,
+            OTHER_RELEASE_DIGEST,
+        )),
+        Err(InstrumentReleaseError::PublicationEvidenceMismatch)
+    );
+    assert_eq!(release.state(), PublicationState::Suspended);
+    assert_eq!(
+        release
+            .publication_evidence()
+            .unwrap()
+            .publication_evidence_ref(),
+        initially_bound_ref
     );
 }
 
