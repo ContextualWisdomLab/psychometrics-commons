@@ -1,4 +1,6 @@
-//! Real `PostgreSQL` coverage for retry persistence rejection paths.
+//! Verifies that invalid or stale retry operations fail closed in real `PostgreSQL`.
+//! The tests submit missing jobs, stale or non-leased jobs, out-of-range fencing tokens,
+//! and non-leaseable claims and assert that the adapter returns the matching safe error.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
