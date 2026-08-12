@@ -2,7 +2,8 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
-    apply_scoring_job_migration, claim_scoring_job, persist_scoring_job, ScoringJobPersistenceError,
+    apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
+    record_retryable_scoring_failure, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
@@ -225,6 +226,72 @@ fn claim_classification_wraps_a_second_statement_database_failure() {
         .batch_execute(
             "DROP SCHEMA scoring_job_claim_classification_test CASCADE;\
              DROP SCHEMA scoring_job_claim_failure_sink CASCADE;",
+        )
+        .unwrap();
+}
+
+#[test]
+fn retry_classification_wraps_a_second_statement_database_failure() {
+    let mut client = isolated_client(
+        "DROP SCHEMA IF EXISTS scoring_job_retry_classification_test CASCADE;\
+         DROP SCHEMA IF EXISTS scoring_job_retry_failure_sink CASCADE;\
+         CREATE SCHEMA scoring_job_retry_classification_test;\
+         CREATE SCHEMA scoring_job_retry_failure_sink;\
+         SET search_path TO scoring_job_retry_classification_test;",
+    );
+    apply_scoring_job_migration(&mut client).unwrap();
+
+    let job = queued_job(
+        "scoring_job_retry_classification",
+        "scoring_request_retry_classification",
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_scoring_job(&mut transaction, &job).unwrap();
+        claim_scoring_job(
+            &mut transaction,
+            "scoring_job_retry_classification",
+            "worker_retry_classification",
+            "scoring_lease_retry_classification",
+            10_000,
+            11_000,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute(
+            r"CREATE FUNCTION redirect_retry_after_update() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                PERFORM set_config('search_path', 'scoring_job_retry_failure_sink', true);
+                RETURN NULL;
+            END
+            $$;
+            CREATE TRIGGER redirect_retry_after_update
+            AFTER UPDATE ON scoring_job_state
+            FOR EACH STATEMENT EXECUTE FUNCTION redirect_retry_after_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        record_retryable_scoring_failure(
+            &mut transaction,
+            "scoring_job_retry_classification",
+            2,
+            "provider_timeout",
+            10_500,
+            12_000,
+        ),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "DROP SCHEMA scoring_job_retry_classification_test CASCADE;\
+             DROP SCHEMA scoring_job_retry_failure_sink CASCADE;",
         )
         .unwrap();
 }
