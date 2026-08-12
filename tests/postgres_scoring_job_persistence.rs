@@ -7,6 +7,15 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::mem::discriminant;
+use std::sync::{Mutex, MutexGuard};
+
+static SCORING_JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn scoring_job_test_guard() -> MutexGuard<'static, ()> {
+    SCORING_JOB_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -26,6 +35,7 @@ fn queued_job(job_ref: &str, request_ref: &str, max_attempts: u32) -> ScoringJob
 
 #[test]
 fn scoring_job_enqueue_is_exactly_idempotent_and_conflicts_fail_closed() {
+    let _guard = scoring_job_test_guard();
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
@@ -59,6 +69,7 @@ fn scoring_job_enqueue_is_exactly_idempotent_and_conflicts_fail_closed() {
 
 #[test]
 fn enqueue_rejects_nonfresh_jobs_large_attempt_budgets_and_stronger_isolation() {
+    let _guard = scoring_job_test_guard();
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
@@ -110,6 +121,7 @@ fn enqueue_rejects_nonfresh_jobs_large_attempt_budgets_and_stronger_isolation() 
 
 #[test]
 fn claim_is_atomic_and_issues_monotonic_fencing_evidence() {
+    let _guard = scoring_job_test_guard();
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
@@ -166,6 +178,7 @@ fn claim_is_atomic_and_issues_monotonic_fencing_evidence() {
 
 #[test]
 fn invalid_claim_evidence_fails_before_persistence_mutation() {
+    let _guard = scoring_job_test_guard();
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
@@ -269,6 +282,7 @@ fn invalid_claim_evidence_fails_before_persistence_mutation() {
 
 #[test]
 fn database_constraints_reject_invalid_lease_identity_and_fencing_shape() {
+    let _guard = scoring_job_test_guard();
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
