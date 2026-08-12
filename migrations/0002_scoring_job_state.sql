@@ -149,6 +149,8 @@ DECLARE
     actual_columns TEXT[];
     actual_defaults TEXT[];
     actual_constraints TEXT[];
+    probe_job_ref TEXT := 'scoring_job_migration_probe_' || pg_backend_pid()::TEXT;
+    probe_request_ref TEXT := 'scoring_request_migration_probe_' || pg_backend_pid()::TEXT;
 BEGIN
     IF relation_ref IS NULL THEN
         RAISE EXCEPTION USING
@@ -221,6 +223,8 @@ BEGIN
         FROM pg_constraint AS constraint_record
         WHERE constraint_record.conrelid = relation_ref
           AND constraint_record.contype IN ('c', 'p')
+          AND constraint_record.convalidated
+          AND constraint_record.conenforced
         ORDER BY constraint_record.conname
     ) INTO actual_constraints;
 
@@ -248,5 +252,26 @@ BEGIN
             ERRCODE = '55000',
             MESSAGE = 'scoring_job_state constraint contract does not match migration 0002';
     END IF;
+
+    BEGIN
+        INSERT INTO scoring_job_state (
+            scoring_job_ref,
+            scoring_request_ref,
+            scoring_state,
+            attempt_count,
+            max_attempts
+        ) VALUES (
+            probe_job_ref,
+            probe_request_ref,
+            'queued',
+            1,
+            3
+        );
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'scoring_job_state accepted an impossible queued state';
+    EXCEPTION
+        WHEN check_violation THEN NULL;
+    END;
 END
 $scoring_job_schema$;
