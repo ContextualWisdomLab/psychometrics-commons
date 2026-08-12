@@ -311,6 +311,9 @@ pub fn record_outbox_delivery_attempt(
         return Err(PersistenceError::NonMonotonicTimestamp);
     }
 
+    // PostgreSQL evaluates the main SELECT against the statement snapshot, so rows
+    // inserted by this data-modifying CTE are counted only through inserted_attempt.
+
     let attempt_count: i64 = transaction
         .query_one(
             "WITH inserted_attempt AS (\
