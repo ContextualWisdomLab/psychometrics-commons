@@ -1,4 +1,6 @@
-//! Regression contract for retry reclaims clearing attempt-local failure evidence.
+//! Verifies that a job scheduled for retry can be claimed again after its due time.
+//! The first attempt records a failure code; the second claim must start a new attempt
+//! and clear that old attempt-local failure code while advancing the fencing token.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
