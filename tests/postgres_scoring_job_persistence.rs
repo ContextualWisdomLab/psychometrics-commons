@@ -79,7 +79,11 @@ fn enqueue_rejects_nonfresh_jobs_large_attempt_budgets_and_stronger_isolation() 
     ));
     transaction.rollback().unwrap();
 
-    let oversized_job = queued_job("scoring_job_oversized", "scoring_request_oversized", u32::MAX);
+    let oversized_job = queued_job(
+        "scoring_job_oversized",
+        "scoring_request_oversized",
+        u32::MAX,
+    );
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist_scoring_job(&mut transaction, &oversized_job),
@@ -87,7 +91,11 @@ fn enqueue_rejects_nonfresh_jobs_large_attempt_budgets_and_stronger_isolation() 
     ));
     transaction.rollback().unwrap();
 
-    let serializable_job = queued_job("scoring_job_serializable", "scoring_request_serializable", 3);
+    let serializable_job = queued_job(
+        "scoring_job_serializable",
+        "scoring_request_serializable",
+        3,
+    );
     let mut transaction = client
         .build_transaction()
         .isolation_level(IsolationLevel::Serializable)
