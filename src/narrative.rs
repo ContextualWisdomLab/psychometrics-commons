@@ -91,9 +91,10 @@ impl StyleAssignmentIdentity<'_> {
             ScoreIdentity::ScoreProfileRef(reference) => {
                 ("score_profile_ref", required_reference(reference)?)
             }
-            ScoreIdentity::CanonicalScorePayloadDigest(digest) => {
-                ("canonical_score_payload_digest", required_exact_token(digest)?)
-            }
+            ScoreIdentity::CanonicalScorePayloadDigest(digest) => (
+                "canonical_score_payload_digest",
+                required_exact_token(digest)?,
+            ),
         };
         let instrument_version_ref = required_reference(self.instrument_version_ref)?;
         let scoring_version_ref = required_reference(self.scoring_version_ref)?;
