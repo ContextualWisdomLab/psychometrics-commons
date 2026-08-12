@@ -6,15 +6,19 @@ use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, enqueue_outbox_event, record_outbox_delivery_attempt,
     OutboxPersistenceIdentity, PersistenceDisposition, PersistenceError,
 };
-use std::sync::{Mutex, MutexGuard, PoisonError};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5053_5943_484F_4D4D;
 
-fn database_test_guard() -> MutexGuard<'static, ()> {
-    DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+fn database_test_guard() -> Client {
+    let mut client = test_client();
+    client
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("shared PostgreSQL integration-test advisory lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
