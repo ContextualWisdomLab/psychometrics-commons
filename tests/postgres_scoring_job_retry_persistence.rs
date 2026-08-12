@@ -106,7 +106,10 @@ fn retryable_failure_persists_due_retry_and_reclaim_issues_next_fence() {
     assert_eq!(row.get::<_, String>(0), "retry_scheduled");
     assert_eq!(row.get::<_, i32>(1), 1);
     assert_eq!(row.get::<_, Option<i64>>(2), Some(12_000));
-    assert_eq!(row.get::<_, Option<String>>(3).as_deref(), Some("provider_timeout"));
+    assert_eq!(
+        row.get::<_, Option<String>>(3).as_deref(),
+        Some("provider_timeout")
+    );
     assert_eq!(row.get::<_, Option<String>>(4), None);
     assert_eq!(row.get::<_, Option<String>>(5), None);
     assert_eq!(row.get::<_, Option<i64>>(6), None);
