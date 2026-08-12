@@ -13,11 +13,19 @@
 
 Psychometrics Commons is anonymous-first. A participant may later attach a Keyverse account, but identity federation remains Keyverse-owned and operational assessment identity must remain independent from the research identity namespace.
 
-The protected-main domain primitive in `src/participant.rs` already enforces an important first boundary: an optional first account link does not replace the product-owned `participant_id`, blank issuer/subject references fail closed, and a second in-place link is rejected. The module reserves unlink/relink/account-recovery semantics for an explicit audited lifecycle rather than silent mutation.
+The protected-main domain primitive in `src/participant.rs` already enforces part of the first boundary: an optional first account link does not replace the product-owned `participant_ref`, separate anonymous/authenticated proof references are required, exact event replay is idempotent, conflicting replay fails closed, and a second in-place link is rejected. Protected main does **not** yet persist an identity issuer alongside the provider-scoped subject, so it cannot claim issuer-scoped external identity as shipped behavior.
 
-A nullable `keyverse_subject_ref` on a current participant projection is therefore useful as an application view, but it is insufficient as the future physical persistence model. In-place replacement would lose who linked or unlinked an account, when the relationship changed, why it changed, and which historical sessions/results were valid under which operational identity context. It would also make identity recovery vulnerable to accidental historical rewrites and would encourage coupling product records to an identity-provider object lifecycle.
+Active PR #29 (`fix: scope participant account links by identity issuer`) adds that missing domain-level issuer binding: issuer and provider-scoped subject are validated and stored together, issuer substitution changes replay identity and fails closed, and public docstrings explain the boundary. This is `IMPLEMENTED_ON_ACTIVE_PR`, not `IMPLEMENTED_ON_PROTECTED_MAIN`, until the exact reviewed PR head is merged. It still does not implement append-only persistence, unlink/relink/recovery transport, or Keyverse token verification.
 
-This ADR is a mixture of current and target state. The stable participant/first-link fail-closed domain behavior is implemented on the protected-main baseline named by `docs/TRACEABILITY.md`; append-only persistence, unlink/relink/recovery transport, and operational evidence remain target behavior until corresponding source, migrations, tests, and release evidence are merged.
+A nullable current subject link on a participant projection is therefore useful as an application view, but it is insufficient as the future physical persistence model. In-place replacement would lose who linked or unlinked an account, when the relationship changed, why it changed, and which historical sessions/results were valid under which operational identity context. It would also make identity recovery vulnerable to accidental historical rewrites and would encourage coupling product records to an identity-provider object lifecycle.
+
+This ADR is a mixture of current and target state. Protected main provides stable participant identity plus a fail-closed subject-link primitive. PR #29 provides issuer-scoped first-link behavior on an active branch. Append-only persistence, unlink/relink/recovery transport, and operational evidence remain target behavior until corresponding source, migrations, tests, and release evidence are merged.
+
+### Implementation status
+
+- `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; optional first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #29 adds opaque `identity_issuer` binding and issuer-aware replay equality to the first-link domain primitive.
+- `PLANNED`: append-only identity-link persistence, durable transport, unlink/relink/recovery lifecycle, concurrency arbitration, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
 
@@ -57,7 +65,7 @@ Keyverse is a dependency, not a source of truth for historical product identity.
 
 ## Contract details
 
-The current machine-readable contract is the Rust domain surface in `src/participant.rs`. It supports stable participant identity plus the first optional account-link boundary. No hosted identity-link HTTP API, durable transport event, or physical identity-link schema is claimed by this ADR.
+The protected-main machine-readable contract is the Rust domain surface in `src/participant.rs`: it supports stable participant identity plus a first optional subject-link boundary. PR #29 strengthens that same surface so the external account is represented by issuer plus provider-scoped subject. No hosted identity-link HTTP API, durable transport event, or physical identity-link schema is claimed by either state.
 
 Target transport/persistence contracts must preserve the following semantics when implemented:
 
@@ -111,7 +119,7 @@ Material trust-boundary changes must remain aligned with `docs/architecture/SECU
 
 ## Deployment and operations impact
 
-The current protected-main first-link domain primitive adds no new runtime dependency. Future persistence adds a Commons-owned database entity/projection; future live linking adds a Keyverse capability dependency but anonymous assessment must not require Keyverse readiness.
+The protected-main subject-link primitive adds no new runtime dependency, and PR #29's issuer-scoped domain strengthening also adds no runtime dependency. Future persistence adds a Commons-owned database entity/projection; future live linking adds a Keyverse capability dependency but anonymous assessment must not require Keyverse readiness.
 
 Operational health must distinguish core assessment capability from optional account-link capability. Logs/metrics must expose link/recovery outcome classes, idempotent duplicates, conflicts, authorization failures, and dependency failures without leaking raw subject identifiers. Backup/restore drills must prove identity-link history and its current projection reconcile after restore.
 
@@ -133,7 +141,7 @@ A schema migration may be rolled back only before new append-only evidence depen
 - `docs/architecture/ERD.md` — logical `participant_identity_link` history and cardinality are required; physical DDL remains implementation-gated.
 - `docs/architecture/SECURITY_AND_DATA.md` — operational/research identity separation and trust boundaries must remain aligned.
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` — update when live Keyverse capability or physical persistence changes readiness/recovery behavior.
-- `docs/TRACEABILITY.md` — distinguish the protected-main first-link primitive from target append-only persistence/transport.
+- `docs/TRACEABILITY.md` — distinguish the protected-main first-link primitive, PR #29 issuer-scoped active-PR behavior, and target append-only persistence/transport.
 - `docs/ROADMAP.md` — retain identity-link persistence/recovery evidence in the implementation queue until merged and verified.
 
 ## Validation and release evidence
@@ -152,7 +160,7 @@ Before account-link persistence is considered GA-complete, exact-head evidence m
 - security tests for account-link/recovery takeover and cross-tenant access;
 - exact deployment-profile recovery evidence before any GA/SLO/RPO/RTO claim involving this persistence.
 
-The current `src/participant.rs` first-link primitive satisfies only the domain-level first-link portion of this decision. Persistence, transport, recovery, unlink/relink, and audit evidence remain target work until implemented and merged to protected main.
+Protected main satisfies only the domain-level stable first-link portion of this decision and does not yet bind issuer. PR #29 implements issuer-scoped first-link validation/storage/replay on an active branch. Persistence, transport, recovery, unlink/relink, concurrency, and audit evidence remain target work until separately implemented, reviewed, and merged.
 
 ## Alternatives considered
 
@@ -192,7 +200,7 @@ Rejected because recovery would alter scientific and audit provenance. Reconside
 
 ### Accepted risks
 
-Until persistence/transport are implemented, protected main provides only the first-link domain boundary, not an end-to-end recovery/audit capability. This gap remains visible in `docs/TRACEABILITY.md` and is not treated as GA evidence.
+Until persistence/transport are implemented, protected main provides only the stable subject-link domain boundary and PR #29 provides only an active-branch issuer-scoped strengthening, not an end-to-end recovery/audit capability. Neither state is evidence that append-only identity persistence is GA-complete.
 
 ## Follow-up work
 
@@ -219,7 +227,8 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
-- Current domain evidence: `src/participant.rs` and its contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
+- Protected-main domain evidence: `src/participant.rs` and its contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`; this baseline does not yet bind issuer.
+- Active-PR domain evidence: PR #29 adds issuer-scoped first-link validation/storage/replay and remains `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
