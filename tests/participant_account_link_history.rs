@@ -58,8 +58,74 @@ fn exact_replay_is_idempotent_and_does_not_duplicate_history() {
 }
 
 #[test]
-fn rejected_replay_or_rebinding_cannot_append_or_mutate_history() {
+fn every_rejected_link_path_preserves_append_only_history() {
     let mut participant = anonymous_participant();
+
+    let before_invalid_reference = participant.link_history().to_vec();
+    assert_eq!(
+        participant.link_account(
+            "",
+            "keyverse_issuer_history",
+            "keyverse_subject_history",
+            "anonymous_proof_history",
+            "authenticated_proof_history",
+            10_100,
+        ),
+        Err(AccountLinkError::InvalidReference)
+    );
+    assert_eq!(
+        participant.link_history(),
+        before_invalid_reference.as_slice()
+    );
+
+    let before_invalid_timestamp = participant.link_history().to_vec();
+    assert_eq!(
+        participant.link_account(
+            "link_event_invalid_timestamp",
+            "keyverse_issuer_history",
+            "keyverse_subject_history",
+            "anonymous_proof_history",
+            "authenticated_proof_history",
+            0,
+        ),
+        Err(AccountLinkError::InvalidTimestamp)
+    );
+    assert_eq!(
+        participant.link_history(),
+        before_invalid_timestamp.as_slice()
+    );
+
+    let before_proof_reuse = participant.link_history().to_vec();
+    assert_eq!(
+        participant.link_account(
+            "link_event_proof_reuse",
+            "keyverse_issuer_history",
+            "keyverse_subject_history",
+            "shared_proof_history",
+            "shared_proof_history",
+            10_100,
+        ),
+        Err(AccountLinkError::ProofReferenceReuse)
+    );
+    assert_eq!(participant.link_history(), before_proof_reuse.as_slice());
+
+    let before_non_monotonic_timestamp = participant.link_history().to_vec();
+    assert_eq!(
+        participant.link_account(
+            "link_event_non_monotonic",
+            "keyverse_issuer_history",
+            "keyverse_subject_history",
+            "anonymous_proof_history",
+            "authenticated_proof_history",
+            9_999,
+        ),
+        Err(AccountLinkError::NonMonotonicTimestamp)
+    );
+    assert_eq!(
+        participant.link_history(),
+        before_non_monotonic_timestamp.as_slice()
+    );
+
     participant
         .link_account(
             "link_event_history",
