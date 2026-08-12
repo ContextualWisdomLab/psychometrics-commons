@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
         (scoring_state = 'queued'
             AND attempt_count = 0
             AND next_attempt_at_unix_ms IS NULL
+            AND last_failure_code IS NULL
             AND result_ref IS NULL
             AND completed_fencing_token IS NULL)
         OR
@@ -104,7 +105,9 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
         OR
         (scoring_state = 'retry_scheduled'
             AND attempt_count > 0
+            AND attempt_count < max_attempts
             AND next_attempt_at_unix_ms IS NOT NULL
+            AND last_failure_code IS NOT NULL
             AND result_ref IS NULL
             AND completed_fencing_token IS NULL)
         OR
@@ -117,6 +120,7 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
         (scoring_state = 'quarantined'
             AND attempt_count > 0
             AND next_attempt_at_unix_ms IS NULL
+            AND last_failure_code IS NOT NULL
             AND result_ref IS NULL
             AND completed_fencing_token IS NULL)
         OR
