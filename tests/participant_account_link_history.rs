@@ -54,7 +54,10 @@ fn exact_replay_is_idempotent_and_does_not_duplicate_history() {
     }
 
     assert_eq!(participant.link_history().len(), 1);
-    assert_eq!(participant.link_history()[0].link_event_ref(), "link_event_history");
+    assert_eq!(
+        participant.link_history()[0].link_event_ref(),
+        "link_event_history"
+    );
 }
 
 #[test]
