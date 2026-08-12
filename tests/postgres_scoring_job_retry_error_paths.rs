@@ -8,17 +8,17 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::mem::discriminant;
 
-fn test_client() -> Client {
+fn test_client(schema: &str) -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
-        .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS scoring_job_retry_error_paths_test;\
-             SET search_path TO scoring_job_retry_error_paths_test;\
-             DROP TABLE IF EXISTS scoring_job_state;",
-        )
+        .batch_execute(&format!(
+            "CREATE SCHEMA IF NOT EXISTS {schema};\
+             SET search_path TO {schema};\
+             DROP TABLE IF EXISTS scoring_job_state;"
+        ))
         .unwrap();
     apply_scoring_job_migration(&mut client).unwrap();
     client
@@ -43,7 +43,7 @@ fn persist_and_claim(client: &mut Client, job_ref: &str, max_attempts: u32) {
 
 #[test]
 fn missing_job_and_oversized_fence_fail_closed() {
-    let mut client = test_client();
+    let mut client = test_client("scoring_job_retry_missing_paths_test");
 
     {
         let mut transaction = client.transaction().unwrap();
@@ -81,11 +81,11 @@ fn missing_job_and_oversized_fence_fail_closed() {
 
 #[test]
 fn already_transitioned_jobs_reject_stale_failure_and_new_claims() {
-    let mut client = test_client();
-    persist_and_claim(&mut client, "scoring_job_retry_not_leased", 3);
+    let mut retry_client = test_client("scoring_job_retry_not_leased_paths_test");
+    persist_and_claim(&mut retry_client, "scoring_job_retry_not_leased", 3);
 
     {
-        let mut transaction = client.transaction().unwrap();
+        let mut transaction = retry_client.transaction().unwrap();
         record_retryable_scoring_failure(
             &mut transaction,
             "scoring_job_retry_not_leased",
@@ -99,7 +99,7 @@ fn already_transitioned_jobs_reject_stale_failure_and_new_claims() {
     }
 
     {
-        let mut transaction = client.transaction().unwrap();
+        let mut transaction = retry_client.transaction().unwrap();
         assert!(matches!(
             record_retryable_scoring_failure(
                 &mut transaction,
@@ -114,7 +114,7 @@ fn already_transitioned_jobs_reject_stale_failure_and_new_claims() {
         transaction.rollback().unwrap();
     }
 
-    let mut quarantined_client = test_client();
+    let mut quarantined_client = test_client("scoring_job_retry_quarantine_paths_test");
     persist_and_claim(&mut quarantined_client, "scoring_job_quarantined", 1);
     {
         let mut transaction = quarantined_client.transaction().unwrap();
