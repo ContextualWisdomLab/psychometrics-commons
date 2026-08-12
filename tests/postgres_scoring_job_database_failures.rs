@@ -9,8 +9,8 @@ use psychometrics_commons_runtime::scoring_job::ScoringJob;
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client =
-        Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_database_failure_test;\
