@@ -10,6 +10,25 @@ fn test_client() -> Client {
 }
 
 #[test]
+fn scoring_job_migration_rejects_incompatible_preexisting_schema() {
+    let mut client = test_client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS scoring_job_drift_test CASCADE;\
+             CREATE SCHEMA scoring_job_drift_test;\
+             SET search_path TO scoring_job_drift_test, public;\
+             CREATE TABLE scoring_job_state (unexpected_column TEXT);",
+        )
+        .unwrap();
+
+    assert!(apply_scoring_job_migration(&mut client).is_err());
+
+    client
+        .batch_execute("DROP SCHEMA scoring_job_drift_test CASCADE;")
+        .unwrap();
+}
+
+#[test]
 fn impossible_scoring_job_state_shapes_are_rejected_by_postgres() {
     let mut client = test_client();
     client
