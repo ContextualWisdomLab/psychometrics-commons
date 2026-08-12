@@ -12,8 +12,6 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const SCORING_JOB_MIGRATION: &str = include_str!("../migrations/0002_scoring_job_state.sql");
-const QUEUED_STATE: &str = "queued";
-const LEASED_STATE: &str = "leased";
 
 /// Outcome of persisting the immutable identity of a scoring job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,7 +92,9 @@ impl Display for ScoringJobPersistenceError {
             Self::ValueOutOfRange => "scoring persistence value exceeds the PostgreSQL range",
             Self::InvalidLeaseWindow => "scoring lease expiry must be later than claim time",
             Self::UnsupportedInitialState => "only a fresh queued scoring job may be inserted",
-            Self::ConflictingReplay => "scoring job identity was replayed with conflicting evidence",
+            Self::ConflictingReplay => {
+                "scoring job identity was replayed with conflicting evidence"
+            }
             Self::UnsupportedIsolationLevel => {
                 "scoring job enqueue replay requires read committed isolation"
             }
@@ -145,13 +145,18 @@ pub fn persist_scoring_job(
     job: &ScoringJob,
 ) -> Result<ScoringJobPersistenceDisposition, ScoringJobPersistenceError> {
     if !matches!(
-        (job.state(), job.attempt_count(), job.active_lease(), job.result_ref()),
+        (
+            job.state(),
+            job.attempt_count(),
+            job.active_lease(),
+            job.result_ref()
+        ),
         (ScoringJobState::Queued, 0, None, None)
     ) {
         return Err(ScoringJobPersistenceError::UnsupportedInitialState);
     }
-    let max_attempts =
-        i32::try_from(job.max_attempts()).map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?;
+    let max_attempts = i32::try_from(job.max_attempts())
+        .map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?;
     require_read_committed(transaction)?;
 
     let inserted = transaction.execute(
@@ -283,6 +288,3 @@ fn require_read_committed(
         Err(ScoringJobPersistenceError::UnsupportedIsolationLevel)
     }
 }
-
-#[allow(dead_code)]
-const _: (&str, &str) = (QUEUED_STATE, LEASED_STATE);
