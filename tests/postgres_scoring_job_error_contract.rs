@@ -38,7 +38,7 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
         ),
         (
             ScoringJobPersistenceError::UnsupportedIsolationLevel,
-            "scoring job enqueue replay requires read committed isolation",
+            "scoring job persistence requires read committed isolation",
         ),
         (
             ScoringJobPersistenceError::JobNotFound,
