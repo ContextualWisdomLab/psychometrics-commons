@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS scoring_job_state (
-    scoring_job_ref TEXT PRIMARY KEY
-        CHECK (
+    scoring_job_ref TEXT NOT NULL
+        CONSTRAINT scoring_job_ref_format_check CHECK (
             scoring_job_ref = btrim(scoring_job_ref)
             AND scoring_job_ref <> ''
             AND NOT (
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             )
         ),
     scoring_request_ref TEXT NOT NULL
-        CHECK (
+        CONSTRAINT scoring_request_ref_format_check CHECK (
             scoring_request_ref = btrim(scoring_request_ref)
             AND scoring_request_ref <> ''
             AND NOT (
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             )
         ),
     scoring_state TEXT NOT NULL
-        CHECK (
+        CONSTRAINT scoring_state_value_check CHECK (
             scoring_state IN (
                 'queued',
                 'leased',
@@ -28,11 +28,14 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
                 'cancelled'
             )
         ),
-    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-    max_attempts INTEGER NOT NULL CHECK (max_attempts > 0),
-    next_attempt_at_unix_ms BIGINT CHECK (next_attempt_at_unix_ms > 0),
+    attempt_count INTEGER NOT NULL DEFAULT 0
+        CONSTRAINT scoring_attempt_count_nonnegative_check CHECK (attempt_count >= 0),
+    max_attempts INTEGER NOT NULL
+        CONSTRAINT scoring_max_attempts_positive_check CHECK (max_attempts > 0),
+    next_attempt_at_unix_ms BIGINT
+        CONSTRAINT scoring_next_attempt_positive_check CHECK (next_attempt_at_unix_ms > 0),
     last_failure_code TEXT
-        CHECK (
+        CONSTRAINT scoring_failure_code_format_check CHECK (
             last_failure_code IS NULL OR (
                 last_failure_code = btrim(last_failure_code)
                 AND last_failure_code <> ''
@@ -43,7 +46,7 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             )
         ),
     active_worker_ref TEXT
-        CHECK (active_worker_ref IS NULL OR (
+        CONSTRAINT scoring_worker_ref_format_check CHECK (active_worker_ref IS NULL OR (
             active_worker_ref = btrim(active_worker_ref)
             AND active_worker_ref <> ''
             AND NOT (
@@ -52,7 +55,7 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             )
         )),
     active_lease_ref TEXT
-        CHECK (active_lease_ref IS NULL OR (
+        CONSTRAINT scoring_lease_ref_format_check CHECK (active_lease_ref IS NULL OR (
             active_lease_ref = btrim(active_lease_ref)
             AND active_lease_ref <> ''
             AND NOT (
@@ -66,8 +69,9 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
     completed_fencing_token BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-    CHECK (attempt_count <= max_attempts),
-    CHECK (
+    CONSTRAINT scoring_job_state_pkey PRIMARY KEY (scoring_job_ref),
+    CONSTRAINT scoring_attempt_budget_check CHECK (attempt_count <= max_attempts),
+    CONSTRAINT scoring_active_lease_shape_check CHECK (
         (scoring_state = 'leased'
             AND active_worker_ref IS NOT NULL
             AND active_lease_ref IS NOT NULL
@@ -80,16 +84,24 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             AND active_fencing_token IS NULL
             AND active_lease_expires_at_unix_ms IS NULL)
     ),
-    CHECK (active_fencing_token IS NULL OR active_fencing_token > 0),
-    CHECK (active_fencing_token IS NULL OR active_fencing_token = attempt_count),
-    CHECK (active_lease_expires_at_unix_ms IS NULL OR active_lease_expires_at_unix_ms > 0),
-    CHECK (completed_fencing_token IS NULL OR completed_fencing_token > 0),
-    CHECK (result_ref IS NULL OR (
+    CONSTRAINT scoring_fencing_token_positive_check CHECK (
+        active_fencing_token IS NULL OR active_fencing_token > 0
+    ),
+    CONSTRAINT scoring_fencing_attempt_match_check CHECK (
+        active_fencing_token IS NULL OR active_fencing_token = attempt_count
+    ),
+    CONSTRAINT scoring_lease_expiry_positive_check CHECK (
+        active_lease_expires_at_unix_ms IS NULL OR active_lease_expires_at_unix_ms > 0
+    ),
+    CONSTRAINT scoring_completed_fence_positive_check CHECK (
+        completed_fencing_token IS NULL OR completed_fencing_token > 0
+    ),
+    CONSTRAINT scoring_result_ref_format_check CHECK (result_ref IS NULL OR (
         result_ref = btrim(result_ref)
         AND result_ref <> ''
         AND NOT (result_ref ~ '[[:digit:]]' AND result_ref ~ '^[[:digit:]+,.eE-]+$')
     )),
-    CHECK (
+    CONSTRAINT scoring_state_shape_check CHECK (
         (scoring_state = 'queued'
             AND attempt_count = 0
             AND next_attempt_at_unix_ms IS NULL
@@ -130,3 +142,111 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
             AND completed_fencing_token IS NULL)
     )
 );
+
+DO $scoring_job_schema$
+DECLARE
+    relation_ref REGCLASS := to_regclass('scoring_job_state');
+    actual_columns TEXT[];
+    actual_defaults TEXT[];
+    actual_constraints TEXT[];
+BEGIN
+    IF relation_ref IS NULL THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'scoring_job_state migration did not create its owned table';
+    END IF;
+
+    SELECT ARRAY(
+        SELECT format(
+            '%s:%s:%s',
+            attribute.attname,
+            format_type(attribute.atttypid, attribute.atttypmod),
+            CASE WHEN attribute.attnotnull THEN 'not_null' ELSE 'nullable' END
+        )
+        FROM pg_attribute AS attribute
+        WHERE attribute.attrelid = relation_ref
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+        ORDER BY attribute.attnum
+    ) INTO actual_columns;
+
+    IF actual_columns IS DISTINCT FROM ARRAY[
+        'scoring_job_ref:text:not_null',
+        'scoring_request_ref:text:not_null',
+        'scoring_state:text:not_null',
+        'attempt_count:integer:not_null',
+        'max_attempts:integer:not_null',
+        'next_attempt_at_unix_ms:bigint:nullable',
+        'last_failure_code:text:nullable',
+        'active_worker_ref:text:nullable',
+        'active_lease_ref:text:nullable',
+        'active_fencing_token:bigint:nullable',
+        'active_lease_expires_at_unix_ms:bigint:nullable',
+        'result_ref:text:nullable',
+        'completed_fencing_token:bigint:nullable',
+        'created_at:timestamp with time zone:not_null',
+        'updated_at:timestamp with time zone:not_null'
+    ]::TEXT[] THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'scoring_job_state column contract does not match migration 0002';
+    END IF;
+
+    SELECT ARRAY(
+        SELECT format(
+            '%s:%s',
+            attribute.attname,
+            pg_get_expr(default_value.adbin, default_value.adrelid)
+        )
+        FROM pg_attribute AS attribute
+        JOIN pg_attrdef AS default_value
+          ON default_value.adrelid = attribute.attrelid
+         AND default_value.adnum = attribute.attnum
+        WHERE attribute.attrelid = relation_ref
+        ORDER BY attribute.attnum
+    ) INTO actual_defaults;
+
+    IF actual_defaults IS DISTINCT FROM ARRAY[
+        'attempt_count:0',
+        'created_at:clock_timestamp()',
+        'updated_at:clock_timestamp()'
+    ]::TEXT[] THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'scoring_job_state default contract does not match migration 0002';
+    END IF;
+
+    SELECT ARRAY(
+        SELECT constraint_record.conname::TEXT
+        FROM pg_constraint AS constraint_record
+        WHERE constraint_record.conrelid = relation_ref
+          AND constraint_record.contype IN ('c', 'p')
+        ORDER BY constraint_record.conname
+    ) INTO actual_constraints;
+
+    IF actual_constraints IS DISTINCT FROM ARRAY[
+        'scoring_active_lease_shape_check',
+        'scoring_attempt_budget_check',
+        'scoring_attempt_count_nonnegative_check',
+        'scoring_completed_fence_positive_check',
+        'scoring_failure_code_format_check',
+        'scoring_fencing_attempt_match_check',
+        'scoring_fencing_token_positive_check',
+        'scoring_job_ref_format_check',
+        'scoring_job_state_pkey',
+        'scoring_lease_expiry_positive_check',
+        'scoring_lease_ref_format_check',
+        'scoring_max_attempts_positive_check',
+        'scoring_next_attempt_positive_check',
+        'scoring_request_ref_format_check',
+        'scoring_result_ref_format_check',
+        'scoring_state_shape_check',
+        'scoring_state_value_check',
+        'scoring_worker_ref_format_check'
+    ]::TEXT[] THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'scoring_job_state constraint contract does not match migration 0002';
+    END IF;
+END
+$scoring_job_schema$;
