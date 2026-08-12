@@ -5,7 +5,7 @@ use psychometrics_commons_runtime::session::SessionState;
 
 #[test]
 fn durable_snapshot_reference_must_be_opaque() {
-    let ledger = ResponseLedger::new("session_ref");
+    let ledger = ResponseLedger::new("session_ref").unwrap();
 
     for snapshot_ref in ["   ", "12345", "1.25e3", "１２３４５"] {
         let error = ledger
@@ -17,7 +17,7 @@ fn durable_snapshot_reference_must_be_opaque() {
 
 #[test]
 fn durable_snapshot_reference_is_trimmed_before_becoming_identity() {
-    let ledger = ResponseLedger::new("session_ref");
+    let ledger = ResponseLedger::new("session_ref").unwrap();
     let snapshot = ledger
         .freeze_as(SessionState::Completed, " snapshot_ref_a ")
         .unwrap();
