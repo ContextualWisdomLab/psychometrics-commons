@@ -17,13 +17,23 @@ fn write<'a>(
 }
 
 #[test]
+fn response_ledger_session_reference_must_be_opaque() {
+    for session_ref in ["", "   ", "12345", "1.25e3", "１２３４５"] {
+        assert_eq!(
+            ResponseLedger::new(session_ref),
+            Err(WriteError::InvalidReference)
+        );
+    }
+}
+
+#[test]
 fn response_identity_references_reject_numeric_like_values() {
     for request in [
         write("12345", "client_event_a", "item_version_a"),
         write("server_event_a", "1.25e3", "item_version_a"),
         write("server_event_a", "client_event_a", "１２３４５"),
     ] {
-        let mut ledger = ResponseLedger::new("session_ref");
+        let mut ledger = ResponseLedger::new("session_ref").unwrap();
         assert_eq!(
             ledger.record(SessionState::Active, request),
             Err(WriteError::InvalidReference)
@@ -34,7 +44,7 @@ fn response_identity_references_reject_numeric_like_values() {
 
 #[test]
 fn response_identity_references_are_canonicalized_before_idempotency_checks() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new(" session_ref ").unwrap();
     let original = ledger
         .record(
             SessionState::Active,
@@ -54,4 +64,11 @@ fn response_identity_references_are_canonicalized_before_idempotency_checks() {
         .unwrap();
     assert_eq!(replay, original);
     assert_eq!(ledger.len(), 1);
+    assert_eq!(
+        ledger
+            .freeze_as(SessionState::Completed, "snapshot_ref_a")
+            .unwrap()
+            .session_ref(),
+        "session_ref"
+    );
 }
