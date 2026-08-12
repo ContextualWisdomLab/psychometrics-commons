@@ -1,12 +1,20 @@
 //! Real `PostgreSQL` state-shape constraints for durable scoring-job rows.
 
-use postgres::{Client, NoTls};
+use postgres::{Client, Error, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::apply_scoring_job_migration;
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn assert_contract_failure(error: &Error, expected_message: &str) {
+    let database_error = error
+        .as_db_error()
+        .expect("migration contract failures must preserve PostgreSQL diagnostics");
+    assert_eq!(database_error.code().code(), "55000");
+    assert_eq!(database_error.message(), expected_message);
 }
 
 #[test]
@@ -22,11 +30,9 @@ fn scoring_job_migration_rejects_incompatible_preexisting_schema() {
         .unwrap();
 
     let error = apply_scoring_job_migration(&mut client).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("scoring_job_state column contract does not match migration 0002"),
-        "unexpected migration failure: {error}"
+    assert_contract_failure(
+        &error,
+        "scoring_job_state column contract does not match migration 0002",
     );
 
     client
@@ -68,16 +74,64 @@ fn scoring_job_migration_rejects_weakened_same_name_constraint() {
         .unwrap();
 
     let error = apply_scoring_job_migration(&mut client).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("scoring_job_state constraint contract does not match migration 0002"),
-        "unexpected migration failure: {error}"
+    assert_contract_failure(
+        &error,
+        "scoring_job_state constraint contract does not match migration 0002",
     );
 
     client
         .batch_execute("DROP SCHEMA scoring_job_constraint_drift_test CASCADE;")
         .unwrap();
+}
+
+#[test]
+fn scoring_job_migration_rejects_additional_constraint_kinds() {
+    let mut client = test_client();
+
+    for (schema_name, drift_statement, expected_message) in [
+        (
+            "scoring_job_not_valid_drift_test",
+            "ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_extra_not_valid_check CHECK (true) NOT VALID",
+            "scoring_job_state constraint contract does not match migration 0002",
+        ),
+        (
+            "scoring_job_unique_drift_test",
+            "ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_extra_unique UNIQUE (scoring_request_ref)",
+            "scoring_job_state constraint contract does not match migration 0002",
+        ),
+        (
+            "scoring_job_foreign_key_drift_test",
+            "ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_extra_foreign_key FOREIGN KEY (scoring_request_ref) REFERENCES scoring_job_state(scoring_job_ref)",
+            "scoring_job_state constraint contract does not match migration 0002",
+        ),
+        (
+            "scoring_job_exclude_drift_test",
+            "ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_extra_exclude EXCLUDE USING btree (scoring_request_ref WITH =)",
+            "scoring_job_state constraint contract does not match migration 0002",
+        ),
+        (
+            "scoring_job_not_null_drift_test",
+            "ALTER TABLE scoring_job_state ALTER COLUMN last_failure_code SET NOT NULL",
+            "scoring_job_state column contract does not match migration 0002",
+        ),
+    ] {
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {schema_name} CASCADE;\
+                 CREATE SCHEMA {schema_name};\
+                 SET search_path TO {schema_name}, public;"
+            ))
+            .unwrap();
+        apply_scoring_job_migration(&mut client).unwrap();
+        client.batch_execute(drift_statement).unwrap();
+
+        let error = apply_scoring_job_migration(&mut client).unwrap_err();
+        assert_contract_failure(&error, expected_message);
+
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
+            .unwrap();
+    }
 }
 
 #[test]
