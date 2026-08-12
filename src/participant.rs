@@ -1,9 +1,15 @@
 //! Anonymous-first participant identity and optional account-link semantics.
 //!
 //! Psychometrics Commons owns stable operational participant references. Keyverse
-//! owns credentials and authentication proof. Linking therefore records the
-//! identity issuer, provider-scoped subject, and durable proof-of-control
-//! references without replacing historical participant identifiers.
+//! owns credentials and authentication proof. Linking records an identity issuer
+//! together with a provider-scoped subject: the subject is an account identifier
+//! that is only unique within that issuer. A proof-of-control reference points to
+//! durable evidence that the caller controlled an identity; it is not the credential
+//! itself. Linking never replaces the historical product-owned participant identifier.
+//! Exact replay is idempotent, meaning the same event with the same evidence succeeds
+//! without changing state again. Invalid or conflicting evidence fails closed: it is
+//! rejected without changing the existing link. Rebinding means replacing an already
+//! linked issuer/subject pair, which this primitive does not allow silently.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -119,13 +125,20 @@ impl ParticipantRecord {
         self.linked_issuer_ref.as_deref()
     }
 
-    /// Return the provider-scoped authenticated subject reference, when present.
+    /// Return the authenticated account identifier within its issuer, when present.
+    ///
+    /// The same subject text may legitimately identify different accounts under
+    /// different issuers, so callers must interpret it together with
+    /// [`Self::linked_issuer_ref`].
     #[must_use]
     pub fn linked_subject_ref(&self) -> Option<&str> {
         self.linked_subject_ref.as_deref()
     }
 
     /// Return the account-link event idempotency reference, when linked.
+    ///
+    /// Reusing this event reference with exactly the same evidence is a safe no-op;
+    /// reusing it with changed evidence is rejected.
     #[must_use]
     pub fn link_event_ref(&self) -> Option<&str> {
         self.link_event_ref.as_deref()
@@ -151,14 +164,16 @@ impl ParticipantRecord {
 
     /// Link this stable participant identity to one issuer-scoped authenticated subject.
     ///
-    /// The issuer and provider-scoped subject together identify the external
-    /// account. Both proof references are mandatory and must be distinct identities
-    /// because they represent separate evidence that the caller controlled the
-    /// anonymous participant and authenticated subject. An exact event replay is
-    /// idempotent. Reusing the same event reference with altered issuer, subject,
-    /// proof, or time evidence fails closed. Once linked, a different event cannot
-    /// silently rebind the participant; future unlink/relink policy requires an
-    /// explicit audited lifecycle.
+    /// The issuer and subject together identify the external account; the subject is
+    /// only unique within its issuer. Both proof references are mandatory and must
+    /// differ because they point to separate evidence that the caller controlled the
+    /// anonymous participant and the authenticated account. Replaying the exact same
+    /// event and evidence is idempotent: it succeeds without changing state again.
+    /// Reusing the event with changed issuer, subject, proof, or time evidence fails
+    /// closed, meaning the operation returns an error and leaves the existing link
+    /// unchanged. Once linked, a different event also cannot silently rebind, or
+    /// replace, the participant's issuer/subject pair; future unlink/relink policy
+    /// requires an explicit audited lifecycle.
     ///
     /// # Errors
     ///
