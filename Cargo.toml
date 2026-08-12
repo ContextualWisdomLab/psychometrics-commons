@@ -6,6 +6,9 @@ description = "Hosted product runtime primitives for CWL Psychometrics Commons"
 repository = "https://github.com/ContextualWisdomLab/psychometrics-commons"
 publish = false
 
+[dependencies]
+postgres = "=0.19.14"
+
 [lib]
 path = "src/lib.rs"
 

@@ -253,13 +253,11 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         .expect("traceability must define the active implementation-work section");
     let pr_entry = active_work
         .lines()
-        .find(|line| line.contains("PR #24"))
-        .expect("active implementation work must name PR #24");
+        .find(|line| line.contains("**Active PR**"))
+        .expect("active implementation work must contain an Active PR entry");
     assert!(
-        pr_entry.contains("**Active PR**")
-            && pr_entry.contains("not protected-main truth")
-            && !pr_entry.contains("**Implemented**"),
-        "active persistence work must remain explicitly segregated from protected-main truth"
+        pr_entry.contains("not protected-main truth") && !pr_entry.contains("**Implemented**"),
+        "active work must remain explicitly segregated from protected-main truth"
     );
 
     let marker = "- Evaluated protected-main implementation baseline: `";
@@ -320,7 +318,8 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
     }
 
     assert!(
-        erd.contains("logical target ERD") && erd.contains("not the future mutable persistence source of truth"),
+        erd.contains("logical target ERD")
+            && erd.contains("not the future mutable persistence source of truth"),
         "ERD must distinguish target logical persistence from current participant projection/as-built evidence"
     );
     for time_field in [

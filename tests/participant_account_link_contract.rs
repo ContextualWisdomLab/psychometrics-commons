@@ -10,6 +10,7 @@ fn participant_is_anonymous_by_default_and_keeps_product_identity_stable() {
     assert_eq!(participant.participant_ref(), "participant_alpha");
     assert_eq!(participant.tenant_ref(), "tenant_alpha");
     assert_eq!(participant.created_at_unix_ms(), 10_000);
+    assert_eq!(participant.linked_issuer_ref(), None);
     assert_eq!(participant.linked_subject_ref(), None);
     assert_eq!(participant.link_event_ref(), None);
     assert_eq!(participant.anonymous_proof_ref(), None);
@@ -25,6 +26,7 @@ fn linking_requires_both_anonymous_and_authenticated_proof() {
     participant
         .link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -34,6 +36,10 @@ fn linking_requires_both_anonymous_and_authenticated_proof() {
 
     assert_eq!(participant.participant_ref(), "participant_alpha");
     assert_eq!(participant.tenant_ref(), "tenant_alpha");
+    assert_eq!(
+        participant.linked_issuer_ref(),
+        Some("keyverse_issuer_alpha")
+    );
     assert_eq!(
         participant.linked_subject_ref(),
         Some("keyverse_subject_alpha")
@@ -59,6 +65,7 @@ fn exact_link_replay_is_idempotent_without_rewriting_product_identity() {
         participant
             .link_account(
                 "link_event_alpha",
+                "keyverse_issuer_alpha",
                 "keyverse_subject_alpha",
                 "anonymous_proof_alpha",
                 "authenticated_proof_alpha",
@@ -68,6 +75,10 @@ fn exact_link_replay_is_idempotent_without_rewriting_product_identity() {
     }
 
     assert_eq!(participant.participant_ref(), "participant_alpha");
+    assert_eq!(
+        participant.linked_issuer_ref(),
+        Some("keyverse_issuer_alpha")
+    );
     assert_eq!(participant.linked_at_unix_ms(), Some(20_100));
 }
 
@@ -78,6 +89,7 @@ fn replay_with_changed_link_evidence_fails_closed() {
     participant
         .link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -88,6 +100,7 @@ fn replay_with_changed_link_evidence_fails_closed() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_other",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -98,6 +111,7 @@ fn replay_with_changed_link_evidence_fails_closed() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_other",
             "authenticated_proof_alpha",
@@ -108,6 +122,7 @@ fn replay_with_changed_link_evidence_fails_closed() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_other",
@@ -118,6 +133,7 @@ fn replay_with_changed_link_evidence_fails_closed() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -134,6 +150,7 @@ fn already_linked_participant_cannot_be_rebound_under_new_event_identity() {
     participant
         .link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -144,6 +161,7 @@ fn already_linked_participant_cannot_be_rebound_under_new_event_identity() {
     assert_eq!(
         participant.link_account(
             "link_event_beta",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -154,6 +172,7 @@ fn already_linked_participant_cannot_be_rebound_under_new_event_identity() {
     assert_eq!(
         participant.link_account(
             "link_event_beta",
+            "keyverse_issuer_other",
             "keyverse_subject_other",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -171,6 +190,7 @@ fn account_link_time_is_server_monotonic() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -181,6 +201,7 @@ fn account_link_time_is_server_monotonic() {
     assert_eq!(
         participant.link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -191,6 +212,7 @@ fn account_link_time_is_server_monotonic() {
     participant
         .link_account(
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -220,6 +242,7 @@ fn malformed_participant_and_link_references_fail_closed() {
     let invalid_cases = [
         (
             "12345",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
@@ -227,28 +250,41 @@ fn malformed_participant_and_link_references_fail_closed() {
         (
             "link_event_alpha",
             "12345",
+            "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "authenticated_proof_alpha",
         ),
         (
             "link_event_alpha",
+            "keyverse_issuer_alpha",
+            "12345",
+            "anonymous_proof_alpha",
+            "authenticated_proof_alpha",
+        ),
+        (
+            "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "12345",
             "authenticated_proof_alpha",
         ),
         (
             "link_event_alpha",
+            "keyverse_issuer_alpha",
             "keyverse_subject_alpha",
             "anonymous_proof_alpha",
             "12345",
         ),
     ];
-    for (event_ref, subject_ref, anonymous_proof_ref, authenticated_proof_ref) in invalid_cases {
+    for (event_ref, issuer_ref, subject_ref, anonymous_proof_ref, authenticated_proof_ref) in
+        invalid_cases
+    {
         let mut participant =
             ParticipantRecord::new_anonymous("participant_alpha", "tenant_alpha", 60_000).unwrap();
         assert_eq!(
             participant.link_account(
                 event_ref,
+                issuer_ref,
                 subject_ref,
                 anonymous_proof_ref,
                 authenticated_proof_ref,
