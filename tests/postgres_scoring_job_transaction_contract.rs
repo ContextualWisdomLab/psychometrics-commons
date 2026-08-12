@@ -132,7 +132,7 @@ fn enqueue_classification_wraps_a_second_statement_database_failure() {
 
     client
         .batch_execute(
-            r#"CREATE FUNCTION redirect_after_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+            r"CREATE FUNCTION redirect_after_insert() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 PERFORM set_config('search_path', 'scoring_job_enqueue_failure_sink', true);
                 RETURN NULL;
@@ -140,7 +140,7 @@ fn enqueue_classification_wraps_a_second_statement_database_failure() {
             $$;
             CREATE TRIGGER redirect_after_insert
             AFTER INSERT ON scoring_job_state
-            FOR EACH STATEMENT EXECUTE FUNCTION redirect_after_insert();"#,
+            FOR EACH STATEMENT EXECUTE FUNCTION redirect_after_insert();",
         )
         .unwrap();
 
@@ -195,7 +195,7 @@ fn claim_classification_wraps_a_second_statement_database_failure() {
 
     client
         .batch_execute(
-            r#"CREATE FUNCTION redirect_after_update() RETURNS trigger LANGUAGE plpgsql AS $$
+            r"CREATE FUNCTION redirect_after_update() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 PERFORM set_config('search_path', 'scoring_job_claim_failure_sink', true);
                 RETURN NULL;
@@ -203,7 +203,7 @@ fn claim_classification_wraps_a_second_statement_database_failure() {
             $$;
             CREATE TRIGGER redirect_after_update
             AFTER UPDATE ON scoring_job_state
-            FOR EACH STATEMENT EXECUTE FUNCTION redirect_after_update();"#,
+            FOR EACH STATEMENT EXECUTE FUNCTION redirect_after_update();",
         )
         .unwrap();
 
