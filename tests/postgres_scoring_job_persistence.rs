@@ -21,8 +21,8 @@ fn scoring_job_test_guard() -> MutexGuard<'static, ()> {
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client =
-        Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_persistence_test;\
@@ -34,9 +34,7 @@ fn test_client() -> Client {
 
 fn reset_scoring_job_table(client: &mut Client) {
     client
-        .batch_execute(
-            "DROP TABLE IF EXISTS scoring_job_persistence_test.scoring_job_state;",
-        )
+        .batch_execute("DROP TABLE IF EXISTS scoring_job_persistence_test.scoring_job_state;")
         .unwrap();
 }
 
