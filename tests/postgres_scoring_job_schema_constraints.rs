@@ -21,7 +21,13 @@ fn scoring_job_migration_rejects_incompatible_preexisting_schema() {
         )
         .unwrap();
 
-    assert!(apply_scoring_job_migration(&mut client).is_err());
+    let error = apply_scoring_job_migration(&mut client).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("scoring_job_state column contract does not match migration 0002"),
+        "unexpected migration failure: {error}"
+    );
 
     client
         .batch_execute("DROP SCHEMA scoring_job_drift_test CASCADE;")
@@ -39,14 +45,32 @@ fn scoring_job_migration_rejects_weakened_same_name_constraint() {
         )
         .unwrap();
     apply_scoring_job_migration(&mut client).unwrap();
+
+    let relation_exists: bool = client
+        .query_one(
+            "SELECT to_regclass('scoring_job_constraint_drift_test.scoring_job_state') IS NOT NULL",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(relation_exists, "migration did not create the schema-qualified table");
+
     client
         .batch_execute(
-            "ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_state_shape_check;\
-             ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_state_shape_check CHECK (true);",
+            "ALTER TABLE scoring_job_constraint_drift_test.scoring_job_state \
+                 DROP CONSTRAINT scoring_worker_ref_format_check;\
+             ALTER TABLE scoring_job_constraint_drift_test.scoring_job_state \
+                 ADD CONSTRAINT scoring_worker_ref_format_check CHECK (true);",
         )
         .unwrap();
 
-    assert!(apply_scoring_job_migration(&mut client).is_err());
+    let error = apply_scoring_job_migration(&mut client).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("scoring_job_state constraint contract does not match migration 0002"),
+        "unexpected migration failure: {error}"
+    );
 
     client
         .batch_execute("DROP SCHEMA scoring_job_constraint_drift_test CASCADE;")
