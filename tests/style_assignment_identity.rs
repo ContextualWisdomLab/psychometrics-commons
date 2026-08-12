@@ -4,7 +4,7 @@ use psychometrics_commons_runtime::narrative::{
     ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentIdentityError,
 };
 
-fn input<'a>(score_identity: ScoreIdentity<'a>) -> StyleAssignmentIdentity<'a> {
+fn input(score_identity: ScoreIdentity<'_>) -> StyleAssignmentIdentity<'_> {
     StyleAssignmentIdentity {
         score_identity,
         instrument_version_ref: "instrument_version_ipip_big_five_en_v1",
