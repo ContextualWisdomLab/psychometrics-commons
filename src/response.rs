@@ -179,12 +179,21 @@ pub struct ResponseLedger {
 
 impl ResponseLedger {
     /// Create an empty response ledger for one assessment session.
-    #[must_use]
-    pub fn new(session_ref: impl Into<String>) -> Self {
-        Self {
-            session_ref: session_ref.into(),
+    ///
+    /// Leading and trailing whitespace is removed before the session reference
+    /// becomes identity-bearing state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] when the session reference is blank
+    /// or numeric-like instead of an opaque product identifier.
+    pub fn new(session_ref: impl AsRef<str>) -> Result<Self, WriteError> {
+        let session_ref =
+            normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
             events: Vec::new(),
-        }
+        })
     }
 
     /// Return the number of accepted response events.
