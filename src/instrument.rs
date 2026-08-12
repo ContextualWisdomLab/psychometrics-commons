@@ -667,19 +667,19 @@ impl PublicationEvent {
         self.occurred_at_unix_ms
     }
 
-    /// Return the publication-evidence identity bound to a publish event.
+    /// Return the publication-evidence identity bound to a publish or reactivation event.
     #[must_use]
     pub fn publication_evidence_ref(&self) -> Option<&str> {
         self.publication_evidence_ref.as_deref()
     }
 
-    /// Return the evidence-policy identity bound to a publish event.
+    /// Return the evidence-policy identity bound to a publish or reactivation event.
     #[must_use]
     pub fn evidence_policy_ref(&self) -> Option<&str> {
         self.evidence_policy_ref.as_deref()
     }
 
-    /// Return the evidence-artifact digest bound to a publish event.
+    /// Return the evidence-artifact digest bound to a publish or reactivation event.
     #[must_use]
     pub fn publication_evidence_digest(&self) -> Option<&str> {
         self.publication_evidence_digest.as_deref()
@@ -788,10 +788,11 @@ impl InstrumentRelease {
     ///
     /// Exact replay of a previously accepted event returns the current state without
     /// reopening or rewinding a later lifecycle state. Reuse of an event reference
-    /// with different command evidence fails closed. `Review -> Published` additionally
-    /// requires exact, policy-approved publication evidence that is effective at the
-    /// server-authoritative publication time. The accepted publish event durably binds
-    /// evidence identity, evidence-policy identity, and evidence-artifact digest.
+    /// with different command evidence fails closed. Both `Review -> Published` and
+    /// `Suspended -> Published` additionally require exact, policy-approved publication
+    /// evidence that is effective at the server-authoritative transition time. The
+    /// accepted publish/reactivation event durably binds evidence identity,
+    /// evidence-policy identity, and evidence-artifact digest.
     ///
     /// # Errors
     ///
@@ -825,34 +826,39 @@ impl InstrumentRelease {
             return Err(InstrumentReleaseError::NonMonotonicTimestamp);
         }
 
-        let publication_binding =
-            if self.state == PublicationState::Review && command == PublicationCommand::Publish {
-                let evidence = self
-                    .publication_evidence
-                    .as_ref()
-                    .ok_or(InstrumentReleaseError::MissingPublicationEvidence)?;
-                if evidence.status() != PublicationEvidenceStatus::Approved {
-                    return Err(InstrumentReleaseError::PublicationEvidenceNotApproved);
-                }
-                if !evidence.provenance().is_effective_at(occurred_at_unix_ms) {
-                    return Err(InstrumentReleaseError::PublicationEvidenceNotEffective);
-                }
-                Some((
-                    evidence.publication_evidence_ref().to_owned(),
-                    evidence.evidence_policy_ref().to_owned(),
-                    evidence.provenance().evidence_digest().to_owned(),
-                ))
-            } else {
-                None
-            };
+        let requires_publication_evidence = matches!(
+            (self.state, command),
+            (PublicationState::Review, PublicationCommand::Publish)
+                | (PublicationState::Suspended, PublicationCommand::Reactivate)
+        );
+        let publication_binding = if requires_publication_evidence {
+            let evidence = self
+                .publication_evidence
+                .as_ref()
+                .ok_or(InstrumentReleaseError::MissingPublicationEvidence)?;
+            if evidence.status() != PublicationEvidenceStatus::Approved {
+                return Err(InstrumentReleaseError::PublicationEvidenceNotApproved);
+            }
+            if !evidence.provenance().is_effective_at(occurred_at_unix_ms) {
+                return Err(InstrumentReleaseError::PublicationEvidenceNotEffective);
+            }
+            Some((
+                evidence.publication_evidence_ref().to_owned(),
+                evidence.evidence_policy_ref().to_owned(),
+                evidence.provenance().evidence_digest().to_owned(),
+            ))
+        } else {
+            None
+        };
 
         let next = transition(self.state, command)?;
         let (publication_evidence_ref, evidence_policy_ref, publication_evidence_digest) =
-            if let Some((evidence_ref, policy_ref, evidence_digest)) = publication_binding {
-                (Some(evidence_ref), Some(policy_ref), Some(evidence_digest))
-            } else {
-                (None, None, None)
-            };
+            publication_binding.map_or(
+                (None, None, None),
+                |(evidence_ref, policy_ref, evidence_digest)| {
+                    (Some(evidence_ref), Some(policy_ref), Some(evidence_digest))
+                },
+            );
         self.events.push(PublicationEvent {
             event_ref: event_ref.to_owned(),
             command,
