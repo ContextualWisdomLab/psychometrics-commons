@@ -230,20 +230,29 @@ fn non_active_session_cannot_accept_response_events() {
 }
 
 #[test]
-fn server_and_client_references_must_be_non_empty() {
+fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
     let mut ledger = ResponseLedger::new("session_ref");
 
     for request in [
         write("", "client_a", "item_v1", "sha256:aaa"),
         write("event_a", "", "item_v1", "sha256:aaa"),
         write("event_a", "client_a", "", "sha256:aaa"),
-        write("event_a", "client_a", "item_v1", ""),
     ] {
         assert_eq!(
             ledger.record(SessionState::Active, request).unwrap_err(),
-            WriteError::EmptyReference
+            WriteError::InvalidReference
         );
     }
+
+    assert_eq!(
+        ledger
+            .record(
+                SessionState::Active,
+                write("event_a", "client_a", "item_v1", "   "),
+            )
+            .unwrap_err(),
+        WriteError::EmptyReference
+    );
 }
 
 #[test]
@@ -313,8 +322,12 @@ fn write_errors_have_stable_human_readable_context() {
         "session Paused cannot accept response events"
     );
     assert_eq!(
+        WriteError::InvalidReference.to_string(),
+        "response identity references must be opaque non-numeric values"
+    );
+    assert_eq!(
         WriteError::EmptyReference.to_string(),
-        "response references must not be empty"
+        "response payload digest must not be empty"
     );
     assert_eq!(
         WriteError::IdempotencyConflict.to_string(),
