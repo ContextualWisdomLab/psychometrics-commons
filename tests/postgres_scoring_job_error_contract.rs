@@ -1,4 +1,4 @@
-//! Stable operator-facing error contracts for PostgreSQL scoring-job persistence.
+//! Stable operator-facing error contracts for `PostgreSQL` scoring-job persistence.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::ScoringJobPersistenceError;
