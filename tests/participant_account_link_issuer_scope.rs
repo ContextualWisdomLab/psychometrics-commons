@@ -18,7 +18,10 @@ fn account_link_pins_identity_issuer_with_provider_scoped_subject() {
         )
         .unwrap();
 
-    assert_eq!(participant.linked_issuer_ref(), Some("keyverse_issuer_prod"));
+    assert_eq!(
+        participant.linked_issuer_ref(),
+        Some("keyverse_issuer_prod")
+    );
     assert_eq!(
         participant.linked_subject_ref(),
         Some("keyverse_subject_alpha")
@@ -51,7 +54,10 @@ fn replay_cannot_substitute_identity_issuer_under_same_event() {
         ),
         Err(AccountLinkError::ConflictingReplay)
     );
-    assert_eq!(participant.linked_issuer_ref(), Some("keyverse_issuer_prod"));
+    assert_eq!(
+        participant.linked_issuer_ref(),
+        Some("keyverse_issuer_prod")
+    );
 }
 
 #[test]
