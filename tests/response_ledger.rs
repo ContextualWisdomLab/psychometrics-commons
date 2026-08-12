@@ -19,7 +19,7 @@ fn write<'a>(
 
 #[test]
 fn active_session_assigns_monotonic_server_sequences() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
 
     let first = ledger
         .record(
@@ -46,7 +46,7 @@ fn active_session_assigns_monotonic_server_sequences() {
 
 #[test]
 fn duplicate_client_event_is_idempotent_when_content_matches() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     let original = ledger
         .record(
             SessionState::Active,
@@ -71,7 +71,7 @@ fn duplicate_client_event_is_idempotent_when_content_matches() {
 
 #[test]
 fn exact_response_replay_remains_idempotent_after_collection_closes() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     let original = ledger
         .record(
             SessionState::Active,
@@ -110,7 +110,7 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
 
 #[test]
 fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
@@ -159,7 +159,7 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
 
 #[test]
 fn reused_client_event_with_different_content_fails_closed() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
@@ -187,7 +187,7 @@ fn reused_client_event_with_different_content_fails_closed() {
 
 #[test]
 fn server_event_reference_cannot_identify_two_different_events() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
@@ -208,7 +208,7 @@ fn server_event_reference_cannot_identify_two_different_events() {
 
 #[test]
 fn non_active_session_cannot_accept_response_events() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
 
     for state in [
         SessionState::Created,
@@ -231,7 +231,7 @@ fn non_active_session_cannot_accept_response_events() {
 
 #[test]
 fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
 
     for request in [
         write("", "client_a", "item_v1", "sha256:aaa"),
@@ -257,7 +257,7 @@ fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
 
 #[test]
 fn completed_session_freezes_a_deterministic_immutable_snapshot() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
@@ -283,7 +283,7 @@ fn completed_session_freezes_a_deterministic_immutable_snapshot() {
 
 #[test]
 fn snapshot_freeze_requires_completed_session() {
-    let ledger = ResponseLedger::new("session_ref");
+    let ledger = ResponseLedger::new("session_ref").unwrap();
 
     for state in [
         SessionState::Created,
@@ -305,7 +305,7 @@ fn snapshot_freeze_requires_completed_session() {
 
 #[test]
 fn empty_completed_session_has_an_explicit_empty_snapshot() {
-    let ledger = ResponseLedger::new("session_ref");
+    let ledger = ResponseLedger::new("session_ref").unwrap();
     let snapshot = ledger.freeze(SessionState::Completed).unwrap();
 
     assert_eq!(snapshot.event_count(), 0);
