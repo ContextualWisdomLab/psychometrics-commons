@@ -182,6 +182,12 @@ fn mismatched_renewal_preserves_previously_bound_evidence() {
         .unwrap()
         .publication_evidence_ref()
         .to_owned();
+    let initially_bound_digest = release
+        .publication_evidence()
+        .unwrap()
+        .provenance()
+        .evidence_digest()
+        .to_owned();
 
     assert_eq!(
         release.bind_publication_evidence(evidence_for_content_digest(
@@ -201,6 +207,14 @@ fn mismatched_renewal_preserves_previously_bound_evidence() {
             .publication_evidence_ref(),
         initially_bound_ref
     );
+    assert_eq!(
+        release
+            .publication_evidence()
+            .unwrap()
+            .provenance()
+            .evidence_digest(),
+        initially_bound_digest
+    );
 }
 
 #[test]
@@ -210,6 +224,12 @@ fn published_release_cannot_replace_its_bound_publication_evidence() {
         .publication_evidence()
         .unwrap()
         .publication_evidence_ref()
+        .to_owned();
+    let initially_bound_digest = release
+        .publication_evidence()
+        .unwrap()
+        .provenance()
+        .evidence_digest()
         .to_owned();
 
     assert_eq!(
@@ -228,5 +248,13 @@ fn published_release_cannot_replace_its_bound_publication_evidence() {
             .unwrap()
             .publication_evidence_ref(),
         initially_bound_ref
+    );
+    assert_eq!(
+        release
+            .publication_evidence()
+            .unwrap()
+            .provenance()
+            .evidence_digest(),
+        initially_bound_digest
     );
 }
