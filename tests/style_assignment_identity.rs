@@ -146,7 +146,9 @@ fn missing_or_numeric_like_references_fail_closed() {
 fn noncanonical_exact_tokens_fail_closed() {
     for invalid in [
         input(ScoreIdentity::CanonicalScorePayloadDigest("")),
-        input(ScoreIdentity::CanonicalScorePayloadDigest("sha256:score\0a")),
+        input(ScoreIdentity::CanonicalScorePayloadDigest(
+            "sha256:score\0a",
+        )),
         StyleAssignmentIdentity {
             interpretation_rule_bundle_digest: "   ",
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
