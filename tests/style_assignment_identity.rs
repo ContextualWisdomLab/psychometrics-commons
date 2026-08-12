@@ -143,15 +143,20 @@ fn missing_or_numeric_like_references_fail_closed() {
 }
 
 #[test]
-fn blank_exact_tokens_fail_closed() {
+fn noncanonical_exact_tokens_fail_closed() {
     for invalid in [
         input(ScoreIdentity::CanonicalScorePayloadDigest("")),
+        input(ScoreIdentity::CanonicalScorePayloadDigest("sha256:score\0a")),
         StyleAssignmentIdentity {
             interpretation_rule_bundle_digest: "   ",
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
         StyleAssignmentIdentity {
             locale: "",
+            ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
+        },
+        StyleAssignmentIdentity {
+            locale: "en US",
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
     ] {
@@ -171,9 +176,5 @@ fn identity_errors_expose_stable_operator_messages() {
     assert_eq!(
         StyleAssignmentIdentityError::NonCanonicalToken.to_string(),
         "style-assignment digests and locale must be nonblank canonical tokens"
-    );
-    assert_eq!(
-        StyleAssignmentIdentityError::ValueOutOfRange.to_string(),
-        "style-assignment canonical field length is out of range"
     );
 }
