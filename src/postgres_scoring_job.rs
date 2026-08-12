@@ -328,8 +328,8 @@ pub fn record_retryable_scoring_failure(
     if fencing_token == 0 {
         return Err(ScoringJobPersistenceError::InvalidFencingToken);
     }
-    let fencing_token = i64::try_from(fencing_token)
-        .map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?;
+    let fencing_token =
+        i64::try_from(fencing_token).map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?;
     let failed_at_unix_ms = postgres_timestamp(failed_at_unix_ms)?;
     let retry_at_unix_ms = postgres_timestamp(retry_at_unix_ms)?;
     if retry_at_unix_ms < failed_at_unix_ms {
