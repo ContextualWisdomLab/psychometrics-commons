@@ -77,12 +77,7 @@ fn enqueue_rejects_nonfresh_jobs_large_attempt_budgets_and_stronger_isolation() 
 
     let mut leased_job = queued_job("scoring_job_nonfresh", "scoring_request_nonfresh", 3);
     leased_job
-        .claim(
-            "worker_nonfresh",
-            "scoring_lease_nonfresh",
-            10_000,
-            11_000,
-        )
+        .claim("worker_nonfresh", "scoring_lease_nonfresh", 10_000, 11_000)
         .unwrap();
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
