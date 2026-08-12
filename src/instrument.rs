@@ -56,6 +56,18 @@ pub enum PublicationCommand {
     Retire,
 }
 
+/// Policy-evaluated status of scientific publication evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PublicationEvidenceStatus {
+    /// Every mandatory publication gate represented by this record passed.
+    Approved,
+    /// At least one mandatory publication gate failed.
+    Failed,
+    /// One or more mandatory gates are unresolved, unavailable, or not evaluated.
+    Unknown,
+}
+
 /// Fail-closed error returned by instrument-release operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -68,8 +80,22 @@ pub enum InstrumentReleaseError {
     DuplicateItemReference,
     /// The locale is not a supported BCP 47-style tag.
     InvalidLocale,
-    /// The content digest is not a canonical SHA-256 digest reference.
+    /// The release content digest is not a canonical SHA-256 digest reference.
     InvalidDigest,
+    /// The evidence artifact digest is not a canonical SHA-256 digest reference.
+    InvalidEvidenceDigest,
+    /// The evidence validity window ends before its evaluation time.
+    InvalidEvidenceWindow,
+    /// An approved evidence record omitted mandatory evidence categories.
+    IncompletePublicationEvidence,
+    /// Publication evidence does not bind the exact immutable release bundle.
+    PublicationEvidenceMismatch,
+    /// No publication evidence record is bound to the reviewed release.
+    MissingPublicationEvidence,
+    /// The bound publication evidence is failed or unresolved.
+    PublicationEvidenceNotApproved,
+    /// The approved evidence is not effective at the server-authoritative publish time.
+    PublicationEvidenceNotEffective,
     /// A server-authoritative timestamp was zero.
     InvalidTimestamp,
     /// An event timestamp moved backwards.
@@ -93,6 +119,27 @@ impl Display for InstrumentReleaseError {
             Self::InvalidLocale => "instrument release locale must be a valid BCP 47-style tag",
             Self::InvalidDigest => {
                 "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits"
+            }
+            Self::InvalidEvidenceDigest => {
+                "publication evidence digest must be sha256 followed by 64 lowercase hexadecimal digits"
+            }
+            Self::InvalidEvidenceWindow => {
+                "publication evidence validity must not end before its evaluation time"
+            }
+            Self::IncompletePublicationEvidence => {
+                "approved publication evidence must include content or rights, scientific, and approval references"
+            }
+            Self::PublicationEvidenceMismatch => {
+                "publication evidence must match the exact immutable instrument release bundle"
+            }
+            Self::MissingPublicationEvidence => {
+                "reviewed instrument release requires bound publication evidence before publication"
+            }
+            Self::PublicationEvidenceNotApproved => {
+                "instrument publication evidence must be policy-approved before publication"
+            }
+            Self::PublicationEvidenceNotEffective => {
+                "approved publication evidence must be effective at the publication time"
             }
             Self::InvalidTimestamp => "instrument publication timestamps must be greater than zero",
             Self::NonMonotonicTimestamp => {
@@ -302,12 +349,303 @@ impl InstrumentReleaseManifest {
     }
 }
 
+/// Immutable provenance and validity scope for a policy-evaluated evidence artifact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicationEvidenceProvenance {
+    evidence_digest: String,
+    population_context_ref: String,
+    administration_mode_ref: String,
+    measurement_model_ref: String,
+    evaluated_at_unix_ms: u64,
+    valid_until_unix_ms: Option<u64>,
+}
+
+impl PublicationEvidenceProvenance {
+    /// Create version-bound provenance for scientific publication evidence.
+    ///
+    /// The digest identifies the evidence artifact independently of release bytes.
+    /// Population, administration, and measurement-model references remain opaque
+    /// product evidence references; Psychometrics Commons does not recompute the
+    /// upstream scientific evidence represented by them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstrumentReleaseError::InvalidEvidenceDigest`] for a malformed
+    /// evidence digest, [`InstrumentReleaseError::InvalidReference`] for malformed
+    /// scope references, [`InstrumentReleaseError::InvalidTimestamp`] for a zero
+    /// evaluation time, and [`InstrumentReleaseError::InvalidEvidenceWindow`] when
+    /// validity ends before evaluation.
+    pub fn new(
+        evidence_digest: &str,
+        population_context_ref: &str,
+        administration_mode_ref: &str,
+        measurement_model_ref: &str,
+        evaluated_at_unix_ms: u64,
+        valid_until_unix_ms: Option<u64>,
+    ) -> Result<Self, InstrumentReleaseError> {
+        if !valid_sha256_digest(evidence_digest) {
+            return Err(InstrumentReleaseError::InvalidEvidenceDigest);
+        }
+        if evaluated_at_unix_ms == 0 {
+            return Err(InstrumentReleaseError::InvalidTimestamp);
+        }
+        if valid_until_unix_ms.is_some_and(|valid_until| valid_until < evaluated_at_unix_ms) {
+            return Err(InstrumentReleaseError::InvalidEvidenceWindow);
+        }
+
+        Ok(Self {
+            evidence_digest: evidence_digest.to_owned(),
+            population_context_ref: required_reference(population_context_ref)?.to_owned(),
+            administration_mode_ref: required_reference(administration_mode_ref)?.to_owned(),
+            measurement_model_ref: required_reference(measurement_model_ref)?.to_owned(),
+            evaluated_at_unix_ms,
+            valid_until_unix_ms,
+        })
+    }
+
+    /// Return the canonical digest of the evaluated evidence artifact.
+    #[must_use]
+    pub fn evidence_digest(&self) -> &str {
+        &self.evidence_digest
+    }
+
+    /// Return the population context reference used by the evidence policy.
+    #[must_use]
+    pub fn population_context_ref(&self) -> &str {
+        &self.population_context_ref
+    }
+
+    /// Return the administration-mode reference used by the evidence policy.
+    #[must_use]
+    pub fn administration_mode_ref(&self) -> &str {
+        &self.administration_mode_ref
+    }
+
+    /// Return the measurement-model reference represented by the evidence.
+    #[must_use]
+    pub fn measurement_model_ref(&self) -> &str {
+        &self.measurement_model_ref
+    }
+
+    /// Return the server-authoritative evidence evaluation time.
+    #[must_use]
+    pub const fn evaluated_at_unix_ms(&self) -> u64 {
+        self.evaluated_at_unix_ms
+    }
+
+    /// Return the inclusive evidence-validity deadline, when one exists.
+    #[must_use]
+    pub const fn valid_until_unix_ms(&self) -> Option<u64> {
+        self.valid_until_unix_ms
+    }
+
+    fn is_effective_at(&self, occurred_at_unix_ms: u64) -> bool {
+        if occurred_at_unix_ms < self.evaluated_at_unix_ms {
+            return false;
+        }
+        self.valid_until_unix_ms
+            .is_none_or(|valid_until| occurred_at_unix_ms <= valid_until)
+    }
+}
+
+/// Immutable, policy-evaluated evidence bound to one exact publication bundle.
+///
+/// Psychometrics Commons stores only references to scientific and rights evidence.
+/// It never recomputes upstream psychometric evidence in this publication boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicationEvidenceRecord {
+    publication_evidence_ref: String,
+    evidence_policy_ref: String,
+    release_ref: String,
+    instrument_version_ref: String,
+    item_version_refs: Vec<String>,
+    content_digest: String,
+    locale: String,
+    intended_use_ref: String,
+    assessment_spec_ref: String,
+    scoring_version_ref: String,
+    calibration_reference: String,
+    norm_version_ref: Option<String>,
+    limitations_ref: String,
+    provenance: PublicationEvidenceProvenance,
+    content_rights_evidence_refs: Vec<String>,
+    scientific_evidence_refs: Vec<String>,
+    approval_refs: Vec<String>,
+    status: PublicationEvidenceStatus,
+}
+
+impl PublicationEvidenceRecord {
+    /// Create one immutable policy-evaluated publication evidence record.
+    ///
+    /// `Approved` evidence must include content/rights, scientific, and approval
+    /// references. Failed or unresolved evaluations may leave those collections
+    /// empty so the product can retain explicit fail-closed evidence. Provenance is
+    /// mandatory for every status so all decisions retain the evaluated context and
+    /// evidence artifact identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InstrumentReleaseError`] when structural references, locale,
+    /// digest, or evidence collections are invalid or an approved record omits a
+    /// mandatory evidence category.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        publication_evidence_ref: &str,
+        evidence_policy_ref: &str,
+        release_ref: &str,
+        instrument_version_ref: &str,
+        item_version_refs: &[&str],
+        content_digest: &str,
+        locale: &str,
+        intended_use_ref: &str,
+        assessment_spec_ref: &str,
+        scoring_version_ref: &str,
+        calibration_reference: &str,
+        norm_version_ref: Option<&str>,
+        limitations_ref: &str,
+        provenance: PublicationEvidenceProvenance,
+        content_rights_evidence_refs: &[&str],
+        scientific_evidence_refs: &[&str],
+        approval_refs: &[&str],
+        status: PublicationEvidenceStatus,
+    ) -> Result<Self, InstrumentReleaseError> {
+        if item_version_refs.is_empty() {
+            return Err(InstrumentReleaseError::EmptyItemSet);
+        }
+        let item_version_refs = normalize_unique_references(
+            item_version_refs,
+            InstrumentReleaseError::DuplicateItemReference,
+        )?;
+        let content_rights_evidence_refs = normalize_unique_references(
+            content_rights_evidence_refs,
+            InstrumentReleaseError::InvalidReference,
+        )?;
+        let scientific_evidence_refs = normalize_unique_references(
+            scientific_evidence_refs,
+            InstrumentReleaseError::InvalidReference,
+        )?;
+        let approval_refs =
+            normalize_unique_references(approval_refs, InstrumentReleaseError::InvalidReference)?;
+        let locale = locale.trim();
+        if !valid_locale(locale) {
+            return Err(InstrumentReleaseError::InvalidLocale);
+        }
+        if !valid_sha256_digest(content_digest) {
+            return Err(InstrumentReleaseError::InvalidDigest);
+        }
+        if status == PublicationEvidenceStatus::Approved
+            && (content_rights_evidence_refs.is_empty()
+                || scientific_evidence_refs.is_empty()
+                || approval_refs.is_empty())
+        {
+            return Err(InstrumentReleaseError::IncompletePublicationEvidence);
+        }
+
+        Ok(Self {
+            publication_evidence_ref: required_reference(publication_evidence_ref)?.to_owned(),
+            evidence_policy_ref: required_reference(evidence_policy_ref)?.to_owned(),
+            release_ref: required_reference(release_ref)?.to_owned(),
+            instrument_version_ref: required_reference(instrument_version_ref)?.to_owned(),
+            item_version_refs,
+            content_digest: content_digest.to_owned(),
+            locale: locale.to_owned(),
+            intended_use_ref: required_reference(intended_use_ref)?.to_owned(),
+            assessment_spec_ref: required_reference(assessment_spec_ref)?.to_owned(),
+            scoring_version_ref: required_reference(scoring_version_ref)?.to_owned(),
+            calibration_reference: required_reference(calibration_reference)?.to_owned(),
+            norm_version_ref: norm_version_ref
+                .map(required_reference)
+                .transpose()?
+                .map(str::to_owned),
+            limitations_ref: required_reference(limitations_ref)?.to_owned(),
+            provenance,
+            content_rights_evidence_refs,
+            scientific_evidence_refs,
+            approval_refs,
+            status,
+        })
+    }
+
+    /// Return the immutable publication-evidence reference.
+    #[must_use]
+    pub fn publication_evidence_ref(&self) -> &str {
+        &self.publication_evidence_ref
+    }
+
+    /// Return the policy version that evaluated this evidence.
+    #[must_use]
+    pub fn evidence_policy_ref(&self) -> &str {
+        &self.evidence_policy_ref
+    }
+
+    /// Return the immutable provenance and validity scope for this evidence.
+    #[must_use]
+    pub const fn provenance(&self) -> &PublicationEvidenceProvenance {
+        &self.provenance
+    }
+
+    /// Return the content/rights evidence references.
+    #[must_use]
+    pub fn content_rights_evidence_refs(&self) -> &[String] {
+        &self.content_rights_evidence_refs
+    }
+
+    /// Return the scientific evidence references consumed by the policy.
+    #[must_use]
+    pub fn scientific_evidence_refs(&self) -> &[String] {
+        &self.scientific_evidence_refs
+    }
+
+    /// Return the approval evidence references.
+    #[must_use]
+    pub fn approval_refs(&self) -> &[String] {
+        &self.approval_refs
+    }
+
+    /// Return the fail-closed policy evaluation status.
+    #[must_use]
+    pub const fn status(&self) -> PublicationEvidenceStatus {
+        self.status
+    }
+
+    fn matches_manifest(&self, manifest: &InstrumentReleaseManifest) -> bool {
+        (
+            self.release_ref.as_str(),
+            self.instrument_version_ref.as_str(),
+            self.item_version_refs.as_slice(),
+            self.content_digest.as_str(),
+            self.locale.as_str(),
+            self.intended_use_ref.as_str(),
+            self.assessment_spec_ref.as_str(),
+            self.scoring_version_ref.as_str(),
+            self.calibration_reference.as_str(),
+            self.norm_version_ref.as_deref(),
+            self.limitations_ref.as_str(),
+        ) == (
+            manifest.release_ref(),
+            manifest.instrument_version_ref(),
+            manifest.item_version_refs(),
+            manifest.content_digest(),
+            manifest.locale(),
+            manifest.intended_use_ref(),
+            manifest.assessment_spec_ref(),
+            manifest.scoring_version_ref(),
+            manifest.calibration_reference(),
+            manifest.norm_version_ref(),
+            manifest.limitations_ref(),
+        )
+    }
+}
+
 /// Durable idempotency evidence for one accepted publication command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PublicationEvent {
     event_ref: String,
     command: PublicationCommand,
     occurred_at_unix_ms: u64,
+    publication_evidence_ref: Option<String>,
+    evidence_policy_ref: Option<String>,
+    publication_evidence_digest: Option<String>,
 }
 
 impl PublicationEvent {
@@ -328,12 +666,31 @@ impl PublicationEvent {
     pub const fn occurred_at_unix_ms(&self) -> u64 {
         self.occurred_at_unix_ms
     }
+
+    /// Return the publication-evidence identity bound to a publish or reactivation event.
+    #[must_use]
+    pub fn publication_evidence_ref(&self) -> Option<&str> {
+        self.publication_evidence_ref.as_deref()
+    }
+
+    /// Return the evidence-policy identity bound to a publish or reactivation event.
+    #[must_use]
+    pub fn evidence_policy_ref(&self) -> Option<&str> {
+        self.evidence_policy_ref.as_deref()
+    }
+
+    /// Return the evidence-artifact digest bound to a publish or reactivation event.
+    #[must_use]
+    pub fn publication_evidence_digest(&self) -> Option<&str> {
+        self.publication_evidence_digest.as_deref()
+    }
 }
 
 /// Product-owned publication lifecycle for one immutable instrument-release manifest.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InstrumentRelease {
     manifest: InstrumentReleaseManifest,
+    publication_evidence: Option<PublicationEvidenceRecord>,
     state: PublicationState,
     created_at_unix_ms: u64,
     latest_event_at_unix_ms: u64,
@@ -356,6 +713,7 @@ impl InstrumentRelease {
         }
         Ok(Self {
             manifest,
+            publication_evidence: None,
             state: PublicationState::Draft,
             created_at_unix_ms,
             latest_event_at_unix_ms: created_at_unix_ms,
@@ -367,6 +725,39 @@ impl InstrumentRelease {
     #[must_use]
     pub const fn manifest(&self) -> &InstrumentReleaseManifest {
         &self.manifest
+    }
+
+    /// Return the exact publication evidence currently bound to the release.
+    #[must_use]
+    pub const fn publication_evidence(&self) -> Option<&PublicationEvidenceRecord> {
+        self.publication_evidence.as_ref()
+    }
+
+    /// Bind policy-evaluated evidence to the exact immutable release under review.
+    ///
+    /// Binding is deliberately separate from the `Publish` command so evidence may
+    /// be inspected before publication. Rebinding is permitted only while the
+    /// release remains in `Review`; a publish event records which current immutable
+    /// evidence record justified the transition.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstrumentReleaseError::InvalidTransition`] outside `Review` and
+    /// [`InstrumentReleaseError::PublicationEvidenceMismatch`] when the record does
+    /// not bind the exact release version, item set, digest, locale, intended use,
+    /// scoring, calibration, norm, and limitations.
+    pub fn bind_publication_evidence(
+        &mut self,
+        publication_evidence: PublicationEvidenceRecord,
+    ) -> Result<(), InstrumentReleaseError> {
+        if self.state != PublicationState::Review {
+            return Err(InstrumentReleaseError::InvalidTransition);
+        }
+        if !publication_evidence.matches_manifest(&self.manifest) {
+            return Err(InstrumentReleaseError::PublicationEvidenceMismatch);
+        }
+        self.publication_evidence = Some(publication_evidence);
+        Ok(())
     }
 
     /// Return the current publication state.
@@ -397,12 +788,17 @@ impl InstrumentRelease {
     ///
     /// Exact replay of a previously accepted event returns the current state without
     /// reopening or rewinding a later lifecycle state. Reuse of an event reference
-    /// with different command evidence fails closed.
+    /// with different command evidence fails closed. Both `Review -> Published` and
+    /// `Suspended -> Published` additionally require exact, policy-approved publication
+    /// evidence that is effective at the server-authoritative transition time. The
+    /// accepted publish/reactivation event durably binds evidence identity,
+    /// evidence-policy identity, and evidence-artifact digest.
     ///
     /// # Errors
     ///
     /// Returns an [`InstrumentReleaseError`] for invalid references/timestamps,
-    /// conflicting replays, backward event time, or undocumented transitions.
+    /// conflicting replays, backward event time, missing/failed/stale publication
+    /// evidence, or undocumented transitions.
     pub fn apply_command(
         &mut self,
         event_ref: &str,
@@ -429,11 +825,47 @@ impl InstrumentRelease {
         if occurred_at_unix_ms < self.latest_event_at_unix_ms {
             return Err(InstrumentReleaseError::NonMonotonicTimestamp);
         }
+
+        let requires_publication_evidence = matches!(
+            (self.state, command),
+            (PublicationState::Review, PublicationCommand::Publish)
+                | (PublicationState::Suspended, PublicationCommand::Reactivate)
+        );
+        let publication_binding = if requires_publication_evidence {
+            let evidence = self
+                .publication_evidence
+                .as_ref()
+                .ok_or(InstrumentReleaseError::MissingPublicationEvidence)?;
+            if evidence.status() != PublicationEvidenceStatus::Approved {
+                return Err(InstrumentReleaseError::PublicationEvidenceNotApproved);
+            }
+            if !evidence.provenance().is_effective_at(occurred_at_unix_ms) {
+                return Err(InstrumentReleaseError::PublicationEvidenceNotEffective);
+            }
+            Some((
+                evidence.publication_evidence_ref().to_owned(),
+                evidence.evidence_policy_ref().to_owned(),
+                evidence.provenance().evidence_digest().to_owned(),
+            ))
+        } else {
+            None
+        };
+
         let next = transition(self.state, command)?;
+        let (publication_evidence_ref, evidence_policy_ref, publication_evidence_digest) =
+            publication_binding.map_or(
+                (None, None, None),
+                |(evidence_ref, policy_ref, evidence_digest)| {
+                    (Some(evidence_ref), Some(policy_ref), Some(evidence_digest))
+                },
+            );
         self.events.push(PublicationEvent {
             event_ref: event_ref.to_owned(),
             command,
             occurred_at_unix_ms,
+            publication_evidence_ref,
+            evidence_policy_ref,
+            publication_evidence_digest,
         });
         self.state = next;
         self.latest_event_at_unix_ms = occurred_at_unix_ms;

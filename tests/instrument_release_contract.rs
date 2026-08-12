@@ -2,11 +2,14 @@
 
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseError, InstrumentReleaseManifest, PublicationCommand,
+    PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
     PublicationState,
 };
 
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const EVIDENCE_DIGEST: &str =
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn manifest() -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
@@ -27,6 +30,50 @@ fn manifest() -> InstrumentReleaseManifest {
         VALID_DIGEST,
     )
     .unwrap()
+}
+
+fn approved_publication_evidence() -> PublicationEvidenceRecord {
+    approved_publication_evidence_with_valid_until(None)
+}
+
+fn approved_publication_evidence_with_valid_until(
+    valid_until_unix_ms: Option<u64>,
+) -> PublicationEvidenceRecord {
+    PublicationEvidenceRecord::new(
+        "publication_evidence_big_five_ko_v1",
+        "evidence_policy_self_reflection_v1",
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        &["item_version_001", "item_version_002"],
+        VALID_DIGEST,
+        "ko-KR",
+        "intended_use_self_reflection_v1",
+        "assessment_spec_big_five_v1",
+        "scoring_version_big_five_v1",
+        "calibration_big_five_ko_v1",
+        Some("norm_version_big_five_ko_v1"),
+        "limitations_nonclinical_v1",
+        PublicationEvidenceProvenance::new(
+            EVIDENCE_DIGEST,
+            "population_general_adult_v1",
+            "administration_web_self_report_v1",
+            "measurement_model_big_five_v1",
+            10_050,
+            valid_until_unix_ms,
+        )
+        .unwrap(),
+        &["rights_ipip_big_five_v1"],
+        &["recovery_big_five_ko_v1"],
+        &["approval_psychometrics_big_five_ko_v1"],
+        PublicationEvidenceStatus::Approved,
+    )
+    .unwrap()
+}
+
+fn bind_approved_publication_evidence(release: &mut InstrumentRelease) {
+    release
+        .bind_publication_evidence(approved_publication_evidence())
+        .unwrap();
 }
 
 fn custom_manifest(
@@ -287,6 +334,7 @@ fn publication_requires_review_and_controls_new_session_eligibility() {
         )
         .unwrap();
     assert_eq!(release.state(), PublicationState::Review);
+    bind_approved_publication_evidence(&mut release);
 
     release
         .apply_command("publish_event", PublicationCommand::Publish, 10_200)
@@ -315,6 +363,34 @@ fn publication_requires_review_and_controls_new_session_eligibility() {
 }
 
 #[test]
+fn expired_evidence_cannot_reactivate_suspended_release() {
+    let mut release = InstrumentRelease::new(manifest(), 10_000).unwrap();
+    release
+        .apply_command(
+            "submit_review_event",
+            PublicationCommand::SubmitReview,
+            10_100,
+        )
+        .unwrap();
+    release
+        .bind_publication_evidence(approved_publication_evidence_with_valid_until(Some(10_250)))
+        .unwrap();
+    release
+        .apply_command("publish_event", PublicationCommand::Publish, 10_200)
+        .unwrap();
+    release
+        .apply_command("suspend_event", PublicationCommand::Suspend, 10_300)
+        .unwrap();
+
+    assert_eq!(
+        release.apply_command("reactivate_event", PublicationCommand::Reactivate, 10_400,),
+        Err(InstrumentReleaseError::PublicationEvidenceNotEffective)
+    );
+    assert_eq!(release.state(), PublicationState::Suspended);
+    assert_eq!(release.events().len(), 3);
+}
+
+#[test]
 fn release_metadata_and_publication_events_are_auditable() {
     let expected_manifest = manifest();
     let mut release = InstrumentRelease::new(expected_manifest.clone(), 15_000).unwrap();
@@ -334,6 +410,9 @@ fn release_metadata_and_publication_events_are_auditable() {
     assert_eq!(event.event_ref(), "submit_review_event");
     assert_eq!(event.command(), PublicationCommand::SubmitReview);
     assert_eq!(event.occurred_at_unix_ms(), 15_100);
+    assert_eq!(event.publication_evidence_ref(), None);
+    assert_eq!(event.evidence_policy_ref(), None);
+    assert_eq!(event.publication_evidence_digest(), None);
 }
 
 #[test]
@@ -360,6 +439,7 @@ fn suspended_release_can_retire_without_reactivation() {
             18_100,
         )
         .unwrap();
+    bind_approved_publication_evidence(&mut release);
     release
         .apply_command("publish_event", PublicationCommand::Publish, 18_200)
         .unwrap();
@@ -384,6 +464,7 @@ fn event_replay_is_idempotent_and_never_reopens_later_state() {
             20_100,
         )
         .unwrap();
+    bind_approved_publication_evidence(&mut release);
     release
         .apply_command("publish_event", PublicationCommand::Publish, 20_200)
         .unwrap();
@@ -425,6 +506,7 @@ fn event_time_is_server_monotonic_and_retirement_is_terminal() {
             30_100,
         )
         .unwrap();
+    bind_approved_publication_evidence(&mut release);
     release
         .apply_command("publish_event", PublicationCommand::Publish, 30_200)
         .unwrap();
@@ -473,6 +555,34 @@ fn instrument_release_errors_have_stable_safe_display_text() {
         (
             InstrumentReleaseError::InvalidDigest,
             "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits",
+        ),
+        (
+            InstrumentReleaseError::InvalidEvidenceDigest,
+            "publication evidence digest must be sha256 followed by 64 lowercase hexadecimal digits",
+        ),
+        (
+            InstrumentReleaseError::InvalidEvidenceWindow,
+            "publication evidence validity must not end before its evaluation time",
+        ),
+        (
+            InstrumentReleaseError::IncompletePublicationEvidence,
+            "approved publication evidence must include content or rights, scientific, and approval references",
+        ),
+        (
+            InstrumentReleaseError::PublicationEvidenceMismatch,
+            "publication evidence must match the exact immutable instrument release bundle",
+        ),
+        (
+            InstrumentReleaseError::MissingPublicationEvidence,
+            "reviewed instrument release requires bound publication evidence before publication",
+        ),
+        (
+            InstrumentReleaseError::PublicationEvidenceNotApproved,
+            "instrument publication evidence must be policy-approved before publication",
+        ),
+        (
+            InstrumentReleaseError::PublicationEvidenceNotEffective,
+            "approved publication evidence must be effective at the publication time",
         ),
         (
             InstrumentReleaseError::InvalidTimestamp,
