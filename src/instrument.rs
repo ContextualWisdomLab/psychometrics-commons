@@ -752,7 +752,10 @@ impl InstrumentRelease {
         &mut self,
         publication_evidence: PublicationEvidenceRecord,
     ) -> Result<(), InstrumentReleaseError> {
-        if !matches!(self.state, PublicationState::Review | PublicationState::Suspended) {
+        if !matches!(
+            self.state,
+            PublicationState::Review | PublicationState::Suspended
+        ) {
             return Err(InstrumentReleaseError::InvalidTransition);
         }
         if !publication_evidence.matches_manifest(&self.manifest) {
