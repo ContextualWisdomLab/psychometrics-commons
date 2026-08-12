@@ -170,6 +170,39 @@ fn noncanonical_exact_tokens_fail_closed() {
 }
 
 #[test]
+fn locale_requires_bcp47_subtag_structure() {
+    for valid in ["en", "ko-KR", "zh-Hant-TW", "es-419"] {
+        let identity = StyleAssignmentIdentity {
+            locale: valid,
+            ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
+        };
+        assert!(identity.canonical_bytes().is_ok(), "expected valid locale: {valid}");
+    }
+
+    for invalid in [
+        "ko_KR",
+        "-en-US",
+        "en-US-",
+        "en--US",
+        "e-US",
+        "123-US",
+        "englishish-US",
+        "en-abcdefghi",
+        "en-US_foo",
+    ] {
+        let identity = StyleAssignmentIdentity {
+            locale: invalid,
+            ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
+        };
+        assert_eq!(
+            identity.canonical_bytes(),
+            Err(StyleAssignmentIdentityError::NonCanonicalToken),
+            "expected malformed BCP 47 locale to fail closed: {invalid}"
+        );
+    }
+}
+
+#[test]
 fn identity_errors_expose_stable_operator_messages() {
     assert_eq!(
         StyleAssignmentIdentityError::InvalidReference.to_string(),
