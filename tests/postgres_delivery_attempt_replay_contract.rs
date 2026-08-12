@@ -8,11 +8,23 @@ use psychometrics_commons_runtime::postgres_integration::{
 };
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5053_5943_484F_4D4D;
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn database_test_guard() -> Client {
+    let mut client = test_client();
+    client
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("shared PostgreSQL integration-test advisory lock should be acquired");
+    client
 }
 
 fn event() -> IntegrationEvent {
@@ -41,6 +53,7 @@ fn identity() -> OutboxPersistenceIdentity<'static> {
 
 #[test]
 fn exact_replay_after_quarantine_remains_idempotent() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     client
         .batch_execute(
