@@ -105,6 +105,8 @@ pub enum ScoringJobPersistenceError {
     StaleLease,
     /// A worker-side transition was observed at or after persisted lease expiry.
     LeaseExpired,
+    /// A guarded terminal transition was suppressed after its lease evidence was validated.
+    TransitionNotApplied,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -134,6 +136,7 @@ impl Display for ScoringJobPersistenceError {
             Self::NotLeased => "scoring job does not currently have a worker lease",
             Self::StaleLease => "scoring worker fencing token is stale",
             Self::LeaseExpired => "scoring worker lease has expired",
+            Self::TransitionNotApplied => "scoring terminal transition was not applied",
             Self::Database(_) => "PostgreSQL scoring-job persistence failed",
         })
     }
@@ -403,7 +406,8 @@ pub fn record_retryable_scoring_failure(
 /// # Errors
 ///
 /// Returns [`ScoringJobPersistenceError`] for invalid evidence, unsupported isolation,
-/// a missing/non-leased job, stale or expired worker authority, or a database failure.
+/// a missing/non-leased job, stale or expired worker authority, a suppressed terminal
+/// transition, or a database failure.
 pub fn record_permanent_scoring_failure(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
@@ -446,7 +450,9 @@ pub fn record_permanent_scoring_failure(
             &failed_at_unix_ms,
         ],
     )?;
-    debug_assert_eq!(updated, 1);
+    if updated != 1 {
+        return Err(ScoringJobPersistenceError::TransitionNotApplied);
+    }
     Ok(())
 }
 
@@ -461,7 +467,7 @@ pub fn record_permanent_scoring_failure(
 ///
 /// Returns [`ScoringJobPersistenceError`] for invalid evidence, unsupported isolation,
 /// a missing/non-leased job, stale or expired worker authority, conflicting completion,
-/// or a database failure.
+/// a suppressed terminal transition, or a database failure.
 pub fn record_successful_scoring_completion(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
@@ -536,7 +542,9 @@ pub fn record_successful_scoring_completion(
             &completed_at_unix_ms,
         ],
     )?;
-    debug_assert_eq!(updated, 1);
+    if updated != 1 {
+        return Err(ScoringJobPersistenceError::TransitionNotApplied);
+    }
     Ok(ScoringJobCompletionDisposition::Completed)
 }
 
