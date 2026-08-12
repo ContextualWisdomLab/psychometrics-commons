@@ -66,6 +66,15 @@ fn scoring_job_enqueue_is_exactly_idempotent_and_conflicts_fail_closed() {
         Err(ScoringJobPersistenceError::ConflictingReplay)
     ));
     transaction.rollback().unwrap();
+
+    let conflicting_attempt_budget =
+        queued_job("scoring_job_alpha", "scoring_request_alpha", 4);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_scoring_job(&mut transaction, &conflicting_attempt_budget),
+        Err(ScoringJobPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
 }
 
 #[test]
