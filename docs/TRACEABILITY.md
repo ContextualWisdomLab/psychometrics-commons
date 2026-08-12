@@ -114,7 +114,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-PR #31 (`feat: persist PostgreSQL scoring-job leases`) carries `migrations/0002_scoring_job_state.sql`, the `postgres_scoring_job` adapter, and real PostgreSQL tests for exact enqueue replay plus atomic initial worker-lease fencing. It is **not protected-main truth** until an unchanged reviewed/check-clean head is integrated. Durable retry scheduling, retry re-claim, completion/permanent-failure/expiry transitions, crash/restart recovery, and the live fast-mlsirm adapter remain explicitly outside this slice.
+**Active PR** #31 (`feat: persist PostgreSQL scoring-job leases`) carries `migrations/0002_scoring_job_state.sql`, the `postgres_scoring_job` adapter, and real PostgreSQL tests for exact enqueue replay plus atomic initial worker-lease fencing. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Durable retry scheduling, retry re-claim, completion/permanent-failure/expiry transitions, crash/restart recovery, and the live fast-mlsirm adapter remain explicitly outside this slice.
 
 ## 5. ADR traceability by concern
 
