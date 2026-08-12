@@ -231,28 +231,26 @@ fn claim_classification_wraps_a_second_statement_database_failure() {
 }
 
 #[test]
-fn retry_classification_wraps_a_second_statement_database_failure() {
+fn retry_transition_wraps_update_database_failure_after_lease_validation() {
     let mut client = isolated_client(
-        "DROP SCHEMA IF EXISTS scoring_job_retry_classification_test CASCADE;\
-         DROP SCHEMA IF EXISTS scoring_job_retry_failure_sink CASCADE;\
-         CREATE SCHEMA scoring_job_retry_classification_test;\
-         CREATE SCHEMA scoring_job_retry_failure_sink;\
-         SET search_path TO scoring_job_retry_classification_test;",
+        "DROP SCHEMA IF EXISTS scoring_job_retry_transition_failure_test CASCADE;\
+         CREATE SCHEMA scoring_job_retry_transition_failure_test;\
+         SET search_path TO scoring_job_retry_transition_failure_test;",
     );
     apply_scoring_job_migration(&mut client).unwrap();
 
     let job = queued_job(
-        "scoring_job_retry_classification",
-        "scoring_request_retry_classification",
+        "scoring_job_retry_transition_failure",
+        "scoring_request_retry_transition_failure",
     );
     {
         let mut transaction = client.transaction().unwrap();
         persist_scoring_job(&mut transaction, &job).unwrap();
         claim_scoring_job(
             &mut transaction,
-            "scoring_job_retry_classification",
-            "worker_retry_classification",
-            "scoring_lease_retry_classification",
+            "scoring_job_retry_transition_failure",
+            "worker_retry_transition_failure",
+            "scoring_lease_retry_transition_failure",
             10_000,
             11_000,
         )
@@ -262,15 +260,15 @@ fn retry_classification_wraps_a_second_statement_database_failure() {
 
     client
         .batch_execute(
-            r"CREATE FUNCTION redirect_retry_after_update() RETURNS trigger LANGUAGE plpgsql AS $$
+            r"CREATE FUNCTION fail_retry_update() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
-                PERFORM set_config('search_path', 'scoring_job_retry_failure_sink', true);
+                RAISE EXCEPTION 'forced retry transition failure';
                 RETURN NULL;
             END
             $$;
-            CREATE TRIGGER redirect_retry_after_update
-            AFTER UPDATE ON scoring_job_state
-            FOR EACH STATEMENT EXECUTE FUNCTION redirect_retry_after_update();",
+            CREATE TRIGGER fail_retry_update
+            BEFORE UPDATE ON scoring_job_state
+            FOR EACH STATEMENT EXECUTE FUNCTION fail_retry_update();",
         )
         .unwrap();
 
@@ -278,8 +276,8 @@ fn retry_classification_wraps_a_second_statement_database_failure() {
     assert!(matches!(
         record_retryable_scoring_failure(
             &mut transaction,
-            "scoring_job_retry_classification",
-            2,
+            "scoring_job_retry_transition_failure",
+            1,
             "provider_timeout",
             10_500,
             12_000,
@@ -288,10 +286,19 @@ fn retry_classification_wraps_a_second_statement_database_failure() {
     ));
     transaction.rollback().unwrap();
 
-    client
-        .batch_execute(
-            "DROP SCHEMA scoring_job_retry_classification_test CASCADE;\
-             DROP SCHEMA scoring_job_retry_failure_sink CASCADE;",
+    let row = client
+        .query_one(
+            "SELECT scoring_state, attempt_count, last_failure_code \
+             FROM scoring_job_state \
+             WHERE scoring_job_ref = 'scoring_job_retry_transition_failure'",
+            &[],
         )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "leased");
+    assert_eq!(row.get::<_, i32>(1), 1);
+    assert_eq!(row.get::<_, Option<String>>(2), None);
+
+    client
+        .batch_execute("DROP SCHEMA scoring_job_retry_transition_failure_test CASCADE;")
         .unwrap();
 }
