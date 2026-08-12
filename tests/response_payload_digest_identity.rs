@@ -14,7 +14,7 @@ fn write<'a>(payload_digest: &'a str) -> ResponseWrite<'a> {
 
 #[test]
 fn nonblank_payload_digest_whitespace_is_not_canonicalized_into_replay_identity() {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     let original = ledger
         .record(SessionState::Active, write("sha256:response-payload-a"))
         .unwrap();
