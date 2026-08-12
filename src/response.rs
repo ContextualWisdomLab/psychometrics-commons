@@ -237,8 +237,8 @@ impl ResponseLedger {
             normalized_reference(request.client_event_ref).ok_or(WriteError::InvalidReference)?;
         let item_version_ref =
             normalized_reference(request.item_version_ref).ok_or(WriteError::InvalidReference)?;
-        let payload_digest = request.payload_digest.trim();
-        if payload_digest.is_empty() {
+        let payload_digest = request.payload_digest;
+        if payload_digest.trim().is_empty() {
             return Err(WriteError::EmptyReference);
         }
 
