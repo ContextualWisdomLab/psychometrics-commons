@@ -4,10 +4,18 @@ use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent, OutboxState};
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, enqueue_outbox_event, record_outbox_delivery_attempt,
-    PersistenceDisposition, PersistenceError,
+    OutboxPersistenceIdentity, PersistenceDisposition, PersistenceError,
 };
+use std::sync::{Mutex, MutexGuard};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn database_test_guard() -> MutexGuard<'static, ()> {
+    DATABASE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -42,6 +50,10 @@ fn event(event_ref: &str) -> IntegrationEvent {
     .unwrap()
 }
 
+fn identity(event_ref: &str) -> OutboxPersistenceIdentity<'_> {
+    OutboxPersistenceIdentity::new("psychometrics_commons", "tenant_alpha", event_ref)
+}
+
 fn enqueue(client: &mut Client, event_ref: &str, max_attempts: usize) {
     assert_eq!(
         enqueue_outbox_event(client, &event(event_ref), max_attempts).unwrap(),
@@ -63,6 +75,7 @@ fn persisted_state(client: &mut Client, event_ref: &str) -> String {
 
 #[test]
 fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     enqueue(&mut client, "event_delivered", 3);
@@ -70,9 +83,7 @@ fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
     let mut transaction = client.transaction().unwrap();
     let inserted = record_outbox_delivery_attempt(
         &mut transaction,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_delivered",
+        identity("event_delivered"),
         "attempt_alpha",
         DeliveryOutcome::Delivered,
         10_001,
@@ -87,9 +98,7 @@ fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
     let mut replay = client.transaction().unwrap();
     let duplicate = record_outbox_delivery_attempt(
         &mut replay,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_delivered",
+        identity("event_delivered"),
         "attempt_alpha",
         DeliveryOutcome::Delivered,
         10_001,
@@ -104,9 +113,7 @@ fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut conflicting,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_delivered",
+            identity("event_delivered"),
             "attempt_alpha",
             DeliveryOutcome::PermanentFailure,
             10_001,
@@ -120,9 +127,7 @@ fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut terminal,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_delivered",
+            identity("event_delivered"),
             "attempt_beta",
             DeliveryOutcome::Delivered,
             10_002,
@@ -135,6 +140,7 @@ fn delivery_attempts_transition_outbox_and_replay_exact_evidence() {
 
 #[test]
 fn retry_budget_and_permanent_failure_quarantine_durably() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     enqueue(&mut client, "event_retry", 2);
@@ -143,9 +149,7 @@ fn retry_budget_and_permanent_failure_quarantine_durably() {
     let mut first = client.transaction().unwrap();
     let first_retry = record_outbox_delivery_attempt(
         &mut first,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_retry",
+        identity("event_retry"),
         "attempt_first",
         DeliveryOutcome::RetryableFailure,
         10_001,
@@ -158,9 +162,7 @@ fn retry_budget_and_permanent_failure_quarantine_durably() {
     let mut second = client.transaction().unwrap();
     let exhausted = record_outbox_delivery_attempt(
         &mut second,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_retry",
+        identity("event_retry"),
         "attempt_second",
         DeliveryOutcome::RetryableFailure,
         10_002,
@@ -174,9 +176,7 @@ fn retry_budget_and_permanent_failure_quarantine_durably() {
     let mut permanent = client.transaction().unwrap();
     let permanent_failure = record_outbox_delivery_attempt(
         &mut permanent,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_permanent",
+        identity("event_permanent"),
         "attempt_permanent",
         DeliveryOutcome::PermanentFailure,
         10_003,
@@ -189,6 +189,7 @@ fn retry_budget_and_permanent_failure_quarantine_durably() {
 
 #[test]
 fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     enqueue(&mut client, "event_validation", 3);
@@ -197,9 +198,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut invalid_reference,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_validation",
+            identity("event_validation"),
             "123",
             DeliveryOutcome::Delivered,
             10_001,
@@ -213,9 +212,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut invalid_cause,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_validation",
+            identity("event_validation"),
             "attempt_invalid_cause",
             DeliveryOutcome::RetryableFailure,
             10_001,
@@ -229,9 +226,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut invalid_timestamp,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_validation",
+            identity("event_validation"),
             "attempt_zero_time",
             DeliveryOutcome::Delivered,
             0,
@@ -245,9 +240,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut backward,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_validation",
+            identity("event_validation"),
             "attempt_backwards",
             DeliveryOutcome::Delivered,
             9_999,
@@ -261,9 +254,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut unknown,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_missing",
+            identity("event_missing"),
             "attempt_missing",
             DeliveryOutcome::Delivered,
             10_001,
@@ -276,9 +267,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
     let mut rolled_back = client.transaction().unwrap();
     let recorded = record_outbox_delivery_attempt(
         &mut rolled_back,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_validation",
+        identity("event_validation"),
         "attempt_rollback",
         DeliveryOutcome::RetryableFailure,
         10_001,
@@ -301,6 +290,7 @@ fn delivery_attempt_validation_and_transaction_rollback_fail_closed() {
 
 #[test]
 fn delivery_attempt_requires_read_committed_and_surfaces_database_failure() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     enqueue(&mut client, "event_isolation", 3);
@@ -313,9 +303,7 @@ fn delivery_attempt_requires_read_committed_and_surfaces_database_failure() {
     assert!(matches!(
         record_outbox_delivery_attempt(
             &mut serializable,
-            "psychometrics_commons",
-            "tenant_alpha",
-            "event_isolation",
+            identity("event_isolation"),
             "attempt_serializable",
             DeliveryOutcome::Delivered,
             10_001,
@@ -335,9 +323,7 @@ fn delivery_attempt_requires_read_committed_and_surfaces_database_failure() {
     let mut transaction = client.transaction().unwrap();
     let database_error = record_outbox_delivery_attempt(
         &mut transaction,
-        "psychometrics_commons",
-        "tenant_alpha",
-        "event_isolation",
+        identity("event_isolation"),
         "attempt_database_error",
         DeliveryOutcome::Delivered,
         10_001,
