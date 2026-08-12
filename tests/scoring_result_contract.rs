@@ -11,7 +11,7 @@ use psychometrics_commons_runtime::scoring::{
 use psychometrics_commons_runtime::session::SessionState;
 
 fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnapshot {
-    let mut ledger = ResponseLedger::new("session_ref");
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
         .record(
             SessionState::Active,
