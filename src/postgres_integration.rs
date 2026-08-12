@@ -58,6 +58,30 @@ impl DeliveryAttemptPersistence {
     }
 }
 
+/// Composite durable identity for one persisted outbox event.
+///
+/// The three references form the database key used to lock, replay, and advance one
+/// outbox entry. Validation remains fail-closed in [`record_outbox_delivery_attempt`]
+/// so constructing this lightweight value never bypasses persistence checks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OutboxPersistenceIdentity<'a> {
+    source_ref: &'a str,
+    tenant_ref: &'a str,
+    event_ref: &'a str,
+}
+
+impl<'a> OutboxPersistenceIdentity<'a> {
+    /// Group the source, tenant, and event references that identify one durable outbox row.
+    #[must_use]
+    pub const fn new(source_ref: &'a str, tenant_ref: &'a str, event_ref: &'a str) -> Self {
+        Self {
+            source_ref,
+            tenant_ref,
+            event_ref,
+        }
+    }
+}
+
 /// Fail-closed persistence error for integration evidence.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -211,10 +235,10 @@ pub fn enqueue_outbox_event(
 /// The caller must supply the transaction so insertion of immutable attempt evidence
 /// and the corresponding outbox-state transition cannot commit independently. The
 /// outbox row is locked before replay classification or mutation, serializing adapter
-/// calls for one `(source_ref, tenant_ref, event_ref)` identity. Exact attempt replay
-/// remains idempotent even after terminal delivery or quarantine. A different replay
-/// of the same `attempt_ref`, backward time, unknown outbox, or new attempt after a
-/// terminal state fails closed.
+/// calls for one [`OutboxPersistenceIdentity`]. Exact attempt replay remains
+/// idempotent even after terminal delivery or quarantine. A different replay of the
+/// same `attempt_ref`, backward time, unknown outbox, or new attempt after a terminal
+/// state fails closed.
 ///
 /// Retryable failure keeps the outbox pending while automatic-attempt budget remains;
 /// exhausting that budget quarantines the outbox. Delivered attempts terminally mark
@@ -227,17 +251,15 @@ pub fn enqueue_outbox_event(
 /// conflicting replay evidence, invalid stored state, or a database failure.
 pub fn record_outbox_delivery_attempt(
     transaction: &mut Transaction<'_>,
-    source_ref: &str,
-    tenant_ref: &str,
-    event_ref: &str,
+    identity: OutboxPersistenceIdentity<'_>,
     attempt_ref: &str,
     outcome: DeliveryOutcome,
     occurred_at_unix_ms: u64,
     cause_code: Option<&str>,
 ) -> Result<DeliveryAttemptPersistence, PersistenceError> {
-    let source_ref = required_persistence_reference(source_ref)?;
-    let tenant_ref = required_persistence_reference(tenant_ref)?;
-    let event_ref = required_persistence_reference(event_ref)?;
+    let source_ref = required_persistence_reference(identity.source_ref)?;
+    let tenant_ref = required_persistence_reference(identity.tenant_ref)?;
+    let event_ref = required_persistence_reference(identity.event_ref)?;
     let attempt_ref = required_persistence_reference(attempt_ref)?;
     if occurred_at_unix_ms == 0 {
         return Err(PersistenceError::InvalidTimestamp);
