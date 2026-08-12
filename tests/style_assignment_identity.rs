@@ -26,7 +26,8 @@ fn canonical_serialization_is_stable_and_self_delimiting() {
         b"psychometrics-commons/style-assignment-identity/v1\0".as_slice(),
         b"score_identity_kind\0\0\0\0\0\0\0\0\x11score_profile_ref".as_slice(),
         b"score_identity\0\0\0\0\0\0\0\0\x13score_profile_alpha".as_slice(),
-        b"instrument_version_ref\0\0\0\0\0\0\0\0\x26instrument_version_ipip_big_five_en_v1".as_slice(),
+        b"instrument_version_ref\0\0\0\0\0\0\0\0\x26instrument_version_ipip_big_five_en_v1"
+            .as_slice(),
         b"scoring_version_ref\0\0\0\0\0\0\0\0\x1bscoring_version_big_five_v1".as_slice(),
         b"norm_version_ref_present\0\0\0\0\0\0\0\0\x011".as_slice(),
         b"norm_version_ref\0\0\0\0\0\0\0\0\x19norm_version_reference_v1".as_slice(),
@@ -102,7 +103,9 @@ fn opaque_references_are_normalized_but_exact_tokens_are_not() {
             locale: " en-US ",
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
-        input(ScoreIdentity::CanonicalScorePayloadDigest(" sha256:score-a ")),
+        input(ScoreIdentity::CanonicalScorePayloadDigest(
+            " sha256:score-a ",
+        )),
     ] {
         assert_eq!(
             invalid.canonical_bytes(),
