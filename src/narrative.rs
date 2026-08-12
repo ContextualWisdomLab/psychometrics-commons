@@ -41,7 +41,7 @@ pub struct StyleAssignmentIdentity<'a> {
     pub style_mapping_version_ref: &'a str,
     /// Exact digest of the approved interpretation-rule bundle.
     pub interpretation_rule_bundle_digest: &'a str,
-    /// Exact locale token used by the deterministic presentation contract.
+    /// Exact BCP 47 locale token used by the deterministic presentation contract.
     pub locale: &'a str,
 }
 
@@ -51,7 +51,7 @@ pub struct StyleAssignmentIdentity<'a> {
 pub enum StyleAssignmentIdentityError {
     /// An opaque product reference was blank or numeric-like.
     InvalidReference,
-    /// A digest or locale contained noncanonical whitespace/control content or was blank.
+    /// A digest or locale contained noncanonical content or was blank.
     NonCanonicalToken,
 }
 
@@ -75,7 +75,8 @@ impl StyleAssignmentIdentity<'_> {
     ///
     /// Fields are emitted in a fixed schema order. Each field name is followed by an unsigned
     /// 64-bit big-endian byte length and then the exact UTF-8 value. Opaque references are
-    /// normalized with the product reference contract; digests and locale are exact tokens.
+    /// normalized with the product reference contract; digests remain exact tokens and locale
+    /// must satisfy the fail-closed BCP 47 subtag shape used for published assessment locales.
     /// `norm_version_ref` additionally emits an explicit presence marker so `None` cannot be
     /// confused with any future present value.
     ///
@@ -98,7 +99,7 @@ impl StyleAssignmentIdentity<'_> {
         let style_mapping_version_ref = required_reference(self.style_mapping_version_ref)?;
         let interpretation_rule_bundle_digest =
             required_exact_token(self.interpretation_rule_bundle_digest)?;
-        let locale = required_exact_token(self.locale)?;
+        let locale = required_locale(self.locale)?;
         let norm_version_ref = self.norm_version_ref.map(required_reference).transpose()?;
 
         let mut canonical = Vec::with_capacity(384);
@@ -150,6 +151,29 @@ fn required_exact_token(token: &str) -> Result<&str, StyleAssignmentIdentityErro
     } else {
         Ok(token)
     }
+}
+
+fn required_locale(locale: &str) -> Result<&str, StyleAssignmentIdentityError> {
+    let locale = required_exact_token(locale)?;
+    let (language, remainder) = match locale.split_once('-') {
+        Some((language, remainder)) => (language, Some(remainder)),
+        None => (locale, None),
+    };
+    if !(2..=8).contains(&language.len())
+        || !language.bytes().all(|byte| byte.is_ascii_alphabetic())
+    {
+        return Err(StyleAssignmentIdentityError::NonCanonicalToken);
+    }
+    if remainder.is_some_and(|subtags| {
+        subtags.split('-').any(|subtag| {
+            subtag.is_empty()
+                || subtag.len() > 8
+                || !subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+    }) {
+        return Err(StyleAssignmentIdentityError::NonCanonicalToken);
+    }
+    Ok(locale)
 }
 
 fn append_field(target: &mut Vec<u8>, field_name: &str, value: &str) {
