@@ -3,7 +3,7 @@
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
 use psychometrics_commons_runtime::session::SessionState;
 
-fn write<'a>(payload_digest: &'a str) -> ResponseWrite<'a> {
+fn write(payload_digest: &str) -> ResponseWrite<'_> {
     ResponseWrite {
         server_event_ref: "server_event_a",
         client_event_ref: "client_event_a",
