@@ -25,8 +25,20 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             "scoring persistence value exceeds the PostgreSQL range",
         ),
         (
+            ScoringJobPersistenceError::InvalidFencingToken,
+            "scoring persistence fencing tokens must be positive",
+        ),
+        (
             ScoringJobPersistenceError::InvalidLeaseWindow,
             "scoring lease expiry must be later than claim time",
+        ),
+        (
+            ScoringJobPersistenceError::InvalidRetryWindow,
+            "scoring retry time cannot precede failure time",
+        ),
+        (
+            ScoringJobPersistenceError::LeaseNotDue,
+            "scoring retry is not yet due for another lease",
         ),
         (
             ScoringJobPersistenceError::UnsupportedInitialState,
@@ -47,6 +59,18 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
         (
             ScoringJobPersistenceError::NotLeaseable,
             "scoring job is not currently leaseable",
+        ),
+        (
+            ScoringJobPersistenceError::NotLeased,
+            "scoring job does not currently have a worker lease",
+        ),
+        (
+            ScoringJobPersistenceError::StaleLease,
+            "scoring worker fencing token is stale",
+        ),
+        (
+            ScoringJobPersistenceError::LeaseExpired,
+            "scoring worker lease has expired",
         ),
     ] {
         assert_eq!(error.to_string(), expected_message);
