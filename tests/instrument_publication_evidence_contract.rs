@@ -53,12 +53,30 @@ fn evidence(
     scientific_evidence_refs: &[&str],
     approval_refs: &[&str],
 ) -> Result<PublicationEvidenceRecord, InstrumentReleaseError> {
+    evidence_with_item_refs(
+        &["item_version_001", "item_version_002"],
+        status,
+        digest,
+        content_rights_evidence_refs,
+        scientific_evidence_refs,
+        approval_refs,
+    )
+}
+
+fn evidence_with_item_refs(
+    item_version_refs: &[&str],
+    status: PublicationEvidenceStatus,
+    digest: &str,
+    content_rights_evidence_refs: &[&str],
+    scientific_evidence_refs: &[&str],
+    approval_refs: &[&str],
+) -> Result<PublicationEvidenceRecord, InstrumentReleaseError> {
     PublicationEvidenceRecord::new(
         "publication_evidence_big_five_ko_v1",
         "evidence_policy_self_reflection_v1",
         "release_big_five_ko_v1",
         "instrument_version_big_five_ko_v1",
-        &["item_version_001", "item_version_002"],
+        item_version_refs,
         digest,
         "ko-KR",
         "intended_use_self_reflection_v1",
@@ -73,6 +91,43 @@ fn evidence(
         approval_refs,
         status,
     )
+}
+
+#[test]
+fn publication_evidence_rejects_duplicate_scoped_references() {
+    assert_eq!(
+        evidence_with_item_refs(
+            &["item_version_001", "item_version_001"],
+            PublicationEvidenceStatus::Failed,
+            VALID_DIGEST,
+            &[],
+            &[],
+            &[],
+        ),
+        Err(InstrumentReleaseError::DuplicateItemReference)
+    );
+    assert_eq!(
+        evidence_with_item_refs(
+            &["item_version_001"],
+            PublicationEvidenceStatus::Failed,
+            VALID_DIGEST,
+            &["rights_ref", "rights_ref"],
+            &[],
+            &[],
+        ),
+        Err(InstrumentReleaseError::InvalidReference)
+    );
+    assert_eq!(
+        evidence_with_item_refs(
+            &["item_version_001"],
+            PublicationEvidenceStatus::Failed,
+            VALID_DIGEST,
+            &[],
+            &["science_ref", "science_ref"],
+            &[],
+        ),
+        Err(InstrumentReleaseError::InvalidReference)
+    );
 }
 
 fn reviewed_release() -> InstrumentRelease {
