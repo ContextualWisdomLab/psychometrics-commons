@@ -825,36 +825,31 @@ impl InstrumentRelease {
             return Err(InstrumentReleaseError::NonMonotonicTimestamp);
         }
 
-        let publication_binding = if self.state == PublicationState::Review
-            && command == PublicationCommand::Publish
-        {
-            let evidence = self
-                .publication_evidence
-                .as_ref()
-                .ok_or(InstrumentReleaseError::MissingPublicationEvidence)?;
-            if evidence.status() != PublicationEvidenceStatus::Approved {
-                return Err(InstrumentReleaseError::PublicationEvidenceNotApproved);
-            }
-            if !evidence.provenance().is_effective_at(occurred_at_unix_ms) {
-                return Err(InstrumentReleaseError::PublicationEvidenceNotEffective);
-            }
-            Some((
-                evidence.publication_evidence_ref().to_owned(),
-                evidence.evidence_policy_ref().to_owned(),
-                evidence.provenance().evidence_digest().to_owned(),
-            ))
-        } else {
-            None
-        };
+        let publication_binding =
+            if self.state == PublicationState::Review && command == PublicationCommand::Publish {
+                let evidence = self
+                    .publication_evidence
+                    .as_ref()
+                    .ok_or(InstrumentReleaseError::MissingPublicationEvidence)?;
+                if evidence.status() != PublicationEvidenceStatus::Approved {
+                    return Err(InstrumentReleaseError::PublicationEvidenceNotApproved);
+                }
+                if !evidence.provenance().is_effective_at(occurred_at_unix_ms) {
+                    return Err(InstrumentReleaseError::PublicationEvidenceNotEffective);
+                }
+                Some((
+                    evidence.publication_evidence_ref().to_owned(),
+                    evidence.evidence_policy_ref().to_owned(),
+                    evidence.provenance().evidence_digest().to_owned(),
+                ))
+            } else {
+                None
+            };
 
         let next = transition(self.state, command)?;
         let (publication_evidence_ref, evidence_policy_ref, publication_evidence_digest) =
             if let Some((evidence_ref, policy_ref, evidence_digest)) = publication_binding {
-                (
-                    Some(evidence_ref),
-                    Some(policy_ref),
-                    Some(evidence_digest),
-                )
+                (Some(evidence_ref), Some(policy_ref), Some(evidence_digest))
             } else {
                 (None, None, None)
             };
