@@ -88,5 +88,41 @@ CREATE TABLE IF NOT EXISTS scoring_job_state (
         result_ref = btrim(result_ref)
         AND result_ref <> ''
         AND NOT (result_ref ~ '[[:digit:]]' AND result_ref ~ '^[[:digit:]+,.eE-]+$')
-    ))
+    )),
+    CHECK (
+        (scoring_state = 'queued'
+            AND attempt_count = 0
+            AND next_attempt_at_unix_ms IS NULL
+            AND result_ref IS NULL
+            AND completed_fencing_token IS NULL)
+        OR
+        (scoring_state = 'leased'
+            AND attempt_count > 0
+            AND next_attempt_at_unix_ms IS NULL
+            AND result_ref IS NULL
+            AND completed_fencing_token IS NULL)
+        OR
+        (scoring_state = 'retry_scheduled'
+            AND attempt_count > 0
+            AND next_attempt_at_unix_ms IS NOT NULL
+            AND result_ref IS NULL
+            AND completed_fencing_token IS NULL)
+        OR
+        (scoring_state = 'completed'
+            AND attempt_count > 0
+            AND next_attempt_at_unix_ms IS NULL
+            AND result_ref IS NOT NULL
+            AND completed_fencing_token = attempt_count)
+        OR
+        (scoring_state = 'quarantined'
+            AND attempt_count > 0
+            AND next_attempt_at_unix_ms IS NULL
+            AND result_ref IS NULL
+            AND completed_fencing_token IS NULL)
+        OR
+        (scoring_state = 'cancelled'
+            AND next_attempt_at_unix_ms IS NULL
+            AND result_ref IS NULL
+            AND completed_fencing_token IS NULL)
+    )
 );
