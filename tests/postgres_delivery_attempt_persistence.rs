@@ -12,7 +12,9 @@ const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn database_test_guard() -> MutexGuard<'static, ()> {
-    DATABASE_TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+    DATABASE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 fn test_client() -> Client {
