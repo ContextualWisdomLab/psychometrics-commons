@@ -22,6 +22,23 @@ fn invalid_reference_is_rejected() {
         AnonymousSessionContext::new("tenant_alpha", "participant_alpha", "session_alpha", "", 2_000),
         Err(AnonymousSessionContextError::InvalidReference)
     );
+    for (tenant_ref, participant_ref, session_ref, authorization_evidence_ref) in [
+        ("123", "participant_alpha", "session_alpha", "evidence_alpha"),
+        ("tenant_alpha", "456", "session_alpha", "evidence_alpha"),
+        ("tenant_alpha", "participant_alpha", "789", "evidence_alpha"),
+        ("tenant_alpha", "participant_alpha", "session_alpha", "101112"),
+    ] {
+        assert_eq!(
+            AnonymousSessionContext::new(
+                tenant_ref,
+                participant_ref,
+                session_ref,
+                authorization_evidence_ref,
+                2_000,
+            ),
+            Err(AnonymousSessionContextError::InvalidReference)
+        );
+    }
 }
 
 #[test]
