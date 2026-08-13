@@ -21,6 +21,7 @@ pub mod postgres_instrument_release;
 pub mod postgres_integration;
 pub mod postgres_item_delivery;
 pub mod postgres_scoring_job;
+pub mod postgres_scoring_request;
 mod reference;
 pub mod research_release;
 pub mod response;
