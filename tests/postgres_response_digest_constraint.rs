@@ -53,7 +53,12 @@ fn persisted_payload_digest_requires_canonical_lowercase_sha256() {
                      session_ref, server_event_ref, client_event_ref, item_version_ref, \
                      payload_digest, server_sequence\
                  ) VALUES ('session_digest_contract', $1, $2, 'item_version_digest', $3, $4)",
-                &[&server_event_ref, &client_event_ref, &invalid_digest, &sequence],
+                &[
+                    &server_event_ref,
+                    &client_event_ref,
+                    &invalid_digest,
+                    &sequence,
+                ],
             )
             .unwrap_err();
         assert_eq!(
