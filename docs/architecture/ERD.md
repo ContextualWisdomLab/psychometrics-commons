@@ -404,7 +404,7 @@ erDiagram
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`) on protected main after #50; HTTP publication transport remains Target.
-- `item_delivery_ledger` and `item_delivery_event` reflect the already-merged `src/item_delivery.rs` domain primitive. Physical persistence is carried by Active PR `feat/item-delivery-persistence-20260813` (`migrations/0004_item_delivery_evidence.sql`); API delivery orchestration is still Target.
+- `item_delivery_ledger` and `item_delivery_event` reflect the already-merged `src/item_delivery.rs` domain primitive. Physical persistence is carried by Active PR #48 (`migrations/0004_item_delivery_evidence.sql`); API delivery orchestration is still Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
 - `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. PostgreSQL evidence persistence exists only on active PR #24 until merged.

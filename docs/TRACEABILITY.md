@@ -22,7 +22,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|---|
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; **Active PR** `feat/item-delivery-persistence-20260813` adds PostgreSQL ledger/event persistence; API delivery orchestration remains Target |
+| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; **Active PR #48** adds PostgreSQL ledger/event persistence; API delivery orchestration remains Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs`; persistence adapter is Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs`; live fast-mlsirm integration is Target |
@@ -54,7 +54,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests | persistence/API concurrency test |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
-| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests; **Active PR** `feat/item-delivery-persistence-20260813` persists unique session/item and session/sequence evidence | API delivery integration |
+| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests; **Active PR #48** persists unique session/item and session/sequence evidence | API delivery integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` | live adapter + retry/outbox integration |
@@ -73,7 +73,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs` | Keyverse/account/anonymous transport integration |
 | Legal retention represented explicitly | TRD §13 | `src/data_rights.rs` partial completion | dependency propagation/restore tests |
 | No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy only | deployment credential/fitness-function test |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql` and `src/postgres_integration.rs` for integration outbox/inbox and delivery attempts; **Active PR #31** adds `migrations/0002_scoring_job_state.sql` and scoring enqueue/initial-lease persistence; **Active PR #50** adds `migrations/0006_instrument_release.sql` | remaining product aggregates, scoring retry/completion/recovery persistence, crash/restart and restore acceptance |
+| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql` and `src/postgres_integration.rs` for integration outbox/inbox and delivery attempts; **Active PR #31** adds `migrations/0002_scoring_job_state.sql` and scoring enqueue/initial-lease persistence; **Active PR #50** adds `migrations/0006_instrument_release.sql`; **Active PR** #48 adds `migrations/0004_item_delivery_evidence.sql` | remaining product aggregates, scoring retry/completion/recovery persistence, crash/restart and restore acceptance |
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence and delivery-attempt persistence | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL integration evidence does not claim side-effect completion | durable pending/processing/completed persistence + crash/retry tests |
@@ -116,7 +116,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #31 (`feat: persist PostgreSQL scoring-job leases`) carries `migrations/0002_scoring_job_state.sql`, the `postgres_scoring_job` adapter, and real PostgreSQL tests for exact enqueue replay plus atomic initial worker-lease fencing. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Durable retry scheduling, retry re-claim, completion/permanent-failure/expiry transitions, crash/restart recovery, and the live fast-mlsirm adapter remain explicitly outside this slice.
 
-**Active PR** `feat/item-delivery-persistence-20260813` carries `migrations/0004_item_delivery_evidence.sql`, the `postgres_item_delivery` adapter, and real PostgreSQL tests for exact ledger/event replay, release-rebinding rejection, duplicate-item protection, and sequence uniqueness. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. HTTP item-delivery orchestration remains outside this slice.
+**Active PR** #48 (`feat: persist PostgreSQL item-delivery ledger evidence`) carries `migrations/0004_item_delivery_evidence.sql`, the `postgres_item_delivery` adapter, and real PostgreSQL tests for exact ledger/event replay, release-rebinding rejection, duplicate-item protection, and sequence uniqueness. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. HTTP item-delivery orchestration remains outside this slice.
 
 **Active PR #50** carries `migrations/0006_instrument_release.sql`, the `postgres_instrument_release` adapter, and real PostgreSQL tests for exact immutable-manifest replay, fail-closed digest rebinding, reachable publication-state advance, and fail-closed unreachable lifecycle rewind. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. HTTP publication transport and publication-event persistence remain outside this slice.
 
