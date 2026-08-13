@@ -43,6 +43,9 @@ fn retained_scope_set_replay_is_order_independent() {
 
     assert_eq!(
         request.retained_scope_refs(),
-        &["alpha_retention_scope".to_owned(), "zeta_retention_scope".to_owned()]
+        &[
+            "alpha_retention_scope".to_owned(),
+            "zeta_retention_scope".to_owned()
+        ]
     );
 }
