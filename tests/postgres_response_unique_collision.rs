@@ -173,4 +173,13 @@ fn unrelated_unique_constraint_is_a_database_failure() {
         Err(ResponsePersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
+
+    let event_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM response_event WHERE session_ref = $1",
+            &[&"session_unrelated_unique"],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(event_count, 1);
 }
