@@ -4,8 +4,7 @@ use psychometrics_commons_runtime::narrative::{
     ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentIdentityError,
 };
 
-const RULE_DIGEST: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RULE_DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 #[test]
 fn internal_locale_control_character_fails_closed() {
