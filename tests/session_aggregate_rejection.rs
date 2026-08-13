@@ -4,7 +4,9 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
+use psychometrics_commons_runtime::session::{
+    AssessmentSession, SessionCommand, SessionState, TransitionErrorKind,
+};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -61,11 +63,19 @@ fn release() -> InstrumentRelease {
     .unwrap();
     let mut release = InstrumentRelease::new(manifest, 10_000).unwrap();
     release
-        .apply_command("submit_review", PublicationCommand::SubmitReview, 10_100)
+        .apply_command(
+            "publication_review_8d548615",
+            PublicationCommand::SubmitReview,
+            10_100,
+        )
         .unwrap();
     release.bind_publication_evidence(evidence).unwrap();
     release
-        .apply_command("publish", PublicationCommand::Publish, 10_200)
+        .apply_command(
+            "publication_publish_9e659726",
+            PublicationCommand::Publish,
+            10_200,
+        )
         .unwrap();
     release
 }
@@ -74,18 +84,26 @@ fn release() -> InstrumentRelease {
 fn rejected_command_preserves_aggregate_state_and_release_provenance() {
     let release = release();
     let mut session = AssessmentSession::new(
-        "assessment_session_rejected",
-        "assessment_participant_rejected",
+        "ses_a780e89390dc46af81ac1045cbf4f945",
+        "ptc_d2f8ecfa531147b5817a87051b6c34cf",
         &release,
         "ko-KR",
         20_000,
     )
     .unwrap();
 
-    let error = session.apply_command(SessionCommand::Release).unwrap_err();
+    let error = session
+        .apply_command(
+            "cmd_e6deabff4593406cbb313660cd40bd42",
+            1,
+            SessionCommand::Release,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), TransitionErrorKind::InvalidTransition);
     assert_eq!(error.state(), SessionState::Created);
     assert_eq!(error.command(), SessionCommand::Release);
     assert_eq!(session.state(), SessionState::Created);
     assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(session.instrument_release_content_digest(), RELEASE_DIGEST);
     assert_eq!(session.locale(), "ko-KR");
 }
