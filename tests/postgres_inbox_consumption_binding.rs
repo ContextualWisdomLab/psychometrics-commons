@@ -84,27 +84,24 @@ fn transitions_reject_rebound_side_effect_identity_without_mutation() {
     let mut client = test_client();
     accept_inbox_event(&mut client, "consumer_alpha", &source_event(), 20_000).unwrap();
 
-    for consumption_ref in ["consumption_claim", "consumption_complete", "consumption_quarantine"] {
-        persist(
-            &mut client,
-            &consumption(consumption_ref, "side_effect_original"),
-        );
-    }
+    persist(
+        &mut client,
+        &consumption("consumption_binding", "side_effect_original"),
+    );
 
-    let rebound_claim = consumption("consumption_claim", "side_effect_rebound");
+    let rebound = consumption("consumption_binding", "side_effect_rebound");
     let mut claim_transaction = client.transaction().unwrap();
     assert!(matches!(
-        begin_inbox_consumption(&mut claim_transaction, &rebound_claim, 20_001),
+        begin_inbox_consumption(&mut claim_transaction, &rebound, 20_001),
         Err(InboxConsumptionPersistenceError::ConflictingReplay)
     ));
     claim_transaction.rollback().unwrap();
 
-    let rebound_complete = consumption("consumption_complete", "side_effect_rebound");
     let mut complete_transaction = client.transaction().unwrap();
     assert!(matches!(
         complete_inbox_consumption(
             &mut complete_transaction,
-            &rebound_complete,
+            &rebound,
             20_001,
             "completion_projection_applied",
             0,
@@ -113,12 +110,11 @@ fn transitions_reject_rebound_side_effect_identity_without_mutation() {
     ));
     complete_transaction.rollback().unwrap();
 
-    let rebound_quarantine = consumption("consumption_quarantine", "side_effect_rebound");
     let mut quarantine_transaction = client.transaction().unwrap();
     assert!(matches!(
         quarantine_inbox_consumption(
             &mut quarantine_transaction,
-            &rebound_quarantine,
+            &rebound,
             20_001,
             "poison_payload",
             0,
@@ -127,11 +123,9 @@ fn transitions_reject_rebound_side_effect_identity_without_mutation() {
     ));
     quarantine_transaction.rollback().unwrap();
 
-    for consumption_ref in ["consumption_claim", "consumption_complete", "consumption_quarantine"] {
-        assert_eq!(
-            state(&mut client, consumption_ref),
-            ("pending".to_owned(), 0),
-            "rebound side-effect identity must not mutate durable consumption state"
-        );
-    }
+    assert_eq!(
+        state(&mut client, "consumption_binding"),
+        ("pending".to_owned(), 0),
+        "rebound side-effect identity must not mutate durable consumption state"
+    );
 }

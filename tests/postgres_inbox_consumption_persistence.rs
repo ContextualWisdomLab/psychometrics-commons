@@ -186,6 +186,16 @@ fn persist_rebinding_and_non_fresh_state_fail_closed() {
         InboxConsumptionPersistenceError::ConflictingReplay
     ));
 
+    let same_side_effect = pending(
+        "event_rebind",
+        "consumption_other_work",
+        "side_effect_projection",
+    );
+    assert!(matches!(
+        persist_err(&mut client, &same_side_effect),
+        InboxConsumptionPersistenceError::ConflictingReplay
+    ));
+
     let mut completed = pending(
         "event_rebind",
         "consumption_completed_shape",

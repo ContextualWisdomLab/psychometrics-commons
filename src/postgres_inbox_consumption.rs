@@ -171,7 +171,7 @@ pub fn persist_inbox_consumption(
         return Err(InboxConsumptionPersistenceError::InboxNotFound);
     }
 
-    let inserted = transaction.execute(
+    let inserted = match transaction.execute(
         "INSERT INTO integration_consumption (\
              consumer_ref, source_ref, tenant_ref, source_event_ref, consumption_ref,\
              side_effect_ref, consumption_state, fencing_token, latest_event_at_unix_ms\
@@ -187,7 +187,13 @@ pub fn persist_inbox_consumption(
             &consumption.side_effect_ref(),
             &latest_event_at_unix_ms,
         ],
-    )?;
+    ) {
+        Ok(inserted) => inserted,
+        Err(error) if is_unique_violation(&error) => {
+            return Err(InboxConsumptionPersistenceError::ConflictingReplay);
+        }
+        Err(error) => return Err(error.into()),
+    };
     if inserted == 1 {
         return Ok(InboxConsumptionDisposition::Inserted);
     }
@@ -508,6 +514,10 @@ fn require_read_committed(
 
 fn postgres_bigint(value: u64) -> Result<i64, InboxConsumptionPersistenceError> {
     i64::try_from(value).map_err(|_| InboxConsumptionPersistenceError::ValueOutOfRange)
+}
+
+fn is_unique_violation(error: &postgres::Error) -> bool {
+    error.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION)
 }
 
 #[cfg(test)]
