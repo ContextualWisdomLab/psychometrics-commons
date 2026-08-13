@@ -1,122 +1,145 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-12
-- Evaluated protected-main implementation baseline: `1733aac738e455214891a51137a3d0bbe092414c`
+- Date: 2026-08-13
+- Evaluated protected-main implementation baseline: `8964280d63a8aa59bdb847e449190b3e67425aff`
 
-This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
+This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It names one exact protected-main baseline and separates protected-main implementation from active-PR evidence and target architecture. An active PR, target diagram, conversation decision, scheduler plan, or successful isolated check is not shipped truth.
 
 ## 1. Status vocabulary
 
-- **Implemented** — source and tests exist on the evaluated protected-main baseline.
-- **Partially implemented** — a reusable domain contract exists, but transport, persistence, integration, lifecycle coverage, or a stricter governing evidence rule is incomplete.
-- **Active PR** — source/evidence exists on a currently open PR but is not protected-main truth.
-- **Target** — required by PRD/TRD/ADR but not implemented on the evaluated baseline.
-- **External dependency** — implemented/owned in another CWL bounded context and consumed through a contract.
+The canonical maturity vocabulary used by current delivery work maps to the repository's established human-readable terms as follows:
 
-An active PR, architecture document, conversation decision, or scheduler plan is not protected-main implementation. A future implementation-status change must be supported by source/test/migration/contract evidence on the named protected baseline.
+- **IMPLEMENTED_ON_PROTECTED_MAIN / Implemented** — source and realistic tests or executable evidence exist on the named protected-main baseline.
+- **PARTIAL / Partially implemented** — a bounded contract or subset exists on protected main, but transport, persistence, integration, lifecycle, scientific, operational, or release evidence remains incomplete.
+- **IMPLEMENTED_ON_ACTIVE_PR / Active PR** — source/evidence exists only on a currently open PR and is not protected-main truth.
+- **ACCEPTED_ARCHITECTURE / PLANNED / Target** — required by accepted architecture or delivery planning but not implemented on the named protected-main baseline.
+- **External dependency** — owned by another CWL bounded context and consumed through a versioned contract; it is not reimplemented here.
+- **RESEARCH_ONLY** — research evidence or an experimental path that is not production product authority.
+- **SUPERSEDED** — replaced by an accepted later decision or implementation contract.
+- **OUT_OF_SCOPE** — deliberately outside Psychometrics Commons ownership.
+
+Documentation-family assessments use `PRESENT_CURRENT`, `PRESENT_STALE`, `PARTIAL`, `MISSING`, `NOT_APPLICABLE`, or `SUPERSEDED`. These labels describe documentation fitness, not product maturity.
 
 ## 2. Product requirement traceability
 
-| Requirement | PRD source | Technical/architecture contract | ADR(s) | Evaluated-main implementation |
-|---|---|---|---|---|
-| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented; anonymous credential/HTTP flow is Target |
-| Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
-| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs`; persistence adapter is Target |
-| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
-| Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs`; live fast-mlsirm integration is Target |
-| Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle in `src/scoring_job.rs`; **Active PR #31** adds PostgreSQL enqueue identity and initial atomic worker-lease fencing, while durable retry/completion/expiry recovery, crash/restart recovery, and live fast-mlsirm execution remain Target |
-| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result-serving transport is Target |
-| Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010, ADR-0018 | Target |
-| Continuous scores remain source of truth; Personality Style is presentation | PRD §3.2 | Measurement Governance; AI Governance | ADR-0018 | Target product narrative mapping; numeric source remains External fast-mlsirm contract |
-| Immutable instrument release/version lifecycle | PRD §6, §9 | TRD §7; UML publication state | ADR-0005, ADR-0010 | **Implemented** in `src/instrument.rs`: immutable release manifest, exact version/digest/locale/item set, fail-closed Draft/Review/Published/Suspended/Retired lifecycle, idempotent publication events, and new-session eligibility |
-| Instrument publication requires intended-use scientific/right/locale evidence | PRD §6, §9, §10 | Measurement Governance; publication evidence gate | ADR-0004, ADR-0013, ADR-0019 | **Implemented** policy gate and immutable evidence provenance in `src/instrument.rs`; each real instrument still requires its own rights/locale/scientific evidence artifacts before publication |
-| Optional Keyverse account linking | PRD §3.1, §9.7 | TRD §10; UML identity-link lifecycle | ADR-0003, ADR-0020 | **Partially implemented**: issuer-scoped first-link fail-closed domain primitive in `src/participant.rs`; append-only unlink/relink/recovery history, persistence, audit, and transport remain Target |
-| Cross-cutting tenant/task authorization | PRD §7, §9 | TRD §11; Security/Data | ADR-0001, ADR-0003 | **Implemented** fail-closed domain gate in `src/authorization.rs`; persistence/policy-adapter/public-transport integration remains Target |
-| Purpose-specific consent | PRD §5, §9.6 | TRD §12 | ADR-0006 | **Implemented** domain contract in `src/consent.rs`; transport/persistence is Target |
-| Explicit research contribution + withdrawal | PRD §5 | TRD §12, §14–15 | ADR-0006, ADR-0007 | **Implemented** product-domain lifecycle in `src/consent.rs`; dataset snapshot/release integration is Target |
-| Participant export/deletion | PRD §3.1, §9, §11 | TRD §13 | ADR-0006 | **Implemented** domain lifecycle in `src/data_rights.rs`; dependent-system execution is Target |
-| Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
-| Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
-| Durable outbox/inbox delivery semantics | PRD §7, §9 | TRD §19–20 | ADR-0014, ADR-0015 | **Partially implemented**: domain contracts in `src/integration.rs`; PostgreSQL 18 outbox/inbox identity plus delivery-attempt state persistence in `migrations/0001_integration_delivery.sql` and `src/postgres_integration.rs`; full side-effect lifecycle/crash recovery remains Target |
-| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs`; HTTP probes, live dependency checks, measured thresholds, and deployment evidence remain Target |
-| Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; actual English/Korean form content, rights, translation, invariance and serving are Target |
-| WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
-| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/normalized-ingestion/orchestration adapter |
-| Measurement Workbench | PRD §6 | C4/component view; UML publication-evidence sequence; Measurement Governance | ADR-0001, ADR-0002, ADR-0004, ADR-0019 | Target; fast-mlsirm/Inkspan/RankWeave are External dependencies |
-| Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Architecture established; public transport is Target |
-| Community/Hosted/Enterprise profiles | PRD §7, §13 | TRD deployment sections; Deployment/Operations | ADR-0011, ADR-0017 | Target deployment packaging/evidence |
+| Requirement | Governing contract | Protected-main / active-work evidence | Remaining obligation |
+|---|---|---|---|
+| Anonymous core assessment | PRD §3.1/§9.1; TRD §5/§10; ADR-0002/0003/0005 | **PARTIAL:** server-authoritative session primitives exist in `src/session.rs`; participant identity exists in `src/participant.rs` | anonymous credential and public HTTP journey |
+| Pause/resume | TRD §5; ADR-0005 | **IMPLEMENTED_ON_PROTECTED_MAIN:** `src/session.rs` | persistence/API concurrency evidence |
+| Sequence-aware item delivery | TRD §5–7; ADR-0005/0010 | **IMPLEMENTED_ON_PROTECTED_MAIN:** `src/item_delivery.rs` | persistence and serving orchestration |
+| Idempotent response events | TRD §6; ADR-0005/0010 | **IMPLEMENTED_ON_PROTECTED_MAIN:** `src/response.rs` | durable repository and concurrent replay evidence |
+| Immutable response snapshot before scoring | TRD §5–8; ADR-0005/0010 | **IMPLEMENTED_ON_PROTECTED_MAIN:** `src/response.rs` | atomic session-completion persistence |
+| Version-pinned scoring dispatch | TRD §8; ADR-0004/0010 | **IMPLEMENTED_ON_PROTECTED_MAIN:** `src/scoring.rs` | exact live fast-mlsirm adapter; fast-mlsirm remains an **External dependency** |
+| Bounded asynchronous scoring with fencing | TRD §8; ADR-0015 | **PARTIAL:** `src/scoring_job.rs`, `migrations/0002_scoring_job_state.sql`, and `src/postgres_scoring_job.rs` are protected-main truth after merged PR #31; enqueue and initial worker claim are durable | **Active PR #36** adds successful-completion/permanent-failure terminal persistence; retry scheduling/reclaim, lease-expiry recovery, crash/restart reconciliation, and live scoring execution remain Target |
+| Immutable result provenance | TRD §9; ADR-0004/0010 | **IMPLEMENTED_ON_PROTECTED_MAIN:** immutable domain snapshot in `src/result.rs` | product result persistence and serving transport |
+| Deterministic Personality Style identity | PRD §3.2/§9.5; ADR-0018 | **PARTIAL:** `src/narrative.rs` defines behavior-affecting identity, BCP 47 locale validation, canonical serialization, and SHA-256 assignment key on protected main | actual style mapping and deterministic fallback delivery remain Target; **Active PR #40** hardens digest-bearing provenance inputs |
+| Continuous/facet scores remain scientific source of truth | ADR-0004/0018; Measurement Governance | **PARTIAL:** product result and presentation-identity boundaries exist; numerical authority remains fast-mlsirm **External dependency** | end-to-end no-score-mutation and deterministic fallback acceptance |
+| Immutable instrument publication lifecycle | TRD §7; ADR-0005/0010/0019 | **IMPLEMENTED_ON_PROTECTED_MAIN:** `src/instrument.rs` | persistence/API integration and real instrument evidence bundles |
+| Intended-use scientific/rights/locale publication evidence | Measurement Governance; ADR-0013/0019 | **IMPLEMENTED_ON_PROTECTED_MAIN:** release-bound evidence gate in `src/instrument.rs` | each actual instrument must supply its own evidence |
+| Optional Keyverse account linking | TRD §10; ADR-0003/0020 | **PARTIAL:** first-link domain primitive in `src/participant.rs`; Keyverse is an **External dependency** | append-only unlink/relink/recovery persistence, audit, transport |
+| Tenant/resource authorization | TRD §11; ADR-0001/0003 | **PARTIAL:** fail-closed domain gates in `src/authorization.rs` | repository/route integration and cross-tenant E2E negatives |
+| Purpose-specific consent | TRD §12; ADR-0006 | **PARTIAL:** `src/consent.rs` | persistence and API execution |
+| Research contribution and withdrawal | TRD §12/§14–15; ADR-0006/0007 | **PARTIAL:** contribution lifecycle in `src/consent.rs` | restricted staging/linkage and release pipeline |
+| Participant export/deletion | TRD §13; ADR-0006 | **PARTIAL:** `src/data_rights.rs` | durable dependent-system execution and evidence |
+| Research identity separation | TRD §14; ADR-0003/0006/0007/0020 | **PARTIAL:** architecture and contribution identity separation exist | restricted linkage persistence and access-control evidence |
+| Research release manifest/gate | TRD §15; ADR-0007/0010 | Target on protected main; semantic-data-portal is an **External dependency** | **Active PR #41** adds only the product-side release-evidence validator; staging, privacy workflow, immutable release persistence and portal registration remain Target |
+| Durable outbox/inbox semantics | TRD §19–20; ADR-0014/0015 | **PARTIAL:** `src/integration.rs`, `migrations/0001_integration_delivery.sql`, `src/postgres_integration.rs` | full side-effect/crash/reconciliation lifecycle |
+| Operation-scoped health | ADR-0011/0017; Operability | **PARTIAL:** `src/health.rs` | HTTP probes, live observations, metrics, measured deployment evidence |
+| Korean/English exact locale versions | TRD §28; ADR-0013/0019 | **PARTIAL:** instrument locale and narrative BCP 47 contracts exist | real Korean/English forms, rights, translation, linking/DIF/invariance evidence and serving |
+| WCAG 2.2 AA reference client | PRD §9.10; ADR-0002/0013 | Target | implemented reference client plus automated/manual/assistive-technology acceptance |
+| EMA/ESM longitudinal flow | TRD §16; ADR-0008 | Gyeot and TEPP are **External dependency** owners | Commons enrollment, normalized ingestion and orchestration adapter |
+| Measurement Workbench | PRD §6; ADR-0001/0004/0019 | Target; fast-mlsirm/Inkspan/RankWeave are **External dependency** owners | product orchestration without numerical/authoring/search kernel duplication |
+| Community/Hosted/Enterprise profiles | ADR-0011/0017 | Target | packaging, tenancy/residency, observability, backup/restore, SBOM/provenance and measured recovery evidence |
 
 ## 3. Technical invariant traceability
 
-| Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
-|---|---|---|---|
-| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests | persistence/API concurrency test |
-| Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
-| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
-| Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
-| Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
-| Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` | live adapter + retry/outbox integration |
-| Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; **Active PR #31** persists the initial claim atomically | durable retry/completion/expiry compare-and-set, concurrent-worker/crash-restart recovery, and live adapter evidence |
-| Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
-| Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
-| Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
-| Instrument release bytes/version/item order are immutable | TRD §7 | `src/instrument.rs` + publication contract tests | persistence/API publication integration |
-| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs` | session-creation integration test |
-| Publication event replay is idempotent/conflicting reuse fails closed | TRD §7 | `src/instrument.rs` | durable DB uniqueness/concurrency test |
-| Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | `src/instrument.rs` binds approved evidence status, provenance/scope, mandatory evidence references, validity window, and immutable release identity before publication/reactivation | persistence/API publication integration and real instrument-specific evidence artifacts |
-| Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID | append-only identity-link persistence + unlink/relink/recovery audit tests |
-| Sensitive authorization is tenant- and task-bound | TRD §11; Security/Data | `src/authorization.rs` fail-closed authorization context/gates | policy adapter + route/repository integration + cross-tenant E2E tests |
-| Research consent separate from service consent | TRD §12; Research Governance | `src/consent.rs` | public API/UI negative test |
-| Research withdrawal preserves evidence | TRD §12–15; Research Governance | `src/consent.rs` | release-pipeline exclusion test |
-| Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs` | Keyverse/account/anonymous transport integration |
-| Legal retention represented explicitly | TRD §13 | `src/data_rights.rs` partial completion | dependency propagation/restore tests |
-| No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy only | deployment credential/fitness-function test |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql` and `src/postgres_integration.rs` for integration outbox/inbox and delivery attempts; **Active PR #31** adds `migrations/0002_scoring_job_state.sql` and scoring enqueue/initial-lease persistence | remaining product aggregates, scoring retry/completion/recovery persistence, crash/restart and restore acceptance |
-| No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
-| Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence and delivery-attempt persistence | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
-| Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL integration evidence does not claim side-effect completion | durable pending/processing/completed persistence + crash/retry tests |
-| Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs`: liveness is modeled independently from operation-scoped readiness and capability state | live transport probes, dependency observations, metrics, and deployment-profile acceptance |
-| Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs`: readiness evaluates only capabilities required by the selected operation and fails unknown required capability closed | real adapter classification and degraded-mode integration tests |
-| Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Implemented** domain contract in `src/health.rs` | persistence/job backlog metrics, migration/schema probes, alerting, and failure-injection evidence |
-| No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
-| AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
-| AI cannot mutate numeric scientific result | AI Governance; ADR-0009, ADR-0018 | architecture policy | product adapter/adversarial mutation tests |
-| Exact locale no silent assessment fallback | TRD §28; ADR-0013 | instrument locale pinning exists; client serving policy is Target | exact English/Korean published-form/client tests |
-| GA claims require measured profile recovery/availability evidence | ADR-0017; Deployment/Operations | architecture policy | deployed SLO/RPO/RTO/restore/incident evidence |
-| Architecture mitigation is not risk closure/certification | Compliance Readiness; Risk Register | documentation fitness only | control-specific implementation and scoped independent assessment where claimed |
+| Invariant | Evidence on evaluated protected main | Missing or active evidence |
+|---|---|---|
+| Server-authoritative lifecycle | `src/session.rs` | persistence/API concurrency |
+| Only Active accepts new responses | `src/session.rs`, `src/response.rs` tests | transport rejection |
+| Conflicting response replay fails closed | `src/response.rs` | database uniqueness/concurrency |
+| Snapshot is immutable and completion-bound | `src/response.rs` | atomic persistence with session completion/outbox |
+| Scoring pins durable snapshot/version identity | `src/scoring.rs` | live adapter and durable request/result transaction |
+| Stale scoring worker cannot own a newer lease | `src/scoring_job.rs`, `src/postgres_scoring_job.rs`, `migrations/0002_scoring_job_state.sql` | terminal persistence is **Active PR #36**; retry/reclaim/expiry/crash recovery Target |
+| Scientific failure cannot fabricate a score | `src/scoring.rs` typed dispositions | live adapter failure injection |
+| Historical result does not mutate | `src/result.rs` | persistent snapshot/supersession chain and API tests |
+| Narrative cannot mutate scientific scores | ADR-0018 plus `src/narrative.rs` identity/key boundary | full mapping/fallback/no-score-mutation E2E; exact digest hardening is **Active PR #40** |
+| Published instrument identity/evidence is immutable | `src/instrument.rs` | persistence/API and real release bundles |
+| Account linking does not rewrite historical participant/result identity | `src/participant.rs`; ADR-0020 | append-only history persistence and recovery |
+| Authorization is task-, tenant-, and resource-bound | `src/authorization.rs` | transport/repository policy integration |
+| Research consent is separate from service use | `src/consent.rs` | public journey negative test |
+| Data-rights completion is evidence-backed | `src/data_rights.rs` | durable worker/dependency propagation/restore |
+| No cross-service application DB access | accepted architecture/ADR-0015 | deployment credential fitness evidence |
+| Initial operational persistence is upstream PostgreSQL 18.x | `migrations/0001_integration_delivery.sql`, `src/postgres_integration.rs`, `migrations/0002_scoring_job_state.sql`, `src/postgres_scoring_job.rs` | remaining aggregate persistence, terminal/recovery flows, migration/restore acceptance |
+| Tenant/source-scoped outbox/inbox identity | integration migration/adapter | completed side-effect/crash/poison-message evidence |
+| Liveness differs from operation readiness | `src/health.rs` | live probes and measured thresholds |
+| No operational IDs in public research release | Research Governance/architecture only | **Active PR #41** validates release evidence only; actual leakage-negative release fixture remains Target |
+| Exact locale has no silent assessment fallback | `src/instrument.rs`; `src/narrative.rs` BCP 47 validation | real localized forms/client serving and cross-locale scientific evidence |
+| GA/recovery claims require measured evidence | ADR-0017; Release Acceptance | deployed SLO/RPO/RTO/restore/incident evidence |
 
-## 4. Source module map
+## 4. Source and migration map
 
-Current protected-main Rust module surface on `1733aac738e455214891a51137a3d0bbe092414c`:
+Current protected-main Rust/product persistence surface on `8964280d63a8aa59bdb847e449190b3e67425aff` includes:
 
 ```text
 src/lib.rs
-├── authorization.rs  # fail-closed tenant/task authorization context and gates
-├── consent.rs        # purpose-specific consent + research contribution lifecycle
-├── data_rights.rs    # export/deletion lifecycle and retention evidence
-├── health.rs         # operation-scoped liveness/readiness and capability-state contract
-├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
-├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
-├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
-├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
-├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
-├── reference.rs      # internal opaque-reference normalization
-├── response.rs       # idempotent response ledger + immutable response snapshots
-├── result.rs         # immutable result provenance/supersession
-├── scoring.rs        # version-pinned scoring dispatch contract
-├── scoring_job.rs    # bounded retry/quarantine lifecycle with lease fencing
-└── session.rs        # server-authoritative assessment-session transitions
+├── authorization.rs        # fail-closed tenant/task/resource authorization
+├── consent.rs              # purpose-specific consent + research contribution
+├── data_rights.rs          # export/deletion lifecycle and retention evidence
+├── health.rs               # operation-scoped liveness/readiness capability contract
+├── instrument.rs           # immutable publication + evidence gate
+├── integration.rs          # outbox/inbox/retry/quarantine domain contracts
+├── item_delivery.rs        # sequence-aware delivery evidence
+├── narrative.rs            # deterministic Personality Style provenance identity/key
+├── participant.rs          # stable product participant + optional Keyverse first link
+├── postgres_integration.rs # PostgreSQL integration delivery persistence
+├── postgres_scoring_job.rs # PostgreSQL scoring enqueue/initial-lease persistence
+├── reference.rs            # opaque-reference normalization
+├── response.rs             # idempotent response ledger + immutable response snapshot
+├── result.rs               # immutable scientific/product result snapshot
+├── scoring.rs              # version-pinned scoring dispatch/result contract
+├── scoring_job.rs          # retry/quarantine lifecycle and worker fencing
+└── session.rs              # server-authoritative session transitions
+
+migrations/
+├── 0001_integration_delivery.sql
+└── 0002_scoring_job_state.sql
 ```
 
-Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/probes/metrics, durable scoring retry/completion/expiry recovery, and Measurement Workbench orchestration.
+Still-Target product-owned implementation includes session/response/result/consent/data-rights persistence, public/admin HTTP transport, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, full Personality Style mapping/fallback delivery, research staging/release persistence, longitudinal normalized ingestion, identity-link history persistence, runtime probes/metrics, scoring retry/reclaim/expiry/crash recovery, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #31 (`feat: persist PostgreSQL scoring-job leases`) carries `migrations/0002_scoring_job_state.sql`, the `postgres_scoring_job` adapter, and real PostgreSQL tests for exact enqueue replay plus atomic initial worker-lease fencing. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Durable retry scheduling, retry re-claim, completion/permanent-failure/expiry transitions, crash/restart recovery, and the live fast-mlsirm adapter remain explicitly outside this slice.
+- **Active PR** #36 (`feat: persist PostgreSQL scoring terminal outcomes`) is not protected-main truth; it adds successful-completion and permanent-failure/quarantine persistence while preserving fencing and immutable result evidence.
+- **Active PR** #40 (`fix(narrative): require canonical SHA-256 provenance digests`) is not protected-main truth; it hardens the digest-bearing deterministic Personality Style identity fields and does not change numeric psychometric authority.
+- **Active PR** #41 (`feat: validate Research Commons publication evidence`) is not protected-main truth; it adds a bounded product-side release-evidence validator but does not stage/publish data or register semantic-data-portal releases.
 
-## 5. ADR traceability by concern
+PR #31 is merged and must no longer be represented as Active PR evidence. Its migration and initial PostgreSQL scoring-job lease adapter are protected-main truth on the evaluated baseline.
+
+## 5. Documentation-family reconciliation
+
+| Artifact family | Assessment on this baseline | Notes |
+|---|---|---|
+| PRD | PRESENT_CURRENT | journey, bounded contexts and acceptance remain consistent with current code |
+| TRD | PRESENT_CURRENT | implementation is still partial; prose transport requirements are not deployed APIs |
+| Root Architecture + C4 | PRESENT_CURRENT | target/mixed architecture, not deployment proof |
+| ADR index/set | PARTIAL | accepted decisions remain authoritative, but ADR-0015's embedded current/as-built status prose predates merged PostgreSQL slices and requires current-state maintenance without changing the accepted decision |
+| UML | PRESENT_CURRENT | target behavior remains distinct from shipped evidence |
+| Logical ERD | PRESENT_CURRENT | logical target model is not physical DDL proof |
+| Security/Threat Model/privacy | PRESENT_CURRENT | controls remain evidence-gated where implementation is incomplete |
+| Measurement Governance | PRESENT_CURRENT | fast-mlsirm retains numerical authority |
+| AI Governance | PRESENT_CURRENT | optional AI cannot mutate scientific numeric truth |
+| Research Governance | PRESENT_CURRENT | release execution remains partial/Target |
+| Product Experience | PRESENT_CURRENT | consumer implementation remains incomplete |
+| Quality/Risk/Compliance Readiness | PRESENT_CURRENT | readiness is not certification |
+| Traceability | PRESENT_CURRENT | this file is reconciled to the named protected-main baseline and live PR set |
+| Roadmap | PRESENT_CURRENT | dependency order remains valid |
+| Documentation Assessment | PRESENT_STALE | evaluated baseline and prior active-PR descriptions lag current protected main and require follow-up reconciliation |
+| OpenAPI/AsyncAPI | NOT_APPLICABLE as as-built evidence | add with first implemented HTTP/durable message surfaces; do not fabricate target operations as deployed |
+| Physical schema | PARTIAL | migrations 0001/0002 are real; remaining logical entities are not yet physical schema |
+
+## 6. ADR traceability by concern
 
 | Concern | Governing ADR(s) |
 |---|---|
@@ -141,66 +164,59 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 | Scientific publication evidence gate | ADR-0019 |
 | Append-only participant identity-link history | ADR-0020 |
 
-## 6. Governance and evidence artifact traceability
+## 7. Governance and evidence artifact traceability
 
-| Concern | Authoritative artifact | Evidence status on evaluated baseline |
+| Concern | Authoritative artifact | Current evidence status |
 |---|---|---|
-| Product intent | `docs/PRD.md` | Protected-main normative product baseline |
-| Technical contract | `docs/TRD.md` | Protected-main normative technical baseline; transport/persistence evidence remains implementation-gated |
-| Measurement/scientific publication | `docs/MEASUREMENT_GOVERNANCE.md` | Protected-main governance; numerical implementation remains fast-mlsirm-owned |
-| Continuous score/narrative interpretation | ADR-0018 + `docs/AI_GOVERNANCE.md` | Target product mapping/fallback; numeric result domain exists but narrative mapping does not |
-| Instrument scientific publication gate | ADR-0019 + `docs/MEASUREMENT_GOVERNANCE.md` | **Implemented policy gate:** `src/instrument.rs` requires exact release-bound approved evidence provenance; instrument-specific rights/locale/scientific artifacts remain release evidence inputs rather than shipped core content |
-| AI/judge/provider authority | `docs/AI_GOVERNANCE.md` | Protected-main governance; target adapters remain unimplemented |
-| Research contribution/release | `docs/RESEARCH_GOVERNANCE.md` | Protected-main governance; partial domain lifecycle exists in `src/consent.rs` |
-| Nonfunctional measurable scenarios | `docs/QUALITY_ATTRIBUTES.md` | Protected-main evidence contract; scenarios become verified only as implementations exist |
-| Assurance readiness | `docs/COMPLIANCE_READINESS.md` | Architecture-defined only; no SOC 2/CSAP external attestation/certification claimed |
-| Material risk | `docs/RISK_REGISTER.md` | Architecture/evidence-state register; individual risks remain open until evidence/accepted risk |
-| Canonical terms | `docs/GLOSSARY.md` | Protected-main terminology baseline |
-| Architecture views | `docs/architecture/*` | Normative target/mixed views; not as-built proof |
-| Implementation status | this document | Named evaluated-main baseline plus explicitly segregated Active PR work |
-| Delivery dependency order | `docs/ROADMAP.md` | Protected-main delivery baseline |
+| Product intent | `docs/PRD.md` | protected-main normative baseline |
+| Technical contract | `docs/TRD.md` | normative; implementation still partial |
+| Measurement/scientific publication | `docs/MEASUREMENT_GOVERNANCE.md` | product governance; numerical kernels remain external |
+| Continuous score / narrative interpretation | ADR-0018 + `docs/AI_GOVERNANCE.md` | deterministic identity/key **PARTIAL** on protected main; mapping/fallback Target |
+| Instrument scientific publication gate | ADR-0019 + Measurement Governance | policy gate implemented; actual instrument evidence is release input |
+| Research contribution/release | `docs/RESEARCH_GOVERNANCE.md` | contribution lifecycle partial; PR #41 is active-only validator evidence |
+| Nonfunctional evidence | `docs/QUALITY_ATTRIBUTES.md`, `docs/TEST_STRATEGY.md`, `docs/OPERABILITY.md` | scenarios are verified only where executable evidence exists |
+| Assurance readiness | `docs/COMPLIANCE_READINESS.md` | no external SOC 2/CSAP certification claim |
+| Material risk | `docs/RISK_REGISTER.md` | open until verified closure or authorized acceptance |
+| Architecture views | `docs/architecture/*` | target/mixed views, not as-built proof |
+| Release authority | `docs/RELEASE_ACCEPTANCE.md` | software, instrument and research release gates remain distinct |
+| Delivery order | `docs/ROADMAP.md` | protected-main delivery baseline |
 
-## 7. Whole-conversation reconciliation gate
+## 8. Whole-product reconciliation gate
 
-The durable product architecture is **Scientific Trait Core + Accessible Narrative + Reflective Capacities + Longitudinal Context + Open Science**, expressed to users as **Measure → Understand → Reflect → Observe Over Time → Contribute to Science**.
+The durable product definition remains **Scientific Trait Core + Accessible Narrative + Reflective Capacities + Longitudinal Context + Open Science**, expressed as **Measure → Understand → Reflect → Observe Over Time → Contribute to Science**.
 
-The first consumer family is IPIP Big Five. Continuous/facet scores and uncertainty remain the scientific source of truth; Personality Style is a separately versioned deterministic presentation mapping and cannot be represented as MBTI equivalence. Self-compassion and future reflective constructs are independently measured instruments, never inferred from Big Five. Anonymous participation is first-class; Keyverse account linking is optional and append-only. Research contribution is a separate purpose-specific opt-in, with operational and research identity namespaces separated. Gyeot owns EMA/ESM collection, TEPP owns temporal/event/multilevel/multiple-membership analytics, and this product owns consented normalized ingestion/orchestration rather than duplicating either kernel. AI is bounded and cannot mutate numeric scores, calibration, norms, DIF, uncertainty, or scientific publication gates. The Measurement Workbench reuses fast-mlsirm scientific contracts and Inkspan/RankWeave capabilities rather than copying their kernels.
+IPIP Big Five is the first consumer family. Continuous/facet scores and uncertainty remain scientific truth; Personality Style is a separately versioned presentation mapping and is not MBTI equivalence. Self-compassion and future-reflection constructs are independent instruments. Anonymous participation is first-class; optional Keyverse linking never rewrites historical product identity. Research contribution is a separate purpose-specific opt-in. Gyeot owns EMA/ESM collection, TEPP owns temporal/event/multilevel/multiple-membership analysis, and semantic-data-portal owns public research catalog/release registration. Psychometrics Commons orchestrates its own participant/session/consent/persistence/release-handoff responsibilities without copying those kernels. Optional AI cannot mutate numeric scores, calibration, norms, DIF, uncertainty or scientific publication gates.
 
-Whenever a durable conversation decision changes one of those boundaries, the appropriate PRD/TRD/ADR/architecture/governance artifact must be reconciled before an implementation can be treated as architecture-compliant.
+Enterprise issue-prioritization/causal expected-intervention-value logic remains OUT_OF_SCOPE absent a future accepted ADR.
 
-## 8. Machine-readable contract gate
+## 9. Machine-readable contract gate
 
-The prose API/event families in TRD are architecture requirements, not evidence of an implemented transport.
+Prose API/event families in the TRD are architecture requirements, not evidence of an implemented transport.
 
-When the first HTTP API is implemented, the same PR or a prerequisite PR must add and validate an OpenAPI 3.2.x document whose operations and problem responses match the actual implementation. HTTP errors use RFC 9457 problem details unless a documented domain representation is more appropriate.
+When the first HTTP API is implemented, the same workstream must add and validate an OpenAPI 3.2.x document matching only actually implemented operations and RFC 9457-compatible problem responses where applicable. When durable message transport is implemented, the same workstream must add and validate an AsyncAPI 3.1.x document for actually produced/consumed channels and message schemas, including ADR-0014 digest, tenant/resource, deduplication, replay and quarantine semantics.
 
-When durable message transport is implemented, the same PR or a prerequisite PR must add and validate an AsyncAPI 3.1.x document for actually produced/consumed event channels and message schemas. It must encode/reference ADR-0014 canonical UTF-8 payload hashing, SHA-256 payload digest semantics, tenant/resource binding, deduplication identity, pending/processing/completed consumption, replay retention, and quarantine behavior.
+Target or future contracts may be documented as non-deployed design material, but cannot satisfy as-built or release acceptance.
 
-A machine-readable contract may not list unimplemented operations as if they were available. Target/future contracts, if needed, must be clearly marked non-deployed and cannot satisfy release acceptance.
-
-## 9. Traceability maintenance gate
+## 10. Traceability maintenance gate
 
 A PR that materially changes any of the following must update this document or prove no traceability change is needed:
 
-- domain module ownership;
+- domain ownership or dependency direction;
 - lifecycle states/transitions;
-- public/admin API family;
-- event family/integrity/idempotency semantics;
-- persistent logical entity or relationship;
-- scientific publication or score interpretation rule;
+- public/admin API or event family;
+- persistent logical entity/cardinality/transaction boundary;
+- scientific publication or score-interpretation rule;
 - AI/judge/provider authority;
 - research contribution/release/access rule;
-- cross-service dependency;
-- security/privacy trust boundary;
-- database support/transaction semantics;
-- quality-attribute/recovery claim;
+- identity/security/privacy/tenant/trust boundary;
+- database support, migration or recovery semantics;
+- quality/release/recovery claim;
 - material risk/evidence state;
-- consumer/research acceptance criterion;
-- deployment profile/recovery contract.
+- consumer/research acceptance criterion.
 
-CI should validate linked documentation paths and status/name consistency now and, when machine-readable contracts/migrations exist, validate that documented references map to real contract/schema artifacts.
+CI must continue validating required documentation paths, ADR indexing, status vocabulary and target-versus-as-built discipline. When machine-readable contracts or migrations exist, documentation references must resolve to real artifacts without promoting unmerged PR behavior to protected-main truth.
 
-## 10. References
+## 11. References
 
 Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
 
