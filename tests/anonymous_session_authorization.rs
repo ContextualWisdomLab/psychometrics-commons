@@ -8,8 +8,14 @@ const SESSION_REF: &str = "ses_f437dbb76bf94f6e83fa89227ac9da77";
 const EVIDENCE_REF: &str = "evd_b18845e9af6a4bb782cb3b376dfd5f85";
 
 fn context() -> AnonymousSessionContext {
-    AnonymousSessionContext::new(TENANT_REF, PARTICIPANT_REF, SESSION_REF, EVIDENCE_REF, 2_000)
-        .unwrap()
+    AnonymousSessionContext::new(
+        TENANT_REF,
+        PARTICIPANT_REF,
+        SESSION_REF,
+        EVIDENCE_REF,
+        2_000,
+    )
+    .unwrap()
 }
 
 #[test]
