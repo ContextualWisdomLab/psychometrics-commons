@@ -9,6 +9,9 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::session::SessionState;
 
+const ENGINE_DIGEST: &str =
+    "sha256:5555555555555555555555555555555555555555555555555555555555555555";
+
 fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnapshot {
     let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
@@ -18,7 +21,8 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
                 server_event_ref: "event_ref",
                 client_event_ref: "client_ref",
                 item_version_ref: "item_version_ref",
-                payload_digest: "sha256:response",
+                payload_digest:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             },
         )
         .unwrap();
@@ -52,7 +56,7 @@ fn result_for(request: &ScoringRequest) -> ScoringResult {
     ScoringResult::new(
         "scoring_result_ref",
         request,
-        "sha256:engine",
+        ENGINE_DIGEST,
         vec![ScoreObservation::scored("construct_ref", 1.0, Some(0.2)).unwrap()],
     )
     .unwrap()

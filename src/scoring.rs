@@ -12,6 +12,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const SUPPORTED_OUTPUT_SCHEMA_VERSION: u16 = 1;
+const SHA256_PREFIX: &str = "sha256:";
+const SHA256_HEX_LENGTH: usize = 64;
 
 /// Borrowed fields needed to dispatch one immutable response snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -283,12 +285,17 @@ pub struct ScoringResult {
 impl ScoringResult {
     /// Create an immutable scoring result without recomputing product-side scores.
     ///
+    /// The engine artifact is immutable provenance, not a display label. ADR-0010 requires
+    /// published artifacts to be content-addressed by cryptographic digest, so this boundary
+    /// accepts the canonical `sha256:` prefix followed by exactly 64 lowercase hexadecimal bytes.
+    ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for blank identity or
-    /// engine provenance, [`ScoringContractError::EmptyObservationSet`] when no
-    /// construct observation exists, or [`ScoringContractError::DuplicateConstruct`]
-    /// when a construct appears more than once after reference normalization.
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank result identity,
+    /// [`ScoringContractError::InvalidEngineArtifactDigest`] when engine provenance is not a
+    /// canonical SHA-256 digest, [`ScoringContractError::EmptyObservationSet`] when no construct
+    /// observation exists, or [`ScoringContractError::DuplicateConstruct`] when a construct
+    /// appears more than once after reference normalization.
     pub fn new(
         scoring_result_ref: impl Into<String>,
         request: &ScoringRequest,
@@ -298,7 +305,7 @@ impl ScoringResult {
         let scoring_result_ref = scoring_result_ref.into();
         let scoring_result_ref = required_reference(&scoring_result_ref)?;
         let engine_artifact_digest = engine_artifact_digest.into();
-        let engine_artifact_digest = required_reference(&engine_artifact_digest)?;
+        let engine_artifact_digest = required_sha256_digest(&engine_artifact_digest)?;
         if observations.is_empty() {
             return Err(ScoringContractError::EmptyObservationSet);
         }
@@ -370,6 +377,8 @@ pub enum ScoringContractError {
     ResponseSnapshotMismatch,
     /// The requested output schema major is not supported by this runtime.
     UnsupportedOutputSchemaVersion,
+    /// Engine provenance is not canonical lowercase SHA-256 evidence.
+    InvalidEngineArtifactDigest,
     /// A numeric score is NaN or infinite.
     InvalidScore,
     /// A score standard error is negative, NaN, or infinite.
@@ -399,6 +408,9 @@ impl Display for ScoringContractError {
             Self::UnsupportedOutputSchemaVersion => {
                 formatter.write_str("requested scoring output schema version is unsupported")
             }
+            Self::InvalidEngineArtifactDigest => formatter.write_str(
+                "scoring engine artifact digest must be sha256: followed by 64 lowercase hexadecimal characters",
+            ),
             Self::InvalidScore => formatter.write_str("score values must be finite"),
             Self::InvalidStandardError => {
                 formatter.write_str("score standard errors must be finite and non-negative")
@@ -419,4 +431,18 @@ impl Error for ScoringContractError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
     normalized_reference(reference).ok_or(ScoringContractError::EmptyReference)
+}
+
+fn required_sha256_digest(digest: &str) -> Result<&str, ScoringContractError> {
+    let Some(hex) = digest.strip_prefix(SHA256_PREFIX) else {
+        return Err(ScoringContractError::InvalidEngineArtifactDigest);
+    };
+    if hex.len() != SHA256_HEX_LENGTH
+        || !hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(ScoringContractError::InvalidEngineArtifactDigest);
+    }
+    Ok(digest)
 }

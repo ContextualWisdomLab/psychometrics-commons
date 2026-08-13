@@ -132,6 +132,8 @@ pub enum WriteError {
     InvalidReference,
     /// A required response-payload digest was blank.
     EmptyReference,
+    /// A nonblank response-payload digest was not canonical lowercase SHA-256 evidence.
+    InvalidPayloadDigest,
     /// A client idempotency reference was reused for different response content.
     IdempotencyConflict,
     /// A server event reference was reused for a distinct response event.
@@ -151,6 +153,8 @@ impl Display for WriteError {
             Self::EmptyReference => {
                 formatter.write_str("response payload digest must not be empty")
             }
+            Self::InvalidPayloadDigest => formatter
+                .write_str("response payload digest must be canonical lowercase sha256 evidence"),
             Self::IdempotencyConflict => formatter.write_str(
                 "client event reference was already used for different response content",
             ),
@@ -216,11 +220,14 @@ impl ResponseLedger {
     /// immutable event identity is returned. Every genuinely new logical response
     /// still requires an active session. Identity-bearing references are normalized
     /// before replay/conflict checks so surrounding whitespace cannot create aliases.
+    /// Response-payload identity must use exact `sha256:` plus 64 lowercase hexadecimal
+    /// characters, matching the durable `PostgreSQL` digest constraint.
     ///
     /// # Errors
     ///
     /// Returns [`WriteError::InvalidReference`] for blank or numeric-like identity
     /// references, [`WriteError::EmptyReference`] for a blank payload digest,
+    /// [`WriteError::InvalidPayloadDigest`] for a noncanonical digest,
     /// [`WriteError::IdempotencyConflict`] when a client event reference is reused
     /// with different item or payload content, [`WriteError::SessionNotActive`]
     /// when a new logical response is offered outside active collection, or
@@ -240,6 +247,9 @@ impl ResponseLedger {
         let payload_digest = request.payload_digest;
         if payload_digest.trim().is_empty() {
             return Err(WriteError::EmptyReference);
+        }
+        if !is_canonical_sha256(payload_digest) {
+            return Err(WriteError::InvalidPayloadDigest);
         }
 
         if let Some(existing) = self
@@ -342,4 +352,14 @@ impl ResponseLedger {
             last_sequence: self.events.last().map(ResponseEvent::sequence),
         })
     }
+}
+
+fn is_canonical_sha256(digest: &str) -> bool {
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }

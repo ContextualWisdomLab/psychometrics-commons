@@ -9,6 +9,9 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::session::SessionState;
 
+const ENGINE_DIGEST: &str =
+    "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+
 fn ledger_with_one_response() -> ResponseLedger {
     let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
@@ -18,7 +21,8 @@ fn ledger_with_one_response() -> ResponseLedger {
                 server_event_ref: "event_ref",
                 client_event_ref: "client_ref",
                 item_version_ref: "item_version_ref",
-                payload_digest: "sha256:response",
+                payload_digest:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             },
         )
         .unwrap();
@@ -112,13 +116,13 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
     let result = ScoringResult::new(
         " scoring_result_ref ",
         &request,
-        " sha256:engine ",
+        ENGINE_DIGEST,
         vec![ScoreObservation::scored(" construct_ref ", 1.0, None).unwrap()],
     )
     .unwrap();
 
     assert_eq!(result.scoring_result_ref(), "scoring_result_ref");
-    assert_eq!(result.engine_artifact_digest(), "sha256:engine");
+    assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].construct_ref(), "construct_ref");
 
     let duplicate = ResultSnapshot::new(
