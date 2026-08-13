@@ -4,6 +4,13 @@ use psychometrics_commons_runtime::narrative::{
     ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentIdentityError,
 };
 
+const RULE_DIGEST_A: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RULE_DIGEST_B: &str =
+    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+const SCORE_DIGEST_A: &str =
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
 fn input(score_identity: ScoreIdentity<'_>) -> StyleAssignmentIdentity<'_> {
     StyleAssignmentIdentity {
         score_identity,
@@ -11,7 +18,7 @@ fn input(score_identity: ScoreIdentity<'_>) -> StyleAssignmentIdentity<'_> {
         scoring_version_ref: "scoring_version_big_five_v1",
         norm_version_ref: Some("norm_version_reference_v1"),
         style_mapping_version_ref: "style_mapping_version_v1",
-        interpretation_rule_bundle_digest: "sha256:rule-bundle-a",
+        interpretation_rule_bundle_digest: RULE_DIGEST_A,
         locale: "en-US",
     }
 }
@@ -32,7 +39,8 @@ fn canonical_serialization_is_stable_and_self_delimiting() {
         b"norm_version_ref_present\0\0\0\0\0\0\0\x011".as_slice(),
         b"norm_version_ref\0\0\0\0\0\0\0\x19norm_version_reference_v1".as_slice(),
         b"style_mapping_version_ref\0\0\0\0\0\0\0\x18style_mapping_version_v1".as_slice(),
-        b"interpretation_rule_bundle_digest\0\0\0\0\0\0\0\x14sha256:rule-bundle-a".as_slice(),
+        b"interpretation_rule_bundle_digest\0\0\0\0\0\0\0\x47sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .as_slice(),
         b"locale\0\0\0\0\0\0\0\x05en-US".as_slice(),
     ]
     .concat();
@@ -48,7 +56,7 @@ fn every_behavior_affecting_field_changes_canonical_identity() {
 
     let variants = [
         input(ScoreIdentity::ScoreProfileRef("score_profile_beta")),
-        input(ScoreIdentity::CanonicalScorePayloadDigest("sha256:score-a")),
+        input(ScoreIdentity::CanonicalScorePayloadDigest(SCORE_DIGEST_A)),
         StyleAssignmentIdentity {
             instrument_version_ref: "instrument_version_ipip_big_five_en_v2",
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
@@ -70,7 +78,7 @@ fn every_behavior_affecting_field_changes_canonical_identity() {
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
         StyleAssignmentIdentity {
-            interpretation_rule_bundle_digest: "sha256:rule-bundle-b",
+            interpretation_rule_bundle_digest: RULE_DIGEST_B,
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
         StyleAssignmentIdentity {
@@ -96,7 +104,8 @@ fn opaque_references_are_normalized_but_exact_tokens_are_not() {
 
     for invalid in [
         StyleAssignmentIdentity {
-            interpretation_rule_bundle_digest: " sha256:rule-bundle-a ",
+            interpretation_rule_bundle_digest:
+                " sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ",
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
         StyleAssignmentIdentity {
@@ -104,7 +113,7 @@ fn opaque_references_are_normalized_but_exact_tokens_are_not() {
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         },
         input(ScoreIdentity::CanonicalScorePayloadDigest(
-            " sha256:score-a ",
+            " sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ",
         )),
     ] {
         assert_eq!(
@@ -147,7 +156,7 @@ fn noncanonical_exact_tokens_fail_closed() {
     for invalid in [
         input(ScoreIdentity::CanonicalScorePayloadDigest("")),
         input(ScoreIdentity::CanonicalScorePayloadDigest(
-            "sha256:score\0a",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\0",
         )),
         StyleAssignmentIdentity {
             interpretation_rule_bundle_digest: "   ",

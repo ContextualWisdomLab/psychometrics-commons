@@ -1,43 +1,45 @@
-//! Anonymous-first participant identity and optional account-link semantics.
+//! Anonymous-first participant identity and optional account-link lifecycle semantics.
 //!
-//! Psychometrics Commons owns stable operational participant references. Keyverse
-//! owns credentials and authentication proof. Linking records an identity issuer
-//! together with a provider-scoped subject: the subject is an account identifier
-//! that is only unique within that issuer. A proof artifact is durable evidence held
-//! outside this domain object; this module stores only an opaque reference to that
-//! evidence and never stores the credential itself. Opaque means the reference is a
-//! non-numeric identifier whose internal meaning is not interpreted by this module.
-//! Linking never replaces the historical product-owned participant identifier.
-//! Replay detection compares the supplied account-link event reference and evidence
-//! with the stored link. An exact replay is idempotent: retrying the same event with
-//! the same evidence succeeds without adding another history event or changing the
-//! current projection. Invalid or conflicting evidence fails closed without changing
-//! the existing link. Successful evidence is append-only: one event is added to
-//! domain history and callers receive only read-only access to that history. An
-//! audited lifecycle means any future unlink or relink must be a separate explicitly
-//! recorded operation; this primitive does not delete, edit, or silently replace a
-//! prior link.
+//! Psychometrics Commons owns the stable participant reference; Keyverse owns credentials and
+//! authentication proof. The **current projection** is only the external issuer/subject link that
+//! callers may use now. It is not the participant's historical identity. A successful link appends
+//! immutable audit evidence: a recorded event whose identity, proof references, subject, issuer,
+//! and server time are never edited in place. Ending a link appends a second event and clears only
+//! that current projection; it does not delete the participant, prior link evidence, or results.
+//!
+//! **Replay** means receiving a command whose event reference was already recorded. An exact
+//! replay is idempotent: the prior outcome is reused and the same logical event is not processed a
+//! second time. Reusing that reference with different evidence fails closed. A later relink is a
+//! new append-only link event. Historical replays are recognized from history and therefore cannot
+//! resurrect an ended link or revoke a newer current link. Server-authoritative lifecycle time may
+//! stay equal between events but must never move backwards.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-/// Fail-closed error returned by participant creation or account linking.
+/// Fail-closed error returned by participant identity-link lifecycle operations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AccountLinkError {
-    /// A participant, tenant, issuer, subject, event, or proof reference was invalid.
+    /// A participant, tenant, issuer, subject, event, proof, or lifecycle evidence reference was invalid.
     InvalidReference,
     /// A server-authoritative timestamp was zero.
     InvalidTimestamp,
-    /// Account linking was recorded before the participant existed.
+    /// Initial account linking was recorded before the participant existed.
     NonMonotonicTimestamp,
+    /// A later identity-link lifecycle event would move backwards in time.
+    NonMonotonicLifecycleTimestamp,
     /// The same proof reference was offered for both independent control claims.
     ProofReferenceReuse,
     /// The same account-link event reference was reused with different evidence.
     ConflictingReplay,
+    /// The same link-end event reference was reused with different evidence.
+    ConflictingLinkEndReplay,
     /// An already-linked participant was offered a new account-link identity.
     AlreadyLinked,
+    /// A link-end operation was requested while no current identity link existed.
+    NotLinked,
 }
 
 impl Display for AccountLinkError {
@@ -52,13 +54,20 @@ impl Display for AccountLinkError {
             Self::NonMonotonicTimestamp => {
                 "participant account-link time must not precede participant creation"
             }
+            Self::NonMonotonicLifecycleTimestamp => {
+                "participant identity-link lifecycle time must not move backwards"
+            }
             Self::ProofReferenceReuse => {
                 "anonymous and authenticated account-link proofs must use distinct references"
             }
             Self::ConflictingReplay => {
                 "participant account-link event was replayed with conflicting evidence"
             }
+            Self::ConflictingLinkEndReplay => {
+                "participant identity-link end event was replayed with conflicting evidence"
+            }
             Self::AlreadyLinked => "participant is already linked and cannot be rebound in place",
+            Self::NotLinked => "participant has no current identity link to end",
         })
     }
 }
@@ -67,14 +76,10 @@ impl Error for AccountLinkError {}
 
 /// Immutable audit evidence for one successful participant account link.
 ///
-/// A proof artifact is durable evidence that control was established; this value stores
-/// only the artifact reference, never the credential or proof bytes. Event, issuer,
-/// subject, and proof references are opaque: they are non-numeric identifiers whose
-/// internal meaning is not interpreted or rewritten here. The participant identifier
-/// remains owned by the enclosing [`ParticipantRecord`], so retaining this event cannot
-/// replace or renumber historical product identity. Successful events are retained in
-/// append-only history and exposed through read-only accessors, so callers cannot edit
-/// or remove prior audit evidence through this API.
+/// Immutable audit evidence is the append-only record used to explain what identity-link command
+/// was accepted later. [`Self::link_event_ref`] is the idempotency reference: an exact retry with
+/// the same event reference and evidence reuses this event instead of processing a second logical
+/// link. The event stores only opaque proof references, never credentials or proof bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountLinkEvent {
     link_event_ref: String,
@@ -86,10 +91,7 @@ pub struct AccountLinkEvent {
 }
 
 impl AccountLinkEvent {
-    /// Return the opaque event reference used for replay detection.
-    ///
-    /// Replay detection compares this stored reference with a retry. Matching reference
-    /// and evidence is treated as the same event; changed evidence is rejected.
+    /// Return the opaque event reference used for idempotent replay detection.
     #[must_use]
     pub fn link_event_ref(&self) -> &str {
         &self.link_event_ref
@@ -107,19 +109,13 @@ impl AccountLinkEvent {
         &self.subject_ref
     }
 
-    /// Return the reference to proof that controlled the anonymous participant session.
-    ///
-    /// The referenced proof artifact is stored elsewhere; this history stores only the
-    /// opaque reference and exposes it read-only.
+    /// Return the reference proving control of the anonymous participant session.
     #[must_use]
     pub fn anonymous_proof_ref(&self) -> &str {
         &self.anonymous_proof_ref
     }
 
-    /// Return the reference to proof that controlled the authenticated account.
-    ///
-    /// The referenced proof artifact is stored elsewhere; this history stores only the
-    /// opaque reference and exposes it read-only.
+    /// Return the reference proving control of the authenticated account.
     #[must_use]
     pub fn authenticated_proof_ref(&self) -> &str {
         &self.authenticated_proof_ref
@@ -129,6 +125,46 @@ impl AccountLinkEvent {
     #[must_use]
     pub const fn linked_at_unix_ms(&self) -> u64 {
         self.linked_at_unix_ms
+    }
+}
+
+/// Immutable audit evidence that a previously current identity link ended.
+///
+/// This record never edits the earlier [`AccountLinkEvent`]. `link_end_event_ref` is its
+/// idempotency reference, `linked_event_ref` identifies the exact historical link that ended, and
+/// `evidence_ref` points to the authorization/audit evidence held outside this domain object.
+/// Exact replay therefore confirms the already-recorded event rather than appending a duplicate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountLinkEndEvent {
+    link_end_event_ref: String,
+    linked_event_ref: String,
+    evidence_ref: String,
+    ended_at_unix_ms: u64,
+}
+
+impl AccountLinkEndEvent {
+    /// Return the opaque idempotency reference for this link-end event.
+    #[must_use]
+    pub fn link_end_event_ref(&self) -> &str {
+        &self.link_end_event_ref
+    }
+
+    /// Return the historical account-link event ended by this lifecycle event.
+    #[must_use]
+    pub fn linked_event_ref(&self) -> &str {
+        &self.linked_event_ref
+    }
+
+    /// Return the opaque authorization/audit evidence reference for ending the link.
+    #[must_use]
+    pub fn evidence_ref(&self) -> &str {
+        &self.evidence_ref
+    }
+
+    /// Return the server-authoritative time at which the current link ended.
+    #[must_use]
+    pub const fn ended_at_unix_ms(&self) -> u64 {
+        self.ended_at_unix_ms
     }
 }
 
@@ -145,6 +181,7 @@ pub struct ParticipantRecord {
     authenticated_proof_ref: Option<String>,
     linked_at_unix_ms: Option<u64>,
     link_history: Vec<AccountLinkEvent>,
+    link_end_history: Vec<AccountLinkEndEvent>,
 }
 
 impl ParticipantRecord {
@@ -152,9 +189,8 @@ impl ParticipantRecord {
     ///
     /// # Errors
     ///
-    /// Returns [`AccountLinkError::InvalidReference`] when participant or tenant
-    /// reference is blank/numeric-only and [`AccountLinkError::InvalidTimestamp`]
-    /// when `created_at_unix_ms` is zero.
+    /// Returns [`AccountLinkError::InvalidReference`] for an invalid participant or tenant
+    /// reference and [`AccountLinkError::InvalidTimestamp`] when creation time is zero.
     pub fn new_anonymous(
         participant_ref: &str,
         tenant_ref: &str,
@@ -174,6 +210,7 @@ impl ParticipantRecord {
             authenticated_proof_ref: None,
             linked_at_unix_ms: None,
             link_history: Vec::new(),
+            link_end_history: Vec::new(),
         })
     }
 
@@ -195,80 +232,73 @@ impl ParticipantRecord {
         self.created_at_unix_ms
     }
 
-    /// Return the identity issuer for the linked authenticated subject, when present.
+    /// Return the identity issuer for the currently linked subject, when present.
     #[must_use]
     pub fn linked_issuer_ref(&self) -> Option<&str> {
         self.linked_issuer_ref.as_deref()
     }
 
-    /// Return the authenticated account identifier within its issuer, when present.
-    ///
-    /// The same subject text may legitimately identify different accounts under
-    /// different issuers, so callers must interpret it together with
-    /// [`Self::linked_issuer_ref`].
+    /// Return the current authenticated account identifier within its issuer, when present.
     #[must_use]
     pub fn linked_subject_ref(&self) -> Option<&str> {
         self.linked_subject_ref.as_deref()
     }
 
-    /// Return the account-link event idempotency reference, when linked.
-    ///
-    /// Reusing this event reference with exactly the same evidence is a safe no-op;
-    /// reusing it with changed evidence is rejected.
+    /// Return the current account-link event reference, when linked.
     #[must_use]
     pub fn link_event_ref(&self) -> Option<&str> {
         self.link_event_ref.as_deref()
     }
 
-    /// Return proof that the caller controlled the anonymous participant session.
+    /// Return anonymous-session proof evidence for the current link.
     #[must_use]
     pub fn anonymous_proof_ref(&self) -> Option<&str> {
         self.anonymous_proof_ref.as_deref()
     }
 
-    /// Return proof that the caller controlled the authenticated Keyverse subject.
+    /// Return authenticated-subject proof evidence for the current link.
     #[must_use]
     pub fn authenticated_proof_ref(&self) -> Option<&str> {
         self.authenticated_proof_ref.as_deref()
     }
 
-    /// Return the server-authoritative account-link time, when linked.
+    /// Return the server-authoritative time of the current account link, when linked.
     #[must_use]
     pub const fn linked_at_unix_ms(&self) -> Option<u64> {
         self.linked_at_unix_ms
     }
 
-    /// Return append-only successful account-link audit history.
-    ///
-    /// Append-only means a successful first link adds one event and this API provides
-    /// no edit or delete operation for prior events. Exact idempotent replay is a retry
-    /// of the same event with the same evidence; it succeeds without adding a second
-    /// event. Rejected conflicting replay or rebinding never mutates this history. The
-    /// returned slice is read-only, so callers can inspect but cannot replace events.
+    /// Return append-only successful account-link history.
     #[must_use]
     pub fn link_history(&self) -> &[AccountLinkEvent] {
         &self.link_history
     }
 
+    /// Return append-only successful link-end history.
+    #[must_use]
+    pub fn link_end_history(&self) -> &[AccountLinkEndEvent] {
+        &self.link_end_history
+    }
+
     /// Link this stable participant identity to one issuer-scoped authenticated subject.
     ///
-    /// The issuer and subject together identify the external account; the subject is
-    /// only unique within its issuer. Both proof references are mandatory and must
-    /// differ because they point to separate evidence that the caller controlled the
-    /// anonymous participant and the authenticated account. Replaying the exact same
-    /// event and evidence is idempotent: it is a safe retry that succeeds without
-    /// changing state or appending history again. Reusing the event with changed issuer,
-    /// subject, proof, or time evidence fails closed and leaves the existing link
-    /// unchanged. Once linked, a different event also cannot silently rebind, or replace,
-    /// the participant's issuer/subject pair. An audited lifecycle requires any future
-    /// unlink or relink to be a separate explicitly recorded operation rather than an
-    /// in-place edit of this stored event. A successful first link appends one immutable
-    /// audit event before exposing the current-link projection.
+    /// Processing follows these steps:
+    ///
+    /// 1. normalize the opaque references and reject zero time;
+    /// 2. look through the full history for `link_event_ref`; an exact historical replay is a
+    ///    no-op, while the same reference with changed evidence fails closed;
+    /// 3. reject a new event while another link is currently projected instead of silently
+    ///    rebinding the participant in place;
+    /// 4. require independent anonymous/authenticated proof references and monotonic time; and
+    /// 5. append the new immutable event, then expose it as the current projection.
+    ///
+    /// A later relink is therefore possible only after a separately recorded link-end event, and
+    /// its server time cannot precede that prior lifecycle event.
     ///
     /// # Errors
     ///
-    /// Returns [`AccountLinkError`] for invalid evidence, proof-identity reuse,
-    /// zero/backward time, conflicting event replay, or attempted in-place rebinding.
+    /// Returns [`AccountLinkError`] for invalid evidence, proof-reference reuse, zero/backward
+    /// time, conflicting replay, or attempted in-place rebinding.
     pub fn link_account(
         &mut self,
         link_event_ref: &str,
@@ -287,27 +317,36 @@ impl ParticipantRecord {
             return Err(AccountLinkError::InvalidTimestamp);
         }
 
-        if let Some(existing_event_ref) = self.link_event_ref.as_deref() {
-            if existing_event_ref == link_event_ref {
-                return if self.linked_issuer_ref.as_deref() == Some(issuer_ref)
-                    && self.linked_subject_ref.as_deref() == Some(subject_ref)
-                    && self.anonymous_proof_ref.as_deref() == Some(anonymous_proof_ref)
-                    && self.authenticated_proof_ref.as_deref() == Some(authenticated_proof_ref)
-                    && self.linked_at_unix_ms == Some(linked_at_unix_ms)
-                {
-                    Ok(())
-                } else {
-                    Err(AccountLinkError::ConflictingReplay)
-                };
-            }
-            return Err(AccountLinkError::AlreadyLinked);
+        if let Some(existing) = self
+            .link_history
+            .iter()
+            .find(|event| event.link_event_ref == link_event_ref)
+        {
+            return if existing.issuer_ref == issuer_ref
+                && existing.subject_ref == subject_ref
+                && existing.anonymous_proof_ref == anonymous_proof_ref
+                && existing.authenticated_proof_ref == authenticated_proof_ref
+                && existing.linked_at_unix_ms == linked_at_unix_ms
+            {
+                Ok(())
+            } else {
+                Err(AccountLinkError::ConflictingReplay)
+            };
         }
 
+        if self.link_event_ref.is_some() {
+            return Err(AccountLinkError::AlreadyLinked);
+        }
         if anonymous_proof_ref == authenticated_proof_ref {
             return Err(AccountLinkError::ProofReferenceReuse);
         }
         if linked_at_unix_ms < self.created_at_unix_ms {
             return Err(AccountLinkError::NonMonotonicTimestamp);
+        }
+        if let Some(previous_end) = self.link_end_history.last() {
+            if linked_at_unix_ms < previous_end.ended_at_unix_ms {
+                return Err(AccountLinkError::NonMonotonicLifecycleTimestamp);
+            }
         }
 
         self.link_history.push(AccountLinkEvent {
@@ -324,6 +363,69 @@ impl ParticipantRecord {
         self.anonymous_proof_ref = Some(anonymous_proof_ref.to_owned());
         self.authenticated_proof_ref = Some(authenticated_proof_ref.to_owned());
         self.linked_at_unix_ms = Some(linked_at_unix_ms);
+        Ok(())
+    }
+
+    /// Record that the current external identity link ended while preserving all history.
+    ///
+    /// The method first recognizes exact historical replay by `link_end_event_ref`. That check is
+    /// deliberately performed before examining the current projection: replaying an older
+    /// already-recorded link-end event after a later relink must be a no-op, otherwise a delayed
+    /// duplicate could incorrectly clear the newer identity link. A genuinely new event requires
+    /// a current link, must not move server-authoritative lifecycle time backwards, appends an
+    /// immutable link-end record that points to the exact link event being ended, and only then
+    /// clears the current external projection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AccountLinkError`] for invalid evidence, zero/backward time, conflicting replay,
+    /// or when no current link exists.
+    pub fn record_link_end(
+        &mut self,
+        link_end_event_ref: &str,
+        evidence_ref: &str,
+        ended_at_unix_ms: u64,
+    ) -> Result<(), AccountLinkError> {
+        let link_end_event_ref = required_reference(link_end_event_ref)?;
+        let evidence_ref = required_reference(evidence_ref)?;
+        if ended_at_unix_ms == 0 {
+            return Err(AccountLinkError::InvalidTimestamp);
+        }
+
+        if let Some(existing) = self
+            .link_end_history
+            .iter()
+            .find(|event| event.link_end_event_ref == link_end_event_ref)
+        {
+            return if existing.evidence_ref == evidence_ref
+                && existing.ended_at_unix_ms == ended_at_unix_ms
+            {
+                Ok(())
+            } else {
+                Err(AccountLinkError::ConflictingLinkEndReplay)
+            };
+        }
+
+        let Some(linked_event_ref) = self.link_event_ref.as_deref() else {
+            return Err(AccountLinkError::NotLinked);
+        };
+        let linked_at_unix_ms = self.linked_at_unix_ms.unwrap_or(self.created_at_unix_ms);
+        if ended_at_unix_ms < linked_at_unix_ms {
+            return Err(AccountLinkError::NonMonotonicLifecycleTimestamp);
+        }
+
+        self.link_end_history.push(AccountLinkEndEvent {
+            link_end_event_ref: link_end_event_ref.to_owned(),
+            linked_event_ref: linked_event_ref.to_owned(),
+            evidence_ref: evidence_ref.to_owned(),
+            ended_at_unix_ms,
+        });
+        self.linked_issuer_ref = None;
+        self.linked_subject_ref = None;
+        self.link_event_ref = None;
+        self.anonymous_proof_ref = None;
+        self.authenticated_proof_ref = None;
+        self.linked_at_unix_ms = None;
         Ok(())
     }
 }

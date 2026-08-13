@@ -19,6 +19,7 @@ pub mod participant;
 pub mod postgres_integration;
 pub mod postgres_scoring_job;
 mod reference;
+pub mod research_release;
 pub mod response;
 pub mod result;
 pub mod scoring;
