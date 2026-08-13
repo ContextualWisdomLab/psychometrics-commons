@@ -1,3 +1,27 @@
+CREATE OR REPLACE FUNCTION item_delivery_reference_array_is_valid(reference_values TEXT[])
+RETURNS BOOLEAN
+LANGUAGE SQL
+IMMUTABLE
+PARALLEL SAFE
+SET search_path = pg_catalog
+AS $item_delivery_reference_array$
+    SELECT
+        COALESCE(
+            bool_and(
+                reference_value IS NOT NULL
+                AND reference_value = btrim(reference_value)
+                AND reference_value <> ''
+                AND NOT (
+                    reference_value ~ '[[:digit:]]'
+                    AND reference_value ~ '^[[:digit:]+,.eE-]+$'
+                )
+            ),
+            FALSE
+        )
+        AND COUNT(*) = COUNT(DISTINCT reference_value)
+    FROM unnest(reference_values) AS allowed_reference(reference_value);
+$item_delivery_reference_array$;
+
 CREATE TABLE IF NOT EXISTS item_delivery_ledger (
     session_ref TEXT CONSTRAINT item_delivery_ledger_session_ref_not_null NOT NULL
         CONSTRAINT item_delivery_ledger_session_ref_format_check CHECK (
@@ -29,6 +53,9 @@ CREATE TABLE IF NOT EXISTS item_delivery_ledger (
     allowed_item_version_refs TEXT[] CONSTRAINT item_delivery_ledger_allowed_items_not_null NOT NULL
         CONSTRAINT item_delivery_ledger_allowed_items_not_empty_check CHECK (
             cardinality(allowed_item_version_refs) > 0
+        )
+        CONSTRAINT item_delivery_ledger_allowed_items_format_check CHECK (
+            item_delivery_reference_array_is_valid(allowed_item_version_refs)
         ),
     created_at TIMESTAMPTZ CONSTRAINT item_delivery_ledger_created_at_not_null NOT NULL
         DEFAULT clock_timestamp(),
