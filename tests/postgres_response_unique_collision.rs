@@ -135,3 +135,42 @@ fn distinct_server_event_reusing_server_sequence_is_conflicting_replay() {
     let replay = one_event_ledger(session_ref, "server_event_new", "client_event_new");
     assert_conflict_rolls_back(&mut client, &replay, session_ref);
 }
+
+#[test]
+fn unrelated_unique_constraint_is_a_database_failure() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    client
+        .batch_execute(
+            "ALTER TABLE response_event \
+             ADD CONSTRAINT response_event_unrelated_item_unique UNIQUE (item_version_ref);",
+        )
+        .unwrap();
+    insert_existing_event(
+        &mut client,
+        "session_unrelated_unique",
+        "server_event_existing",
+        "client_event_existing",
+        7,
+    );
+
+    let mut colliding = ResponseLedger::new("session_unrelated_unique").unwrap();
+    colliding
+        .record(
+            SessionState::Active,
+            ResponseWrite {
+                server_event_ref: "server_event_new",
+                client_event_ref: "client_event_new",
+                item_version_ref: "item_version_existing",
+                payload_digest: DIGEST,
+            },
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_response_ledger(&mut transaction, &colliding),
+        Err(ResponsePersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
