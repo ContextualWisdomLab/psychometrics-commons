@@ -232,6 +232,38 @@ fn expire_processing_returns_pending_without_transferring_the_fence() {
 }
 
 #[test]
+fn expired_claim_local_completion_replay_remains_idempotent() {
+    let mut consumption = pending_consumption();
+    consumption.begin_processing(20_001, 21_000).unwrap();
+    consumption.expire_processing(21_000).unwrap();
+
+    assert_eq!(
+        consumption.complete(21_001, "completion_projection_applied", 0),
+        Ok(ConsumptionState::Completed)
+    );
+    assert_eq!(
+        consumption.complete(21_001, "completion_projection_applied", 0),
+        Ok(ConsumptionState::Completed)
+    );
+}
+
+#[test]
+fn expired_claim_local_quarantine_replay_remains_idempotent() {
+    let mut consumption = pending_consumption();
+    consumption.begin_processing(20_001, 21_000).unwrap();
+    consumption.expire_processing(21_000).unwrap();
+
+    assert_eq!(
+        consumption.quarantine(21_001, "poison_payload", 0),
+        Ok(ConsumptionState::Quarantined)
+    );
+    assert_eq!(
+        consumption.quarantine(21_001, "poison_payload", 0),
+        Ok(ConsumptionState::Quarantined)
+    );
+}
+
+#[test]
 fn expire_processing_allows_a_later_claim_with_a_new_fence() {
     let mut consumption = pending_consumption();
     assert_eq!(consumption.begin_processing(20_001, 21_000).unwrap(), 1);
