@@ -1,3 +1,5 @@
+//! Data-rights persist rejects `PostgreSQL` isolation other than read committed.
+
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
@@ -12,8 +14,10 @@ fn serializable_session_default_is_rejected() {
     let url = std::env::var("TEST_DATABASE_URL").unwrap();
     let mut db = Client::connect(&url, NoTls).unwrap();
     let schema = format!("data_rights_iso_{}", std::process::id());
-    db.batch_execute(&format!("CREATE SCHEMA {schema}; SET search_path TO {schema};"))
-        .unwrap();
+    db.batch_execute(&format!(
+        "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+    ))
+    .unwrap();
     apply_integration_migration(&mut db).unwrap();
     apply_data_rights_migration(&mut db).unwrap();
     db.batch_execute("SET default_transaction_isolation TO 'serializable'")
@@ -41,10 +45,13 @@ fn serializable_session_default_is_rejected() {
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     )
     .unwrap();
-    let targets = [DataRightsPropagationTarget::new("dependent_system_alpha", &event)];
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
 
-    let error = persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3)
-        .unwrap_err();
+    let error =
+        persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3).unwrap_err();
     assert!(matches!(
         &error,
         DataRightsPersistenceError::UnsupportedIsolationLevel

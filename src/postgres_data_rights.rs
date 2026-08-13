@@ -56,6 +56,8 @@ pub enum DataRightsPersistenceError {
     EmptyTargetSet,
     /// The same dependent system was supplied more than once.
     DuplicateTarget,
+    /// The same immutable outbox event identity was bound to more than one system.
+    DuplicateEventIdentity,
     /// A target event did not identify the exact request, tenant, source, kind, or time.
     InvalidPropagationEnvelope,
     /// The request identity was replayed with different immutable evidence or target set.
@@ -82,6 +84,9 @@ impl Display for DataRightsPersistenceError {
             }
             Self::DuplicateTarget => {
                 "data-rights propagation target set contains a duplicate system"
+            }
+            Self::DuplicateEventIdentity => {
+                "data-rights propagation target set reuses an event identity"
             }
             Self::InvalidPropagationEnvelope => {
                 "data-rights propagation event does not match the durable request"
@@ -201,7 +206,8 @@ fn persist_request_header(
     targets: &[DataRightsPropagationTarget<'_>],
     requested_at: i64,
 ) -> Result<DataRightsPersistenceDisposition, DataRightsPersistenceError> {
-    let inserted = transaction.execute(
+    transaction.batch_execute("SAVEPOINT data_rights_request_insert")?;
+    let inserted = match transaction.execute(
         "INSERT INTO data_rights_request_state (\
              request_ref, tenant_ref, participant_ref, request_kind, scope_ref, current_state,\
              requested_at_unix_ms, latest_event_at_unix_ms\
@@ -215,7 +221,17 @@ fn persist_request_header(
             &request.scope_ref(),
             &requested_at,
         ],
-    )?;
+    ) {
+        Ok(inserted) => {
+            transaction.batch_execute("RELEASE SAVEPOINT data_rights_request_insert")?;
+            inserted
+        }
+        Err(error) if is_unique_violation(&error) => {
+            transaction.batch_execute("ROLLBACK TO SAVEPOINT data_rights_request_insert")?;
+            0
+        }
+        Err(error) => return Err(error.into()),
+    };
     if inserted == 1 {
         return Ok(DataRightsPersistenceDisposition::Inserted);
     }
@@ -249,6 +265,7 @@ fn validate_targets(
         DataRightsRequestKind::Deletion => "data_rights.deletion.requested",
     };
     let mut systems = Vec::with_capacity(targets.len());
+    let mut event_refs = Vec::with_capacity(targets.len());
     for target in targets {
         let system = normalized_reference(target.dependent_system_ref)
             .ok_or(DataRightsPersistenceError::InvalidReference)?;
@@ -256,6 +273,11 @@ fn validate_targets(
             return Err(DataRightsPersistenceError::DuplicateTarget);
         }
         systems.push(system);
+        let event_ref = target.event.event_ref();
+        if event_refs.contains(&event_ref) {
+            return Err(DataRightsPersistenceError::DuplicateEventIdentity);
+        }
+        event_refs.push(event_ref);
         let event = target.event;
         if event.source() != SOURCE_REF
             || event.tenant_ref() != request.tenant_ref()
@@ -295,6 +317,10 @@ fn stored_targets_match(
                 && row.get::<_, String>(2) == target.event.event_ref()
         })
     }))
+}
+
+fn is_unique_violation(error: &postgres::Error) -> bool {
+    error.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION)
 }
 
 fn require_read_committed(

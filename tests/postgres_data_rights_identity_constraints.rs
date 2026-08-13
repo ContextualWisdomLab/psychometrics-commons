@@ -1,3 +1,5 @@
+//! Stored data-rights request identity remains opaque and non-numeric.
+
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migration;
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
@@ -7,8 +9,10 @@ fn request_reference_must_remain_opaque_in_storage() {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut db = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     let schema = format!("data_rights_identity_{}", std::process::id());
-    db.batch_execute(&format!("CREATE SCHEMA {schema}; SET search_path TO {schema};"))
-        .unwrap();
+    db.batch_execute(&format!(
+        "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+    ))
+    .unwrap();
     apply_integration_migration(&mut db).unwrap();
     apply_data_rights_migration(&mut db).unwrap();
 

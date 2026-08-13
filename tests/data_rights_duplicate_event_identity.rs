@@ -1,3 +1,5 @@
+//! Shared outbox event identity cannot fan out to two dependent systems.
+
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
 use psychometrics_commons_runtime::integration::IntegrationEvent;

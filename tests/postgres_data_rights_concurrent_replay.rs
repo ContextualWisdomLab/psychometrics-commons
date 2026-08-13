@@ -1,3 +1,5 @@
+//! Concurrent data-rights persist replay is exactly one insert plus duplicates.
+
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
@@ -11,12 +13,8 @@ use std::thread;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn run_worker(
-    url: String,
-    schema: String,
-    barrier: Arc<Barrier>,
-) -> DataRightsPersistenceDisposition {
-    let mut db = Client::connect(&url, NoTls).unwrap();
+fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPersistenceDisposition {
+    let mut db = Client::connect(url, NoTls).unwrap();
     db.batch_execute(&format!("SET search_path TO {schema}"))
         .unwrap();
     let request = DataRightsRequest::new(
@@ -67,20 +65,18 @@ fn concurrent_exact_first_write_is_idempotent() {
         let barrier = Arc::clone(&barrier);
         let url = url.clone();
         let schema = schema.clone();
-        thread::spawn(move || run_worker(url, schema, barrier))
+        thread::spawn(move || run_worker(&url, &schema, &barrier))
     };
     let second = {
         let barrier = Arc::clone(&barrier);
         let url = url.clone();
         let schema = schema.clone();
-        thread::spawn(move || run_worker(url, schema, barrier))
+        thread::spawn(move || run_worker(&url, &schema, &barrier))
     };
     barrier.wait();
 
     let mut outcomes = vec![first.join().unwrap(), second.join().unwrap()];
-    outcomes.sort_by_key(|value| {
-        matches!(value, DataRightsPersistenceDisposition::Duplicate)
-    });
+    outcomes.sort_by_key(|value| matches!(value, DataRightsPersistenceDisposition::Duplicate));
     assert_eq!(
         outcomes,
         vec![
