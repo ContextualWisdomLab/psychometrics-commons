@@ -2,9 +2,10 @@
 //!
 //! Session state is server-authoritative. Clients submit commands and the
 //! runtime decides whether a transition is legal; clients never submit an
-//! arbitrary target state. Duplicate commands that represent the transition
-//! already applied are idempotent. Session creation pins the exact immutable
-//! published instrument release and locale before lifecycle transitions begin.
+//! arbitrary target state. Accepted commands carry server-issued replay identity
+//! and ordering so an exact retransmission returns its original outcome without
+//! rewinding later state. Session creation pins the exact immutable published
+//! instrument release, content digest, and locale before lifecycle transitions begin.
 
 use crate::instrument::InstrumentRelease;
 use crate::reference::normalized_reference;
@@ -87,9 +88,17 @@ impl Display for SessionCreationError {
 
 impl Error for SessionCreationError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AcceptedSessionCommand {
+    command_ref: String,
+    sequence: u64,
+    command: SessionCommand,
+    resulting_state: SessionState,
+}
+
 /// Immutable creation identity and current lifecycle state for one assessment session.
 ///
-/// The session copies only release/version/locale identity from an already-validated
+/// The session copies release/version/content-digest/locale identity from an already-validated
 /// [`InstrumentRelease`]. It does not duplicate instrument publication evidence rules.
 /// Suspending or retiring the release later blocks *new* sessions but does not rewrite
 /// the provenance of a session that was validly created while the release was published.
@@ -99,9 +108,11 @@ pub struct AssessmentSession {
     participant_ref: String,
     instrument_release_ref: String,
     instrument_version_ref: String,
+    instrument_release_content_digest: String,
     locale: String,
     created_at_unix_ms: u64,
     state: SessionState,
+    accepted_commands: Vec<AcceptedSessionCommand>,
 }
 
 impl AssessmentSession {
@@ -144,9 +155,11 @@ impl AssessmentSession {
             participant_ref: participant_ref.to_owned(),
             instrument_release_ref: release.manifest().release_ref().to_owned(),
             instrument_version_ref: release.manifest().instrument_version_ref().to_owned(),
+            instrument_release_content_digest: release.manifest().content_digest().to_owned(),
             locale: release.manifest().locale().to_owned(),
             created_at_unix_ms,
             state: SessionState::Created,
+            accepted_commands: Vec::new(),
         })
     }
 
@@ -174,6 +187,12 @@ impl AssessmentSession {
         &self.instrument_version_ref
     }
 
+    /// Return the canonical content digest of the immutable release pinned at creation.
+    #[must_use]
+    pub fn instrument_release_content_digest(&self) -> &str {
+        &self.instrument_release_content_digest
+    }
+
     /// Return the exact assessment-content locale pinned at creation.
     #[must_use]
     pub fn locale(&self) -> &str {
@@ -192,20 +211,65 @@ impl AssessmentSession {
         self.state
     }
 
-    /// Apply one lifecycle command to this aggregate's server-authoritative state.
+    /// Apply one identified lifecycle command to this aggregate's server-authoritative state.
     ///
-    /// Creation provenance is immutable: only the lifecycle state changes. Duplicate
-    /// commands retain the idempotency semantics of [`transition`].
+    /// New commands must carry a normalized opaque server command reference and a positive,
+    /// strictly increasing sequence. An exact replay of an accepted command returns the state
+    /// produced by that original command but does not mutate the aggregate's current state.
+    /// Reusing a command reference with different sequence or command evidence fails closed.
+    /// Creation provenance never changes.
     ///
     /// # Errors
     ///
-    /// Returns [`TransitionError`] when the command is not legal from the current state.
+    /// Returns [`TransitionError`] for malformed command identity, invalid ordering,
+    /// conflicting replay evidence, or a lifecycle command not legal from the current state.
     pub fn apply_command(
         &mut self,
+        command_ref: &str,
+        sequence: u64,
         command: SessionCommand,
     ) -> Result<SessionState, TransitionError> {
+        let command_ref = normalized_reference(command_ref).ok_or_else(|| {
+            TransitionError::new(self.state, command, TransitionErrorKind::InvalidReference)
+        })?;
+
+        if let Some(accepted) = self
+            .accepted_commands
+            .iter()
+            .find(|accepted| accepted.command_ref == command_ref)
+        {
+            return if accepted.sequence == sequence && accepted.command == command {
+                Ok(accepted.resulting_state)
+            } else {
+                Err(TransitionError::new(
+                    self.state,
+                    command,
+                    TransitionErrorKind::ConflictingReplay,
+                ))
+            };
+        }
+
+        if sequence == 0
+            || self
+                .accepted_commands
+                .last()
+                .is_some_and(|accepted| sequence <= accepted.sequence)
+        {
+            return Err(TransitionError::new(
+                self.state,
+                command,
+                TransitionErrorKind::InvalidSequence,
+            ));
+        }
+
         let next = transition(self.state, command)?;
         self.state = next;
+        self.accepted_commands.push(AcceptedSessionCommand {
+            command_ref: command_ref.to_owned(),
+            sequence,
+            command,
+            resulting_state: next,
+        });
         Ok(next)
     }
 }
@@ -236,16 +300,35 @@ pub enum SessionCommand {
     Invalidate,
 }
 
-/// Error returned when a command is not legal for the current session state.
+/// Stable reason category for a rejected identified session command.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum TransitionErrorKind {
+    /// The server command reference was blank or numeric-like rather than opaque.
+    InvalidReference,
+    /// The server command sequence was zero or did not advance beyond accepted commands.
+    InvalidSequence,
+    /// An accepted command reference was replayed with different immutable evidence.
+    ConflictingReplay,
+    /// The lifecycle command is not valid from the aggregate's current state.
+    InvalidTransition,
+}
+
+/// Error returned when an identified command cannot be safely applied.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TransitionError {
     state: SessionState,
     command: SessionCommand,
+    kind: TransitionErrorKind,
 }
 
 impl TransitionError {
-    const fn new(state: SessionState, command: SessionCommand) -> Self {
-        Self { state, command }
+    const fn new(state: SessionState, command: SessionCommand, kind: TransitionErrorKind) -> Self {
+        Self {
+            state,
+            command,
+            kind,
+        }
     }
 
     /// Return the state in which the rejected command was attempted.
@@ -259,15 +342,32 @@ impl TransitionError {
     pub const fn command(self) -> SessionCommand {
         self.command
     }
+
+    /// Return the stable rejection category.
+    #[must_use]
+    pub const fn kind(self) -> TransitionErrorKind {
+        self.kind
+    }
 }
 
 impl Display for TransitionError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "command {:?} is not valid while session is {:?}",
-            self.command, self.state
-        )
+        match self.kind {
+            TransitionErrorKind::InvalidReference => {
+                formatter.write_str("session command reference must be opaque and non-numeric")
+            }
+            TransitionErrorKind::InvalidSequence => {
+                formatter.write_str("session command sequence must be positive and strictly increasing")
+            }
+            TransitionErrorKind::ConflictingReplay => {
+                formatter.write_str("session command reference was replayed with conflicting evidence")
+            }
+            TransitionErrorKind::InvalidTransition => write!(
+                formatter,
+                "command {:?} is not valid while session is {:?}",
+                self.command, self.state
+            ),
+        }
     }
 }
 
@@ -276,8 +376,9 @@ impl Error for TransitionError {}
 /// Apply a session command to a server-authoritative lifecycle state.
 ///
 /// Duplicate commands that merely confirm an already-applied transition are
-/// idempotent. Other illegal transitions fail closed and preserve the source
-/// state in [`TransitionError`].
+/// idempotent at this state-only helper. Aggregate-level replay across intervening
+/// commands is enforced by [`AssessmentSession::apply_command`]. Other illegal
+/// transitions fail closed and preserve the source state in [`TransitionError`].
 ///
 /// # Errors
 ///
@@ -307,7 +408,13 @@ pub const fn transition(
         (Created | Active | Paused | Completed | Scoring | Scored | Invalidated, Invalidate) => {
             Invalidated
         }
-        _ => return Err(TransitionError::new(state, command)),
+        _ => {
+            return Err(TransitionError::new(
+                state,
+                command,
+                TransitionErrorKind::InvalidTransition,
+            ));
+        }
     };
 
     Ok(next)
