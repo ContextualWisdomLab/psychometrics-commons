@@ -1,9 +1,10 @@
 //! Immutable product result snapshots and supersession provenance.
 //!
 //! A result snapshot copies the exact scientific provenance and score
-//! observations returned by the scoring boundary. The product runtime may add
-//! presentation and consent references, but it does not recompute psychometric
-//! values or mutate a historical snapshot when norms or narratives change.
+//! observations returned by the scoring boundary. The product runtime also pins
+//! tenant, participant, presentation, and consent references, but it does not
+//! recompute psychometric values or mutate a historical snapshot when norms or
+//! narratives change.
 
 use crate::reference::normalized_reference;
 use crate::scoring::{ScoreObservation, ScoringRequest, ScoringResult};
@@ -16,6 +17,8 @@ use std::fmt::{Display, Formatter};
 pub struct ResultSnapshotInput<'a> {
     /// New opaque result-snapshot reference.
     pub result_snapshot_ref: &'a str,
+    /// Product tenant that authoritatively scopes the participant/result resource.
+    pub tenant_ref: &'a str,
     /// Product participant that owns the personal result.
     pub participant_ref: &'a str,
     /// Exact approved narrative-rule or deterministic-template version.
@@ -32,6 +35,7 @@ pub struct ResultSnapshotInput<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResultSnapshot {
     snapshot_ref: String,
+    tenant_ref: String,
     participant_ref: String,
     scoring_result_ref: String,
     session_ref: String,
@@ -54,14 +58,18 @@ impl ResultSnapshot {
     /// Create a result snapshot by copying the scoring request and engine output.
     ///
     /// All product-owned references are normalized before they become identity-
-    /// bearing state. Scientific provenance is copied verbatim from the already
-    /// validated scoring request/result boundary.
+    /// bearing state. The explicit tenant reference remains part of immutable result
+    /// provenance so a participant/result identifier can never imply a default tenant.
+    /// Transport authorization must still derive tenant authority from authenticated
+    /// product context rather than trusting this value from an unverified client body.
+    /// Scientific provenance is copied verbatim from the already validated scoring
+    /// request/result boundary.
     ///
     /// # Errors
     ///
     /// Returns [`ResultSnapshotError::ScoringRequestMismatch`] when `result`
     /// belongs to another scoring request, [`ResultSnapshotError::EmptyReference`]
-    /// for any blank required/supersession/consent reference,
+    /// for any invalid required/supersession/consent reference,
     /// [`ResultSnapshotError::MissingConsentSnapshot`] when no consent evidence
     /// is supplied, [`ResultSnapshotError::DuplicateConsentSnapshot`] when the
     /// same normalized consent reference appears more than once,
@@ -78,6 +86,7 @@ impl ResultSnapshot {
         }
 
         let snapshot_ref = required_reference(input.result_snapshot_ref)?;
+        let tenant_ref = required_reference(input.tenant_ref)?;
         let participant_ref = required_reference(input.participant_ref)?;
         let narrative_version_ref = required_reference(input.narrative_version_ref)?;
         if input.consent_snapshot_refs.is_empty() {
@@ -105,6 +114,7 @@ impl ResultSnapshot {
 
         Ok(Self {
             snapshot_ref: snapshot_ref.to_owned(),
+            tenant_ref: tenant_ref.to_owned(),
             participant_ref: participant_ref.to_owned(),
             scoring_result_ref: result.scoring_result_ref().to_owned(),
             session_ref: request.session_ref().to_owned(),
@@ -128,6 +138,12 @@ impl ResultSnapshot {
     #[must_use]
     pub fn result_snapshot_ref(&self) -> &str {
         &self.snapshot_ref
+    }
+
+    /// Return the product tenant that scopes this result resource.
+    #[must_use]
+    pub fn tenant_ref(&self) -> &str {
+        &self.tenant_ref
     }
 
     /// Return the product participant that owns this personal result.
@@ -231,7 +247,7 @@ impl ResultSnapshot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResultSnapshotError {
-    /// A required or supplied optional reference is blank.
+    /// A required or supplied optional reference is blank or numeric-like.
     EmptyReference,
     /// Result publication was attempted without any consent snapshot evidence.
     MissingConsentSnapshot,
@@ -249,7 +265,7 @@ impl Display for ResultSnapshotError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyReference => {
-                formatter.write_str("result snapshot references must not be empty")
+                formatter.write_str("result snapshot references must be opaque non-numeric values")
             }
             Self::MissingConsentSnapshot => formatter
                 .write_str("result snapshots require at least one consent snapshot reference"),
