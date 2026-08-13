@@ -461,32 +461,21 @@ fn sha256(message: &[u8]) -> [u8; 32] {
             schedule_index += 1;
         }
 
-        let [
-            mut working_a,
-            mut working_b,
-            mut working_c,
-            mut working_d,
-            mut working_e,
-            mut working_f,
-            mut working_g,
-            mut working_h,
-        ] = state;
+        let [mut working_a, mut working_b, mut working_c, mut working_d, mut working_e, mut working_f, mut working_g, mut working_h] =
+            state;
         for (&round_constant, &word) in SHA256_ROUND_CONSTANTS.iter().zip(schedule.iter()) {
-            let sum1 = working_e.rotate_right(6)
-                ^ working_e.rotate_right(11)
-                ^ working_e.rotate_right(25);
+            let sum1 =
+                working_e.rotate_right(6) ^ working_e.rotate_right(11) ^ working_e.rotate_right(25);
             let choose = (working_e & working_f) ^ ((!working_e) & working_g);
             let temporary1 = working_h
                 .wrapping_add(sum1)
                 .wrapping_add(choose)
                 .wrapping_add(round_constant)
                 .wrapping_add(word);
-            let sum0 = working_a.rotate_right(2)
-                ^ working_a.rotate_right(13)
-                ^ working_a.rotate_right(22);
-            let majority = (working_a & working_b)
-                ^ (working_a & working_c)
-                ^ (working_b & working_c);
+            let sum0 =
+                working_a.rotate_right(2) ^ working_a.rotate_right(13) ^ working_a.rotate_right(22);
+            let majority =
+                (working_a & working_b) ^ (working_a & working_c) ^ (working_b & working_c);
             let temporary2 = sum0.wrapping_add(majority);
 
             working_h = working_g;
