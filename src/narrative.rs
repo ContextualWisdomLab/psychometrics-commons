@@ -461,37 +461,52 @@ fn sha256(message: &[u8]) -> [u8; 32] {
             schedule_index += 1;
         }
 
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        let [
+            mut working_a,
+            mut working_b,
+            mut working_c,
+            mut working_d,
+            mut working_e,
+            mut working_f,
+            mut working_g,
+            mut working_h,
+        ] = state;
         for (&round_constant, &word) in SHA256_ROUND_CONSTANTS.iter().zip(schedule.iter()) {
-            let sum1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let choose = (e & f) ^ ((!e) & g);
-            let temporary1 = h
+            let sum1 = working_e.rotate_right(6)
+                ^ working_e.rotate_right(11)
+                ^ working_e.rotate_right(25);
+            let choose = (working_e & working_f) ^ ((!working_e) & working_g);
+            let temporary1 = working_h
                 .wrapping_add(sum1)
                 .wrapping_add(choose)
                 .wrapping_add(round_constant)
                 .wrapping_add(word);
-            let sum0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let sum0 = working_a.rotate_right(2)
+                ^ working_a.rotate_right(13)
+                ^ working_a.rotate_right(22);
+            let majority = (working_a & working_b)
+                ^ (working_a & working_c)
+                ^ (working_b & working_c);
             let temporary2 = sum0.wrapping_add(majority);
 
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(temporary1);
-            d = c;
-            c = b;
-            b = a;
-            a = temporary1.wrapping_add(temporary2);
+            working_h = working_g;
+            working_g = working_f;
+            working_f = working_e;
+            working_e = working_d.wrapping_add(temporary1);
+            working_d = working_c;
+            working_c = working_b;
+            working_b = working_a;
+            working_a = temporary1.wrapping_add(temporary2);
         }
 
-        state[0] = state[0].wrapping_add(a);
-        state[1] = state[1].wrapping_add(b);
-        state[2] = state[2].wrapping_add(c);
-        state[3] = state[3].wrapping_add(d);
-        state[4] = state[4].wrapping_add(e);
-        state[5] = state[5].wrapping_add(f);
-        state[6] = state[6].wrapping_add(g);
-        state[7] = state[7].wrapping_add(h);
+        state[0] = state[0].wrapping_add(working_a);
+        state[1] = state[1].wrapping_add(working_b);
+        state[2] = state[2].wrapping_add(working_c);
+        state[3] = state[3].wrapping_add(working_d);
+        state[4] = state[4].wrapping_add(working_e);
+        state[5] = state[5].wrapping_add(working_f);
+        state[6] = state[6].wrapping_add(working_g);
+        state[7] = state[7].wrapping_add(working_h);
     }
 
     let mut digest = [0_u8; 32];
