@@ -12,6 +12,7 @@ const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 
 fn manifest() -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
@@ -70,7 +71,7 @@ fn published_release() -> InstrumentRelease {
     let mut release = InstrumentRelease::new(manifest(), 10_000).unwrap();
     release
         .apply_command(
-            "submit_review_session_binding_event",
+            "publication_review_f9f86084",
             PublicationCommand::SubmitReview,
             10_100,
         )
@@ -80,7 +81,7 @@ fn published_release() -> InstrumentRelease {
         .unwrap();
     release
         .apply_command(
-            "publish_session_binding_event",
+            "publication_publish_635a7491",
             PublicationCommand::Publish,
             10_200,
         )
@@ -92,21 +93,25 @@ fn published_release() -> InstrumentRelease {
 fn published_release_binds_created_session_to_exact_release_and_locale() {
     let release = published_release();
     let session = AssessmentSession::new(
-        "assessment_session_example",
-        "assessment_participant_example",
+        "ses_02fe09e373504b7986ae78491116edbd",
+        PARTICIPANT_REF,
         &release,
         "ko-KR",
         20_000,
     )
     .unwrap();
 
-    assert_eq!(session.session_ref(), "assessment_session_example");
-    assert_eq!(session.participant_ref(), "assessment_participant_example");
+    assert_eq!(
+        session.session_ref(),
+        "ses_02fe09e373504b7986ae78491116edbd"
+    );
+    assert_eq!(session.participant_ref(), PARTICIPANT_REF);
     assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
     assert_eq!(
         session.instrument_version_ref(),
         "instrument_version_big_five_ko_v1"
     );
+    assert_eq!(session.instrument_release_content_digest(), VALID_DIGEST);
     assert_eq!(session.locale(), "ko-KR");
     assert_eq!(session.created_at_unix_ms(), 20_000);
     assert_eq!(session.state(), SessionState::Created);
@@ -117,9 +122,47 @@ fn session_creation_rejects_nonpublished_release_and_locale_mismatch() {
     let draft = InstrumentRelease::new(manifest(), 10_000).unwrap();
     assert_eq!(
         AssessmentSession::new(
-            "assessment_session_draft",
-            "assessment_participant_example",
+            "ses_6ce2f3b539ce49dd84606000a9fe0cf1",
+            PARTICIPANT_REF,
             &draft,
+            "ko-KR",
+            20_000,
+        ),
+        Err(SessionCreationError::InstrumentReleaseUnavailable)
+    );
+
+    let mut suspended = published_release();
+    suspended
+        .apply_command(
+            "publication_suspend_742f8862",
+            PublicationCommand::Suspend,
+            10_300,
+        )
+        .unwrap();
+    assert_eq!(
+        AssessmentSession::new(
+            "ses_65dbb7b745154f3ea252cc11ce419c3b",
+            PARTICIPANT_REF,
+            &suspended,
+            "ko-KR",
+            20_000,
+        ),
+        Err(SessionCreationError::InstrumentReleaseUnavailable)
+    );
+
+    let mut retired = published_release();
+    retired
+        .apply_command(
+            "publication_retire_853f9973",
+            PublicationCommand::Retire,
+            10_300,
+        )
+        .unwrap();
+    assert_eq!(
+        AssessmentSession::new(
+            "ses_8e6ecbd3d4e64f019e4526d64d0d6288",
+            PARTICIPANT_REF,
+            &retired,
             "ko-KR",
             20_000,
         ),
@@ -129,8 +172,8 @@ fn session_creation_rejects_nonpublished_release_and_locale_mismatch() {
     let published = published_release();
     assert_eq!(
         AssessmentSession::new(
-            "assessment_session_wrong_locale",
-            "assessment_participant_example",
+            "ses_ae8463e84a894610a49e968d6de2e8e9",
+            PARTICIPANT_REF,
             &published,
             "en-US",
             20_000,
@@ -143,18 +186,12 @@ fn session_creation_rejects_nonpublished_release_and_locale_mismatch() {
 fn session_creation_rejects_invalid_identity_and_timestamp() {
     let release = published_release();
     assert_eq!(
-        AssessmentSession::new(
-            "12345",
-            "assessment_participant_example",
-            &release,
-            "ko-KR",
-            20_000,
-        ),
+        AssessmentSession::new("12345", PARTICIPANT_REF, &release, "ko-KR", 20_000),
         Err(SessionCreationError::InvalidReference)
     );
     assert_eq!(
         AssessmentSession::new(
-            "assessment_session_example",
+            "ses_04d76c1b48df4210bd61027fe292f63d",
             "12345",
             &release,
             "ko-KR",
@@ -164,8 +201,8 @@ fn session_creation_rejects_invalid_identity_and_timestamp() {
     );
     assert_eq!(
         AssessmentSession::new(
-            "assessment_session_example",
-            "assessment_participant_example",
+            "ses_1594e879cb0749a1a373d74d82bbdbcf",
+            PARTICIPANT_REF,
             &release,
             "ko-KR",
             0,
