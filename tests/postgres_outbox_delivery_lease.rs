@@ -11,12 +11,24 @@ use psychometrics_commons_runtime::postgres_integration::{
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SCHEMA: &str = "outbox_delivery_lease_test";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4C53;
 
-fn test_client() -> Client {
+fn database_test_guard() -> Client {
+    let mut client = connect_client();
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL outbox-lease test advisory lock should be acquired");
+    client
+}
+
+fn connect_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn test_client() -> Client {
+    let mut client = connect_client();
     client
         .batch_execute(&format!(
             "CREATE SCHEMA IF NOT EXISTS {SCHEMA}; SET search_path TO {SCHEMA};"
@@ -100,6 +112,7 @@ fn lease_row(client: &mut Client, event_ref: &str) -> (Option<String>, Option<i6
 
 #[test]
 fn expired_delivery_lease_recovers_and_reclaim_issues_next_fence() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -143,6 +156,7 @@ fn expired_delivery_lease_recovers_and_reclaim_issues_next_fence() {
 
 #[test]
 fn fenced_retryable_failure_clears_lease_for_the_next_claim() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -188,6 +202,7 @@ fn fenced_retryable_failure_clears_lease_for_the_next_claim() {
 
 #[test]
 fn claim_does_not_steal_an_unrecovered_expired_lease() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -216,6 +231,7 @@ fn claim_does_not_steal_an_unrecovered_expired_lease() {
 
 #[test]
 fn live_lease_blocks_unfenced_attempt_and_matching_fence_delivers() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -272,6 +288,7 @@ fn live_lease_blocks_unfenced_attempt_and_matching_fence_delivers() {
 
 #[test]
 fn unexpired_lease_and_missing_or_unleased_outbox_fail_closed() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -350,6 +367,7 @@ fn unexpired_lease_and_missing_or_unleased_outbox_fail_closed() {
 
 #[test]
 fn fenced_attempt_validation_fails_closed() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -442,6 +460,7 @@ fn fenced_attempt_validation_fails_closed() {
 
 #[test]
 fn terminal_outbox_is_not_leaseable_and_expired_fenced_attempt_fails_closed() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -499,6 +518,7 @@ fn terminal_outbox_is_not_leaseable_and_expired_fenced_attempt_fails_closed() {
 
 #[test]
 fn fenced_attempt_replay_is_idempotent_and_conflicts_fail_closed() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -575,6 +595,7 @@ fn fenced_attempt_replay_is_idempotent_and_conflicts_fail_closed() {
 
 #[test]
 fn outbox_lease_operations_require_read_committed() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -617,6 +638,7 @@ fn outbox_lease_operations_require_read_committed() {
 
 #[test]
 fn missing_outbox_relation_is_a_database_failure() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
 
@@ -653,6 +675,7 @@ fn missing_outbox_relation_is_a_database_failure() {
 
 #[test]
 fn expiry_classify_select_failure_is_a_database_failure() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();

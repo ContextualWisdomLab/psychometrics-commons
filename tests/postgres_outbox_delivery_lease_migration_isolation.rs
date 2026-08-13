@@ -6,8 +6,7 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable")
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
 }
 
 fn constraint_count(client: &mut Client, schema_name: &str) -> i64 {

@@ -42,8 +42,14 @@ DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'integration_outbox_lease_presence_check'
+        FROM pg_constraint AS constraint_row
+        JOIN pg_class AS relation_row
+          ON relation_row.oid = constraint_row.conrelid
+        JOIN pg_namespace AS namespace_row
+          ON namespace_row.oid = relation_row.relnamespace
+        WHERE constraint_row.conname = 'integration_outbox_lease_presence_check'
+          AND relation_row.relname = 'integration_outbox'
+          AND namespace_row.nspname = current_schema()
     ) THEN
         ALTER TABLE integration_outbox
             ADD CONSTRAINT integration_outbox_lease_presence_check
