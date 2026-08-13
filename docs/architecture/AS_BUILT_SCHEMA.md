@@ -15,9 +15,13 @@ Protected main contains `migrations/0001_integration_delivery.sql` with the corr
 | `integration_outbox` | integration | Implemented subset |
 | `integration_delivery_attempt` | integration | Implemented subset |
 | `integration_inbox` | integration | Implemented subset |
-| `integration_consumption` | integration | Target only |
+| `integration_consumption` | integration | **Active PR** (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
+
+## Active PR inbox-consumption physical schema
+
+This branch's `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim of a crashed processing lease remains Target.
 
 ## Active PR #31 physical schema
 
