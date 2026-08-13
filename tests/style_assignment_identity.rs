@@ -176,10 +176,13 @@ fn locale_requires_bcp47_subtag_structure() {
         "ko-KR",
         "zh-Hant-TW",
         "es-419",
+        "zh-cmn-Hans-CN",
         "sl-rozaj-biske",
         "de-CH-1901",
         "en-US-u-ca-gregory",
         "zh-Hant-TW-x-private",
+        "i-klingon",
+        "x-private",
     ] {
         let identity = StyleAssignmentIdentity {
             locale: valid,
@@ -204,7 +207,7 @@ fn locale_requires_bcp47_subtag_structure() {
         "en-x",
         "en-US-Latn",
         "en-419-US",
-        "en-1234",
+        "en-12",
     ] {
         let identity = StyleAssignmentIdentity {
             locale: invalid,
