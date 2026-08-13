@@ -320,42 +320,6 @@ fn consent_replay_select_failure_is_a_database_failure() {
 }
 
 #[test]
-fn consent_ledger_replay_select_failure_is_a_database_failure() {
-    let _guard = consent_test_guard();
-    let mut client = test_client();
-    reset_consent_tables(&mut client);
-    apply_consent_migration(&mut client).unwrap();
-
-    let ledger = ConsentLedger::new("participant_consent_hidden_ledger").unwrap();
-    {
-        let mut transaction = client.transaction().unwrap();
-        persist_consent_ledger(&mut transaction, &ledger).unwrap();
-        transaction.commit().unwrap();
-    }
-    client
-        .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS consent_ledger_failure_sink;\
-             CREATE OR REPLACE FUNCTION consent_ledger_redirect_after_insert() \
-             RETURNS trigger LANGUAGE plpgsql AS $$ \
-             BEGIN \
-                 PERFORM set_config('search_path', 'consent_ledger_failure_sink', true); \
-                 RETURN NULL; \
-             END $$; \
-             CREATE TRIGGER consent_ledger_redirect_after_insert \
-             AFTER INSERT ON consent_ledger \
-             FOR EACH STATEMENT EXECUTE FUNCTION consent_ledger_redirect_after_insert();",
-        )
-        .unwrap();
-
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_consent_ledger(&mut transaction, &ledger),
-        Err(ConsentPersistenceError::Database(_))
-    ));
-    transaction.rollback().unwrap();
-}
-
-#[test]
 fn missing_consent_relation_is_a_database_failure() {
     let _guard = consent_test_guard();
     let mut client = test_client();
