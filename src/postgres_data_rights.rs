@@ -9,7 +9,7 @@ use crate::data_rights::{DataRightsRequest, DataRightsRequestKind, DataRightsSta
 use crate::integration::IntegrationEvent;
 use crate::postgres_integration::{enqueue_outbox_event, PersistenceError};
 use crate::reference::normalized_reference;
-use postgres::Client;
+use postgres::{Client, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -60,6 +60,8 @@ pub enum DataRightsPersistenceError {
     InvalidPropagationEnvelope,
     /// The request identity was replayed with different immutable evidence or target set.
     ConflictingReplay,
+    /// The configured transaction isolation cannot preserve the replay classifier.
+    UnsupportedIsolationLevel,
     /// A timestamp cannot be represented by the `PostgreSQL` bigint contract.
     ValueOutOfRange,
     /// Existing integration-outbox persistence rejected the event evidence.
@@ -86,6 +88,9 @@ impl Display for DataRightsPersistenceError {
             }
             Self::ConflictingReplay => {
                 "data-rights request was replayed with conflicting durable evidence"
+            }
+            Self::UnsupportedIsolationLevel => {
+                "data-rights persistence requires read committed isolation"
             }
             Self::ValueOutOfRange => {
                 "data-rights persistence value exceeds the PostgreSQL bigint range"
@@ -136,12 +141,15 @@ pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::
 /// back the request row, target rows, and any earlier event inserts together. It does not deliver
 /// events itself; the existing outbox worker owns retry, quarantine, and reconciliation behavior.
 /// Exact request replay is idempotent only when the target set and outbox evidence are unchanged.
+/// The insert-then-inspect first-write classifier requires `READ COMMITTED`, matching the existing
+/// integration outbox replay contract, and fails closed when the session default uses stronger
+/// isolation.
 ///
 /// # Errors
 ///
 /// Returns [`DataRightsPersistenceError`] for invalid request state, target identities, event
-/// envelope mismatch, conflicting replay, out-of-range time, integration persistence failure, or
-/// database failure.
+/// envelope mismatch, unsupported isolation, conflicting replay, out-of-range time, integration
+/// persistence failure, or database failure.
 pub fn persist_requested_data_rights_with_propagation(
     client: &mut Client,
     request: &DataRightsRequest,
@@ -159,42 +167,8 @@ pub fn persist_requested_data_rights_with_propagation(
     validate_targets(request, targets)?;
 
     let mut transaction = client.transaction()?;
-    let existing = transaction.query_opt(
-        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, current_state, \
-                requested_at_unix_ms, latest_event_at_unix_ms \
-         FROM data_rights_request_state WHERE request_ref = $1",
-        &[&request.request_ref()],
-    )?;
-
-    let disposition = if let Some(row) = existing {
-        let exact = row.get::<_, String>(0) == request.tenant_ref()
-            && row.get::<_, String>(1) == request.participant_ref()
-            && row.get::<_, String>(2) == request_kind_name(request.kind())
-            && row.get::<_, String>(3) == request.scope_ref()
-            && row.get::<_, String>(4) == "requested"
-            && row.get::<_, i64>(5) == requested_at
-            && row.get::<_, i64>(6) == requested_at;
-        if !exact || !stored_targets_match(&mut transaction, request, targets)? {
-            return Err(DataRightsPersistenceError::ConflictingReplay);
-        }
-        DataRightsPersistenceDisposition::Duplicate
-    } else {
-        transaction.execute(
-            "INSERT INTO data_rights_request_state (\
-                 request_ref, tenant_ref, participant_ref, request_kind, scope_ref, current_state,\
-                 requested_at_unix_ms, latest_event_at_unix_ms\
-             ) VALUES ($1,$2,$3,$4,$5,'requested',$6,$6)",
-            &[
-                &request.request_ref(),
-                &request.tenant_ref(),
-                &request.participant_ref(),
-                &request_kind_name(request.kind()),
-                &request.scope_ref(),
-                &requested_at,
-            ],
-        )?;
-        DataRightsPersistenceDisposition::Inserted
-    };
+    require_read_committed(&mut transaction)?;
+    let disposition = persist_request_header(&mut transaction, request, targets, requested_at)?;
 
     for target in targets {
         enqueue_outbox_event(&mut transaction, target.event, max_attempts)?;
@@ -219,6 +193,51 @@ pub fn persist_requested_data_rights_with_propagation(
 
     transaction.commit()?;
     Ok(disposition)
+}
+
+fn persist_request_header(
+    transaction: &mut Transaction<'_>,
+    request: &DataRightsRequest,
+    targets: &[DataRightsPropagationTarget<'_>],
+    requested_at: i64,
+) -> Result<DataRightsPersistenceDisposition, DataRightsPersistenceError> {
+    let inserted = transaction.execute(
+        "INSERT INTO data_rights_request_state (\
+             request_ref, tenant_ref, participant_ref, request_kind, scope_ref, current_state,\
+             requested_at_unix_ms, latest_event_at_unix_ms\
+         ) VALUES ($1,$2,$3,$4,$5,'requested',$6,$6) \
+         ON CONFLICT (request_ref) DO NOTHING",
+        &[
+            &request.request_ref(),
+            &request.tenant_ref(),
+            &request.participant_ref(),
+            &request_kind_name(request.kind()),
+            &request.scope_ref(),
+            &requested_at,
+        ],
+    )?;
+    if inserted == 1 {
+        return Ok(DataRightsPersistenceDisposition::Inserted);
+    }
+
+    let row = transaction.query_one(
+        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, current_state, \
+                requested_at_unix_ms, latest_event_at_unix_ms \
+         FROM data_rights_request_state WHERE request_ref = $1",
+        &[&request.request_ref()],
+    )?;
+    let exact = row.get::<_, String>(0) == request.tenant_ref()
+        && row.get::<_, String>(1) == request.participant_ref()
+        && row.get::<_, String>(2) == request_kind_name(request.kind())
+        && row.get::<_, String>(3) == request.scope_ref()
+        && row.get::<_, String>(4) == "requested"
+        && row.get::<_, i64>(5) == requested_at
+        && row.get::<_, i64>(6) == requested_at;
+    if exact && stored_targets_match(transaction, request, targets)? {
+        Ok(DataRightsPersistenceDisposition::Duplicate)
+    } else {
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    }
 }
 
 fn validate_targets(
@@ -254,7 +273,7 @@ fn validate_targets(
 }
 
 fn stored_targets_match(
-    transaction: &mut postgres::Transaction<'_>,
+    transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
     targets: &[DataRightsPropagationTarget<'_>],
 ) -> Result<bool, postgres::Error> {
@@ -276,6 +295,18 @@ fn stored_targets_match(
                 && row.get::<_, String>(2) == target.event.event_ref()
         })
     }))
+}
+
+fn require_read_committed(
+    transaction: &mut Transaction<'_>,
+) -> Result<(), DataRightsPersistenceError> {
+    let row = transaction.query_one("SHOW transaction_isolation", &[])?;
+    let isolation: String = row.get(0);
+    if isolation == "read committed" {
+        Ok(())
+    } else {
+        Err(DataRightsPersistenceError::UnsupportedIsolationLevel)
+    }
 }
 
 const fn request_kind_name(kind: DataRightsRequestKind) -> &'static str {
