@@ -115,5 +115,8 @@ CREATE TABLE IF NOT EXISTS participant_identity_link_end_event (
         DEFAULT clock_timestamp(),
     CONSTRAINT participant_identity_link_end_event_pkey PRIMARY KEY (participant_ref, link_end_event_ref),
     CONSTRAINT participant_identity_link_end_event_ledger_fkey
-        FOREIGN KEY (participant_ref) REFERENCES participant_identity_ledger (participant_ref)
+        FOREIGN KEY (participant_ref) REFERENCES participant_identity_ledger (participant_ref),
+    CONSTRAINT participant_identity_link_end_event_link_fkey
+        FOREIGN KEY (participant_ref, linked_event_ref)
+        REFERENCES participant_identity_link_event (participant_ref, link_event_ref)
 );
