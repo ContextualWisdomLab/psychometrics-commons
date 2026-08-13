@@ -217,7 +217,6 @@ pub fn persist_inbox_consumption(
 }
 
 /// Claim one pending consumption and issue a new fencing token.
-///
 /// A processing row cannot be stolen. Expire-and-reclaim returns an expired
 /// claim to pending without transferring the crashed worker's fence; the next
 /// claim increments the stored token.
@@ -641,13 +640,12 @@ mod tests {
 
     #[test]
     fn non_database_postgres_error_is_not_a_unique_violation() {
-        let error = match postgres::Client::connect(
+        let error = postgres::Client::connect(
             "host=127.0.0.1 port=1 user=x dbname=x connect_timeout=1",
             postgres::NoTls,
-        ) {
-            Ok(_) => panic!("a closed loopback port must fail without a PostgreSQL database error"),
-            Err(error) => error,
-        };
+        )
+        .err()
+        .expect("a closed loopback port must fail without a PostgreSQL database error");
         assert!(!is_unique_violation(&error));
     }
 }
