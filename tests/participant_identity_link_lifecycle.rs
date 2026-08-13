@@ -4,7 +4,8 @@ use psychometrics_commons_runtime::participant::{AccountLinkError, ParticipantRe
 
 fn linked_participant() -> ParticipantRecord {
     let mut participant =
-        ParticipantRecord::new_anonymous("participant_lifecycle", "tenant_lifecycle", 10_000).unwrap();
+        ParticipantRecord::new_anonymous("participant_lifecycle", "tenant_lifecycle", 10_000)
+            .unwrap();
     participant
         .link_account(
             "link_event_first",
@@ -77,9 +78,24 @@ fn unbound_or_invalid_link_end_never_mutates_history() {
 
     let mut participant = linked_participant();
     for (event_ref, evidence_ref, timestamp, expected) in [
-        ("", "link_end_evidence_first", 10_200, AccountLinkError::InvalidReference),
-        ("link_end_event_first", "12345", 10_200, AccountLinkError::InvalidReference),
-        ("link_end_event_first", "link_end_evidence_first", 0, AccountLinkError::InvalidTimestamp),
+        (
+            "",
+            "link_end_evidence_first",
+            10_200,
+            AccountLinkError::InvalidReference,
+        ),
+        (
+            "link_end_event_first",
+            "12345",
+            10_200,
+            AccountLinkError::InvalidReference,
+        ),
+        (
+            "link_end_event_first",
+            "link_end_evidence_first",
+            0,
+            AccountLinkError::InvalidTimestamp,
+        ),
         (
             "link_end_event_first",
             "link_end_evidence_first",
@@ -95,7 +111,10 @@ fn unbound_or_invalid_link_end_never_mutates_history() {
         );
         assert_eq!(participant.link_history(), links_before.as_slice());
         assert_eq!(participant.link_end_history(), ends_before.as_slice());
-        assert_eq!(participant.linked_subject_ref(), Some("keyverse_subject_first"));
+        assert_eq!(
+            participant.linked_subject_ref(),
+            Some("keyverse_subject_first")
+        );
     }
 }
 
@@ -132,7 +151,10 @@ fn relink_is_explicit_and_historical_replays_cannot_change_the_new_projection() 
 
     assert_eq!(participant.link_history().len(), 2);
     assert_eq!(participant.link_end_history().len(), 1);
-    assert_eq!(participant.linked_subject_ref(), Some("keyverse_subject_second"));
+    assert_eq!(
+        participant.linked_subject_ref(),
+        Some("keyverse_subject_second")
+    );
 }
 
 #[test]
