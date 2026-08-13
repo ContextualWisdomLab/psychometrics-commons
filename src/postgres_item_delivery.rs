@@ -11,6 +11,7 @@ use std::fmt::{Display, Formatter};
 
 const ITEM_DELIVERY_MIGRATION: &str = include_str!("../migrations/0004_item_delivery_evidence.sql");
 
+/// Outcome of persisting one item-delivery ledger snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ItemDeliveryPersistenceDisposition {
@@ -20,6 +21,7 @@ pub enum ItemDeliveryPersistenceDisposition {
     Duplicate,
 }
 
+/// Fail-closed error for durable item-delivery persistence.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ItemDeliveryPersistenceError {
@@ -41,10 +43,18 @@ impl Display for ItemDeliveryPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => "item delivery persistence references must be opaque values",
-            Self::ConflictingReplay => "item delivery identity was replayed with conflicting evidence",
-            Self::DuplicateItemDelivery => "item version was already delivered in this persisted session",
-            Self::SequenceConflict => "item delivery sequence was reused by a different delivery identity",
-            Self::UnsupportedIsolationLevel => "item delivery persistence requires read committed isolation",
+            Self::ConflictingReplay => {
+                "item delivery identity was replayed with conflicting evidence"
+            }
+            Self::DuplicateItemDelivery => {
+                "item version was already delivered in this persisted session"
+            }
+            Self::SequenceConflict => {
+                "item delivery sequence was reused by a different delivery identity"
+            }
+            Self::UnsupportedIsolationLevel => {
+                "item delivery persistence requires read committed isolation"
+            }
             Self::Database(_) => "PostgreSQL item-delivery persistence failed",
         })
     }
@@ -68,8 +78,11 @@ impl From<postgres::Error> for ItemDeliveryPersistenceError {
 /// Apply the idempotent item-delivery migration.
 ///
 /// # Errors
+///
 /// Returns the database error when the migration cannot be applied.
-pub fn apply_item_delivery_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
+pub fn apply_item_delivery_migration(
+    client: &mut impl GenericClient,
+) -> Result<(), postgres::Error> {
     client.batch_execute(ITEM_DELIVERY_MIGRATION)
 }
 
@@ -79,6 +92,7 @@ pub fn apply_item_delivery_migration(client: &mut impl GenericClient) -> Result<
 /// allowed-item, delivery, or event-evidence rebinding fails closed.
 ///
 /// # Errors
+///
 /// Returns a typed fail-closed persistence error for invalid evidence, conflicts,
 /// unsupported isolation, duplicate item/sequence evidence, or database failures.
 pub fn persist_item_delivery_ledger(
@@ -110,14 +124,28 @@ fn persist_ledger_header(
 ) -> Result<bool, ItemDeliveryPersistenceError> {
     let allowed_item_version_refs = ledger.allowed_item_version_refs().to_vec();
     let inserted = transaction.execute(
-        "INSERT INTO item_delivery_ledger (tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, allowed_item_version_refs) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (session_ref) DO NOTHING",
-        &[&tenant_ref, &session_ref, &ledger.instrument_release_ref(), &ledger.release_content_digest(), &ledger.locale(), &allowed_item_version_refs],
+        "INSERT INTO item_delivery_ledger (\
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
+             allowed_item_version_refs\
+         ) VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (session_ref) DO NOTHING",
+        &[
+            &tenant_ref,
+            &session_ref,
+            &ledger.instrument_release_ref(),
+            &ledger.release_content_digest(),
+            &ledger.locale(),
+            &allowed_item_version_refs,
+        ],
     )?;
     if inserted == 1 {
         return Ok(true);
     }
+
     let row = transaction.query_one(
-        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, allowed_item_version_refs FROM item_delivery_ledger WHERE session_ref = $1",
+        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
+                allowed_item_version_refs \
+         FROM item_delivery_ledger WHERE session_ref = $1",
         &[&session_ref],
     )?;
     let stored_tenant_ref: String = row.get(0);
@@ -148,8 +176,20 @@ fn persist_one_event(
     let sequence = event.sequence() as i64;
     let selection_evidence_ref = event.selection_evidence_ref();
     let inserted = match transaction.execute(
-        "INSERT INTO item_delivery_event (tenant_ref, session_ref, delivery_event_ref, item_version_ref, presentation_context_ref, selection_evidence_ref, delivery_sequence) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (session_ref, delivery_event_ref) DO NOTHING",
-        &[&tenant_ref, &session_ref, &delivery_event_ref, &event.item_version_ref(), &event.presentation_context_ref(), &selection_evidence_ref, &sequence],
+        "INSERT INTO item_delivery_event (\
+             tenant_ref, session_ref, delivery_event_ref, item_version_ref, \
+             presentation_context_ref, selection_evidence_ref, delivery_sequence\
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+         ON CONFLICT (session_ref, delivery_event_ref) DO NOTHING",
+        &[
+            &tenant_ref,
+            &session_ref,
+            &delivery_event_ref,
+            &event.item_version_ref(),
+            &event.presentation_context_ref(),
+            &selection_evidence_ref,
+            &sequence,
+        ],
     ) {
         Ok(count) => count,
         Err(error) => return Err(classify_unique_violation(error)),
@@ -157,8 +197,12 @@ fn persist_one_event(
     if inserted == 1 {
         return Ok(true);
     }
+
     let row = transaction.query_one(
-        "SELECT tenant_ref, item_version_ref, presentation_context_ref, selection_evidence_ref, delivery_sequence FROM item_delivery_event WHERE session_ref = $1 AND delivery_event_ref = $2",
+        "SELECT tenant_ref, item_version_ref, presentation_context_ref, \
+                selection_evidence_ref, delivery_sequence \
+         FROM item_delivery_event \
+         WHERE session_ref = $1 AND delivery_event_ref = $2",
         &[&session_ref, &delivery_event_ref],
     )?;
     classify_existing_event(&row, tenant_ref, event, sequence)
@@ -188,10 +232,19 @@ fn classify_existing_event(
 }
 
 fn classify_unique_violation(error: postgres::Error) -> ItemDeliveryPersistenceError {
-    match error.as_db_error().and_then(postgres::error::DbError::constraint) {
-        Some("item_delivery_event_delivery_ref_unique") => ItemDeliveryPersistenceError::ConflictingReplay,
-        Some("item_delivery_event_item_version_unique") => ItemDeliveryPersistenceError::DuplicateItemDelivery,
-        Some("item_delivery_event_sequence_unique") => ItemDeliveryPersistenceError::SequenceConflict,
+    match error
+        .as_db_error()
+        .and_then(postgres::error::DbError::constraint)
+    {
+        Some("item_delivery_event_delivery_ref_unique") => {
+            ItemDeliveryPersistenceError::ConflictingReplay
+        }
+        Some("item_delivery_event_item_version_unique") => {
+            ItemDeliveryPersistenceError::DuplicateItemDelivery
+        }
+        Some("item_delivery_event_sequence_unique") => {
+            ItemDeliveryPersistenceError::SequenceConflict
+        }
         _ => ItemDeliveryPersistenceError::Database(error),
     }
 }
@@ -200,7 +253,9 @@ fn required_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceEr
     normalized_reference(reference).ok_or(ItemDeliveryPersistenceError::InvalidReference)
 }
 
-fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), ItemDeliveryPersistenceError> {
+fn require_read_committed(
+    transaction: &mut Transaction<'_>,
+) -> Result<(), ItemDeliveryPersistenceError> {
     let row = transaction.query_one("SHOW transaction_isolation", &[])?;
     let isolation: String = row.get(0);
     if isolation == "read committed" {
@@ -216,8 +271,17 @@ mod reference_guard_tests {
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
-        assert!(matches!(required_reference(" "), Err(ItemDeliveryPersistenceError::InvalidReference)));
-        assert!(matches!(required_reference("12"), Err(ItemDeliveryPersistenceError::InvalidReference)));
-        assert_eq!(required_reference("session_item_delivery_alpha").unwrap(), "session_item_delivery_alpha");
+        assert!(matches!(
+            required_reference(" "),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert!(matches!(
+            required_reference("12"),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert_eq!(
+            required_reference("session_item_delivery_alpha").unwrap(),
+            "session_item_delivery_alpha"
+        );
     }
 }
