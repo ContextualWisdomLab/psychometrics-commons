@@ -44,8 +44,8 @@ fn persist_and_claim(client: &mut Client, job_ref: &str, request_ref: &str) {
 }
 
 #[test]
-fn terminal_outcome_inputs_fail_closed_before_database_mutation() {
-    let mut client = test_client("scoring_job_terminal_input_validation_test");
+fn successful_completion_inputs_fail_closed_before_database_mutation() {
+    let mut client = test_client("scoring_job_completion_input_validation_test");
     let mut transaction = client.transaction().unwrap();
 
     assert!(matches!(
@@ -98,6 +98,14 @@ fn terminal_outcome_inputs_fail_closed_before_database_mutation() {
         ),
         Err(ScoringJobPersistenceError::InvalidTimestamp)
     ));
+
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn permanent_failure_inputs_fail_closed_before_database_mutation() {
+    let mut client = test_client("scoring_job_failure_input_validation_test");
+    let mut transaction = client.transaction().unwrap();
 
     assert!(matches!(
         record_permanent_scoring_failure(
