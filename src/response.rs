@@ -153,9 +153,8 @@ impl Display for WriteError {
             Self::EmptyReference => {
                 formatter.write_str("response payload digest must not be empty")
             }
-            Self::InvalidPayloadDigest => formatter.write_str(
-                "response payload digest must be canonical lowercase sha256 evidence",
-            ),
+            Self::InvalidPayloadDigest => formatter
+                .write_str("response payload digest must be canonical lowercase sha256 evidence"),
             Self::IdempotencyConflict => formatter.write_str(
                 "client event reference was already used for different response content",
             ),
