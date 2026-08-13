@@ -103,8 +103,8 @@ fn deletion_completion_preserves_legal_retention_exceptions() {
     assert_eq!(
         request.retained_scope_refs(),
         &[
-            "tax_record_retention".to_owned(),
-            "audit_evidence_retention".to_owned()
+            "audit_evidence_retention".to_owned(),
+            "tax_record_retention".to_owned()
         ]
     );
 }
