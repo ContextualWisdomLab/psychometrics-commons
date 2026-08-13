@@ -568,16 +568,18 @@ fn header_replay_select_failure_is_a_database_failure() {
         &event,
     )];
     persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3).unwrap();
-    let sink = format!("data_rights_select_failure_sink_{}", std::process::id());
-    db.batch_execute(&format!(
-        "CREATE SCHEMA {sink};\
-         CREATE TABLE {sink}.data_rights_request_state (\
-             request_ref TEXT PRIMARY KEY\
-         );\
-         INSERT INTO {sink}.data_rights_request_state (request_ref) \
-         VALUES ('data_rights_request_alpha');\
-         SET search_path TO {sink};"
-    ))
+    db.batch_execute(
+        "DELETE FROM data_rights_propagation_state;\
+         DELETE FROM data_rights_request_state;\
+         CREATE OR REPLACE FUNCTION data_rights_force_unique_violation() \
+         RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN \
+             RAISE unique_violation USING MESSAGE = 'data_rights header classify sink'; \
+         END $$; \
+         CREATE TRIGGER data_rights_force_unique_violation \
+         BEFORE INSERT ON data_rights_request_state \
+         FOR EACH ROW EXECUTE FUNCTION data_rights_force_unique_violation();",
+    )
     .unwrap();
     assert!(matches!(
         persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3),
