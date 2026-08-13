@@ -54,6 +54,33 @@ fn anonymous_session_context_matches_only_its_exact_resource_binding() {
 }
 
 #[test]
+fn anonymous_session_binding_rejects_noncanonical_reference_spellings() {
+    let context = context();
+
+    assert!(!context.matches_binding(
+        " tenant_alpha",
+        "participant_alpha",
+        "session_alpha"
+    ));
+    assert!(!context.matches_binding(
+        "tenant_alpha",
+        "participant_alpha ",
+        "session_alpha"
+    ));
+    assert!(!context.matches_binding(
+        "tenant_alpha",
+        "participant_alpha",
+        " session_alpha "
+    ));
+    assert!(!context.is_valid_for_binding_at(
+        "tenant_alpha ",
+        "participant_alpha",
+        "session_alpha",
+        1_000,
+    ));
+}
+
+#[test]
 fn anonymous_session_context_combines_exact_binding_with_expiry_fail_closed() {
     let context = context();
 
