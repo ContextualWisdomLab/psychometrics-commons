@@ -26,9 +26,18 @@ fn canonical_lowercase_sha256_payload_digest_is_accepted() {
 }
 
 #[test]
-fn malformed_payload_digests_fail_closed_before_response_mutation() {
+fn blank_payload_digest_preserves_the_existing_empty_reference_error() {
+    let mut ledger = ResponseLedger::new("session_alpha").unwrap();
+    assert_eq!(
+        ledger.record(SessionState::Active, request("")),
+        Err(WriteError::EmptyReference)
+    );
+    assert!(ledger.is_empty());
+}
+
+#[test]
+fn malformed_nonblank_payload_digests_fail_closed_before_response_mutation() {
     for invalid in [
-        "",
         "response-alpha",
         "sha256:response-alpha",
         "sha512:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
