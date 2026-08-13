@@ -1,9 +1,13 @@
 //! Fail-closed digest validation for deterministic Personality Style provenance.
 
-use psychometrics_commons_runtime::narrative::{ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentIdentityError};
+use psychometrics_commons_runtime::narrative::{
+    ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentIdentityError,
+};
 
-const VALID_SCORE_DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const VALID_RULE_DIGEST: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const VALID_SCORE_DIGEST: &str =
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const VALID_RULE_DIGEST: &str =
+    "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn identity<'a>(score_digest: &'a str, rule_digest: &'a str) -> StyleAssignmentIdentity<'a> {
     StyleAssignmentIdentity {
@@ -19,7 +23,9 @@ fn identity<'a>(score_digest: &'a str, rule_digest: &'a str) -> StyleAssignmentI
 
 #[test]
 fn canonical_sha256_digests_are_accepted() {
-    assert!(identity(VALID_SCORE_DIGEST, VALID_RULE_DIGEST).canonical_bytes().is_ok());
+    assert!(identity(VALID_SCORE_DIGEST, VALID_RULE_DIGEST)
+        .canonical_bytes()
+        .is_ok());
 }
 
 #[test]
