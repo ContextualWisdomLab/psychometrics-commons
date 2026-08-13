@@ -409,9 +409,7 @@ impl ParticipantRecord {
         let Some(linked_event_ref) = self.link_event_ref.as_deref() else {
             return Err(AccountLinkError::NotLinked);
         };
-        let linked_at_unix_ms = self
-            .linked_at_unix_ms
-            .unwrap_or(self.created_at_unix_ms);
+        let linked_at_unix_ms = self.linked_at_unix_ms.unwrap_or(self.created_at_unix_ms);
         if ended_at_unix_ms < linked_at_unix_ms {
             return Err(AccountLinkError::NonMonotonicLifecycleTimestamp);
         }
