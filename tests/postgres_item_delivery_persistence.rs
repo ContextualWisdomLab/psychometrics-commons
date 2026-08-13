@@ -617,3 +617,56 @@ fn selection_evidence_replay_conflict_fails_closed() {
         ),
     );
 }
+
+#[test]
+fn stored_item_version_and_sequence_mismatches_fail_closed() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let ledger = delivered_ledger(
+        "session_item_delivery_field_mismatch",
+        "release_big_five_ko_v1",
+        RELEASE_DIGEST,
+        &[(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+        )],
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_item_delivery_ledger(&mut transaction, &ledger).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute(
+            "UPDATE item_delivery_event SET item_version_ref = 'item_version_002' \
+             WHERE session_ref = 'session_item_delivery_field_mismatch'",
+        )
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_item_delivery_ledger(&mut transaction, &ledger),
+            Err(ItemDeliveryPersistenceError::ConflictingReplay)
+        ));
+        transaction.rollback().unwrap();
+    }
+    client
+        .batch_execute(
+            "UPDATE item_delivery_event SET item_version_ref = 'item_version_001', \
+                 delivery_sequence = 99 \
+             WHERE session_ref = 'session_item_delivery_field_mismatch'",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_item_delivery_ledger(&mut transaction, &ledger),
+        Err(ItemDeliveryPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
