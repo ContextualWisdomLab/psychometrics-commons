@@ -284,7 +284,10 @@ fn missing_link_event_relation_after_header_is_a_database_failure() {
     apply_identity_link_migration(&mut client).unwrap();
     persist_ok(&mut client, &anonymous("participant_missing_event"));
     client
-        .batch_execute("DROP TABLE participant_identity_link_event;")
+        .batch_execute(
+            "DROP TABLE participant_identity_link_end_event;\
+             DROP TABLE participant_identity_link_event;",
+        )
         .unwrap();
     assert!(matches!(
         persist_err(&mut client, &linked("participant_missing_event")),
