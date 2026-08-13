@@ -61,11 +61,19 @@ fn published_release() -> InstrumentRelease {
     .unwrap();
     let mut release = InstrumentRelease::new(manifest, 10_000).unwrap();
     release
-        .apply_command("publication_review_11d5b1e7", PublicationCommand::SubmitReview, 10_100)
+        .apply_command(
+            "publication_review_11d5b1e7",
+            PublicationCommand::SubmitReview,
+            10_100,
+        )
         .unwrap();
     release.bind_publication_evidence(evidence).unwrap();
     release
-        .apply_command("publication_publish_20f6c2a8", PublicationCommand::Publish, 10_200)
+        .apply_command(
+            "publication_publish_20f6c2a8",
+            PublicationCommand::Publish,
+            10_200,
+        )
         .unwrap();
     release
 }

@@ -136,7 +136,10 @@ fn later_release_withdrawal_does_not_rewrite_existing_session_provenance() {
         )
         .unwrap();
     assert!(!suspended_release.accepts_new_sessions());
-    assert_eq!(suspended_session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(
+        suspended_session.instrument_release_ref(),
+        "release_big_five_ko_v1"
+    );
     assert_eq!(
         suspended_session.instrument_version_ref(),
         "instrument_version_big_five_ko_v1"
@@ -164,12 +167,18 @@ fn later_release_withdrawal_does_not_rewrite_existing_session_provenance() {
         )
         .unwrap();
     assert!(!retired_release.accepts_new_sessions());
-    assert_eq!(retired_session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(
+        retired_session.instrument_release_ref(),
+        "release_big_five_ko_v1"
+    );
     assert_eq!(
         retired_session.instrument_version_ref(),
         "instrument_version_big_five_ko_v1"
     );
-    assert_eq!(retired_session.instrument_release_content_digest(), VALID_DIGEST);
+    assert_eq!(
+        retired_session.instrument_release_content_digest(),
+        VALID_DIGEST
+    );
     assert_eq!(retired_session.locale(), "ko-KR");
 }
 

@@ -133,7 +133,10 @@ fn session_pins_manifest_digest_and_exact_command_replay_does_not_rewind_state()
             SessionCommand::Pause,
         )
         .unwrap_err();
-    assert_eq!(command_conflict.kind(), TransitionErrorKind::ConflictingReplay);
+    assert_eq!(
+        command_conflict.kind(),
+        TransitionErrorKind::ConflictingReplay
+    );
     assert_eq!(
         command_conflict.to_string(),
         "session command reference was replayed with conflicting evidence"
@@ -146,7 +149,10 @@ fn session_pins_manifest_digest_and_exact_command_replay_does_not_rewind_state()
             SessionCommand::Activate,
         )
         .unwrap_err();
-    assert_eq!(sequence_conflict.kind(), TransitionErrorKind::ConflictingReplay);
+    assert_eq!(
+        sequence_conflict.kind(),
+        TransitionErrorKind::ConflictingReplay
+    );
     assert_eq!(session.state(), SessionState::Paused);
 }
 

@@ -356,12 +356,10 @@ impl Display for TransitionError {
             TransitionErrorKind::InvalidReference => {
                 formatter.write_str("session command reference must be opaque and non-numeric")
             }
-            TransitionErrorKind::InvalidSequence => {
-                formatter.write_str("session command sequence must be positive and strictly increasing")
-            }
-            TransitionErrorKind::ConflictingReplay => {
-                formatter.write_str("session command reference was replayed with conflicting evidence")
-            }
+            TransitionErrorKind::InvalidSequence => formatter
+                .write_str("session command sequence must be positive and strictly increasing"),
+            TransitionErrorKind::ConflictingReplay => formatter
+                .write_str("session command reference was replayed with conflicting evidence"),
             TransitionErrorKind::InvalidTransition => write!(
                 formatter,
                 "command {:?} is not valid while session is {:?}",
