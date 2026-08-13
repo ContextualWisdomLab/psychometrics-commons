@@ -61,11 +61,11 @@ fn published_release() -> InstrumentRelease {
     .unwrap();
     let mut release = InstrumentRelease::new(manifest, 10_000).unwrap();
     release
-        .apply_command("submit_review", PublicationCommand::SubmitReview, 10_100)
+        .apply_command("publication_review_11d5b1e7", PublicationCommand::SubmitReview, 10_100)
         .unwrap();
     release.bind_publication_evidence(evidence).unwrap();
     release
-        .apply_command("publish", PublicationCommand::Publish, 10_200)
+        .apply_command("publication_publish_20f6c2a8", PublicationCommand::Publish, 10_200)
         .unwrap();
     release
 }
@@ -74,8 +74,8 @@ fn published_release() -> InstrumentRelease {
 fn aggregate_applies_session_commands_and_preserves_release_provenance() {
     let release = published_release();
     let mut session = AssessmentSession::new(
-        "assessment_session_lifecycle",
-        "assessment_participant_lifecycle",
+        "ses_3d657ef743a54698868e4b6ee6c49af4",
+        "ptc_471a8fd35e1747b7b25b66d219ce4ccd",
         &release,
         "ko-KR",
         20_000,
@@ -83,14 +83,27 @@ fn aggregate_applies_session_commands_and_preserves_release_provenance() {
     .unwrap();
 
     assert_eq!(
-        session.apply_command(SessionCommand::Activate).unwrap(),
+        session
+            .apply_command(
+                "cmd_7e39ee81534f40288d3154b149936170",
+                1,
+                SessionCommand::Activate,
+            )
+            .unwrap(),
         SessionState::Active
     );
     assert_eq!(
-        session.apply_command(SessionCommand::Pause).unwrap(),
+        session
+            .apply_command(
+                "cmd_d0b706bf38f44112b5151ccac9da77f1",
+                2,
+                SessionCommand::Pause,
+            )
+            .unwrap(),
         SessionState::Paused
     );
     assert_eq!(session.state(), SessionState::Paused);
     assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(session.instrument_release_content_digest(), RELEASE_DIGEST);
     assert_eq!(session.locale(), "ko-KR");
 }
