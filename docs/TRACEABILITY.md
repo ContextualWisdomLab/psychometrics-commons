@@ -2,7 +2,7 @@
 
 - Status: Normative traceability index
 - Date: 2026-08-14
-- Evaluated protected-main implementation baseline: `4b828134f4d597ca1add3d6dbf02bebd72bfb0b2`
+- Evaluated protected-main implementation baseline: `ed6da43c4eece52f4410ddc72d518a7bd9c26b71`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -33,8 +33,8 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Immutable instrument release/version lifecycle | PRD §6, §9 | TRD §7; UML publication state | ADR-0005, ADR-0010 | **Implemented** in `src/instrument.rs` plus `migrations/0006_instrument_release.sql` and `src/postgres_instrument_release.rs`: immutable release manifest, exact version/digest/locale/item set, fail-closed Draft/Review/Published/Suspended/Retired lifecycle, idempotent publication events, and new-session eligibility |
 | Instrument publication requires intended-use scientific/right/locale evidence | PRD §6, §9, §10 | Measurement Governance; publication evidence gate | ADR-0004, ADR-0013, ADR-0019 | **Implemented** policy gate and immutable evidence provenance in `src/instrument.rs`; each real instrument still requires its own rights/locale/scientific evidence artifacts before publication |
 | Optional Keyverse account linking | PRD §3.1, §9.7 | TRD §10; UML identity-link lifecycle | ADR-0003, ADR-0020 | **Partially implemented**: issuer-scoped first-link fail-closed domain primitive in `src/participant.rs`; append-only unlink/relink/recovery history, persistence, audit, and transport remain Target |
-| Cross-cutting tenant/task authorization | PRD §7, §9 | TRD §11; Security/Data | ADR-0001, ADR-0003 | **Implemented** fail-closed domain gate in `src/authorization.rs`; persistence/policy-adapter/public-transport integration remains Target |
-| Purpose-specific consent | PRD §5, §9.6 | TRD §12 | ADR-0006 | **Implemented** domain contract in `src/consent.rs`; **Active PR #49** adds PostgreSQL ledger/event persistence; public transport remains Target |
+| Cross-cutting tenant/task authorization | PRD §7, §9 | TRD §11; Security/Data | ADR-0001, ADR-0003 | **Implemented** fail-closed domain gate in `src/authorization.rs` binds consent operations to participant-owned `ConsentLedger` / `ManageOwnConsent`; persistence/policy-adapter/public-transport integration remains Target |
+| Purpose-specific consent | PRD §5, §9.6 | TRD §12 | ADR-0006 | **Implemented** domain contract in `src/consent.rs`; grant/revoke/inspect are bound to participant ownership; **Active PR #49** adds PostgreSQL ledger/event persistence; public transport remains Target |
 | Explicit research contribution + withdrawal | PRD §5 | TRD §12, §14–15 | ADR-0006, ADR-0007 | **Implemented** product-domain lifecycle in `src/consent.rs`; dataset snapshot/release integration is Target |
 | Participant export/deletion | PRD §3.1, §9, §11 | TRD §13 | ADR-0006 | **Implemented** domain lifecycle in `src/data_rights.rs` plus `migrations/0003_data_rights_propagation.sql` and `src/postgres_data_rights.rs`; dependent-system execution remains Target |
 | Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
@@ -58,7 +58,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
-| Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists the initial claim atomically | durable retry/completion/expiry compare-and-set, concurrent-worker/crash-restart recovery, and live adapter evidence |
+| Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, claim, retry, terminal outcomes, and expired-lease recovery without transferring the expired fence | live adapter evidence |
 | Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
@@ -67,13 +67,13 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Publication event replay is idempotent/conflicting reuse fails closed | TRD §7 | `src/instrument.rs` | durable DB uniqueness/concurrency test |
 | Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | `src/instrument.rs` binds approved evidence status, provenance/scope, mandatory evidence references, validity window, and immutable release identity before publication/reactivation | persistence/API publication integration and real instrument-specific evidence artifacts |
 | Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID | append-only identity-link persistence + unlink/relink/recovery audit tests |
-| Sensitive authorization is tenant- and task-bound | TRD §11; Security/Data | `src/authorization.rs` fail-closed authorization context/gates | policy adapter + route/repository integration + cross-tenant E2E tests |
+| Sensitive authorization is tenant- and task-bound | TRD §11; Security/Data | `src/authorization.rs` fail-closed authorization context/gates bind consent operations to participant ownership | policy adapter + route/repository integration + cross-tenant E2E tests |
 | Research consent separate from service consent | TRD §12; Research Governance | `src/consent.rs` | public API/UI negative test |
 | Research withdrawal preserves evidence | TRD §12–15; Research Governance | `src/consent.rs` | release-pipeline exclusion test |
 | Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs`; `src/postgres_data_rights.rs` persists the requested identity and local propagation events | Keyverse/account/anonymous transport integration |
 | Legal retention represented explicitly | TRD §13 | `src/data_rights.rs` partial completion | dependency execution/restore tests after local propagation |
 | No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy only | deployment credential/fitness-function test |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0006_instrument_release.sql`, and the matching PostgreSQL adapters; **Active PR** #49 adds `migrations/0005_consent_lifecycle.sql` | remaining product aggregates, scoring retry/completion/recovery persistence, crash/restart and restore acceptance |
+| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0006_instrument_release.sql`, and the matching PostgreSQL adapters, including expired-lease recovery on the existing scoring-job row; **Active PR** #49 adds `migrations/0005_consent_lifecycle.sql` | remaining product aggregates, crash/restart restore acceptance |
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence and delivery-attempt persistence | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL integration evidence does not claim side-effect completion | durable pending/processing/completed persistence + crash/retry tests |
@@ -89,7 +89,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `4b828134f4d597ca1add3d6dbf02bebd72bfb0b2`:
+Current protected-main Rust module surface on `ed6da43c4eece52f4410ddc72d518a7bd9c26b71`:
 
 ```text
 src/lib.rs
@@ -121,7 +121,7 @@ migrations/
 └── 0006_instrument_release.sql
 ```
 
-Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/probes/metrics, durable scoring retry/completion/expiry recovery, and Measurement Workbench orchestration.
+Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/probes/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
