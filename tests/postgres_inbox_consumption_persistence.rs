@@ -1113,18 +1113,18 @@ fn expired_claim_local_terminal_replay_is_idempotent() {
 fn drop_consumption_check_constraints(client: &mut Client) {
     client
         .batch_execute(
-            "DO $$\
-             DECLARE constraint_row record;\
-             BEGIN\
-               FOR constraint_row IN\
-                 SELECT conname FROM pg_constraint\
-                 WHERE conrelid = 'integration_consumption'::regclass AND contype = 'c'\
-               LOOP\
-                 EXECUTE format(\
-                     'ALTER TABLE integration_consumption DROP CONSTRAINT %I',\
-                     constraint_row.conname\
-                 );\
-               END LOOP;\
+            "DO $$
+             DECLARE constraint_row record;
+             BEGIN
+               FOR constraint_row IN
+                 SELECT conname FROM pg_constraint
+                 WHERE conrelid = 'integration_consumption'::regclass AND contype = 'c'
+               LOOP
+                 EXECUTE format(
+                     'ALTER TABLE integration_consumption DROP CONSTRAINT %I',
+                     constraint_row.conname
+                 );
+               END LOOP;
              END $$;",
         )
         .unwrap();
