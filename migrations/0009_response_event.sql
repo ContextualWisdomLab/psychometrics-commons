@@ -43,9 +43,8 @@ CREATE TABLE IF NOT EXISTS response_event (
             )
         ),
     payload_digest TEXT CONSTRAINT response_event_payload_digest_not_null NOT NULL
-        CONSTRAINT response_event_payload_digest_not_empty_check CHECK (
-            payload_digest = btrim(payload_digest)
-            AND payload_digest <> ''
+        CONSTRAINT response_event_payload_digest_format_check CHECK (
+            payload_digest ~ '^sha256:[0-9a-f]{64}$'
         ),
     server_sequence BIGINT CONSTRAINT response_event_server_sequence_not_null NOT NULL
         CONSTRAINT response_event_server_sequence_positive_check CHECK (server_sequence > 0),
