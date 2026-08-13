@@ -7,7 +7,13 @@ use psychometrics_commons_runtime::anonymous_session::{
 #[test]
 fn invalid_reference_is_rejected() {
     assert_eq!(
-        AnonymousSessionContext::new("", "participant_alpha", "session_alpha", "evidence_alpha", 2_000),
+        AnonymousSessionContext::new(
+            "",
+            "participant_alpha",
+            "session_alpha",
+            "evidence_alpha",
+            2_000,
+        ),
         Err(AnonymousSessionContextError::InvalidReference)
     );
     assert_eq!(
@@ -15,18 +21,40 @@ fn invalid_reference_is_rejected() {
         Err(AnonymousSessionContextError::InvalidReference)
     );
     assert_eq!(
-        AnonymousSessionContext::new("tenant_alpha", "participant_alpha", "", "evidence_alpha", 2_000),
+        AnonymousSessionContext::new(
+            "tenant_alpha",
+            "participant_alpha",
+            "",
+            "evidence_alpha",
+            2_000,
+        ),
         Err(AnonymousSessionContextError::InvalidReference)
     );
     assert_eq!(
-        AnonymousSessionContext::new("tenant_alpha", "participant_alpha", "session_alpha", "", 2_000),
+        AnonymousSessionContext::new(
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            "",
+            2_000,
+        ),
         Err(AnonymousSessionContextError::InvalidReference)
     );
     for (tenant_ref, participant_ref, session_ref, authorization_evidence_ref) in [
-        ("123", "participant_alpha", "session_alpha", "evidence_alpha"),
+        (
+            "123",
+            "participant_alpha",
+            "session_alpha",
+            "evidence_alpha",
+        ),
         ("tenant_alpha", "456", "session_alpha", "evidence_alpha"),
         ("tenant_alpha", "participant_alpha", "789", "evidence_alpha"),
-        ("tenant_alpha", "participant_alpha", "session_alpha", "101112"),
+        (
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            "101112",
+        ),
     ] {
         assert_eq!(
             AnonymousSessionContext::new(
