@@ -118,6 +118,22 @@ impl AnonymousSessionContext {
     pub const fn is_valid_at(&self, now_unix_ms: u64) -> bool {
         now_unix_ms != 0 && now_unix_ms < self.valid_until_unix_ms
     }
+
+    /// Return whether tenant, participant, and assessment-session references match exactly.
+    ///
+    /// Inputs are normalized with the same opaque-reference contract used at construction.
+    /// A malformed reference therefore fails closed instead of matching a stored binding.
+    #[must_use]
+    pub fn matches_binding(
+        &self,
+        tenant_ref: &str,
+        participant_ref: &str,
+        session_ref: &str,
+    ) -> bool {
+        normalized_reference(tenant_ref) == Some(self.tenant_ref.as_str())
+            && normalized_reference(participant_ref) == Some(self.participant_ref.as_str())
+            && normalized_reference(session_ref) == Some(self.session_ref.as_str())
+    }
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
