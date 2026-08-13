@@ -71,13 +71,27 @@ pub enum DataRightsPersistenceError {
 impl Display for DataRightsPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "data-rights propagation references must be opaque non-numeric values",
-            Self::InvalidRequestState => "data-rights durable propagation requires Requested state",
-            Self::EmptyTargetSet => "data-rights propagation requires at least one dependent system",
-            Self::DuplicateTarget => "data-rights propagation target set contains a duplicate system",
-            Self::InvalidPropagationEnvelope => "data-rights propagation event does not match the durable request",
-            Self::ConflictingReplay => "data-rights request was replayed with conflicting durable evidence",
-            Self::ValueOutOfRange => "data-rights persistence value exceeds the PostgreSQL bigint range",
+            Self::InvalidReference => {
+                "data-rights propagation references must be opaque non-numeric values"
+            }
+            Self::InvalidRequestState => {
+                "data-rights durable propagation requires Requested state"
+            }
+            Self::EmptyTargetSet => {
+                "data-rights propagation requires at least one dependent system"
+            }
+            Self::DuplicateTarget => {
+                "data-rights propagation target set contains a duplicate system"
+            }
+            Self::InvalidPropagationEnvelope => {
+                "data-rights propagation event does not match the durable request"
+            }
+            Self::ConflictingReplay => {
+                "data-rights request was replayed with conflicting durable evidence"
+            }
+            Self::ValueOutOfRange => {
+                "data-rights persistence value exceeds the PostgreSQL bigint range"
+            }
             Self::Integration(_) => "data-rights outbox evidence failed persistence validation",
             Self::Database(_) => "PostgreSQL data-rights persistence operation failed",
         })
