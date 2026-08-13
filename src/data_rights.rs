@@ -55,6 +55,8 @@ pub enum DataRightsError {
     IdentityVerificationRequired,
     /// A retention exception was supplied for a non-deletion request.
     RetentionExceptionNotAllowed,
+    /// The same normalized retention scope was supplied more than once.
+    DuplicateRetentionScope,
     /// A lifecycle reference was reused with evidence different from its first use.
     ConflictingReplay,
     /// The requested lifecycle transition is not valid from the current state.
@@ -72,6 +74,9 @@ impl Display for DataRightsError {
             }
             Self::RetentionExceptionNotAllowed => {
                 "retention exceptions are valid only for deletion requests"
+            }
+            Self::DuplicateRetentionScope => {
+                "data-rights retained scope references must be unique"
             }
             Self::ConflictingReplay => {
                 "data-rights lifecycle reference was replayed with conflicting evidence"
@@ -341,15 +346,17 @@ impl DataRightsRequest {
     ///
     /// `retained_scope_refs` is valid only for deletion. A non-empty retained set
     /// results in [`DataRightsState::PartiallyCompleted`] so the product never
-    /// represents legally retained data as deleted. An exact completion replay is
-    /// idempotent even after the request becomes terminal.
+    /// represents legally retained data as deleted. Retained scope references are
+    /// normalized and must be unique. An exact completion replay is idempotent even
+    /// after the request becomes terminal.
     ///
     /// # Errors
     ///
     /// Returns [`DataRightsError::RetentionExceptionNotAllowed`] for export
-    /// retention exceptions, [`DataRightsError::ConflictingReplay`] when completion
-    /// evidence is replayed inconsistently, or another [`DataRightsError`] for
-    /// invalid evidence, time, retained scopes, or lifecycle state.
+    /// retention exceptions, [`DataRightsError::DuplicateRetentionScope`] when a
+    /// normalized retention scope is repeated, [`DataRightsError::ConflictingReplay`]
+    /// when completion evidence is replayed inconsistently, or another
+    /// [`DataRightsError`] for invalid evidence, time, retained scopes, or lifecycle state.
     pub fn complete(
         &mut self,
         completion_evidence_ref: &str,
@@ -360,10 +367,17 @@ impl DataRightsRequest {
             return Err(DataRightsError::RetentionExceptionNotAllowed);
         }
         let completion_ref = required_reference(completion_evidence_ref)?;
-        let normalized_retention = retained_scope_refs
-            .iter()
-            .map(|reference| required_reference(reference).map(str::to_owned))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut normalized_retention = Vec::with_capacity(retained_scope_refs.len());
+        for reference in retained_scope_refs {
+            let reference = required_reference(reference)?;
+            if normalized_retention
+                .iter()
+                .any(|existing| existing == reference)
+            {
+                return Err(DataRightsError::DuplicateRetentionScope);
+            }
+            normalized_retention.push(reference.to_owned());
+        }
         if let (Some(existing_ref), Some(existing_at)) = (
             self.completion_evidence_ref.as_deref(),
             self.completed_at_unix_ms,
