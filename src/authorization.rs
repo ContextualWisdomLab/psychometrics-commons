@@ -38,6 +38,8 @@ pub enum ResourceKind {
     Result,
     /// Participant-owned assessment session resource.
     AssessmentSession,
+    /// Participant-owned purpose-specific consent ledger resource.
+    ConsentLedger,
     /// Participant-owned export/deletion request resource.
     DataRightsRequest,
     /// Tenant-scoped immutable instrument release resource.
@@ -52,7 +54,10 @@ impl ResourceKind {
     const fn requires_participant_owner(self) -> bool {
         matches!(
             self,
-            Self::Result | Self::AssessmentSession | Self::DataRightsRequest
+            Self::Result
+                | Self::AssessmentSession
+                | Self::ConsentLedger
+                | Self::DataRightsRequest
         )
     }
 }
@@ -65,6 +70,8 @@ pub enum ProductPermission {
     ReadOwnResult,
     /// Mutate or command an assessment session owned by the authenticated participant.
     ManageOwnSession,
+    /// Grant, revoke, or inspect purpose-specific consent for the authenticated participant.
+    ManageOwnConsent,
     /// Request or inspect data-rights work for the authenticated participant.
     ManageOwnDataRights,
     /// Publish or transition an instrument release within the authenticated tenant.
@@ -80,6 +87,7 @@ impl ProductPermission {
         match self {
             Self::ReadOwnResult => ResourceKind::Result,
             Self::ManageOwnSession => ResourceKind::AssessmentSession,
+            Self::ManageOwnConsent => ResourceKind::ConsentLedger,
             Self::ManageOwnDataRights => ResourceKind::DataRightsRequest,
             Self::PublishInstrument => ResourceKind::InstrumentRelease,
             Self::ApproveResearchRelease => ResourceKind::ResearchRelease,
@@ -222,7 +230,7 @@ impl ResourceScope {
     /// Create a tenant-scoped resource without participant ownership semantics.
     ///
     /// Only tenant-owned resource kinds are accepted. Participant-owned result,
-    /// session, and data-rights resources must be constructed with
+    /// session, consent, and data-rights resources must be constructed with
     /// [`Self::participant_owned`] so ownership cannot be omitted accidentally.
     ///
     /// # Errors
@@ -250,9 +258,9 @@ impl ResourceScope {
 
     /// Create a participant-owned resource inside one tenant.
     ///
-    /// Only participant-owned result, assessment-session, and data-rights kinds are
-    /// accepted. Tenant-scoped instrument, research-release, and configuration
-    /// resources must use [`Self::tenant_scoped`].
+    /// Only participant-owned result, assessment-session, consent, and data-rights
+    /// kinds are accepted. Tenant-scoped instrument, research-release, and
+    /// configuration resources must use [`Self::tenant_scoped`].
     ///
     /// # Errors
     ///
@@ -334,6 +342,7 @@ pub fn authorize(
     match permission {
         ProductPermission::ReadOwnResult
         | ProductPermission::ManageOwnSession
+        | ProductPermission::ManageOwnConsent
         | ProductPermission::ManageOwnDataRights => {
             let participant_ref = actor
                 .participant_ref
