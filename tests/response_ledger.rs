@@ -3,10 +3,8 @@
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
 use psychometrics_commons_runtime::session::SessionState;
 
-const DIGEST_A: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const DIGEST_B: &str =
-    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_CHANGED: &str =
     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
@@ -97,7 +95,10 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
                 write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_A),
             )
             .unwrap();
-        assert_eq!(replay, original, "exact replay must survive state {state:?}");
+        assert_eq!(
+            replay, original,
+            "exact replay must survive state {state:?}"
+        );
     }
     assert_eq!(ledger.len(), 1);
 }
@@ -125,7 +126,12 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
         let digest_error = ledger
             .record(
                 state,
-                write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_CHANGED),
+                write(
+                    "ignored_new_server_ref",
+                    "client_a",
+                    "item_v1",
+                    DIGEST_CHANGED,
+                ),
             )
             .unwrap_err();
         assert_eq!(digest_error, WriteError::IdempotencyConflict);
