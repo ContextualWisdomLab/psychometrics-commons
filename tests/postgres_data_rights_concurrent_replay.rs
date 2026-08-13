@@ -11,9 +11,14 @@ use std::thread;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn run_worker(url: String, schema: String, barrier: Arc<Barrier>) -> DataRightsPersistenceDisposition {
+fn run_worker(
+    url: String,
+    schema: String,
+    barrier: Arc<Barrier>,
+) -> DataRightsPersistenceDisposition {
     let mut db = Client::connect(&url, NoTls).unwrap();
-    db.batch_execute(&format!("SET search_path TO {schema}")).unwrap();
+    db.batch_execute(&format!("SET search_path TO {schema}"))
+        .unwrap();
     let request = DataRightsRequest::new(
         "data_rights_request_concurrent",
         "tenant_alpha",
@@ -36,7 +41,10 @@ fn run_worker(url: String, schema: String, barrier: Arc<Barrier>) -> DataRightsP
         DIGEST,
     )
     .unwrap();
-    let targets = [DataRightsPropagationTarget::new("dependent_system_alpha", &event)];
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
     barrier.wait();
     persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3).unwrap()
 }
@@ -46,7 +54,11 @@ fn concurrent_exact_first_write_is_idempotent() {
     let url = std::env::var("TEST_DATABASE_URL").unwrap();
     let schema = format!("data_rights_concurrent_{}", std::process::id());
     let mut setup = Client::connect(&url, NoTls).unwrap();
-    setup.batch_execute(&format!("CREATE SCHEMA {schema}; SET search_path TO {schema};")).unwrap();
+    setup
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
+        .unwrap();
     apply_integration_migration(&mut setup).unwrap();
     apply_data_rights_migration(&mut setup).unwrap();
 
@@ -66,7 +78,9 @@ fn concurrent_exact_first_write_is_idempotent() {
     barrier.wait();
 
     let mut outcomes = vec![first.join().unwrap(), second.join().unwrap()];
-    outcomes.sort_by_key(|value| matches!(value, DataRightsPersistenceDisposition::Duplicate));
+    outcomes.sort_by_key(|value| {
+        matches!(value, DataRightsPersistenceDisposition::Duplicate)
+    });
     assert_eq!(
         outcomes,
         vec![
