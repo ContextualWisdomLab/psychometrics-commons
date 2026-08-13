@@ -81,46 +81,87 @@ pub struct ApprovedResearchRelease {
 impl ApprovedResearchRelease {
     /// Return the research-release reference.
     #[must_use]
-    pub fn release_ref(&self) -> &str { &self.release_ref }
+    pub fn release_ref(&self) -> &str {
+        &self.release_ref
+    }
+
     /// Return the immutable dataset snapshot reference.
     #[must_use]
-    pub fn dataset_snapshot_ref(&self) -> &str { &self.dataset_snapshot_ref }
+    pub fn dataset_snapshot_ref(&self) -> &str {
+        &self.dataset_snapshot_ref
+    }
+
     /// Return the exact research scope reference.
     #[must_use]
-    pub fn research_scope_ref(&self) -> &str { &self.research_scope_ref }
+    pub fn research_scope_ref(&self) -> &str {
+        &self.research_scope_ref
+    }
+
     /// Return the canonical release-manifest digest.
     #[must_use]
-    pub fn manifest_digest(&self) -> &str { &self.manifest_digest }
+    pub fn manifest_digest(&self) -> &str {
+        &self.manifest_digest
+    }
+
     /// Return privacy-review evidence.
     #[must_use]
-    pub fn privacy_review_ref(&self) -> &str { &self.privacy_review_ref }
+    pub fn privacy_review_ref(&self) -> &str {
+        &self.privacy_review_ref
+    }
+
     /// Return scientific-review evidence.
     #[must_use]
-    pub fn scientific_review_ref(&self) -> &str { &self.scientific_review_ref }
+    pub fn scientific_review_ref(&self) -> &str {
+        &self.scientific_review_ref
+    }
+
     /// Return complete metadata-bundle evidence.
     #[must_use]
-    pub fn metadata_bundle_ref(&self) -> &str { &self.metadata_bundle_ref }
+    pub fn metadata_bundle_ref(&self) -> &str {
+        &self.metadata_bundle_ref
+    }
+
     /// Return license and rights evidence.
     #[must_use]
-    pub fn license_record_ref(&self) -> &str { &self.license_record_ref }
+    pub fn license_record_ref(&self) -> &str {
+        &self.license_record_ref
+    }
+
     /// Return measurement-provenance evidence.
     #[must_use]
-    pub fn measurement_provenance_ref(&self) -> &str { &self.measurement_provenance_ref }
+    pub fn measurement_provenance_ref(&self) -> &str {
+        &self.measurement_provenance_ref
+    }
+
     /// Return access-class approval evidence.
     #[must_use]
-    pub fn access_approval_ref(&self) -> &str { &self.access_approval_ref }
+    pub fn access_approval_ref(&self) -> &str {
+        &self.access_approval_ref
+    }
+
     /// Return citation metadata evidence.
     #[must_use]
-    pub fn citation_metadata_ref(&self) -> &str { &self.citation_metadata_ref }
+    pub fn citation_metadata_ref(&self) -> &str {
+        &self.citation_metadata_ref
+    }
+
     /// Return research-release approval evidence.
     #[must_use]
-    pub fn release_approver_ref(&self) -> &str { &self.release_approver_ref }
+    pub fn release_approver_ref(&self) -> &str {
+        &self.release_approver_ref
+    }
+
     /// Return the ordinary administration reference used for independence evidence.
     #[must_use]
-    pub fn ordinary_admin_ref(&self) -> &str { &self.ordinary_admin_ref }
+    pub fn ordinary_admin_ref(&self) -> &str {
+        &self.ordinary_admin_ref
+    }
+
     /// Return the approved access classification.
     #[must_use]
-    pub const fn access_class(&self) -> ResearchAccessClass { self.access_class }
+    pub const fn access_class(&self) -> ResearchAccessClass {
+        self.access_class
+    }
 }
 
 /// Fail-closed research-release gate error.
@@ -140,10 +181,18 @@ pub enum ResearchReleaseGateError {
 impl Display for ResearchReleaseGateError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "research release references must be opaque non-numeric values",
-            Self::InvalidManifestDigest => "research release manifest digest must be canonical sha256 evidence",
-            Self::UnresolvedBlockingFinding => "research release has unresolved blocking findings",
-            Self::SeparationOfDutiesViolation => "research release approver must be independent from ordinary administration",
+            Self::InvalidReference => {
+                "research release references must be opaque non-numeric values"
+            }
+            Self::InvalidManifestDigest => {
+                "research release manifest digest must be canonical sha256 evidence"
+            }
+            Self::UnresolvedBlockingFinding => {
+                "research release has unresolved blocking findings"
+            }
+            Self::SeparationOfDutiesViolation => {
+                "research release approver must be independent from ordinary administration"
+            }
         })
     }
 }
@@ -153,6 +202,7 @@ impl Error for ResearchReleaseGateError {}
 /// Validate and freeze one set of Research Commons release evidence.
 ///
 /// # Errors
+///
 /// Returns [`ResearchReleaseGateError`] for invalid references, invalid manifest identity,
 /// unresolved blockers, or non-independent approval evidence.
 pub fn approve_research_release(
@@ -204,7 +254,11 @@ fn required_reference(reference: &str) -> Result<&str, ResearchReleaseGateError>
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {
-    let Some(hex) = digest.strip_prefix("sha256:") else { return false; };
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return false;
+    };
     hex.len() == 64
-        && hex.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
