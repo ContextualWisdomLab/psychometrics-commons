@@ -136,13 +136,8 @@ fn changed_request_evidence_fails_closed() {
         &event,
     )];
 
-    persist_requested_data_rights_with_propagation(
-        &mut db,
-        &request("scope_alpha"),
-        &targets,
-        3,
-    )
-    .unwrap();
+    persist_requested_data_rights_with_propagation(&mut db, &request("scope_alpha"), &targets, 3)
+        .unwrap();
 
     assert!(matches!(
         persist_requested_data_rights_with_propagation(
@@ -200,12 +195,7 @@ fn target_reference_and_envelope_validation_fail_closed() {
 
     let invalid_reference = [DataRightsPropagationTarget::new("123", &event)];
     assert!(matches!(
-        persist_requested_data_rights_with_propagation(
-            &mut db,
-            &request,
-            &invalid_reference,
-            3,
-        ),
+        persist_requested_data_rights_with_propagation(&mut db, &request, &invalid_reference, 3,),
         Err(DataRightsPersistenceError::InvalidReference)
     ));
 
@@ -214,12 +204,7 @@ fn target_reference_and_envelope_validation_fail_closed() {
         DataRightsPropagationTarget::new(" dependent_system_alpha ", &event),
     ];
     assert!(matches!(
-        persist_requested_data_rights_with_propagation(
-            &mut db,
-            &request,
-            &duplicate_targets,
-            3,
-        ),
+        persist_requested_data_rights_with_propagation(&mut db, &request, &duplicate_targets, 3,),
         Err(DataRightsPersistenceError::DuplicateTarget)
     ));
 
@@ -238,12 +223,7 @@ fn target_reference_and_envelope_validation_fail_closed() {
         &wrong_source,
     )];
     assert!(matches!(
-        persist_requested_data_rights_with_propagation(
-            &mut db,
-            &request,
-            &wrong_source_target,
-            3,
-        ),
+        persist_requested_data_rights_with_propagation(&mut db, &request, &wrong_source_target, 3,),
         Err(DataRightsPersistenceError::InvalidPropagationEnvelope)
     ));
 
@@ -262,12 +242,7 @@ fn target_reference_and_envelope_validation_fail_closed() {
         &wrong_type,
     )];
     assert!(matches!(
-        persist_requested_data_rights_with_propagation(
-            &mut db,
-            &request,
-            &wrong_type_target,
-            3,
-        ),
+        persist_requested_data_rights_with_propagation(&mut db, &request, &wrong_type_target, 3,),
         Err(DataRightsPersistenceError::InvalidPropagationEnvelope)
     ));
 }
