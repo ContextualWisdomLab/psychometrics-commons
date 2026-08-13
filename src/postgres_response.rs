@@ -209,7 +209,10 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{postgres_sequence, required_reference, ResponsePersistenceError};
+    use super::{
+        is_response_uniqueness_conflict, postgres_sequence, required_reference,
+        ResponsePersistenceError,
+    };
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -230,5 +233,17 @@ mod reference_guard_tests {
             Err(ResponsePersistenceError::InvalidSequence)
         ));
         assert_eq!(postgres_sequence(1).unwrap(), 1);
+    }
+
+    #[test]
+    fn non_database_postgres_error_is_not_a_uniqueness_conflict() {
+        let error = match postgres::Client::connect(
+            "host=127.0.0.1 port=1 user=x dbname=x connect_timeout=1",
+            postgres::NoTls,
+        ) {
+            Ok(_) => panic!("a closed loopback port must fail without a PostgreSQL database error"),
+            Err(error) => error,
+        };
+        assert!(!is_response_uniqueness_conflict(&error));
     }
 }

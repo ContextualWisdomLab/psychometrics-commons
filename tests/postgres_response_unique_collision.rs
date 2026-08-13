@@ -8,8 +8,7 @@ use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{Mutex, MutexGuard};
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn test_guard() -> MutexGuard<'static, ()> {
@@ -116,11 +115,7 @@ fn distinct_server_event_reusing_client_identity_is_conflicting_replay() {
         99,
     );
 
-    let replay = one_event_ledger(
-        session_ref,
-        "server_event_new",
-        "client_event_shared",
-    );
+    let replay = one_event_ledger(session_ref, "server_event_new", "client_event_shared");
     assert_conflict_rolls_back(&mut client, &replay, session_ref);
 }
 
