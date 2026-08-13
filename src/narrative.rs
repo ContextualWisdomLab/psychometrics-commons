@@ -12,6 +12,35 @@ use std::fmt::{Display, Formatter};
 const STYLE_ASSIGNMENT_IDENTITY_DOMAIN: &[u8] =
     b"psychometrics-commons/style-assignment-identity/v1\0";
 
+const GRANDFATHERED_LANGUAGE_TAGS: &[&str] = &[
+    "art-lojban",
+    "cel-gaulish",
+    "en-GB-oed",
+    "i-ami",
+    "i-bnn",
+    "i-default",
+    "i-enochian",
+    "i-hak",
+    "i-klingon",
+    "i-lux",
+    "i-mingo",
+    "i-navajo",
+    "i-pwn",
+    "i-tao",
+    "i-tay",
+    "i-tsu",
+    "no-bok",
+    "no-nyn",
+    "sgn-BE-FR",
+    "sgn-BE-NL",
+    "sgn-CH-DE",
+    "zh-guoyu",
+    "zh-hakka",
+    "zh-min",
+    "zh-min-nan",
+    "zh-xiang",
+];
+
 /// Scientific score evidence that a deterministic Personality Style mapping consumes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -41,7 +70,7 @@ pub struct StyleAssignmentIdentity<'a> {
     pub style_mapping_version_ref: &'a str,
     /// Exact digest of the approved interpretation-rule bundle.
     pub interpretation_rule_bundle_digest: &'a str,
-    /// Exact locale token used by the deterministic presentation contract.
+    /// Exact BCP 47 locale token used by the deterministic presentation contract.
     pub locale: &'a str,
 }
 
@@ -51,7 +80,7 @@ pub struct StyleAssignmentIdentity<'a> {
 pub enum StyleAssignmentIdentityError {
     /// An opaque product reference was blank or numeric-like.
     InvalidReference,
-    /// A digest or locale contained noncanonical whitespace/control content or was blank.
+    /// A digest or locale contained noncanonical content or was blank.
     NonCanonicalToken,
 }
 
@@ -75,7 +104,8 @@ impl StyleAssignmentIdentity<'_> {
     ///
     /// Fields are emitted in a fixed schema order. Each field name is followed by an unsigned
     /// 64-bit big-endian byte length and then the exact UTF-8 value. Opaque references are
-    /// normalized with the product reference contract; digests and locale are exact tokens.
+    /// normalized with the product reference contract; digests remain exact tokens and locale
+    /// must satisfy the fail-closed BCP 47 grammar used for published assessment locales.
     /// `norm_version_ref` additionally emits an explicit presence marker so `None` cannot be
     /// confused with any future present value.
     ///
@@ -98,7 +128,7 @@ impl StyleAssignmentIdentity<'_> {
         let style_mapping_version_ref = required_reference(self.style_mapping_version_ref)?;
         let interpretation_rule_bundle_digest =
             required_exact_token(self.interpretation_rule_bundle_digest)?;
-        let locale = required_exact_token(self.locale)?;
+        let locale = required_locale(self.locale)?;
         let norm_version_ref = self.norm_version_ref.map(required_reference).transpose()?;
 
         let mut canonical = Vec::with_capacity(384);
@@ -150,6 +180,133 @@ fn required_exact_token(token: &str) -> Result<&str, StyleAssignmentIdentityErro
     } else {
         Ok(token)
     }
+}
+
+fn required_locale(locale: &str) -> Result<&str, StyleAssignmentIdentityError> {
+    let locale = required_exact_token(locale)?;
+    if is_well_formed_bcp47(locale) {
+        Ok(locale)
+    } else {
+        Err(StyleAssignmentIdentityError::NonCanonicalToken)
+    }
+}
+
+fn is_well_formed_bcp47(locale: &str) -> bool {
+    if GRANDFATHERED_LANGUAGE_TAGS
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case(locale))
+    {
+        return true;
+    }
+
+    let subtags: Vec<&str> = locale.split('-').collect();
+    if subtags.iter().any(|subtag| subtag.is_empty()) {
+        return false;
+    }
+
+    if subtags[0].eq_ignore_ascii_case("x") {
+        return subtags.len() > 1 && subtags[1..].iter().all(|subtag| is_alnum_len(subtag, 1, 8));
+    }
+
+    let language = subtags[0];
+    let language_allows_extlang = is_alpha_len(language, 2, 3);
+    if !language_allows_extlang && !is_alpha_len(language, 4, 8) {
+        return false;
+    }
+
+    let mut index = 1;
+    if language_allows_extlang {
+        let mut extlang_count = 0;
+        while index < subtags.len() && extlang_count < 3 && is_alpha_len(subtags[index], 3, 3) {
+            index += 1;
+            extlang_count += 1;
+        }
+    }
+
+    if index < subtags.len() && is_alpha_len(subtags[index], 4, 4) {
+        index += 1;
+    }
+
+    if index < subtags.len() && is_region(subtags[index]) {
+        index += 1;
+    }
+
+    let mut variants: Vec<&str> = Vec::new();
+    while index < subtags.len() && is_variant(subtags[index]) {
+        let variant = subtags[index];
+        if variants
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(variant))
+        {
+            return false;
+        }
+        variants.push(variant);
+        index += 1;
+    }
+
+    let mut extension_singletons: Vec<u8> = Vec::new();
+    while index < subtags.len() && is_extension_singleton(subtags[index]) {
+        let singleton = subtags[index].as_bytes()[0].to_ascii_lowercase();
+        if extension_singletons.contains(&singleton) {
+            return false;
+        }
+        extension_singletons.push(singleton);
+        index += 1;
+
+        let extension_start = index;
+        while index < subtags.len()
+            && !is_any_singleton(subtags[index])
+            && is_alnum_len(subtags[index], 2, 8)
+        {
+            index += 1;
+        }
+        if index == extension_start {
+            return false;
+        }
+    }
+
+    if index < subtags.len() && subtags[index].eq_ignore_ascii_case("x") {
+        index += 1;
+        let private_use_start = index;
+        while index < subtags.len() && is_alnum_len(subtags[index], 1, 8) {
+            index += 1;
+        }
+        if index == private_use_start {
+            return false;
+        }
+    }
+
+    index == subtags.len()
+}
+
+fn is_alpha_len(subtag: &str, minimum: usize, maximum: usize) -> bool {
+    (minimum..=maximum).contains(&subtag.len())
+        && subtag.bytes().all(|byte| byte.is_ascii_alphabetic())
+}
+
+fn is_alnum_len(subtag: &str, minimum: usize, maximum: usize) -> bool {
+    (minimum..=maximum).contains(&subtag.len())
+        && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+fn is_region(subtag: &str) -> bool {
+    is_alpha_len(subtag, 2, 2)
+        || (subtag.len() == 3 && subtag.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn is_variant(subtag: &str) -> bool {
+    is_alnum_len(subtag, 5, 8)
+        || (subtag.len() == 4
+            && subtag.as_bytes()[0].is_ascii_digit()
+            && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+}
+
+fn is_any_singleton(subtag: &str) -> bool {
+    subtag.len() == 1 && subtag.as_bytes()[0].is_ascii_alphanumeric()
+}
+
+fn is_extension_singleton(subtag: &str) -> bool {
+    is_any_singleton(subtag) && !subtag.eq_ignore_ascii_case("x")
 }
 
 fn append_field(target: &mut Vec<u8>, field_name: &str, value: &str) {

@@ -170,6 +170,78 @@ fn noncanonical_exact_tokens_fail_closed() {
 }
 
 #[test]
+fn locale_requires_bcp47_subtag_structure() {
+    for valid in [
+        "en",
+        "abcd",
+        "abcdefg",
+        "ko-KR",
+        "zh-Hant-TW",
+        "es-419",
+        "zh-cmn-Hans-CN",
+        "zh-cmn-yue-hak-Hans-CN",
+        "sl-rozaj-biske",
+        "de-CH-1901",
+        "en-US-u-ca-gregory",
+        "en-US-a-abc-b-1234-x-private",
+        "en-u-ca-x-private",
+        "zh-Hant-TW-x-private",
+        "i-klingon",
+        "EN-gb-OED",
+        "x-private",
+        "x-a-b-c",
+    ] {
+        let identity = StyleAssignmentIdentity {
+            locale: valid,
+            ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
+        };
+        assert!(
+            identity.canonical_bytes().is_ok(),
+            "expected valid locale: {valid}"
+        );
+    }
+
+    for invalid in [
+        "ko_KR",
+        "-en-US",
+        "en-US-",
+        "en--US",
+        "e-US",
+        "123-US",
+        "1abc",
+        "englishish-US",
+        "en-abcdefghi",
+        "en-US_foo",
+        "en-a",
+        "en-u-a",
+        "en-u-abcdefghi",
+        "en-US-foo",
+        "en-u-ca-gregory-u-nu-latn",
+        "en-x",
+        "x",
+        "x-abcdefghi",
+        "en-x-abcdefghi",
+        "en-US-Latn",
+        "en-419-US",
+        "en-12",
+        "en-_",
+        "en-1_23",
+        "sl-rozaj-rozaj",
+        "zh-cmn-yue-hak-jkl-Hans-CN",
+    ] {
+        let identity = StyleAssignmentIdentity {
+            locale: invalid,
+            ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
+        };
+        assert_eq!(
+            identity.canonical_bytes(),
+            Err(StyleAssignmentIdentityError::NonCanonicalToken),
+            "expected malformed BCP 47 locale to fail closed: {invalid}"
+        );
+    }
+}
+
+#[test]
 fn identity_errors_expose_stable_operator_messages() {
     assert_eq!(
         StyleAssignmentIdentityError::InvalidReference.to_string(),
