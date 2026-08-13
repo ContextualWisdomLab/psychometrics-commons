@@ -32,6 +32,8 @@ pub enum ConsentPersistenceError {
     InvalidReference,
     /// Event identity was replayed with different immutable evidence.
     ConflictingReplay,
+    /// A consent event timestamp cannot be represented by the bounded database column.
+    InvalidTimestamp,
     /// Consent persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
@@ -45,6 +47,7 @@ impl Display for ConsentPersistenceError {
             Self::ConflictingReplay => {
                 "consent event identity was replayed with conflicting evidence"
             }
+            Self::InvalidTimestamp => "consent event timestamp exceeds the PostgreSQL bigint range",
             Self::UnsupportedIsolationLevel => {
                 "consent persistence requires read committed isolation"
             }
@@ -88,7 +91,8 @@ pub fn apply_consent_migration(
 /// # Errors
 ///
 /// Returns [`ConsentPersistenceError`] for unsupported isolation, conflicting
-/// replay, an invalid reference, or a database failure.
+/// replay, an invalid reference, a timestamp outside the `PostgreSQL` range, or
+/// a database failure.
 pub fn persist_consent_ledger(
     transaction: &mut Transaction<'_>,
     ledger: &ConsentLedger,
@@ -126,7 +130,8 @@ fn persist_one_event(
     event: &ConsentEvent,
 ) -> Result<bool, ConsentPersistenceError> {
     let event_ref = required_reference(event.event_ref())?;
-    let occurred_at = i64::try_from(event.occurred_at_unix_ms()).unwrap_or(i64::MAX);
+    let occurred_at = i64::try_from(event.occurred_at_unix_ms())
+        .map_err(|_| ConsentPersistenceError::InvalidTimestamp)?;
     let purpose = purpose_name(event.purpose());
     let decision = decision_name(event.decision());
     let research_scope_ref = event.research_scope_ref();

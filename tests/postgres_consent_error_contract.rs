@@ -21,6 +21,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             "consent event identity was replayed with conflicting evidence",
         ),
         (
+            ConsentPersistenceError::InvalidTimestamp,
+            "consent event timestamp exceeds the PostgreSQL bigint range",
+        ),
+        (
             ConsentPersistenceError::UnsupportedIsolationLevel,
             "consent persistence requires read committed isolation",
         ),

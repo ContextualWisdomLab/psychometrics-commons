@@ -302,7 +302,7 @@ fn consent_replay_select_failure_is_a_database_failure() {
              CREATE OR REPLACE FUNCTION consent_event_redirect_after_insert() \
              RETURNS trigger LANGUAGE plpgsql AS $$ \
              BEGIN \
-                 PERFORM set_config('search_path', 'consent_event_failure_sink', true); \
+                 PERFORM set_config('search_path', 'consent_event_failure_sink', false); \
                  RETURN NULL; \
              END $$; \
              CREATE TRIGGER consent_event_redirect_after_insert \
@@ -320,12 +320,72 @@ fn consent_replay_select_failure_is_a_database_failure() {
 }
 
 #[test]
+fn oversized_event_timestamp_fails_closed_before_insert() {
+    let _guard = consent_test_guard();
+    let mut client = test_client();
+    reset_consent_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+
+    let ledger = recorded_ledger(
+        "participant_consent_overflow",
+        &[grant(
+            "service_grant_overflow",
+            ConsentPurpose::ServiceOperation,
+            "service_form_v1",
+            None,
+            u64::MAX,
+        )],
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger(&mut transaction, &ledger),
+        Err(ConsentPersistenceError::InvalidTimestamp)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn missing_consent_relation_is_a_database_failure() {
     let _guard = consent_test_guard();
     let mut client = test_client();
     reset_consent_tables(&mut client);
 
     let ledger = ConsentLedger::new("participant_consent_missing").unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger(&mut transaction, &ledger),
+        Err(ConsentPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_consent_event_relation_is_a_database_failure() {
+    let _guard = consent_test_guard();
+    let mut client = test_client();
+    reset_consent_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+
+    let header = ConsentLedger::new("participant_consent_missing_event").unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_consent_ledger(&mut transaction, &header).unwrap();
+        transaction.commit().unwrap();
+    }
+    client
+        .batch_execute("DROP TABLE consent_persistence_test.consent_event;")
+        .unwrap();
+
+    let ledger = recorded_ledger(
+        "participant_consent_missing_event",
+        &[grant(
+            "service_grant",
+            ConsentPurpose::ServiceOperation,
+            "service_form_v1",
+            None,
+            5_000,
+        )],
+    );
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist_consent_ledger(&mut transaction, &ledger),
