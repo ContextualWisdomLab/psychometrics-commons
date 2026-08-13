@@ -6,7 +6,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Added
 
-- PostgreSQL 18 item-delivery persistence for one session-bound ledger plus append-only delivery events, with exact replay, fail-closed release rebinding, duplicate-item protection, unique server sequences, opaque-reference/digest/locale bounds, and `READ COMMITTED` replay classification.
+- PostgreSQL 18 data-rights persistence for one requested export or deletion identity plus one local outbox event per declared dependent system, with exact replay, fail-closed evidence mismatch, unique-event identities, and `READ COMMITTED` replay classification.
 - PostgreSQL 18 instrument-release persistence for one immutable locale-specific publication identity plus reachable publication-state advance, with exact replay, fail-closed digest rebinding, fail-closed unreachable lifecycle rewind, and `READ COMMITTED` replay classification.
 - Initial Psychometrics Commons product requirements covering the IPIP-based Big Five consumer vertical slice, reflective modules, longitudinal participation, Research Commons, and Measurement Workbench.
 - Technical requirements for hosted runtime ownership, state machines, idempotent response/scoring flows, identity and tenant boundaries, consent and data-rights workflows, research pseudonymization and release, event/outbox integration, accessibility, multilingual instrument versions, deployment profiles, and release evidence.
@@ -50,6 +50,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.
 - Architecture contracts now keep longitudinal validity, source-recorded, platform-received, and durable-ingestion timestamps distinct, with ISO 8601-1 and W3C PROV-DM doctoring references.

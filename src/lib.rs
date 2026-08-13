@@ -16,6 +16,7 @@ pub mod integration;
 pub mod item_delivery;
 pub mod narrative;
 pub mod participant;
+pub mod postgres_data_rights;
 pub mod postgres_instrument_release;
 pub mod postgres_integration;
 pub mod postgres_item_delivery;

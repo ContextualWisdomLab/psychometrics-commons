@@ -1,7 +1,7 @@
 # Logical Entity-Relationship Model
 
 - Status: Normative logical data model
-- Date: 2026-08-13
+- Date: 2026-08-10
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
@@ -25,8 +25,6 @@ erDiagram
     assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
-    assessment_session ||--o| item_delivery_ledger : binds
-    item_delivery_ledger ||--o{ item_delivery_event : records
     assessment_session ||--o{ item_delivery_event : delivers
     item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
@@ -54,6 +52,8 @@ erDiagram
     longitudinal_enrollment ||--o{ temporal_analysis_submission : submits
 
     assessment_participant ||--o{ data_rights_request : requests
+    data_rights_request ||--|{ data_rights_propagation_state : enqueues
+    data_rights_propagation_state }o--|| integration_outbox : references
 
     tenant_account ||--o{ integration_outbox : scopes
     tenant_account ||--o{ integration_inbox : scopes
@@ -152,23 +152,14 @@ erDiagram
       timestamp latest_event_at
     }
 
-    item_delivery_ledger {
-      string session_ref PK
-      string instrument_release_ref
-      string release_content_digest
-      string locale
-      string[] allowed_item_version_refs
-      timestamp created_at
-    }
-
     item_delivery_event {
-      string session_ref PK,FK
       string delivery_event_ref PK
-      string item_version_ref
-      string presentation_context_ref
-      string selection_evidence_ref
+      string session_ref FK
+      string item_version_ref FK
       int delivery_sequence
-      timestamp created_at
+      string routing_policy_ref
+      string payload_digest
+      timestamp delivered_at
     }
 
     response_event {
@@ -353,6 +344,16 @@ erDiagram
       timestamp latest_event_at
     }
 
+    data_rights_propagation_state {
+      string request_ref PK,FK
+      string dependent_system_ref PK
+      string tenant_ref FK
+      string source_ref
+      string event_ref
+      string current_state
+      timestamp latest_event_at
+    }
+
     integration_outbox {
       string outbox_event_ref PK
       string tenant_ref FK
@@ -403,8 +404,9 @@ erDiagram
 
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
-- `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`) on protected main after #50; HTTP publication transport remains Target.
-- `item_delivery_ledger` and `item_delivery_event` reflect the already-merged `src/item_delivery.rs` domain primitive. Physical persistence is carried by Active PR #48 (`migrations/0004_item_delivery_evidence.sql`); API delivery orchestration is still Target.
+- `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
+- `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` on Active PR #46 stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
+- `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
 - `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. PostgreSQL evidence persistence exists only on active PR #24 until merged.
