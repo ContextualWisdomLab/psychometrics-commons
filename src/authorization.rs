@@ -54,10 +54,7 @@ impl ResourceKind {
     const fn requires_participant_owner(self) -> bool {
         matches!(
             self,
-            Self::Result
-                | Self::AssessmentSession
-                | Self::ConsentLedger
-                | Self::DataRightsRequest
+            Self::Result | Self::AssessmentSession | Self::ConsentLedger | Self::DataRightsRequest
         )
     }
 }
