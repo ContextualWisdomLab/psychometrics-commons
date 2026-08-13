@@ -171,7 +171,16 @@ fn noncanonical_exact_tokens_fail_closed() {
 
 #[test]
 fn locale_requires_bcp47_subtag_structure() {
-    for valid in ["en", "ko-KR", "zh-Hant-TW", "es-419"] {
+    for valid in [
+        "en",
+        "ko-KR",
+        "zh-Hant-TW",
+        "es-419",
+        "sl-rozaj-biske",
+        "de-CH-1901",
+        "en-US-u-ca-gregory",
+        "zh-Hant-TW-x-private",
+    ] {
         let identity = StyleAssignmentIdentity {
             locale: valid,
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
@@ -189,6 +198,13 @@ fn locale_requires_bcp47_subtag_structure() {
         "englishish-US",
         "en-abcdefghi",
         "en-US_foo",
+        "en-a",
+        "en-US-foo",
+        "en-u-ca-gregory-u-nu-latn",
+        "en-x",
+        "en-US-Latn",
+        "en-419-US",
+        "en-1234",
     ] {
         let identity = StyleAssignmentIdentity {
             locale: invalid,
