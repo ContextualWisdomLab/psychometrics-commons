@@ -753,3 +753,71 @@ fn database_failures_preserve_source() {
     ));
     transaction.rollback().unwrap();
 }
+
+fn suppress_state_updates(client: &mut Client, target_state: &str) {
+    client
+        .batch_execute(&format!(
+            "CREATE OR REPLACE FUNCTION suppress_inbox_consumption_update() \
+             RETURNS trigger LANGUAGE plpgsql AS $$\
+             BEGIN \
+                 IF NEW.consumption_state = '{target_state}' THEN \
+                     RETURN NULL; \
+                 END IF; \
+                 RETURN NEW; \
+             END; \
+             $$; \
+             DROP TRIGGER IF EXISTS suppress_inbox_consumption_update \
+                 ON integration_consumption; \
+             CREATE TRIGGER suppress_inbox_consumption_update \
+             BEFORE UPDATE ON integration_consumption \
+             FOR EACH ROW EXECUTE FUNCTION suppress_inbox_consumption_update();"
+        ))
+        .unwrap();
+}
+
+#[test]
+fn expire_and_complete_reject_suppressed_updates() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_suppressed_update");
+    let expire_target = pending(
+        "event_suppressed_update",
+        "consumption_suppressed_expire",
+        "side_effect_suppressed_expire",
+    );
+    persist_ok(&mut client, &expire_target);
+    let mut claimed = client.transaction().unwrap();
+    begin_inbox_consumption(&mut claimed, &expire_target, 20_001, 21_000).unwrap();
+    claimed.commit().unwrap();
+
+    suppress_state_updates(&mut client, "pending");
+    let mut expire = client.transaction().unwrap();
+    assert!(matches!(
+        expire_inbox_consumption(&mut expire, &expire_target, 21_000),
+        Err(InboxConsumptionPersistenceError::InvalidStoredState)
+    ));
+    expire.rollback().unwrap();
+
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_suppressed_complete");
+    let complete_target = pending(
+        "event_suppressed_complete",
+        "consumption_suppressed_complete",
+        "side_effect_suppressed_complete",
+    );
+    persist_ok(&mut client, &complete_target);
+    suppress_state_updates(&mut client, "completed");
+    let mut complete = client.transaction().unwrap();
+    assert!(matches!(
+        complete_inbox_consumption(
+            &mut complete,
+            &complete_target,
+            20_001,
+            "completion_projection_applied",
+            0,
+        ),
+        Err(InboxConsumptionPersistenceError::InvalidStoredState)
+    ));
+    complete.rollback().unwrap();
+}

@@ -612,7 +612,7 @@ fn is_unique_violation(error: &postgres::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_consumption_state, InboxConsumptionPersistenceError};
+    use super::{is_unique_violation, parse_consumption_state, InboxConsumptionPersistenceError};
     use crate::integration::ConsumptionState;
 
     #[test]
@@ -637,5 +637,17 @@ mod tests {
             parse_consumption_state("unexpected"),
             Err(InboxConsumptionPersistenceError::InvalidStoredState)
         ));
+    }
+
+    #[test]
+    fn non_database_postgres_error_is_not_a_unique_violation() {
+        let error = match postgres::Client::connect(
+            "host=127.0.0.1 port=1 user=x dbname=x connect_timeout=1",
+            postgres::NoTls,
+        ) {
+            Ok(_) => panic!("a closed loopback port must fail without a PostgreSQL database error"),
+            Err(error) => error,
+        };
+        assert!(!is_unique_violation(&error));
     }
 }
