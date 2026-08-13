@@ -229,10 +229,10 @@ fn classify_existing_event(
 }
 
 fn classify_unique_violation(error: postgres::Error) -> ItemDeliveryPersistenceError {
-    let Some(database_error) = error.as_db_error() else {
-        return ItemDeliveryPersistenceError::Database(error);
-    };
-    match database_error.constraint() {
+    match error
+        .as_db_error()
+        .and_then(postgres::error::DbError::constraint)
+    {
         Some("item_delivery_event_item_version_unique") => {
             ItemDeliveryPersistenceError::DuplicateItemDelivery
         }

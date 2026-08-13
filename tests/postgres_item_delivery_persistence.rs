@@ -46,14 +46,19 @@ fn reset_item_delivery_tables(client: &mut Client) {
         .unwrap();
 }
 
-fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
+fn manifest_parts(
+    release_ref: &str,
+    item_version_refs: &[&str],
+    locale: &str,
+    digest: &str,
+) -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
         release_ref,
         "instrument_big_five",
         "instrument_version_ko_v1",
         "construct_big_five",
-        &["item_version_001", "item_version_002"],
-        "ko-KR",
+        item_version_refs,
+        locale,
         "assessment_spec_big_five_v1",
         "scoring_big_five_v1",
         "calibration_big_five_v1",
@@ -65,6 +70,15 @@ fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
         digest,
     )
     .unwrap()
+}
+
+fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
+    manifest_parts(
+        release_ref,
+        &["item_version_001", "item_version_002"],
+        "ko-KR",
+        digest,
+    )
 }
 
 fn request<'a>(
@@ -385,4 +399,221 @@ fn missing_event_relation_is_classified_as_a_database_failure() {
         Err(ItemDeliveryPersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_ledger_relation_is_classified_as_a_database_failure() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+
+    let ledger = ItemDeliveryLedger::from_manifest(
+        "session_item_delivery_missing_ledger",
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_item_delivery_ledger(&mut transaction, &ledger),
+        Err(ItemDeliveryPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn ledger_replay_select_failure_is_classified_as_a_database_failure() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let ledger = ItemDeliveryLedger::from_manifest(
+        "session_item_delivery_hidden_ledger",
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+    )
+    .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_item_delivery_ledger(&mut transaction, &ledger).unwrap();
+        transaction.commit().unwrap();
+    }
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS item_delivery_ledger_failure_sink;\
+             CREATE OR REPLACE FUNCTION item_delivery_ledger_redirect_after_insert() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 PERFORM set_config('search_path', 'item_delivery_ledger_failure_sink', true); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER item_delivery_ledger_redirect_after_insert \
+             AFTER INSERT ON item_delivery_ledger \
+             FOR EACH STATEMENT EXECUTE FUNCTION item_delivery_ledger_redirect_after_insert();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_item_delivery_ledger(&mut transaction, &ledger),
+        Err(ItemDeliveryPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn event_replay_select_failure_is_classified_as_a_database_failure() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let ledger = delivered_ledger(
+        "session_item_delivery_hidden_event",
+        "release_big_five_ko_v1",
+        RELEASE_DIGEST,
+        &[(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+        )],
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_item_delivery_ledger(&mut transaction, &ledger).unwrap();
+        transaction.commit().unwrap();
+    }
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS item_delivery_event_failure_sink;\
+             CREATE OR REPLACE FUNCTION item_delivery_event_redirect_after_insert() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 PERFORM set_config('search_path', 'item_delivery_event_failure_sink', true); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER item_delivery_event_redirect_after_insert \
+             AFTER INSERT ON item_delivery_event \
+             FOR EACH STATEMENT EXECUTE FUNCTION item_delivery_event_redirect_after_insert();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_item_delivery_ledger(&mut transaction, &ledger),
+        Err(ItemDeliveryPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+fn persist_then_conflict(
+    client: &mut Client,
+    original: &ItemDeliveryLedger,
+    conflicting: &ItemDeliveryLedger,
+) {
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_item_delivery_ledger(&mut transaction, original).unwrap();
+        transaction.commit().unwrap();
+    }
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_item_delivery_ledger(&mut transaction, conflicting),
+        Err(ItemDeliveryPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn digest_locale_and_allowed_item_rebinding_fail_closed() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    persist_then_conflict(
+        &mut client,
+        &ItemDeliveryLedger::from_manifest(
+            "session_item_delivery_digest_conflict",
+            &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        )
+        .unwrap(),
+        &ItemDeliveryLedger::from_manifest(
+            "session_item_delivery_digest_conflict",
+            &manifest("release_big_five_ko_v1", OTHER_DIGEST),
+        )
+        .unwrap(),
+    );
+
+    persist_then_conflict(
+        &mut client,
+        &ItemDeliveryLedger::from_manifest(
+            "session_item_delivery_locale_conflict",
+            &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        )
+        .unwrap(),
+        &ItemDeliveryLedger::from_manifest(
+            "session_item_delivery_locale_conflict",
+            &manifest_parts(
+                "release_big_five_ko_v1",
+                &["item_version_001", "item_version_002"],
+                "en-US",
+                RELEASE_DIGEST,
+            ),
+        )
+        .unwrap(),
+    );
+
+    persist_then_conflict(
+        &mut client,
+        &ItemDeliveryLedger::from_manifest(
+            "session_item_delivery_allowed_conflict",
+            &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        )
+        .unwrap(),
+        &ItemDeliveryLedger::from_manifest(
+            "session_item_delivery_allowed_conflict",
+            &manifest_parts(
+                "release_big_five_ko_v1",
+                &["item_version_001", "item_version_003"],
+                "ko-KR",
+                RELEASE_DIGEST,
+            ),
+        )
+        .unwrap(),
+    );
+}
+
+#[test]
+fn selection_evidence_replay_conflict_fails_closed() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    persist_then_conflict(
+        &mut client,
+        &delivered_ledger(
+            "session_item_delivery_selection_conflict",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            &[(
+                "delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                Some("selection_fixed_order_v1"),
+            )],
+        ),
+        &delivered_ledger(
+            "session_item_delivery_selection_conflict",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            &[(
+                "delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                Some("selection_adaptive_v1"),
+            )],
+        ),
+    );
 }
