@@ -19,6 +19,8 @@ erDiagram
     item_definition ||--|{ item_version : versions
     instrument_version ||--|{ instrument_item : contains
     item_version ||--o{ instrument_item : referenced_by
+    instrument_version ||--|{ instrument_release : publishes_as
+    instrument_release ||--o{ assessment_session : administered_as
 
     assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
@@ -82,6 +84,17 @@ erDiagram
       string publication_evidence_ref
       string publication_state
       string content_digest
+      timestamp created_at
+    }
+
+    instrument_release {
+      string release_ref PK
+      string instrument_ref FK
+      string instrument_version_ref FK
+      string construct_ref
+      string locale
+      string content_digest
+      string publication_state
       timestamp created_at
     }
 
@@ -379,6 +392,7 @@ erDiagram
 
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
+- `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`) on Active PR #50; HTTP publication transport remains Target.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
@@ -404,6 +418,7 @@ No local foreign key is created into another service's database.
 Once semantically published/frozen, the following are append-only or superseded rather than mutated in place:
 
 - `instrument_version` after publication;
+- `instrument_release` manifest columns after first persist (only `publication_state` may advance);
 - `item_version` after publication;
 - `item_delivery_event`;
 - `response_snapshot` and `response_snapshot_entry`;
@@ -428,6 +443,7 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `(session_ref, server_sequence)` | authoritative response ordering |
 | unique `response_event_ref` | no server event identity reuse |
 | unique `response_snapshot_ref` and one canonical completed snapshot per session/version policy | immutable scoring evidence |
+| unique `release_ref` for one locale-specific publication identity | instrument-release replay safety |
 | unique `(instrument_version_ref, item_order)` | deterministic published order |
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
 | at most one current Active `participant_identity_link` per participant under the accepted single-account-link policy | unambiguous current account projection |

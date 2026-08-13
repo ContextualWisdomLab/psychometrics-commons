@@ -39,6 +39,21 @@ Real PostgreSQL tests on the active branch cover exact replay/conflicting replay
 
 The active slice deliberately does **not** claim durable retry scheduling/reclaim, completion, permanent failure/quarantine transitions, expired-lease recovery, crash/restart recovery, result persistence, or live fast-mlsirm execution. Those remain Target.
 
+## Active PR instrument-release physical schema
+
+PR #50 (`feat/instrument-release-persistence-20260813`) is **Active PR**, not protected-main truth. Migration `migrations/0006_instrument_release.sql` maps one locale-specific `instrument_release` publication identity into a single PostgreSQL 18 relation owned by `src/postgres_instrument_release.rs`.
+
+The active slice persists:
+
+- opaque `release_ref` publication identity;
+- immutable locale-specific manifest columns, including item-version order, consent-requirement references, optional norm reference, and canonical SHA-256 content digest;
+- current `publication_state` with CHECK-constrained Draft/Review/Published/Suspended/Retired values;
+- exact-replay classification under `READ COMMITTED`;
+- reachable publication-state advance without rewriting immutable manifest columns;
+- fail-closed digest/identity rebinding and unreachable lifecycle rewind.
+
+The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target.
+
 ## Logical-to-physical mapping rule
 
 A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:
