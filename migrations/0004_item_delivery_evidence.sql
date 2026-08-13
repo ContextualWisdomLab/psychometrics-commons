@@ -16,7 +16,7 @@ AS $item_delivery_reference_array$
                     AND reference_value ~ '^[[:digit:]+,.eE-]+$'
                 )
             ),
-            FALSE
+            TRUE
         )
         AND COUNT(*) = COUNT(DISTINCT reference_value)
     FROM unnest(reference_values) AS allowed_reference(reference_value);
