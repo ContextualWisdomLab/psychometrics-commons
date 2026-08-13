@@ -1,6 +1,6 @@
-//! Contract tests for first-class anonymous assessment authorization.
+//! Contract tests for first-class anonymous assessment authorization context.
 
-use psychometrics_commons_runtime::authorization::AnonymousSessionContext;
+use psychometrics_commons_runtime::anonymous_session::AnonymousSessionContext;
 
 #[test]
 fn anonymous_session_context_is_a_product_authorization_primitive() {
