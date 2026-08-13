@@ -84,8 +84,7 @@ fn scoring_result_rejects_noncanonical_engine_artifact_digest() {
             invalid_digest,
             vec![observation()],
         )
-        .err()
-        .expect("noncanonical engine artifact digest must fail closed");
+        .expect_err("noncanonical engine artifact digest must fail closed");
 
         assert_eq!(error, ScoringContractError::InvalidEngineArtifactDigest);
         assert_eq!(
