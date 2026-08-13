@@ -64,6 +64,18 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             InboxConsumptionPersistenceError::UnsupportedInitialState,
             "inbox consumption persist accepts only a fresh pending domain state",
         ),
+        (
+            InboxConsumptionPersistenceError::InvalidConsumptionClaimWindow,
+            "inbox consumption claim expiry must be later than claim time",
+        ),
+        (
+            InboxConsumptionPersistenceError::ConsumptionClaimStillActive,
+            "inbox consumption processing claim has not expired",
+        ),
+        (
+            InboxConsumptionPersistenceError::ConsumptionNotProcessing,
+            "inbox consumption claim expiry requires the processing state",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());

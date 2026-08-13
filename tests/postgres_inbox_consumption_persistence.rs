@@ -4,8 +4,8 @@ use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::integration::{InboxConsumption, IntegrationEvent};
 use psychometrics_commons_runtime::postgres_inbox_consumption::{
     apply_inbox_consumption_migration, begin_inbox_consumption, complete_inbox_consumption,
-    persist_inbox_consumption, quarantine_inbox_consumption, InboxConsumptionDisposition,
-    InboxConsumptionPersistenceError,
+    expire_inbox_consumption, persist_inbox_consumption, quarantine_inbox_consumption,
+    InboxConsumptionDisposition, InboxConsumptionPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
@@ -231,7 +231,7 @@ fn persist_rebinding_and_non_fresh_state_fail_closed() {
     );
     persist_ok(&mut client, &claimed);
     let mut claim = client.transaction().unwrap();
-    begin_inbox_consumption(&mut claim, &claimed, 20_001).unwrap();
+    begin_inbox_consumption(&mut claim, &claimed, 20_001, 21_000).unwrap();
     claim.commit().unwrap();
     assert!(matches!(
         persist_err(&mut client, &claimed),
@@ -284,11 +284,11 @@ fn local_complete_and_claimed_complete_are_fenced() {
     persist_ok(&mut client, &claimed);
     let mut claim = client.transaction().unwrap();
     assert_eq!(
-        begin_inbox_consumption(&mut claim, &claimed, 20_001).unwrap(),
+        begin_inbox_consumption(&mut claim, &claimed, 20_001, 21_000).unwrap(),
         1
     );
     assert!(matches!(
-        begin_inbox_consumption(&mut claim, &claimed, 20_002),
+        begin_inbox_consumption(&mut claim, &claimed, 20_002, 21_000),
         Err(InboxConsumptionPersistenceError::ConsumptionNotClaimable)
     ));
     assert!(matches!(
@@ -358,7 +358,7 @@ fn quarantine_and_terminal_transitions_fail_closed() {
         Err(InboxConsumptionPersistenceError::TerminalConsumptionState)
     ));
     assert!(matches!(
-        begin_inbox_consumption(&mut transaction, &consumption, 20_002),
+        begin_inbox_consumption(&mut transaction, &consumption, 20_002, 21_000),
         Err(InboxConsumptionPersistenceError::TerminalConsumptionState)
     ));
     transaction.commit().unwrap();
@@ -387,7 +387,7 @@ fn quarantine_and_terminal_transitions_fail_closed() {
         Err(InboxConsumptionPersistenceError::TerminalConsumptionState)
     ));
     assert!(matches!(
-        begin_inbox_consumption(&mut complete, &completed, 20_002),
+        begin_inbox_consumption(&mut complete, &completed, 20_002, 21_000),
         Err(InboxConsumptionPersistenceError::TerminalConsumptionState)
     ));
     assert!(matches!(
@@ -423,15 +423,31 @@ fn invalid_inputs_isolation_and_missing_rows_fail_closed() {
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        begin_inbox_consumption(&mut transaction, &consumption, 0),
+        begin_inbox_consumption(&mut transaction, &consumption, 0, 21_000),
         Err(InboxConsumptionPersistenceError::InvalidTimestamp)
     ));
     assert!(matches!(
-        begin_inbox_consumption(&mut transaction, &consumption, 19_999),
+        begin_inbox_consumption(&mut transaction, &consumption, 19_999, 21_000),
         Err(InboxConsumptionPersistenceError::NonMonotonicTimestamp)
     ));
     assert!(matches!(
-        begin_inbox_consumption(&mut transaction, &missing, 20_001),
+        begin_inbox_consumption(&mut transaction, &consumption, 20_001, 20_001),
+        Err(InboxConsumptionPersistenceError::InvalidConsumptionClaimWindow)
+    ));
+    assert!(matches!(
+        expire_inbox_consumption(&mut transaction, &consumption, 0),
+        Err(InboxConsumptionPersistenceError::InvalidTimestamp)
+    ));
+    assert!(matches!(
+        expire_inbox_consumption(&mut transaction, &consumption, 21_000),
+        Err(InboxConsumptionPersistenceError::ConsumptionNotProcessing)
+    ));
+    assert!(matches!(
+        begin_inbox_consumption(&mut transaction, &missing, 20_001, 21_000),
+        Err(InboxConsumptionPersistenceError::ConsumptionNotFound)
+    ));
+    assert!(matches!(
+        expire_inbox_consumption(&mut transaction, &missing, 21_000),
         Err(InboxConsumptionPersistenceError::ConsumptionNotFound)
     ));
     assert!(matches!(
@@ -455,6 +471,20 @@ fn invalid_inputs_isolation_and_missing_rows_fail_closed() {
         Err(InboxConsumptionPersistenceError::InvalidReference)
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn isolation_and_overflow_persist_fail_closed() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_validation");
+    let consumption = pending(
+        "event_validation",
+        "consumption_validation",
+        "side_effect_validation",
+    );
+    persist_ok(&mut client, &consumption);
 
     let mut serializable = client
         .build_transaction()
@@ -466,7 +496,11 @@ fn invalid_inputs_isolation_and_missing_rows_fail_closed() {
         Err(InboxConsumptionPersistenceError::UnsupportedIsolationLevel)
     ));
     assert!(matches!(
-        begin_inbox_consumption(&mut serializable, &consumption, 20_001),
+        begin_inbox_consumption(&mut serializable, &consumption, 20_001, 21_000),
+        Err(InboxConsumptionPersistenceError::UnsupportedIsolationLevel)
+    ));
+    assert!(matches!(
+        expire_inbox_consumption(&mut serializable, &consumption, 21_000),
         Err(InboxConsumptionPersistenceError::UnsupportedIsolationLevel)
     ));
     assert!(matches!(
@@ -481,7 +515,11 @@ fn invalid_inputs_isolation_and_missing_rows_fail_closed() {
         Err(InboxConsumptionPersistenceError::ValueOutOfRange)
     ));
     assert!(matches!(
-        begin_inbox_consumption(&mut overflow, &consumption, u64::MAX),
+        begin_inbox_consumption(&mut overflow, &consumption, u64::MAX, u64::MAX),
+        Err(InboxConsumptionPersistenceError::ValueOutOfRange)
+    ));
+    assert!(matches!(
+        expire_inbox_consumption(&mut overflow, &consumption, u64::MAX),
         Err(InboxConsumptionPersistenceError::ValueOutOfRange)
     ));
     overflow.rollback().unwrap();
@@ -516,7 +554,7 @@ fn claimed_quarantine_and_overflow_persist_fail_closed() {
     ));
 
     let mut claimed = client.transaction().unwrap();
-    begin_inbox_consumption(&mut claimed, &consumption, 20_001).unwrap();
+    begin_inbox_consumption(&mut claimed, &consumption, 20_001, 21_000).unwrap();
     assert!(matches!(
         quarantine_inbox_consumption(&mut claimed, &consumption, 20_000, "poison_payload", 1),
         Err(InboxConsumptionPersistenceError::NonMonotonicTimestamp)
@@ -544,7 +582,7 @@ fn processing_row_cannot_be_stolen_and_crash_leaves_recoverable_state() {
 
     let mut worker = client.transaction().unwrap();
     assert_eq!(
-        begin_inbox_consumption(&mut worker, &consumption, 20_001).unwrap(),
+        begin_inbox_consumption(&mut worker, &consumption, 20_001, 21_000).unwrap(),
         1
     );
     worker.commit().unwrap();
@@ -555,7 +593,7 @@ fn processing_row_cannot_be_stolen_and_crash_leaves_recoverable_state() {
 
     let mut thief = client.transaction().unwrap();
     assert!(matches!(
-        begin_inbox_consumption(&mut thief, &consumption, 20_002),
+        begin_inbox_consumption(&mut thief, &consumption, 20_002, 21_000),
         Err(InboxConsumptionPersistenceError::ConsumptionNotClaimable)
     ));
     thief.rollback().unwrap();
@@ -584,6 +622,113 @@ fn processing_row_cannot_be_stolen_and_crash_leaves_recoverable_state() {
 }
 
 #[test]
+fn expired_processing_claim_returns_pending_without_transferring_the_fence() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_expire");
+    let consumption = pending("event_expire", "consumption_expire", "side_effect_expire");
+    persist_ok(&mut client, &consumption);
+
+    let mut claimed = client.transaction().unwrap();
+    assert_eq!(
+        begin_inbox_consumption(&mut claimed, &consumption, 20_001, 21_000).unwrap(),
+        1
+    );
+    claimed.commit().unwrap();
+
+    let mut still_live = client.transaction().unwrap();
+    assert!(matches!(
+        expire_inbox_consumption(&mut still_live, &consumption, 20_500),
+        Err(InboxConsumptionPersistenceError::ConsumptionClaimStillActive)
+    ));
+    still_live.rollback().unwrap();
+    assert_eq!(
+        stored_state(&mut client, "event_expire", "consumption_expire"),
+        ("processing".to_owned(), 1)
+    );
+
+    let mut expired = client.transaction().unwrap();
+    assert_eq!(
+        expire_inbox_consumption(&mut expired, &consumption, 21_000).unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    assert!(matches!(
+        complete_inbox_consumption(
+            &mut expired,
+            &consumption,
+            21_001,
+            "completion_after_crash",
+            1,
+        ),
+        Err(InboxConsumptionPersistenceError::StaleConsumptionFence)
+    ));
+    assert_eq!(
+        complete_inbox_consumption(
+            &mut expired,
+            &consumption,
+            21_001,
+            "completion_local_after_expire",
+            0,
+        )
+        .unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    expired.commit().unwrap();
+    assert_eq!(
+        stored_state(&mut client, "event_expire", "consumption_expire"),
+        ("completed".to_owned(), 1)
+    );
+}
+
+#[test]
+fn expired_processing_claim_is_reclaimed_with_a_new_fence() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_reclaim");
+    let consumption = pending(
+        "event_reclaim",
+        "consumption_reclaim",
+        "side_effect_reclaim",
+    );
+    persist_ok(&mut client, &consumption);
+
+    let mut claimed = client.transaction().unwrap();
+    assert_eq!(
+        begin_inbox_consumption(&mut claimed, &consumption, 20_001, 21_000).unwrap(),
+        1
+    );
+    claimed.commit().unwrap();
+
+    let mut expired = client.transaction().unwrap();
+    assert_eq!(
+        expire_inbox_consumption(&mut expired, &consumption, 21_000).unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    assert_eq!(
+        begin_inbox_consumption(&mut expired, &consumption, 21_001, 22_000).unwrap(),
+        2
+    );
+    assert_eq!(
+        complete_inbox_consumption(
+            &mut expired,
+            &consumption,
+            21_002,
+            "completion_after_reclaim",
+            2,
+        )
+        .unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    expired.commit().unwrap();
+    assert_eq!(
+        stored_state(&mut client, "event_reclaim", "consumption_reclaim"),
+        ("completed".to_owned(), 2)
+    );
+}
+
+#[test]
 fn database_failures_preserve_source() {
     let _guard = test_guard();
     let mut client = test_client();
@@ -600,5 +745,11 @@ fn database_failures_preserve_source() {
         InboxConsumptionPersistenceError::Database(_)
     ));
     assert!(std::error::Error::source(&error).is_some());
+    let expire_error =
+        expire_inbox_consumption(&mut transaction, &consumption, 21_000).unwrap_err();
+    assert!(matches!(
+        expire_error,
+        InboxConsumptionPersistenceError::Database(_)
+    ));
     transaction.rollback().unwrap();
 }

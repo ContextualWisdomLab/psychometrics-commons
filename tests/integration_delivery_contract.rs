@@ -433,6 +433,18 @@ fn integration_errors_have_stable_safe_messages() {
             IntegrationError::StaleConsumptionFence,
             "inbox consumption fencing token does not match the current claim",
         ),
+        (
+            IntegrationError::InvalidConsumptionClaimWindow,
+            "inbox consumption claim expiry must be later than claim time",
+        ),
+        (
+            IntegrationError::ConsumptionClaimStillActive,
+            "inbox consumption processing claim has not expired",
+        ),
+        (
+            IntegrationError::ConsumptionNotProcessing,
+            "inbox consumption claim expiry requires the processing state",
+        ),
     ];
 
     for (error, expected) in cases {

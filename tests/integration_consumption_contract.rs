@@ -35,6 +35,7 @@ fn pending_consumption_is_not_side_effect_completion() {
     assert_eq!(consumption.state(), ConsumptionState::Pending);
     assert_eq!(consumption.fencing_token(), 0);
     assert_eq!(consumption.latest_event_at_unix_ms(), 20_000);
+    assert_eq!(consumption.claim_expires_at_unix_ms(), None);
     assert_eq!(consumption.completion_evidence_ref(), None);
     assert_eq!(consumption.cause_code(), None);
 }
@@ -150,7 +151,7 @@ fn local_effect_completes_pending_consumption_with_zero_fence() {
 #[test]
 fn claimed_worker_completes_only_with_current_fence() {
     let mut consumption = pending_consumption();
-    assert_eq!(consumption.begin_processing(20_001).unwrap(), 1);
+    assert_eq!(consumption.begin_processing(20_001, 21_000).unwrap(), 1);
     assert_eq!(consumption.state(), ConsumptionState::Processing);
     assert_eq!(
         consumption.complete(20_002, "completion_projection_applied", 0),
@@ -166,16 +167,24 @@ fn claimed_worker_completes_only_with_current_fence() {
 fn begin_processing_rejects_non_pending_and_invalid_time() {
     let mut consumption = pending_consumption();
     assert_eq!(
-        consumption.begin_processing(0),
+        consumption.begin_processing(0, 21_000),
         Err(IntegrationError::InvalidTimestamp)
     );
     assert_eq!(
-        consumption.begin_processing(19_999),
+        consumption.begin_processing(20_001, 0),
+        Err(IntegrationError::InvalidTimestamp)
+    );
+    assert_eq!(
+        consumption.begin_processing(20_001, 20_001),
+        Err(IntegrationError::InvalidConsumptionClaimWindow)
+    );
+    assert_eq!(
+        consumption.begin_processing(19_999, 21_000),
         Err(IntegrationError::NonMonotonicTimestamp)
     );
-    consumption.begin_processing(20_001).unwrap();
+    consumption.begin_processing(20_001, 21_000).unwrap();
     assert_eq!(
-        consumption.begin_processing(20_002),
+        consumption.begin_processing(20_002, 21_000),
         Err(IntegrationError::ConsumptionNotClaimable)
     );
 
@@ -184,15 +193,81 @@ fn begin_processing_rejects_non_pending_and_invalid_time() {
         .complete(20_001, "completion_projection_applied", 0)
         .unwrap();
     assert_eq!(
-        completed.begin_processing(20_002),
+        completed.begin_processing(20_002, 21_000),
         Err(IntegrationError::TerminalConsumptionState)
     );
 
     let mut quarantined = pending_consumption();
     quarantined.quarantine(20_001, "poison_payload", 0).unwrap();
     assert_eq!(
-        quarantined.begin_processing(20_002),
+        quarantined.begin_processing(20_002, 21_000),
         Err(IntegrationError::TerminalConsumptionState)
+    );
+}
+
+#[test]
+fn expire_processing_returns_pending_without_transferring_the_fence() {
+    let mut consumption = pending_consumption();
+    assert_eq!(consumption.begin_processing(20_001, 21_000).unwrap(), 1);
+    assert_eq!(consumption.claim_expires_at_unix_ms(), Some(21_000));
+    assert_eq!(
+        consumption.expire_processing(20_500),
+        Err(IntegrationError::ConsumptionClaimStillActive)
+    );
+    assert_eq!(
+        consumption.expire_processing(21_000),
+        Ok(ConsumptionState::Pending)
+    );
+    assert_eq!(consumption.state(), ConsumptionState::Pending);
+    assert_eq!(consumption.fencing_token(), 1);
+    assert_eq!(consumption.claim_expires_at_unix_ms(), None);
+    assert_eq!(
+        consumption.complete(21_001, "completion_projection_applied", 1),
+        Err(IntegrationError::StaleConsumptionFence)
+    );
+    assert_eq!(
+        consumption.complete(21_001, "completion_projection_applied", 0),
+        Ok(ConsumptionState::Completed)
+    );
+}
+
+#[test]
+fn expire_processing_allows_a_later_claim_with_a_new_fence() {
+    let mut consumption = pending_consumption();
+    assert_eq!(consumption.begin_processing(20_001, 21_000).unwrap(), 1);
+    assert_eq!(
+        consumption.expire_processing(21_000),
+        Ok(ConsumptionState::Pending)
+    );
+    assert_eq!(consumption.begin_processing(21_001, 22_000).unwrap(), 2);
+    assert_eq!(
+        consumption.complete(21_002, "completion_projection_applied", 1),
+        Err(IntegrationError::StaleConsumptionFence)
+    );
+    assert_eq!(
+        consumption.complete(21_002, "completion_projection_applied", 2),
+        Ok(ConsumptionState::Completed)
+    );
+}
+
+#[test]
+fn expire_processing_rejects_invalid_time_and_non_processing_state() {
+    let mut consumption = pending_consumption();
+    assert_eq!(
+        consumption.expire_processing(0),
+        Err(IntegrationError::InvalidTimestamp)
+    );
+    assert_eq!(
+        consumption.expire_processing(20_001),
+        Err(IntegrationError::ConsumptionNotProcessing)
+    );
+    consumption.begin_processing(20_001, 21_000).unwrap();
+    consumption
+        .complete(20_002, "completion_projection_applied", 1)
+        .unwrap();
+    assert_eq!(
+        consumption.expire_processing(21_000),
+        Err(IntegrationError::ConsumptionNotProcessing)
     );
 }
 
@@ -259,7 +334,7 @@ fn complete_and_quarantine_reject_invalid_inputs_and_stale_or_backward_time() {
     );
 
     let mut claimed = pending_consumption();
-    claimed.begin_processing(20_001).unwrap();
+    claimed.begin_processing(20_001, 21_000).unwrap();
     assert_eq!(
         claimed.quarantine(0, "poison_payload", 1),
         Err(IntegrationError::InvalidTimestamp)

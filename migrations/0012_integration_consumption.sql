@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS integration_consumption (
         CHECK (fencing_token >= 0),
     latest_event_at_unix_ms BIGINT NOT NULL
         CHECK (latest_event_at_unix_ms > 0),
+    claim_expires_at_unix_ms BIGINT
+        CHECK (
+            claim_expires_at_unix_ms IS NULL
+            OR claim_expires_at_unix_ms > latest_event_at_unix_ms
+        ),
     completion_evidence_ref TEXT
         CHECK (completion_evidence_ref IS NULL OR (
             completion_evidence_ref = btrim(completion_evidence_ref)
@@ -93,7 +98,14 @@ CREATE TABLE IF NOT EXISTS integration_consumption (
         )
     ),
     CHECK (
-        (consumption_state = 'processing' AND fencing_token > 0)
-        OR (consumption_state <> 'processing')
+        (
+            consumption_state = 'processing'
+            AND fencing_token > 0
+            AND claim_expires_at_unix_ms IS NOT NULL
+        )
+        OR (
+            consumption_state <> 'processing'
+            AND claim_expires_at_unix_ms IS NULL
+        )
     )
 );

@@ -41,6 +41,12 @@ pub enum IntegrationError {
     ConsumptionNotClaimable,
     /// A completion or quarantine used a fencing token that is no longer current.
     StaleConsumptionFence,
+    /// A processing claim expiry is not later than its claim time.
+    InvalidConsumptionClaimWindow,
+    /// Claim expiry was requested before the active processing claim expired.
+    ConsumptionClaimStillActive,
+    /// Claim expiry was requested for a consumption that is not processing.
+    ConsumptionNotProcessing,
 }
 
 impl Display for IntegrationError {
@@ -69,6 +75,15 @@ impl Display for IntegrationError {
             }
             Self::StaleConsumptionFence => {
                 "inbox consumption fencing token does not match the current claim"
+            }
+            Self::InvalidConsumptionClaimWindow => {
+                "inbox consumption claim expiry must be later than claim time"
+            }
+            Self::ConsumptionClaimStillActive => {
+                "inbox consumption processing claim has not expired"
+            }
+            Self::ConsumptionNotProcessing => {
+                "inbox consumption claim expiry requires the processing state"
             }
         })
     }
@@ -619,6 +634,7 @@ pub struct InboxConsumption {
     state: ConsumptionState,
     fencing_token: u64,
     latest_event_at_unix_ms: u64,
+    claim_expires_at_unix_ms: u64,
     completion_evidence_ref: Option<String>,
     cause_code: Option<String>,
 }
@@ -652,6 +668,7 @@ impl InboxConsumption {
             state: ConsumptionState::Pending,
             fencing_token: 0,
             latest_event_at_unix_ms: recorded_at_unix_ms,
+            claim_expires_at_unix_ms: 0,
             completion_evidence_ref: None,
             cause_code: None,
         })
@@ -711,6 +728,16 @@ impl InboxConsumption {
         self.latest_event_at_unix_ms
     }
 
+    /// Return the current processing-claim expiry, when a worker holds a fence.
+    #[must_use]
+    pub const fn claim_expires_at_unix_ms(&self) -> Option<u64> {
+        if self.claim_expires_at_unix_ms == 0 {
+            None
+        } else {
+            Some(self.claim_expires_at_unix_ms)
+        }
+    }
+
     /// Return verified completion evidence after a successful side effect.
     #[must_use]
     pub fn completion_evidence_ref(&self) -> Option<&str> {
@@ -727,14 +754,23 @@ impl InboxConsumption {
     ///
     /// Returns the new fencing token. A later completion or quarantine must
     /// present that token. Claiming never inherits a previous worker's fence.
+    /// The claim expires at `expires_at_unix_ms`; expiry recovery returns the
+    /// row to pending without transferring that fence.
     ///
     /// # Errors
     ///
-    /// Returns [`IntegrationError`] for a zero timestamp, backward time, a
-    /// non-pending state, or a terminal consumption.
-    pub fn begin_processing(&mut self, observed_at_unix_ms: u64) -> Result<u64, IntegrationError> {
-        if observed_at_unix_ms == 0 {
+    /// Returns [`IntegrationError`] for a zero timestamp, an empty claim
+    /// window, backward time, a non-pending state, or a terminal consumption.
+    pub fn begin_processing(
+        &mut self,
+        observed_at_unix_ms: u64,
+        expires_at_unix_ms: u64,
+    ) -> Result<u64, IntegrationError> {
+        if observed_at_unix_ms == 0 || expires_at_unix_ms == 0 {
             return Err(IntegrationError::InvalidTimestamp);
+        }
+        if expires_at_unix_ms <= observed_at_unix_ms {
+            return Err(IntegrationError::InvalidConsumptionClaimWindow);
         }
         if self.state.is_terminal() {
             return Err(IntegrationError::TerminalConsumptionState);
@@ -748,7 +784,37 @@ impl InboxConsumption {
         self.fencing_token += 1;
         self.state = ConsumptionState::Processing;
         self.latest_event_at_unix_ms = observed_at_unix_ms;
+        self.claim_expires_at_unix_ms = expires_at_unix_ms;
         Ok(self.fencing_token)
+    }
+
+    /// Recover an expired processing claim without transferring its fence.
+    ///
+    /// The row returns to pending and keeps the last issued fencing token so
+    /// the next claim increments it. The expired worker cannot complete or
+    /// quarantine with that token; a later local completion uses fence `0`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IntegrationError`] for a zero timestamp, a consumption that
+    /// is not processing, or a claim that has not yet expired.
+    pub fn expire_processing(
+        &mut self,
+        observed_at_unix_ms: u64,
+    ) -> Result<ConsumptionState, IntegrationError> {
+        if observed_at_unix_ms == 0 {
+            return Err(IntegrationError::InvalidTimestamp);
+        }
+        if self.state != ConsumptionState::Processing {
+            return Err(IntegrationError::ConsumptionNotProcessing);
+        }
+        if observed_at_unix_ms < self.claim_expires_at_unix_ms {
+            return Err(IntegrationError::ConsumptionClaimStillActive);
+        }
+        self.state = ConsumptionState::Pending;
+        self.claim_expires_at_unix_ms = 0;
+        self.latest_event_at_unix_ms = observed_at_unix_ms;
+        Ok(ConsumptionState::Pending)
     }
 
     /// Mark the required side effect complete with verified evidence.
@@ -784,13 +850,14 @@ impl InboxConsumption {
         if self.state == ConsumptionState::Quarantined {
             return Err(IntegrationError::TerminalConsumptionState);
         }
-        if expected_fence != self.fencing_token {
+        if !self.fence_authorizes(expected_fence) {
             return Err(IntegrationError::StaleConsumptionFence);
         }
         if observed_at_unix_ms < self.latest_event_at_unix_ms {
             return Err(IntegrationError::NonMonotonicTimestamp);
         }
         self.state = ConsumptionState::Completed;
+        self.claim_expires_at_unix_ms = 0;
         self.latest_event_at_unix_ms = observed_at_unix_ms;
         self.completion_evidence_ref = Some(completion_evidence_ref.to_owned());
         Ok(ConsumptionState::Completed)
@@ -828,16 +895,25 @@ impl InboxConsumption {
         if self.state == ConsumptionState::Completed {
             return Err(IntegrationError::TerminalConsumptionState);
         }
-        if expected_fence != self.fencing_token {
+        if !self.fence_authorizes(expected_fence) {
             return Err(IntegrationError::StaleConsumptionFence);
         }
         if observed_at_unix_ms < self.latest_event_at_unix_ms {
             return Err(IntegrationError::NonMonotonicTimestamp);
         }
         self.state = ConsumptionState::Quarantined;
+        self.claim_expires_at_unix_ms = 0;
         self.latest_event_at_unix_ms = observed_at_unix_ms;
         self.cause_code = Some(cause_code.to_owned());
         Ok(ConsumptionState::Quarantined)
+    }
+
+    fn fence_authorizes(&self, expected_fence: u64) -> bool {
+        if self.state == ConsumptionState::Pending {
+            expected_fence == 0
+        } else {
+            expected_fence == self.fencing_token
+        }
     }
 }
 

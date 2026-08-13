@@ -4,7 +4,8 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::{InboxConsumption, IntegrationEvent};
 use psychometrics_commons_runtime::postgres_inbox_consumption::{
     apply_inbox_consumption_migration, begin_inbox_consumption, complete_inbox_consumption,
-    persist_inbox_consumption, quarantine_inbox_consumption, InboxConsumptionPersistenceError,
+    expire_inbox_consumption, persist_inbox_consumption, quarantine_inbox_consumption,
+    InboxConsumptionPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
@@ -92,7 +93,7 @@ fn transitions_reject_rebound_side_effect_identity_without_mutation() {
     let rebound = consumption("consumption_binding", "side_effect_rebound");
     let mut claim_transaction = client.transaction().unwrap();
     assert!(matches!(
-        begin_inbox_consumption(&mut claim_transaction, &rebound, 20_001),
+        begin_inbox_consumption(&mut claim_transaction, &rebound, 20_001, 21_000),
         Err(InboxConsumptionPersistenceError::ConflictingReplay)
     ));
     claim_transaction.rollback().unwrap();
@@ -122,6 +123,13 @@ fn transitions_reject_rebound_side_effect_identity_without_mutation() {
         Err(InboxConsumptionPersistenceError::ConflictingReplay)
     ));
     quarantine_transaction.rollback().unwrap();
+
+    let mut expire_transaction = client.transaction().unwrap();
+    assert!(matches!(
+        expire_inbox_consumption(&mut expire_transaction, &rebound, 21_000),
+        Err(InboxConsumptionPersistenceError::ConflictingReplay)
+    ));
+    expire_transaction.rollback().unwrap();
 
     assert_eq!(
         state(&mut client, "consumption_binding"),

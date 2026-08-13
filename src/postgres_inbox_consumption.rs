@@ -53,6 +53,12 @@ pub enum InboxConsumptionPersistenceError {
     InvalidStoredState,
     /// A pending consumption was offered with a non-fresh domain shape.
     UnsupportedInitialState,
+    /// A processing claim expiry is not later than its claim time.
+    InvalidConsumptionClaimWindow,
+    /// Claim expiry was requested before the stored processing claim expired.
+    ConsumptionClaimStillActive,
+    /// Claim expiry was requested for a consumption that is not processing.
+    ConsumptionNotProcessing,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -92,6 +98,15 @@ impl Display for InboxConsumptionPersistenceError {
             }
             Self::UnsupportedInitialState => {
                 "inbox consumption persist accepts only a fresh pending domain state"
+            }
+            Self::InvalidConsumptionClaimWindow => {
+                "inbox consumption claim expiry must be later than claim time"
+            }
+            Self::ConsumptionClaimStillActive => {
+                "inbox consumption processing claim has not expired"
+            }
+            Self::ConsumptionNotProcessing => {
+                "inbox consumption claim expiry requires the processing state"
             }
             Self::Database(_) => "PostgreSQL inbox-consumption persistence failed",
         })
@@ -143,10 +158,11 @@ pub fn persist_inbox_consumption(
         (
             consumption.state(),
             consumption.fencing_token(),
+            consumption.claim_expires_at_unix_ms().is_none(),
             consumption.completion_evidence_ref(),
             consumption.cause_code()
         ),
-        (ConsumptionState::Pending, 0, None, None)
+        (ConsumptionState::Pending, 0, true, None, None)
     ) {
         return Err(InboxConsumptionPersistenceError::UnsupportedInitialState);
     }
@@ -202,20 +218,26 @@ pub fn persist_inbox_consumption(
 
 /// Claim one pending consumption and issue a new fencing token.
 ///
-/// The expired-lease recovery path is outside this slice. A processing row
-/// cannot be stolen, and a later claim after a future expiry adapter must
-/// issue a new fence rather than reuse the crashed worker's token.
+/// A processing row cannot be stolen. Expire-and-reclaim returns an expired
+/// claim to pending without transferring the crashed worker's fence; the next
+/// claim increments the stored token.
 ///
 /// # Errors
 ///
 /// Returns [`InboxConsumptionPersistenceError`] for invalid identity or time,
-/// unsupported isolation, a missing or non-pending row, or a database failure.
+/// an empty claim window, unsupported isolation, a missing or non-pending row,
+/// or a database failure.
 pub fn begin_inbox_consumption(
     transaction: &mut Transaction<'_>,
     consumption: &InboxConsumption,
     observed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
 ) -> Result<u64, InboxConsumptionPersistenceError> {
     let observed_at_unix_ms = require_timestamp(observed_at_unix_ms)?;
+    let expires_at_unix_ms = require_timestamp(expires_at_unix_ms)?;
+    if expires_at_unix_ms <= observed_at_unix_ms {
+        return Err(InboxConsumptionPersistenceError::InvalidConsumptionClaimWindow);
+    }
     require_read_committed(transaction)?;
     let row = lock_consumption(transaction, consumption)?;
     require_side_effect_binding(&row, consumption)?;
@@ -238,7 +260,8 @@ pub fn begin_inbox_consumption(
             "UPDATE integration_consumption \
              SET consumption_state = 'processing', \
                  fencing_token = fencing_token + 1, \
-                 latest_event_at_unix_ms = $6 \
+                 latest_event_at_unix_ms = $6, \
+                 claim_expires_at_unix_ms = $7 \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
                AND source_event_ref = $4 AND consumption_ref = $5 \
                AND consumption_state = 'pending' \
@@ -250,10 +273,65 @@ pub fn begin_inbox_consumption(
                 &consumption.source_event_ref(),
                 &consumption.consumption_ref(),
                 &observed_at_unix_ms,
+                &expires_at_unix_ms,
             ],
         )?
         .get(0);
     u64::try_from(fencing_token).map_err(|_| InboxConsumptionPersistenceError::ValueOutOfRange)
+}
+
+/// Recover an expired processing claim without transferring its fence.
+///
+/// The row returns to pending and keeps the last issued fencing token. A later
+/// [`begin_inbox_consumption`] increments that token. The expired worker cannot
+/// complete or quarantine with the old fence.
+///
+/// # Errors
+///
+/// Returns [`InboxConsumptionPersistenceError`] for invalid identity or time,
+/// unsupported isolation, a missing row, a claim that is not processing, a
+/// still-live claim, or a database failure.
+pub fn expire_inbox_consumption(
+    transaction: &mut Transaction<'_>,
+    consumption: &InboxConsumption,
+    observed_at_unix_ms: u64,
+) -> Result<InboxConsumptionDisposition, InboxConsumptionPersistenceError> {
+    let observed_at_unix_ms = require_timestamp(observed_at_unix_ms)?;
+    require_read_committed(transaction)?;
+    let row = lock_consumption(transaction, consumption)?;
+    require_side_effect_binding(&row, consumption)?;
+    let state = parse_consumption_state(row.get(1))?;
+    if state != ConsumptionState::Processing {
+        return Err(InboxConsumptionPersistenceError::ConsumptionNotProcessing);
+    }
+    let claim_expires_at_unix_ms: i64 = row.get(6);
+    if observed_at_unix_ms < claim_expires_at_unix_ms {
+        return Err(InboxConsumptionPersistenceError::ConsumptionClaimStillActive);
+    }
+
+    let updated = transaction.execute(
+        "UPDATE integration_consumption \
+         SET consumption_state = 'pending', \
+             claim_expires_at_unix_ms = NULL, \
+             latest_event_at_unix_ms = $6 \
+         WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
+           AND source_event_ref = $4 AND consumption_ref = $5 \
+           AND consumption_state = 'processing' \
+           AND claim_expires_at_unix_ms <= $6",
+        &[
+            &consumption.consumer_ref(),
+            &consumption.source_ref(),
+            &consumption.tenant_ref(),
+            &consumption.source_event_ref(),
+            &consumption.consumption_ref(),
+            &observed_at_unix_ms,
+        ],
+    )?;
+    if updated == 1 {
+        Ok(InboxConsumptionDisposition::Inserted)
+    } else {
+        Err(InboxConsumptionPersistenceError::InvalidStoredState)
+    }
 }
 
 /// Persist verified side-effect completion for a pending or claimed consumption.
@@ -333,11 +411,14 @@ fn apply_terminal_transition(
             "UPDATE integration_consumption \
              SET consumption_state = 'completed', \
                  completion_evidence_ref = $6, \
+                 claim_expires_at_unix_ms = NULL, \
                  latest_event_at_unix_ms = $7 \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
                AND source_event_ref = $4 AND consumption_ref = $5 \
-               AND consumption_state IN ('pending', 'processing') \
-               AND fencing_token = $8",
+               AND ( \
+                    (consumption_state = 'pending' AND $8 = 0::BIGINT) \
+                    OR (consumption_state = 'processing' AND fencing_token = $8) \
+               )",
         ),
         TerminalTransition::Quarantine { cause_code } => (
             ConsumptionState::Quarantined,
@@ -345,11 +426,14 @@ fn apply_terminal_transition(
             "UPDATE integration_consumption \
              SET consumption_state = 'quarantined', \
                  cause_code = $6, \
+                 claim_expires_at_unix_ms = NULL, \
                  latest_event_at_unix_ms = $7 \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
                AND source_event_ref = $4 AND consumption_ref = $5 \
-               AND consumption_state IN ('pending', 'processing') \
-               AND fencing_token = $8",
+               AND ( \
+                    (consumption_state = 'pending' AND $8 = 0::BIGINT) \
+                    OR (consumption_state = 'processing' AND fencing_token = $8) \
+               )",
         ),
     };
     require_read_committed(transaction)?;
@@ -382,7 +466,12 @@ fn apply_terminal_transition(
     ) {
         return Err(InboxConsumptionPersistenceError::TerminalConsumptionState);
     }
-    if fencing_token != expected_fence {
+    let fence_authorized = if state == ConsumptionState::Pending {
+        expected_fence == 0
+    } else {
+        fencing_token == expected_fence
+    };
+    if !fence_authorized {
         return Err(InboxConsumptionPersistenceError::StaleConsumptionFence);
     }
     if observed_at_unix_ms < latest_event_at_unix_ms {
@@ -449,7 +538,8 @@ fn lock_consumption(
     transaction
         .query_opt(
             "SELECT side_effect_ref, consumption_state, fencing_token, latest_event_at_unix_ms, \
-                    completion_evidence_ref, cause_code \
+                    completion_evidence_ref, cause_code, \
+                    COALESCE(claim_expires_at_unix_ms, 0) \
              FROM integration_consumption \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
                AND source_event_ref = $4 AND consumption_ref = $5 \
