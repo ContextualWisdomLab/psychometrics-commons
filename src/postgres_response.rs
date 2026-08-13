@@ -177,12 +177,11 @@ fn persist_one_event(
 }
 
 fn is_response_uniqueness_conflict(error: &postgres::Error) -> bool {
-    let Some(database_error) = error.as_db_error() else {
-        return false;
-    };
-    database_error.code() == &postgres::error::SqlState::UNIQUE_VIOLATION
+    error.code() == Some(&postgres::error::SqlState::UNIQUE_VIOLATION)
         && matches!(
-            database_error.constraint(),
+            error
+                .as_db_error()
+                .and_then(postgres::error::DbError::constraint),
             Some(CLIENT_EVENT_UNIQUE_CONSTRAINT | SERVER_SEQUENCE_UNIQUE_CONSTRAINT)
         )
 }
