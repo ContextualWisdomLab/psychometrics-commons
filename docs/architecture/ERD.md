@@ -52,6 +52,8 @@ erDiagram
     longitudinal_enrollment ||--o{ temporal_analysis_submission : submits
 
     assessment_participant ||--o{ data_rights_request : requests
+    data_rights_request ||--|{ data_rights_propagation_state : enqueues
+    data_rights_propagation_state }o--|| integration_outbox : references
 
     tenant_account ||--o{ integration_outbox : scopes
     tenant_account ||--o{ integration_inbox : scopes
@@ -342,6 +344,16 @@ erDiagram
       timestamp latest_event_at
     }
 
+    data_rights_propagation_state {
+      string request_ref PK,FK
+      string dependent_system_ref PK
+      string tenant_ref FK
+      string source_ref
+      string event_ref
+      string current_state
+      timestamp latest_event_at
+    }
+
     integration_outbox {
       string outbox_event_ref PK
       string tenant_ref FK
@@ -392,7 +404,8 @@ erDiagram
 
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
-- `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`) on Active PR #50; HTTP publication transport remains Target.
+- `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
+- `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` on Active PR #46 stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
