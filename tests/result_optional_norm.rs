@@ -7,6 +7,9 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::session::SessionState;
 
+const ENGINE_DIGEST: &str =
+    "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+
 #[test]
 fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
     let mut ledger = ResponseLedger::new("session_ref").unwrap();
@@ -41,7 +44,7 @@ fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
     let result = ScoringResult::new(
         "scoring_result_ref",
         &request,
-        "sha256:engine",
+        ENGINE_DIGEST,
         vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
     )
     .unwrap();
