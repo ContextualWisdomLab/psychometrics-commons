@@ -745,13 +745,15 @@ fn database_failures_preserve_source() {
         InboxConsumptionPersistenceError::Database(_)
     ));
     assert!(std::error::Error::source(&error).is_some());
-    let expire_error =
-        expire_inbox_consumption(&mut transaction, &consumption, 21_000).unwrap_err();
+    transaction.rollback().unwrap();
+
+    let mut expire = client.transaction().unwrap();
+    let expire_error = expire_inbox_consumption(&mut expire, &consumption, 21_000).unwrap_err();
     assert!(matches!(
         expire_error,
         InboxConsumptionPersistenceError::Database(_)
     ));
-    transaction.rollback().unwrap();
+    expire.rollback().unwrap();
 }
 
 fn suppress_state_updates(client: &mut Client, target_state: &str) {
@@ -876,11 +878,14 @@ fn inbox_lookup_and_lock_failures_are_database_failures() {
         begin_inbox_consumption(&mut lock, &lock_target, 20_001, 21_000),
         Err(InboxConsumptionPersistenceError::Database(_))
     ));
+    lock.rollback().unwrap();
+
+    let mut expire = client.transaction().unwrap();
     assert!(matches!(
-        expire_inbox_consumption(&mut lock, &lock_target, 21_000),
+        expire_inbox_consumption(&mut expire, &lock_target, 21_000),
         Err(InboxConsumptionPersistenceError::Database(_))
     ));
-    lock.rollback().unwrap();
+    expire.rollback().unwrap();
 }
 
 #[test]
