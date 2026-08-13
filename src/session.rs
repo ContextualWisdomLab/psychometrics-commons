@@ -191,6 +191,23 @@ impl AssessmentSession {
     pub const fn state(&self) -> SessionState {
         self.state
     }
+
+    /// Apply one lifecycle command to this aggregate's server-authoritative state.
+    ///
+    /// Creation provenance is immutable: only the lifecycle state changes. Duplicate
+    /// commands retain the idempotency semantics of [`transition`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransitionError`] when the command is not legal from the current state.
+    pub fn apply_command(
+        &mut self,
+        command: SessionCommand,
+    ) -> Result<SessionState, TransitionError> {
+        let next = transition(self.state, command)?;
+        self.state = next;
+        Ok(next)
+    }
 }
 
 /// A command requesting one legal session lifecycle transition.
