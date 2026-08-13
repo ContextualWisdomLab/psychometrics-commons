@@ -46,7 +46,7 @@ fn serializable_session_default_is_rejected() {
     let error = persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3)
         .unwrap_err();
     assert!(matches!(
-        error,
+        &error,
         DataRightsPersistenceError::UnsupportedIsolationLevel
     ));
     assert_eq!(
