@@ -18,6 +18,7 @@ pub mod narrative;
 pub mod participant;
 pub mod postgres_instrument_release;
 pub mod postgres_integration;
+pub mod postgres_item_delivery;
 pub mod postgres_scoring_job;
 mod reference;
 pub mod research_release;

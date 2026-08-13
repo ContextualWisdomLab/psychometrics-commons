@@ -6,6 +6,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Added
 
+- PostgreSQL 18 item-delivery persistence for one session-bound ledger plus append-only delivery events, with exact replay, fail-closed release rebinding, duplicate-item protection, unique server sequences, opaque-reference/digest/locale bounds, and `READ COMMITTED` replay classification.
 - PostgreSQL 18 instrument-release persistence for one immutable locale-specific publication identity plus reachable publication-state advance, with exact replay, fail-closed digest rebinding, fail-closed unreachable lifecycle rewind, and `READ COMMITTED` replay classification.
 - Initial Psychometrics Commons product requirements covering the IPIP-based Big Five consumer vertical slice, reflective modules, longitudinal participation, Research Commons, and Measurement Workbench.
 - Technical requirements for hosted runtime ownership, state machines, idempotent response/scoring flows, identity and tenant boundaries, consent and data-rights workflows, research pseudonymization and release, event/outbox integration, accessibility, multilingual instrument versions, deployment profiles, and release evidence.
