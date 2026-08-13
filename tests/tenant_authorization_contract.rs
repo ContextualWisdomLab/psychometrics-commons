@@ -87,11 +87,7 @@ fn participant_may_manage_only_owned_resources_in_the_authenticated_tenant() {
 #[test]
 fn consent_authority_requires_participant_ownership_shape() {
     assert_eq!(
-        ResourceScope::tenant_scoped(
-            ResourceKind::ConsentLedger,
-            "tenant_alpha",
-            "consent_alpha"
-        ),
+        ResourceScope::tenant_scoped(ResourceKind::ConsentLedger, "tenant_alpha", "consent_alpha"),
         Err(AuthorizationError::ResourceOwnershipMismatch)
     );
 
