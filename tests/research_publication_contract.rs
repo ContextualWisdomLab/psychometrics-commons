@@ -21,7 +21,7 @@ fn candidate() -> ResearchReleaseCandidate<'static> {
         access_approval_ref: "access_approval_alpha",
         citation_metadata_ref: "citation_metadata_alpha",
         release_approver_ref: "research_release_approver_alpha",
-        identity_admin_authority_ref: "identity_admin_alpha",
+        ordinary_admin_ref: "ordinary_admin_alpha",
         unresolved_blocking_findings: 0,
         access_class: ResearchAccessClass::Controlled,
     }
@@ -49,16 +49,13 @@ fn complete_release_evidence_is_approved_without_claiming_portal_publication() {
         approved.release_approver_ref(),
         "research_release_approver_alpha"
     );
+    assert_eq!(approved.ordinary_admin_ref(), "ordinary_admin_alpha");
     assert_eq!(approved.access_class(), ResearchAccessClass::Controlled);
 }
 
 #[test]
 fn every_required_reference_fails_closed_when_missing_or_nonopaque() {
-    let cases = [
-        0_usize, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
-    ];
-
-    for field in cases {
+    for field in 0_usize..12 {
         let mut value = candidate();
         match field {
             0 => value.release_ref = "12345",
@@ -72,7 +69,7 @@ fn every_required_reference_fails_closed_when_missing_or_nonopaque() {
             8 => value.access_approval_ref = "12345",
             9 => value.citation_metadata_ref = " ",
             10 => value.release_approver_ref = "12345",
-            11 => value.identity_admin_authority_ref = " ",
+            11 => value.ordinary_admin_ref = " ",
             _ => unreachable!(),
         }
         assert_eq!(
@@ -112,10 +109,10 @@ fn unresolved_release_blockers_prevent_approval() {
 }
 
 #[test]
-fn release_approval_is_separated_from_identity_administration() {
+fn release_approval_is_separated_from_ordinary_administration() {
     let mut value = candidate();
     value.release_approver_ref = " research_release_approver_alpha ";
-    value.identity_admin_authority_ref = "research_release_approver_alpha";
+    value.ordinary_admin_ref = "research_release_approver_alpha";
 
     assert_eq!(
         approve_research_release(value),
@@ -157,7 +154,7 @@ fn release_gate_errors_have_stable_safe_operator_messages() {
         ),
         (
             ResearchReleaseGateError::SeparationOfDutiesViolation,
-            "research release approver must be distinct from identity administration authority",
+            "research release approver must be independent from ordinary administration",
         ),
     ];
 
