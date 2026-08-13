@@ -212,8 +212,9 @@ pub fn begin_inbox_consumption(
     let observed_at_unix_ms = require_timestamp(observed_at_unix_ms)?;
     require_read_committed(transaction)?;
     let row = lock_consumption(transaction, consumption)?;
-    let state = parse_consumption_state(row.get(0))?;
-    let latest_event_at_unix_ms: i64 = row.get(2);
+    require_side_effect_binding(&row, consumption)?;
+    let state = parse_consumption_state(row.get(1))?;
+    let latest_event_at_unix_ms: i64 = row.get(3);
     match state {
         ConsumptionState::Pending => {}
         ConsumptionState::Processing => {
@@ -347,11 +348,12 @@ fn apply_terminal_transition(
     };
     require_read_committed(transaction)?;
     let row = lock_consumption(transaction, consumption)?;
-    let state = parse_consumption_state(row.get(0))?;
-    let fencing_token: i64 = row.get(1);
-    let latest_event_at_unix_ms: i64 = row.get(2);
-    let stored_completion: Option<String> = row.get(3);
-    let stored_cause: Option<String> = row.get(4);
+    require_side_effect_binding(&row, consumption)?;
+    let state = parse_consumption_state(row.get(1))?;
+    let fencing_token: i64 = row.get(2);
+    let latest_event_at_unix_ms: i64 = row.get(3);
+    let stored_completion: Option<String> = row.get(4);
+    let stored_cause: Option<String> = row.get(5);
     let stored_evidence = if target_state == ConsumptionState::Completed {
         stored_completion.as_deref()
     } else {
@@ -440,7 +442,7 @@ fn lock_consumption(
 ) -> Result<postgres::Row, InboxConsumptionPersistenceError> {
     transaction
         .query_opt(
-            "SELECT consumption_state, fencing_token, latest_event_at_unix_ms, \
+            "SELECT side_effect_ref, consumption_state, fencing_token, latest_event_at_unix_ms, \
                     completion_evidence_ref, cause_code \
              FROM integration_consumption \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
@@ -455,6 +457,18 @@ fn lock_consumption(
             ],
         )?
         .ok_or(InboxConsumptionPersistenceError::ConsumptionNotFound)
+}
+
+fn require_side_effect_binding(
+    row: &postgres::Row,
+    consumption: &InboxConsumption,
+) -> Result<(), InboxConsumptionPersistenceError> {
+    let stored_side_effect_ref: String = row.get(0);
+    if stored_side_effect_ref == consumption.side_effect_ref() {
+        Ok(())
+    } else {
+        Err(InboxConsumptionPersistenceError::ConflictingReplay)
+    }
 }
 
 fn parse_consumption_state(
