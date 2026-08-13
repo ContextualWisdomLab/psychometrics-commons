@@ -1,10 +1,12 @@
-//! First-class anonymous assessment authorization context.
+//! Authorization data for one anonymous assessment session.
 //!
-//! Anonymous assessment must not require a Keyverse account. This module carries only
-//! normalized product references and a reference to server-side authorization evidence;
-//! it never stores authentication secrets or performs identity-provider work. The
-//! short-lived evidence lifetime is explicit so transport adapters can fail closed before
-//! forwarding commands into participant-owned session resources.
+//! The server creates this context after it validates a short-lived anonymous-session proof.
+//! It stores the tenant, participant, assessment session, and a reference to the server record
+//! that authorized the session. It does not require a Keyverse account, store a login or bearer
+//! secret, or contact an identity provider. A product reference is an opaque identifier owned by
+//! Psychometrics Commons; a transport adapter is the HTTP or messaging boundary that turns an
+//! external request into a product command. The explicit expiry lets those adapters reject stale
+//! authority before forwarding a command to the participant's assessment-session resource.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -35,13 +37,14 @@ impl Display for AnonymousSessionContextError {
 
 impl Error for AnonymousSessionContextError {}
 
-/// Server-derived product context for one anonymous assessment session.
+/// Server-created authorization data for one validated anonymous assessment session.
 ///
-/// The context binds one tenant, participant and assessment session to opaque
-/// authorization evidence and its server-authoritative validity boundary. It is a
-/// product authorization input, not a bearer secret and not an identity-provider
-/// credential. Callers are responsible for validating the presented short-lived
-/// session proof before constructing this context.
+/// The context stores exact tenant, participant, and assessment-session references together
+/// with an opaque reference to the server-side evidence that authorized them and the time at
+/// which that authorization expires. The evidence reference names a server record; it is not a
+/// secret that can itself authenticate a caller. Code at an HTTP or messaging boundary must
+/// validate the caller's short-lived proof before constructing this context, then use the exact
+/// binding and expiry checks below before forwarding a participant-session command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnonymousSessionContext {
     tenant_ref: String,
