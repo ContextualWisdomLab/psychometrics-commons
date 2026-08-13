@@ -188,7 +188,10 @@ fn locale_requires_bcp47_subtag_structure() {
             locale: valid,
             ..input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
         };
-        assert!(identity.canonical_bytes().is_ok(), "expected valid locale: {valid}");
+        assert!(
+            identity.canonical_bytes().is_ok(),
+            "expected valid locale: {valid}"
+        );
     }
 
     for invalid in [
