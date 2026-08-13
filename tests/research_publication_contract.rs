@@ -1,7 +1,8 @@
 //! Executable gate coverage for product-side Research Commons release approval.
 
 use psychometrics_commons_runtime::research_release::{
-    approve_research_release, ResearchAccessClass, ResearchReleaseCandidate, ResearchReleaseGateError,
+    approve_research_release, ResearchAccessClass, ResearchReleaseCandidate,
+    ResearchReleaseGateError,
 };
 
 const MANIFEST_DIGEST: &str =
