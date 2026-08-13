@@ -134,6 +134,23 @@ impl AnonymousSessionContext {
             && normalized_reference(participant_ref) == Some(self.participant_ref.as_str())
             && normalized_reference(session_ref) == Some(self.session_ref.as_str())
     }
+
+    /// Return whether the exact anonymous-session binding is valid at one server time.
+    ///
+    /// Combining binding and lifetime in one predicate prevents callers from checking only
+    /// identity or only expiry when deciding whether already-validated anonymous-session
+    /// evidence may be forwarded to a participant-owned assessment-session operation.
+    #[must_use]
+    pub fn is_valid_for_binding_at(
+        &self,
+        tenant_ref: &str,
+        participant_ref: &str,
+        session_ref: &str,
+        now_unix_ms: u64,
+    ) -> bool {
+        self.is_valid_at(now_unix_ms)
+            && self.matches_binding(tenant_ref, participant_ref, session_ref)
+    }
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
