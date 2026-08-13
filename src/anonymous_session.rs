@@ -121,8 +121,9 @@ impl AnonymousSessionContext {
 
     /// Return whether tenant, participant, and assessment-session references match exactly.
     ///
-    /// Inputs are normalized with the same opaque-reference contract used at construction.
-    /// A malformed reference therefore fails closed instead of matching a stored binding.
+    /// Candidates must already be in the canonical opaque-reference spelling that was stored
+    /// at construction. Whitespace-padded aliases therefore fail closed instead of being
+    /// normalized into an authorization match at the resource boundary.
     #[must_use]
     pub fn matches_binding(
         &self,
@@ -130,9 +131,9 @@ impl AnonymousSessionContext {
         participant_ref: &str,
         session_ref: &str,
     ) -> bool {
-        normalized_reference(tenant_ref) == Some(self.tenant_ref.as_str())
-            && normalized_reference(participant_ref) == Some(self.participant_ref.as_str())
-            && normalized_reference(session_ref) == Some(self.session_ref.as_str())
+        exact_reference_match(&self.tenant_ref, tenant_ref)
+            && exact_reference_match(&self.participant_ref, participant_ref)
+            && exact_reference_match(&self.session_ref, session_ref)
     }
 
     /// Return whether the exact anonymous-session binding is valid at one server time.
@@ -155,4 +156,8 @@ impl AnonymousSessionContext {
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
     normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
+}
+
+fn exact_reference_match(stored: &str, candidate: &str) -> bool {
+    normalized_reference(candidate) == Some(candidate) && stored == candidate
 }
