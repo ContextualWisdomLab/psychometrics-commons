@@ -72,6 +72,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ScoringJobPersistenceError::LeaseExpired,
             "scoring worker lease has expired",
         ),
+        (
+            ScoringJobPersistenceError::LeaseStillActive,
+            "scoring job lease has not expired",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());
