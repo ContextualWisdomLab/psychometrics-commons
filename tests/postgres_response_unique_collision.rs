@@ -1,4 +1,4 @@
-//! Real PostgreSQL regression coverage for response-event uniqueness conflicts.
+//! Real `PostgreSQL` regression coverage for response-event uniqueness conflicts.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_response::{

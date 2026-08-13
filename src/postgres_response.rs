@@ -237,13 +237,12 @@ mod reference_guard_tests {
 
     #[test]
     fn non_database_postgres_error_is_not_a_uniqueness_conflict() {
-        let error = match postgres::Client::connect(
+        let error = postgres::Client::connect(
             "host=127.0.0.1 port=1 user=x dbname=x connect_timeout=1",
             postgres::NoTls,
-        ) {
-            Ok(_) => panic!("a closed loopback port must fail without a PostgreSQL database error"),
-            Err(error) => error,
-        };
+        )
+        .err()
+        .expect("a closed loopback port must fail without a PostgreSQL database error");
         assert!(!is_response_uniqueness_conflict(&error));
     }
 }
