@@ -3,8 +3,11 @@
 //! Session state is server-authoritative. Clients submit commands and the
 //! runtime decides whether a transition is legal; clients never submit an
 //! arbitrary target state. Duplicate commands that represent the transition
-//! already applied are idempotent.
+//! already applied are idempotent. Session creation pins the exact immutable
+//! published instrument release and locale before lifecycle transitions begin.
 
+use crate::instrument::InstrumentRelease;
+use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -48,6 +51,145 @@ impl SessionState {
     #[must_use]
     pub const fn accepts_responses(self) -> bool {
         matches!(self, Self::Active)
+    }
+}
+
+/// Fail-closed error returned while creating a session from a published release.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum SessionCreationError {
+    /// A session or participant reference was blank or numeric-like.
+    InvalidReference,
+    /// The server-authoritative session creation timestamp was zero.
+    InvalidTimestamp,
+    /// The selected immutable release is not currently allowed to begin new sessions.
+    InstrumentReleaseUnavailable,
+    /// The requested assessment locale does not exactly match the published release locale.
+    LocaleMismatch,
+}
+
+impl Display for SessionCreationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidReference => {
+                "assessment session references must be opaque non-numeric values"
+            }
+            Self::InvalidTimestamp => "assessment session creation time must be greater than zero",
+            Self::InstrumentReleaseUnavailable => {
+                "assessment session requires an instrument release currently published for new sessions"
+            }
+            Self::LocaleMismatch => {
+                "assessment session locale must exactly match the published instrument release locale"
+            }
+        })
+    }
+}
+
+impl Error for SessionCreationError {}
+
+/// Immutable creation identity and current lifecycle state for one assessment session.
+///
+/// The session copies only release/version/locale identity from an already-validated
+/// [`InstrumentRelease`]. It does not duplicate instrument publication evidence rules.
+/// Suspending or retiring the release later blocks *new* sessions but does not rewrite
+/// the provenance of a session that was validly created while the release was published.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssessmentSession {
+    session_ref: String,
+    participant_ref: String,
+    instrument_release_ref: String,
+    instrument_version_ref: String,
+    locale: String,
+    created_at_unix_ms: u64,
+    state: SessionState,
+}
+
+impl AssessmentSession {
+    /// Create a session bound to one exact published locale-specific instrument release.
+    ///
+    /// This boundary enforces the no-silent-assessment-locale-fallback contract. Callers
+    /// must resolve a release whose exact locale matches the participant-requested locale;
+    /// the runtime does not substitute another published language.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionCreationError::InvalidReference`] for malformed session/participant
+    /// references, [`SessionCreationError::InvalidTimestamp`] for a zero server timestamp,
+    /// [`SessionCreationError::InstrumentReleaseUnavailable`] unless the exact release can
+    /// currently accept new sessions, or [`SessionCreationError::LocaleMismatch`] when the
+    /// requested locale is not exactly the release locale.
+    pub fn new(
+        session_ref: &str,
+        participant_ref: &str,
+        release: &InstrumentRelease,
+        requested_locale: &str,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, SessionCreationError> {
+        let session_ref =
+            normalized_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let participant_ref =
+            normalized_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+        if created_at_unix_ms == 0 {
+            return Err(SessionCreationError::InvalidTimestamp);
+        }
+        if !release.accepts_new_sessions() {
+            return Err(SessionCreationError::InstrumentReleaseUnavailable);
+        }
+        if requested_locale != release.manifest().locale() {
+            return Err(SessionCreationError::LocaleMismatch);
+        }
+
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            participant_ref: participant_ref.to_owned(),
+            instrument_release_ref: release.manifest().release_ref().to_owned(),
+            instrument_version_ref: release.manifest().instrument_version_ref().to_owned(),
+            locale: release.manifest().locale().to_owned(),
+            created_at_unix_ms,
+            state: SessionState::Created,
+        })
+    }
+
+    /// Return this session's opaque product reference.
+    #[must_use]
+    pub fn session_ref(&self) -> &str {
+        &self.session_ref
+    }
+
+    /// Return the stable participant reference without exposing external identity subjects.
+    #[must_use]
+    pub fn participant_ref(&self) -> &str {
+        &self.participant_ref
+    }
+
+    /// Return the immutable instrument-release reference pinned at creation.
+    #[must_use]
+    pub fn instrument_release_ref(&self) -> &str {
+        &self.instrument_release_ref
+    }
+
+    /// Return the immutable instrument-version reference pinned at creation.
+    #[must_use]
+    pub fn instrument_version_ref(&self) -> &str {
+        &self.instrument_version_ref
+    }
+
+    /// Return the exact assessment-content locale pinned at creation.
+    #[must_use]
+    pub fn locale(&self) -> &str {
+        &self.locale
+    }
+
+    /// Return the server-authoritative creation timestamp in Unix milliseconds.
+    #[must_use]
+    pub const fn created_at_unix_ms(&self) -> u64 {
+        self.created_at_unix_ms
+    }
+
+    /// Return the current server-authoritative lifecycle state.
+    #[must_use]
+    pub const fn state(&self) -> SessionState {
+        self.state
     }
 }
 
