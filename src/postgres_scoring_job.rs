@@ -2,8 +2,9 @@
 //!
 //! This adapter persists product orchestration state only. Psychometric scoring remains
 //! owned by `fast-mlsirm`. The caller owns the database connection, credentials, and
-//! transaction boundary. Enqueue replay, worker claims, and retry transitions require
-//! `READ COMMITTED`; row locks and conditional updates preserve stale-worker fencing.
+//! transaction boundary. Enqueue replay, worker claims, retry transitions, and terminal
+//! outcomes require `READ COMMITTED`; row locks and conditional updates preserve stale-worker
+//! fencing and immutable completion evidence.
 
 use crate::reference::normalized_reference;
 use crate::scoring_job::{ScoringJob, ScoringJobState};
@@ -20,6 +21,16 @@ pub enum ScoringJobPersistenceDisposition {
     /// The queued job identity was inserted for the first time.
     Inserted,
     /// The same immutable job identity already existed.
+    Duplicate,
+}
+
+/// Outcome of persisting an immutable successful scoring completion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ScoringJobCompletionDisposition {
+    /// The live fenced attempt was completed for the first time.
+    Completed,
+    /// The same immutable result and fencing evidence was replayed exactly.
     Duplicate,
 }
 
@@ -62,7 +73,7 @@ impl PersistedScoringLease {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ScoringJobPersistenceError {
-    /// A job, worker, lease, or failure identity was blank or numeric-like.
+    /// A job, worker, lease, result, or failure identity was blank or numeric-like.
     InvalidReference,
     /// A caller-supplied timestamp was zero.
     InvalidTimestamp,
@@ -80,6 +91,8 @@ pub enum ScoringJobPersistenceError {
     UnsupportedInitialState,
     /// Enqueue replay reused a job identity with different immutable evidence.
     ConflictingReplay,
+    /// Completed immutable evidence was replayed with a different result or fence.
+    ConflictingCompletion,
     /// Scoring-job persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// The requested scoring job does not exist.
@@ -92,6 +105,8 @@ pub enum ScoringJobPersistenceError {
     StaleLease,
     /// A worker-side transition was observed at or after persisted lease expiry.
     LeaseExpired,
+    /// A guarded terminal transition was suppressed after its lease evidence was validated.
+    TransitionNotApplied,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -110,6 +125,9 @@ impl Display for ScoringJobPersistenceError {
             Self::ConflictingReplay => {
                 "scoring job identity was replayed with conflicting evidence"
             }
+            Self::ConflictingCompletion => {
+                "scoring completion was replayed with conflicting immutable evidence"
+            }
             Self::UnsupportedIsolationLevel => {
                 "scoring job persistence requires read committed isolation"
             }
@@ -118,6 +136,7 @@ impl Display for ScoringJobPersistenceError {
             Self::NotLeased => "scoring job does not currently have a worker lease",
             Self::StaleLease => "scoring worker fencing token is stale",
             Self::LeaseExpired => "scoring worker lease has expired",
+            Self::TransitionNotApplied => "scoring terminal transition was not applied",
             Self::Database(_) => "PostgreSQL scoring-job persistence failed",
         })
     }
@@ -326,11 +345,7 @@ pub fn record_retryable_scoring_failure(
 ) -> Result<ScoringJobState, ScoringJobPersistenceError> {
     let scoring_job_ref = required_reference(scoring_job_ref)?;
     let cause_code = required_reference(cause_code)?;
-    if fencing_token == 0 {
-        return Err(ScoringJobPersistenceError::InvalidFencingToken);
-    }
-    let fencing_token =
-        i64::try_from(fencing_token).map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?;
+    let fencing_token = postgres_fencing_token(fencing_token)?;
     let failed_at_unix_ms = postgres_timestamp(failed_at_unix_ms)?;
     let retry_at_unix_ms = postgres_timestamp(retry_at_unix_ms)?;
     if retry_at_unix_ms < failed_at_unix_ms {
@@ -382,6 +397,157 @@ pub fn record_retryable_scoring_failure(
     })
 }
 
+/// Persist a permanent failure for the worker that owns the current fenced lease.
+///
+/// Permanent failure never schedules another automatic attempt. The job is quarantined,
+/// typed failure evidence is retained, no scoring result is fabricated, and all active
+/// lease evidence is cleared in the same row-locked transaction.
+///
+/// # Errors
+///
+/// Returns [`ScoringJobPersistenceError`] for invalid evidence, unsupported isolation,
+/// a missing/non-leased job, stale or expired worker authority, a suppressed terminal
+/// transition, or a database failure.
+pub fn record_permanent_scoring_failure(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    fencing_token: u64,
+    cause_code: &str,
+    failed_at_unix_ms: u64,
+) -> Result<(), ScoringJobPersistenceError> {
+    let scoring_job_ref = required_reference(scoring_job_ref)?;
+    let cause_code = required_reference(cause_code)?;
+    let fencing_token = postgres_fencing_token(fencing_token)?;
+    let failed_at_unix_ms = postgres_timestamp(failed_at_unix_ms)?;
+    require_read_committed(transaction)?;
+    require_current_scoring_lease(
+        transaction,
+        scoring_job_ref,
+        fencing_token,
+        failed_at_unix_ms,
+    )?;
+
+    let updated = transaction.execute(
+        "UPDATE scoring_job_state \
+         SET scoring_state = 'quarantined',\
+             next_attempt_at_unix_ms = NULL,\
+             last_failure_code = $3,\
+             active_worker_ref = NULL,\
+             active_lease_ref = NULL,\
+             active_fencing_token = NULL,\
+             active_lease_expires_at_unix_ms = NULL,\
+             result_ref = NULL,\
+             completed_fencing_token = NULL,\
+             updated_at = clock_timestamp() \
+         WHERE scoring_job_ref = $1 \
+           AND scoring_state = 'leased' \
+           AND active_fencing_token = $2 \
+           AND active_lease_expires_at_unix_ms > $4",
+        &[
+            &scoring_job_ref,
+            &fencing_token,
+            &cause_code,
+            &failed_at_unix_ms,
+        ],
+    )?;
+    if updated != 1 {
+        return Err(ScoringJobPersistenceError::TransitionNotApplied);
+    }
+    Ok(())
+}
+
+/// Persist one immutable successful scoring result for the current fenced attempt.
+///
+/// The first completion is accepted only while the presenting lease is live. Exact replay
+/// of the already accepted result and fencing token is idempotent even after the original
+/// lease window has elapsed. Any different result or fencing token fails closed rather than
+/// rewriting historical scoring evidence.
+///
+/// # Errors
+///
+/// Returns [`ScoringJobPersistenceError`] for invalid evidence, unsupported isolation,
+/// a missing/non-leased job, stale or expired worker authority, conflicting completion,
+/// a suppressed terminal transition, or a database failure.
+pub fn record_successful_scoring_completion(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    fencing_token: u64,
+    scoring_result_ref: &str,
+    completed_at_unix_ms: u64,
+) -> Result<ScoringJobCompletionDisposition, ScoringJobPersistenceError> {
+    let scoring_job_ref = required_reference(scoring_job_ref)?;
+    let scoring_result_ref = required_reference(scoring_result_ref)?;
+    let fencing_token = postgres_fencing_token(fencing_token)?;
+    let completed_at_unix_ms = postgres_timestamp(completed_at_unix_ms)?;
+    require_read_committed(transaction)?;
+
+    let row = transaction.query_opt(
+        "SELECT scoring_state, result_ref, completed_fencing_token,\
+                active_fencing_token, active_lease_expires_at_unix_ms \
+         FROM scoring_job_state WHERE scoring_job_ref = $1 \
+         FOR UPDATE",
+        &[&scoring_job_ref],
+    )?;
+    let Some(row) = row else {
+        return Err(ScoringJobPersistenceError::JobNotFound);
+    };
+
+    let scoring_state: String = row.get(0);
+    let stored_result_ref: Option<String> = row.get(1);
+    let completed_fencing_token: Option<i64> = row.get(2);
+    if scoring_state == "completed" {
+        if stored_result_ref.as_deref() == Some(scoring_result_ref)
+            && completed_fencing_token == Some(fencing_token)
+        {
+            return Ok(ScoringJobCompletionDisposition::Duplicate);
+        }
+        return Err(ScoringJobPersistenceError::ConflictingCompletion);
+    }
+    if scoring_state != "leased" {
+        return Err(ScoringJobPersistenceError::NotLeased);
+    }
+
+    let active_fencing_token: Option<i64> = row.get(3);
+    if active_fencing_token != Some(fencing_token) {
+        return Err(ScoringJobPersistenceError::StaleLease);
+    }
+    let active_lease_expires_at_unix_ms: Option<i64> = row.get(4);
+    if !matches!(
+        active_lease_expires_at_unix_ms,
+        Some(expiry) if expiry > completed_at_unix_ms
+    ) {
+        return Err(ScoringJobPersistenceError::LeaseExpired);
+    }
+
+    let updated = transaction.execute(
+        "UPDATE scoring_job_state \
+         SET scoring_state = 'completed',\
+             next_attempt_at_unix_ms = NULL,\
+             last_failure_code = NULL,\
+             active_worker_ref = NULL,\
+             active_lease_ref = NULL,\
+             active_fencing_token = NULL,\
+             active_lease_expires_at_unix_ms = NULL,\
+             result_ref = $3,\
+             completed_fencing_token = $2,\
+             updated_at = clock_timestamp() \
+         WHERE scoring_job_ref = $1 \
+           AND scoring_state = 'leased' \
+           AND active_fencing_token = $2 \
+           AND active_lease_expires_at_unix_ms > $4",
+        &[
+            &scoring_job_ref,
+            &fencing_token,
+            &scoring_result_ref,
+            &completed_at_unix_ms,
+        ],
+    )?;
+    if updated != 1 {
+        return Err(ScoringJobPersistenceError::TransitionNotApplied);
+    }
+    Ok(ScoringJobCompletionDisposition::Completed)
+}
+
 fn require_current_scoring_lease(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
@@ -423,6 +589,13 @@ fn postgres_timestamp(timestamp: u64) -> Result<i64, ScoringJobPersistenceError>
         return Err(ScoringJobPersistenceError::InvalidTimestamp);
     }
     i64::try_from(timestamp).map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)
+}
+
+fn postgres_fencing_token(fencing_token: u64) -> Result<i64, ScoringJobPersistenceError> {
+    if fencing_token == 0 {
+        return Err(ScoringJobPersistenceError::InvalidFencingToken);
+    }
+    i64::try_from(fencing_token).map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)
 }
 
 fn require_read_committed(

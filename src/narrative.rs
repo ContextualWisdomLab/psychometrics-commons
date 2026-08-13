@@ -233,14 +233,14 @@ impl StyleAssignmentIdentity<'_> {
             }
             ScoreIdentity::CanonicalScorePayloadDigest(digest) => (
                 "canonical_score_payload_digest",
-                required_exact_token(digest)?,
+                required_sha256_digest(digest)?,
             ),
         };
         let instrument_version_ref = required_reference(self.instrument_version_ref)?;
         let scoring_version_ref = required_reference(self.scoring_version_ref)?;
         let style_mapping_version_ref = required_reference(self.style_mapping_version_ref)?;
         let interpretation_rule_bundle_digest =
-            required_exact_token(self.interpretation_rule_bundle_digest)?;
+            required_sha256_digest(self.interpretation_rule_bundle_digest)?;
         let locale = required_locale(self.locale)?;
         let norm_version_ref = self.norm_version_ref.map(required_reference).transpose()?;
 
@@ -292,6 +292,21 @@ fn required_exact_token(token: &str) -> Result<&str, StyleAssignmentIdentityErro
         Err(StyleAssignmentIdentityError::NonCanonicalToken)
     } else {
         Ok(token)
+    }
+}
+
+fn required_sha256_digest(digest: &str) -> Result<&str, StyleAssignmentIdentityError> {
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return Err(StyleAssignmentIdentityError::NonCanonicalToken);
+    };
+    if hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        Ok(digest)
+    } else {
+        Err(StyleAssignmentIdentityError::NonCanonicalToken)
     }
 }
 
