@@ -57,7 +57,8 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs`; **Active PR #53** persists unique client/server/sequence identity | transport-level rejection test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
-| Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
+| Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` compares the requested `response_snapshot_ref` with the durable snapshot reference; `tests/scoring_result_contract.rs` verifies the pinned reference | live adapter + retry/outbox integration |
+| Scoring engine artifact provenance is canonical SHA-256 | TRD §8; ADR-0010 | `src/scoring.rs` validates the engine-artifact digest; `tests/scoring_engine_digest_contract.rs` covers accepted and rejected canonical forms | live artifact provenance + adapter integration |
 | Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, claim, retry, terminal outcomes, and expired-lease recovery without transferring the expired fence | live adapter evidence |
 | Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
