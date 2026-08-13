@@ -3,6 +3,13 @@
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
 use psychometrics_commons_runtime::session::SessionState;
 
+const DIGEST_A: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST_B: &str =
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_CHANGED: &str =
+    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
 fn write<'a>(
     server_event_ref: &'a str,
     client_event_ref: &'a str,
@@ -24,20 +31,20 @@ fn active_session_assigns_monotonic_server_sequences() {
     let first = ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
     let second = ledger
         .record(
             SessionState::Active,
-            write("event_b", "client_b", "item_v2", "sha256:bbb"),
+            write("event_b", "client_b", "item_v2", DIGEST_B),
         )
         .unwrap();
 
     assert_eq!(first.server_event_ref(), "event_a");
     assert_eq!(first.client_event_ref(), "client_a");
     assert_eq!(first.item_version_ref(), "item_v1");
-    assert_eq!(first.payload_digest(), "sha256:aaa");
+    assert_eq!(first.payload_digest(), DIGEST_A);
     assert_eq!(first.sequence(), 1);
     assert_eq!(second.sequence(), 2);
     assert_eq!(ledger.len(), 2);
@@ -50,18 +57,13 @@ fn duplicate_client_event_is_idempotent_when_content_matches() {
     let original = ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
     let replay = ledger
         .record(
             SessionState::Active,
-            write(
-                "ignored_new_server_ref",
-                "client_a",
-                "item_v1",
-                "sha256:aaa",
-            ),
+            write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
 
@@ -75,7 +77,7 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
     let original = ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
 
@@ -92,18 +94,10 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
         let replay = ledger
             .record(
                 state,
-                write(
-                    "ignored_new_server_ref",
-                    "client_a",
-                    "item_v1",
-                    "sha256:aaa",
-                ),
+                write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_A),
             )
             .unwrap();
-        assert_eq!(
-            replay, original,
-            "exact replay must survive state {state:?}"
-        );
+        assert_eq!(replay, original, "exact replay must survive state {state:?}");
     }
     assert_eq!(ledger.len(), 1);
 }
@@ -114,7 +108,7 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
     ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
 
@@ -131,12 +125,7 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
         let digest_error = ledger
             .record(
                 state,
-                write(
-                    "ignored_new_server_ref",
-                    "client_a",
-                    "item_v1",
-                    "sha256:changed",
-                ),
+                write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_CHANGED),
             )
             .unwrap_err();
         assert_eq!(digest_error, WriteError::IdempotencyConflict);
@@ -144,12 +133,7 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
         let item_error = ledger
             .record(
                 state,
-                write(
-                    "ignored_new_server_ref",
-                    "client_a",
-                    "item_v2",
-                    "sha256:aaa",
-                ),
+                write("ignored_new_server_ref", "client_a", "item_v2", DIGEST_A),
             )
             .unwrap_err();
         assert_eq!(item_error, WriteError::IdempotencyConflict);
@@ -163,14 +147,14 @@ fn reused_client_event_with_different_content_fails_closed() {
     ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
 
     let digest_error = ledger
         .record(
             SessionState::Active,
-            write("event_b", "client_a", "item_v1", "sha256:changed"),
+            write("event_b", "client_a", "item_v1", DIGEST_CHANGED),
         )
         .unwrap_err();
     assert_eq!(digest_error, WriteError::IdempotencyConflict);
@@ -178,7 +162,7 @@ fn reused_client_event_with_different_content_fails_closed() {
     let item_error = ledger
         .record(
             SessionState::Active,
-            write("event_c", "client_a", "item_v2", "sha256:aaa"),
+            write("event_c", "client_a", "item_v2", DIGEST_A),
         )
         .unwrap_err();
     assert_eq!(item_error, WriteError::IdempotencyConflict);
@@ -191,14 +175,14 @@ fn server_event_reference_cannot_identify_two_different_events() {
     ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
 
     let error = ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_b", "item_v2", "sha256:bbb"),
+            write("event_a", "client_b", "item_v2", DIGEST_B),
         )
         .unwrap_err();
 
@@ -222,7 +206,7 @@ fn non_active_session_cannot_accept_response_events() {
         SessionState::Invalidated,
     ] {
         let error = ledger
-            .record(state, write("event_a", "client_a", "item_v1", "sha256:aaa"))
+            .record(state, write("event_a", "client_a", "item_v1", DIGEST_A))
             .unwrap_err();
         assert_eq!(error, WriteError::SessionNotActive(state));
     }
@@ -234,9 +218,9 @@ fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
     let mut ledger = ResponseLedger::new("session_ref").unwrap();
 
     for request in [
-        write("", "client_a", "item_v1", "sha256:aaa"),
-        write("event_a", "", "item_v1", "sha256:aaa"),
-        write("event_a", "client_a", "", "sha256:aaa"),
+        write("", "client_a", "item_v1", DIGEST_A),
+        write("event_a", "", "item_v1", DIGEST_A),
+        write("event_a", "client_a", "", DIGEST_A),
     ] {
         assert_eq!(
             ledger.record(SessionState::Active, request).unwrap_err(),
@@ -261,13 +245,13 @@ fn completed_session_freezes_a_deterministic_immutable_snapshot() {
     ledger
         .record(
             SessionState::Active,
-            write("event_a", "client_a", "item_v1", "sha256:aaa"),
+            write("event_a", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
     ledger
         .record(
             SessionState::Active,
-            write("event_b", "client_b", "item_v2", "sha256:bbb"),
+            write("event_b", "client_b", "item_v2", DIGEST_B),
         )
         .unwrap();
 
@@ -277,7 +261,7 @@ fn completed_session_freezes_a_deterministic_immutable_snapshot() {
     assert_eq!(snapshot.last_sequence(), Some(2));
     assert_eq!(snapshot.event_refs(), ["event_a", "event_b"]);
     assert_eq!(snapshot.item_version_refs(), ["item_v1", "item_v2"]);
-    assert_eq!(snapshot.payload_digests(), ["sha256:aaa", "sha256:bbb"]);
+    assert_eq!(snapshot.payload_digests(), [DIGEST_A, DIGEST_B]);
     assert_eq!(ledger.freeze(SessionState::Completed).unwrap(), snapshot);
 }
 
@@ -328,6 +312,10 @@ fn write_errors_have_stable_human_readable_context() {
     assert_eq!(
         WriteError::EmptyReference.to_string(),
         "response payload digest must not be empty"
+    );
+    assert_eq!(
+        WriteError::InvalidPayloadDigest.to_string(),
+        "response payload digest must be canonical lowercase sha256 evidence"
     );
     assert_eq!(
         WriteError::IdempotencyConflict.to_string(),
