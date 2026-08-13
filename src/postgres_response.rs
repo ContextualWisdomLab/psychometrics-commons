@@ -13,6 +13,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0009_response_event.sql");
+const CLIENT_EVENT_UNIQUE_CONSTRAINT: &str = "response_event_client_event_unique";
+const SERVER_SEQUENCE_UNIQUE_CONSTRAINT: &str = "response_event_server_sequence_unique";
 
 /// Outcome of persisting one response-event ledger snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,7 +131,7 @@ fn persist_one_event(
     event: &ResponseEvent,
 ) -> Result<bool, ResponsePersistenceError> {
     let sequence = postgres_sequence(event.sequence())?;
-    let inserted = transaction.execute(
+    let inserted = match transaction.execute(
         "INSERT INTO response_event (\
              session_ref, server_event_ref, client_event_ref, item_version_ref, \
              payload_digest, server_sequence\
@@ -143,7 +145,13 @@ fn persist_one_event(
             &event.payload_digest(),
             &sequence,
         ],
-    )?;
+    ) {
+        Ok(inserted) => inserted,
+        Err(error) if is_response_uniqueness_conflict(&error) => {
+            return Err(ResponsePersistenceError::ConflictingReplay);
+        }
+        Err(error) => return Err(ResponsePersistenceError::Database(error)),
+    };
     if inserted == 1 {
         return Ok(true);
     }
@@ -166,6 +174,17 @@ fn persist_one_event(
     } else {
         Err(ResponsePersistenceError::ConflictingReplay)
     }
+}
+
+fn is_response_uniqueness_conflict(error: &postgres::Error) -> bool {
+    let Some(database_error) = error.as_db_error() else {
+        return false;
+    };
+    database_error.code() == &postgres::error::SqlState::UNIQUE_VIOLATION
+        && matches!(
+            database_error.constraint(),
+            Some(CLIENT_EVENT_UNIQUE_CONSTRAINT | SERVER_SEQUENCE_UNIQUE_CONSTRAINT)
+        )
 }
 
 fn postgres_sequence(sequence: usize) -> Result<i64, ResponsePersistenceError> {
