@@ -75,9 +75,7 @@ impl Display for DataRightsError {
             Self::RetentionExceptionNotAllowed => {
                 "retention exceptions are valid only for deletion requests"
             }
-            Self::DuplicateRetentionScope => {
-                "data-rights retained scope references must be unique"
-            }
+            Self::DuplicateRetentionScope => "data-rights retained scope references must be unique",
             Self::ConflictingReplay => {
                 "data-rights lifecycle reference was replayed with conflicting evidence"
             }
