@@ -468,7 +468,9 @@ fn missing_relations_are_database_failures() {
     }
 
     apply_item_delivery_migration(&mut client).unwrap();
-    client.batch_execute("DROP TABLE item_delivery_event;").unwrap();
+    client
+        .batch_execute("DROP TABLE item_delivery_event;")
+        .unwrap();
     let with_event = delivered_ledger(
         "session_item_delivery_missing_event",
         "release_big_five_ko_v1",
