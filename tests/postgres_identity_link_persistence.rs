@@ -455,6 +455,18 @@ fn each_link_and_end_stored_field_mismatch_fails_closed() {
         .record_link_end("link_end_event_alpha", "evidence_unlink_alpha", 11_000)
         .unwrap();
     persist_ok(&mut client, &ended);
+    client
+        .execute(
+            "INSERT INTO participant_identity_link_event (\
+                 participant_ref, link_event_ref, issuer_ref, subject_ref, \
+                 anonymous_proof_ref, authenticated_proof_ref, linked_at_unix_ms\
+             ) VALUES (\
+                 'participant_end_field_mismatch', 'link_event_other', 'issuer_keyverse', \
+                 'subject_other', 'proof_anonymous_other', 'proof_authenticated_other', 10501\
+             )",
+            &[],
+        )
+        .unwrap();
     for sql in [
         "UPDATE participant_identity_link_end_event SET linked_event_ref = 'link_event_other' \
          WHERE participant_ref = 'participant_end_field_mismatch'",
