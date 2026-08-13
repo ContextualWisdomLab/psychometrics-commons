@@ -12,6 +12,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const INTEGRATION_MIGRATION: &str = include_str!("../migrations/0001_integration_delivery.sql");
+const OUTBOX_LEASE_MIGRATION: &str = include_str!("../migrations/0013_outbox_delivery_lease.sql");
 const OUTBOX_REPLAY_QUERY: &str = "SELECT EXISTS (\
      SELECT 1 FROM integration_outbox \
      WHERE event_ref = $1 AND event_type = $2 AND schema_version = $3 \
@@ -82,6 +83,41 @@ impl<'a> OutboxPersistenceIdentity<'a> {
     }
 }
 
+/// Durable exclusive-delivery evidence returned by an atomic outbox claim.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PersistedOutboxLease {
+    worker_ref: String,
+    lease_ref: String,
+    fencing_token: u64,
+    expires_at_unix_ms: u64,
+}
+
+impl PersistedOutboxLease {
+    /// Return the opaque worker identity that owns this persisted delivery lease.
+    #[must_use]
+    pub fn worker_ref(&self) -> &str {
+        &self.worker_ref
+    }
+
+    /// Return the opaque lease identity for this persisted delivery attempt.
+    #[must_use]
+    pub fn lease_ref(&self) -> &str {
+        &self.lease_ref
+    }
+
+    /// Return the monotonically increasing stale-worker fencing token.
+    #[must_use]
+    pub const fn fencing_token(&self) -> u64 {
+        self.fencing_token
+    }
+
+    /// Return the caller-supplied lease expiry instant persisted with the claim.
+    #[must_use]
+    pub const fn expires_at_unix_ms(&self) -> u64 {
+        self.expires_at_unix_ms
+    }
+}
+
 /// Fail-closed persistence error for integration evidence.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -106,6 +142,22 @@ pub enum PersistenceError {
     TerminalOutboxState,
     /// Stored outbox state does not match the migration-defined state vocabulary.
     InvalidStoredState,
+    /// Lease expiry was not strictly later than the claim instant.
+    InvalidLeaseWindow,
+    /// A fencing token was zero and therefore cannot represent a persisted attempt.
+    InvalidFencingToken,
+    /// An unfenced delivery attempt was submitted against a live exclusive lease.
+    OutboxLeaseHeld,
+    /// The requested outbox is not currently available for a new exclusive claim.
+    NotLeaseable,
+    /// A fenced transition was submitted for an outbox without a current lease.
+    NotLeased,
+    /// Expiry recovery was requested while the persisted lease is still live.
+    LeaseStillActive,
+    /// A worker presented a fencing token that does not own the current lease.
+    StaleLease,
+    /// A worker-side transition was observed at or after persisted lease expiry.
+    LeaseExpired,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -129,6 +181,18 @@ impl Display for PersistenceError {
             }
             Self::TerminalOutboxState => "terminal outbox state rejects new delivery attempts",
             Self::InvalidStoredState => "stored outbox state violates the persistence contract",
+            Self::InvalidLeaseWindow => "outbox lease expiry must be later than claim time",
+            Self::InvalidFencingToken => "outbox lease fencing tokens must be positive",
+            Self::OutboxLeaseHeld => {
+                "live outbox delivery lease rejects unfenced delivery attempts"
+            }
+            Self::NotLeaseable => {
+                "outbox is not currently available for an exclusive delivery lease"
+            }
+            Self::NotLeased => "outbox does not currently have a delivery lease",
+            Self::LeaseStillActive => "outbox delivery lease has not expired",
+            Self::StaleLease => "outbox delivery fencing token is stale",
+            Self::LeaseExpired => "outbox delivery lease has expired",
             Self::Database(_) => "PostgreSQL persistence operation failed",
         })
     }
@@ -159,7 +223,8 @@ impl From<postgres::Error> for PersistenceError {
 ///
 /// Returns the `PostgreSQL` error if the migration cannot be applied.
 pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
-    client.batch_execute(INTEGRATION_MIGRATION)
+    client.batch_execute(INTEGRATION_MIGRATION)?;
+    client.batch_execute(OUTBOX_LEASE_MIGRATION)
 }
 
 /// Insert an immutable integration event into the durable outbox.
@@ -270,9 +335,9 @@ pub fn record_outbox_delivery_attempt(
 
     let outbox_row = transaction
         .query_opt(
-            "SELECT max_attempts, current_state, latest_event_at_unix_ms \
-             FROM integration_outbox \
-             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3 \
+            "SELECT max_attempts, current_state, latest_event_at_unix_ms, lease_worker_ref
+             FROM integration_outbox
+             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3
              FOR UPDATE",
             &[&source_ref, &tenant_ref, &event_ref],
         )?
@@ -281,88 +346,251 @@ pub fn record_outbox_delivery_attempt(
     let stored_state: String = outbox_row.get(1);
     let current_state = parse_outbox_state(&stored_state)?;
     let latest_event_at_unix_ms: i64 = outbox_row.get(2);
-
-    let outcome_name = delivery_outcome_name(outcome);
-    if let Some(existing_attempt) = transaction.query_opt(
-        "SELECT delivery_outcome, occurred_at_unix_ms, cause_code \
-         FROM integration_delivery_attempt \
-         WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3 AND attempt_ref = $4",
-        &[&source_ref, &tenant_ref, &event_ref, &attempt_ref],
-    )? {
-        let existing_outcome: String = existing_attempt.get(0);
-        let existing_occurred_at_unix_ms: i64 = existing_attempt.get(1);
-        let existing_cause_code: Option<String> = existing_attempt.get(2);
-        if existing_outcome == outcome_name
-            && existing_occurred_at_unix_ms == occurred_at_unix_ms
-            && existing_cause_code.as_deref() == cause_code
-        {
-            return Ok(DeliveryAttemptPersistence {
-                disposition: PersistenceDisposition::Duplicate,
-                outbox_state: current_state,
-            });
-        }
-        return Err(PersistenceError::ConflictingReplay);
+    let lease_worker_ref: Option<String> = outbox_row.get(3);
+    if lease_worker_ref.is_some() {
+        return Err(PersistenceError::OutboxLeaseHeld);
     }
 
-    if current_state != OutboxState::Pending {
-        return Err(PersistenceError::TerminalOutboxState);
-    }
-    if occurred_at_unix_ms < latest_event_at_unix_ms {
-        return Err(PersistenceError::NonMonotonicTimestamp);
-    }
-
-    // PostgreSQL evaluates the main SELECT against the statement snapshot, so rows
-    // inserted by this data-modifying CTE are counted only through inserted_attempt.
-
-    let attempt_count: i64 = transaction
-        .query_one(
-            "WITH inserted_attempt AS (\
-                 INSERT INTO integration_delivery_attempt (\
-                     source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome,\
-                     occurred_at_unix_ms, cause_code\
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-                 RETURNING 1\
-             ) \
-             SELECT count(*) + (SELECT count(*) FROM inserted_attempt) \
-             FROM integration_delivery_attempt \
-             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
-            &[
-                &source_ref,
-                &tenant_ref,
-                &event_ref,
-                &attempt_ref,
-                &outcome_name,
-                &occurred_at_unix_ms,
-                &cause_code,
-            ],
-        )?
-        .get(0);
-    let next_state = match outcome {
-        DeliveryOutcome::Delivered => OutboxState::Delivered,
-        DeliveryOutcome::PermanentFailure => OutboxState::Quarantined,
-        DeliveryOutcome::RetryableFailure if attempt_count >= i64::from(max_attempts) => {
-            OutboxState::Quarantined
-        }
-        DeliveryOutcome::RetryableFailure => OutboxState::Pending,
+    let write = DeliveryAttemptWrite {
+        source_ref,
+        tenant_ref,
+        event_ref,
+        attempt_ref,
+        outcome,
+        occurred_at_unix_ms,
+        cause_code,
+        current_state,
+        latest_event_at_unix_ms,
+        max_attempts,
+        clear_lease: false,
     };
-    let next_state_name = outbox_state_name(next_state);
-    transaction.execute(
-        "UPDATE integration_outbox \
-         SET current_state = $4, latest_event_at_unix_ms = $5 \
-         WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
+    if let Some(replay) = classify_existing_delivery_attempt(transaction, &write)? {
+        return Ok(replay);
+    }
+    persist_new_delivery_attempt(transaction, &write)
+}
+
+/// Claim exclusive delivery ownership of one pending outbox row.
+///
+/// The claim succeeds only when the row is `pending` and has no current lease,
+/// including an expired unrecovered lease. A later [`expire_outbox_delivery_lease`]
+/// clears the expired fence so the next claim issues a new token. `READ COMMITTED`
+/// is required so concurrent claims observe the latest committed lease evidence.
+///
+/// # Errors
+///
+/// Returns [`PersistenceError`] for invalid identity, an empty lease window,
+/// unsupported isolation, a missing or non-claimable outbox, or a database failure.
+pub fn claim_outbox_delivery(
+    transaction: &mut Transaction<'_>,
+    identity: OutboxPersistenceIdentity<'_>,
+    worker_ref: &str,
+    lease_ref: &str,
+    claimed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+) -> Result<PersistedOutboxLease, PersistenceError> {
+    let source_ref = required_persistence_reference(identity.source)?;
+    let tenant_ref = required_persistence_reference(identity.tenant)?;
+    let event_ref = required_persistence_reference(identity.event)?;
+    let worker_ref = required_persistence_reference(worker_ref)?;
+    let lease_ref = required_persistence_reference(lease_ref)?;
+    if claimed_at_unix_ms == 0 || expires_at_unix_ms == 0 {
+        return Err(PersistenceError::InvalidTimestamp);
+    }
+    let claimed_at_unix_ms = postgres_bigint(claimed_at_unix_ms)?;
+    let expires_at_unix_ms = postgres_bigint(expires_at_unix_ms)?;
+    if expires_at_unix_ms <= claimed_at_unix_ms {
+        return Err(PersistenceError::InvalidLeaseWindow);
+    }
+    require_read_committed(transaction)?;
+
+    let claimed = transaction.query_opt(
+        "UPDATE integration_outbox
+         SET lease_worker_ref = $4,
+             lease_ref = $5,
+             lease_fencing_token = delivery_lease_generation + 1,
+             lease_expires_at_unix_ms = $6,
+             delivery_lease_generation = delivery_lease_generation + 1
+         WHERE source_ref = $1
+           AND tenant_ref = $2
+           AND event_ref = $3
+           AND current_state = 'pending'
+           AND lease_worker_ref IS NULL
+         RETURNING lease_fencing_token",
         &[
             &source_ref,
             &tenant_ref,
             &event_ref,
-            &next_state_name,
-            &occurred_at_unix_ms,
+            &worker_ref,
+            &lease_ref,
+            &expires_at_unix_ms,
         ],
     )?;
+    if let Some(row) = claimed {
+        let fencing_token: i64 = row.get(0);
+        return Ok(PersistedOutboxLease {
+            worker_ref: worker_ref.to_owned(),
+            lease_ref: lease_ref.to_owned(),
+            fencing_token: u64::try_from(fencing_token)
+                .map_err(|_| PersistenceError::ValueOutOfRange)?,
+            expires_at_unix_ms: u64::try_from(expires_at_unix_ms)
+                .map_err(|_| PersistenceError::ValueOutOfRange)?,
+        });
+    }
 
-    Ok(DeliveryAttemptPersistence {
-        disposition: PersistenceDisposition::Inserted,
-        outbox_state: next_state,
-    })
+    let exists = transaction.query_opt(
+        "SELECT 1 FROM integration_outbox
+         WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
+        &[&source_ref, &tenant_ref, &event_ref],
+    )?;
+    if exists.is_some() {
+        Err(PersistenceError::NotLeaseable)
+    } else {
+        Err(PersistenceError::OutboxNotFound)
+    }
+}
+
+/// Recover one expired exclusive outbox delivery lease without transferring the fence.
+///
+/// The row stays `pending` and the lease columns are cleared. A later
+/// [`claim_outbox_delivery`] issues the next fencing token. `READ COMMITTED` is
+/// required so concurrent expiry recovery observes the latest committed lease.
+///
+/// # Errors
+///
+/// Returns [`PersistenceError`] for invalid identity or timestamp, unsupported
+/// isolation, a missing or unleased outbox, a still-live lease, or a database
+/// failure.
+pub fn expire_outbox_delivery_lease(
+    transaction: &mut Transaction<'_>,
+    identity: OutboxPersistenceIdentity<'_>,
+    observed_at_unix_ms: u64,
+) -> Result<(), PersistenceError> {
+    let source_ref = required_persistence_reference(identity.source)?;
+    let tenant_ref = required_persistence_reference(identity.tenant)?;
+    let event_ref = required_persistence_reference(identity.event)?;
+    if observed_at_unix_ms == 0 {
+        return Err(PersistenceError::InvalidTimestamp);
+    }
+    let observed_at_unix_ms = postgres_bigint(observed_at_unix_ms)?;
+    require_read_committed(transaction)?;
+
+    let recovered = transaction.query_opt(
+        "UPDATE integration_outbox
+         SET lease_worker_ref = NULL,
+             lease_ref = NULL,
+             lease_fencing_token = NULL,
+             lease_expires_at_unix_ms = NULL
+         WHERE source_ref = $1
+           AND tenant_ref = $2
+           AND event_ref = $3
+           AND lease_worker_ref IS NOT NULL
+           AND lease_expires_at_unix_ms <= $4
+         RETURNING event_ref",
+        &[&source_ref, &tenant_ref, &event_ref, &observed_at_unix_ms],
+    )?;
+    if recovered.is_some() {
+        return Ok(());
+    }
+
+    let row = transaction.query_opt(
+        "SELECT lease_worker_ref IS NOT NULL AS leased
+         FROM integration_outbox
+         WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
+        &[&source_ref, &tenant_ref, &event_ref],
+    )?;
+    let Some(row) = row else {
+        return Err(PersistenceError::OutboxNotFound);
+    };
+    let leased: bool = row.get(0);
+    if leased {
+        Err(PersistenceError::LeaseStillActive)
+    } else {
+        Err(PersistenceError::NotLeased)
+    }
+}
+
+/// Persist a delivery attempt for the worker that owns the current fenced lease.
+///
+/// Exact attempt replay remains idempotent. A matching first attempt advances the
+/// outbox and clears the exclusive lease so a later claim issues a new fence.
+///
+/// # Errors
+///
+/// Returns [`PersistenceError`] for invalid identity, a zero fencing token,
+/// unsupported isolation, a missing or unleased outbox, a stale or expired fence,
+/// conflicting replay, or a database failure.
+pub fn record_leased_outbox_delivery_attempt(
+    transaction: &mut Transaction<'_>,
+    identity: OutboxPersistenceIdentity<'_>,
+    attempt_ref: &str,
+    outcome: DeliveryOutcome,
+    occurred_at_unix_ms: u64,
+    cause_code: Option<&str>,
+    fencing_token: u64,
+) -> Result<DeliveryAttemptPersistence, PersistenceError> {
+    let source_ref = required_persistence_reference(identity.source)?;
+    let tenant_ref = required_persistence_reference(identity.tenant)?;
+    let event_ref = required_persistence_reference(identity.event)?;
+    let attempt_ref = required_persistence_reference(attempt_ref)?;
+    if occurred_at_unix_ms == 0 {
+        return Err(PersistenceError::InvalidTimestamp);
+    }
+    if fencing_token == 0 {
+        return Err(PersistenceError::InvalidFencingToken);
+    }
+    let cause_code = cause_code.map(required_persistence_reference).transpose()?;
+    let occurred_at_unix_ms = postgres_bigint(occurred_at_unix_ms)?;
+    let fencing_token = postgres_bigint(fencing_token)?;
+    require_read_committed(transaction)?;
+
+    let outbox_row = transaction
+        .query_opt(
+            "SELECT max_attempts, current_state, latest_event_at_unix_ms,
+                    lease_fencing_token, lease_expires_at_unix_ms
+             FROM integration_outbox
+             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3
+             FOR UPDATE",
+            &[&source_ref, &tenant_ref, &event_ref],
+        )?
+        .ok_or(PersistenceError::OutboxNotFound)?;
+    let max_attempts: i32 = outbox_row.get(0);
+    let stored_state: String = outbox_row.get(1);
+    let current_state = parse_outbox_state(&stored_state)?;
+    let latest_event_at_unix_ms: i64 = outbox_row.get(2);
+    let stored_fence: Option<i64> = outbox_row.get(3);
+    let lease_expires_at_unix_ms: Option<i64> = outbox_row.get(4);
+
+    let write = DeliveryAttemptWrite {
+        source_ref,
+        tenant_ref,
+        event_ref,
+        attempt_ref,
+        outcome,
+        occurred_at_unix_ms,
+        cause_code,
+        current_state,
+        latest_event_at_unix_ms,
+        max_attempts,
+        clear_lease: true,
+    };
+    if let Some(replay) = classify_existing_delivery_attempt(transaction, &write)? {
+        return Ok(replay);
+    }
+
+    let (Some(stored_fence), Some(lease_expires_at_unix_ms)) =
+        (stored_fence, lease_expires_at_unix_ms)
+    else {
+        return Err(PersistenceError::NotLeased);
+    };
+    if stored_fence != fencing_token {
+        return Err(PersistenceError::StaleLease);
+    }
+    if lease_expires_at_unix_ms <= occurred_at_unix_ms {
+        return Err(PersistenceError::LeaseExpired);
+    }
+
+    persist_new_delivery_attempt(transaction, &write)
 }
 
 /// Accept or deduplicate one immutable tenant-bound event in a durable inbox.
@@ -439,6 +667,140 @@ pub fn accept_inbox_event(
     }
 }
 
+struct DeliveryAttemptWrite<'a> {
+    source_ref: &'a str,
+    tenant_ref: &'a str,
+    event_ref: &'a str,
+    attempt_ref: &'a str,
+    outcome: DeliveryOutcome,
+    occurred_at_unix_ms: i64,
+    cause_code: Option<&'a str>,
+    current_state: OutboxState,
+    latest_event_at_unix_ms: i64,
+    max_attempts: i32,
+    clear_lease: bool,
+}
+
+fn classify_existing_delivery_attempt(
+    transaction: &mut Transaction<'_>,
+    write: &DeliveryAttemptWrite<'_>,
+) -> Result<Option<DeliveryAttemptPersistence>, PersistenceError> {
+    let outcome_name = delivery_outcome_name(write.outcome);
+    let Some(existing_attempt) = transaction.query_opt(
+        "SELECT delivery_outcome, occurred_at_unix_ms, cause_code
+         FROM integration_delivery_attempt
+         WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3 AND attempt_ref = $4",
+        &[
+            &write.source_ref,
+            &write.tenant_ref,
+            &write.event_ref,
+            &write.attempt_ref,
+        ],
+    )?
+    else {
+        return Ok(None);
+    };
+    let existing_outcome: String = existing_attempt.get(0);
+    let existing_occurred_at_unix_ms: i64 = existing_attempt.get(1);
+    let existing_cause_code: Option<String> = existing_attempt.get(2);
+    if existing_outcome == outcome_name
+        && existing_occurred_at_unix_ms == write.occurred_at_unix_ms
+        && existing_cause_code.as_deref() == write.cause_code
+    {
+        Ok(Some(DeliveryAttemptPersistence {
+            disposition: PersistenceDisposition::Duplicate,
+            outbox_state: write.current_state,
+        }))
+    } else {
+        Err(PersistenceError::ConflictingReplay)
+    }
+}
+
+fn persist_new_delivery_attempt(
+    transaction: &mut Transaction<'_>,
+    write: &DeliveryAttemptWrite<'_>,
+) -> Result<DeliveryAttemptPersistence, PersistenceError> {
+    if write.current_state != OutboxState::Pending {
+        return Err(PersistenceError::TerminalOutboxState);
+    }
+    if write.occurred_at_unix_ms < write.latest_event_at_unix_ms {
+        return Err(PersistenceError::NonMonotonicTimestamp);
+    }
+
+    let outcome_name = delivery_outcome_name(write.outcome);
+    // PostgreSQL evaluates the main SELECT against the statement snapshot, so rows
+    // inserted by this data-modifying CTE are counted only through inserted_attempt.
+    let attempt_count: i64 = transaction
+        .query_one(
+            "WITH inserted_attempt AS (
+                 INSERT INTO integration_delivery_attempt (
+                     source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome,
+                     occurred_at_unix_ms, cause_code
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 RETURNING 1
+             )
+             SELECT count(*) + (SELECT count(*) FROM inserted_attempt)
+             FROM integration_delivery_attempt
+             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
+            &[
+                &write.source_ref,
+                &write.tenant_ref,
+                &write.event_ref,
+                &write.attempt_ref,
+                &outcome_name,
+                &write.occurred_at_unix_ms,
+                &write.cause_code,
+            ],
+        )?
+        .get(0);
+    let next_state = match write.outcome {
+        DeliveryOutcome::Delivered => OutboxState::Delivered,
+        DeliveryOutcome::PermanentFailure => OutboxState::Quarantined,
+        DeliveryOutcome::RetryableFailure if attempt_count >= i64::from(write.max_attempts) => {
+            OutboxState::Quarantined
+        }
+        DeliveryOutcome::RetryableFailure => OutboxState::Pending,
+    };
+    let next_state_name = outbox_state_name(next_state);
+    if write.clear_lease {
+        transaction.execute(
+            "UPDATE integration_outbox
+             SET current_state = $4,
+                 latest_event_at_unix_ms = $5,
+                 lease_worker_ref = NULL,
+                 lease_ref = NULL,
+                 lease_fencing_token = NULL,
+                 lease_expires_at_unix_ms = NULL
+             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
+            &[
+                &write.source_ref,
+                &write.tenant_ref,
+                &write.event_ref,
+                &next_state_name,
+                &write.occurred_at_unix_ms,
+            ],
+        )?;
+    } else {
+        transaction.execute(
+            "UPDATE integration_outbox
+             SET current_state = $4, latest_event_at_unix_ms = $5
+             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
+            &[
+                &write.source_ref,
+                &write.tenant_ref,
+                &write.event_ref,
+                &next_state_name,
+                &write.occurred_at_unix_ms,
+            ],
+        )?;
+    }
+
+    Ok(DeliveryAttemptPersistence {
+        disposition: PersistenceDisposition::Inserted,
+        outbox_state: next_state,
+    })
+}
+
 fn required_persistence_reference(reference: &str) -> Result<&str, PersistenceError> {
     normalized_reference(reference).ok_or(PersistenceError::InvalidReference)
 }
@@ -486,6 +848,47 @@ fn postgres_bigint(value: u64) -> Result<i64, PersistenceError> {
 mod tests {
     use super::{parse_outbox_state, PersistenceError};
     use crate::integration::OutboxState;
+
+    #[test]
+    fn lease_persistence_errors_are_safe_and_specific() {
+        for (error, expected) in [
+            (
+                PersistenceError::InvalidLeaseWindow,
+                "outbox lease expiry must be later than claim time",
+            ),
+            (
+                PersistenceError::InvalidFencingToken,
+                "outbox lease fencing tokens must be positive",
+            ),
+            (
+                PersistenceError::OutboxLeaseHeld,
+                "live outbox delivery lease rejects unfenced delivery attempts",
+            ),
+            (
+                PersistenceError::NotLeaseable,
+                "outbox is not currently available for an exclusive delivery lease",
+            ),
+            (
+                PersistenceError::NotLeased,
+                "outbox does not currently have a delivery lease",
+            ),
+            (
+                PersistenceError::LeaseStillActive,
+                "outbox delivery lease has not expired",
+            ),
+            (
+                PersistenceError::StaleLease,
+                "outbox delivery fencing token is stale",
+            ),
+            (
+                PersistenceError::LeaseExpired,
+                "outbox delivery lease has expired",
+            ),
+        ] {
+            assert_eq!(error.to_string(), expected);
+            assert!(std::error::Error::source(&error).is_none());
+        }
+    }
 
     #[test]
     fn stored_outbox_state_parser_is_fail_closed() {
