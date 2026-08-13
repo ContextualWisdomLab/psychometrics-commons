@@ -246,7 +246,7 @@ impl StyleAssignmentIdentity<'_> {
         );
         append_field(&mut canonical, "scoring_version_ref", scoring_version_ref);
         append_field(
-            fmut canonical,
+            &mut canonical,
             "norm_version_ref_present",
             if norm_version_ref.is_some() { "1" } else { "0" },
         );
