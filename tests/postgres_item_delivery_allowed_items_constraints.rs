@@ -3,8 +3,7 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -22,14 +21,14 @@ fn constraint_name(error: &postgres::Error) -> &str {
 fn assert_invalid_allowed_items(
     client: &mut Client,
     session_ref: &str,
-    allowed_items: Vec<Option<String>>,
+    allowed_items: &[Option<String>],
 ) {
     let error = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-                 session_ref, instrument_release_ref, release_content_digest, locale, \
+                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
                  allowed_item_version_refs\
-             ) VALUES ($1, 'release_big_five_ko_v1', $2, 'ko-KR', $3)",
+             ) VALUES ('tenant_item_delivery', $1, 'release_big_five_ko_v1', $2, 'ko-KR', $3)",
             &[&session_ref, &DIGEST, &allowed_items],
         )
         .unwrap_err();
@@ -69,16 +68,13 @@ fn allowed_item_versions_are_non_null_opaque_canonical_and_unique() {
             "session_noncanonical_item",
             vec![Some("item_version_001"), Some(" item_version_002 ")],
         ),
-        (
-            "session_null_item",
-            vec![Some("item_version_001"), None],
-        ),
+        ("session_null_item", vec![Some("item_version_001"), None]),
     ] {
-        let allowed_items = item_values
+        let allowed_items: Vec<Option<String>> = item_values
             .into_iter()
             .map(|value| value.map(str::to_owned))
             .collect();
-        assert_invalid_allowed_items(&mut client, session_ref, allowed_items);
+        assert_invalid_allowed_items(&mut client, session_ref, &allowed_items);
     }
 
     client

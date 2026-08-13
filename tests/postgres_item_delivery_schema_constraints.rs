@@ -53,9 +53,9 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let numeric_session = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-             session_ref, instrument_release_ref, release_content_digest, locale, \
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
              allowed_item_version_refs\
-         ) VALUES ('12', 'release_big_five_ko_v1', \
+         ) VALUES ('tenant_item_delivery', '12', 'release_big_five_ko_v1', \
              'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
              'ko-KR', ARRAY['item_version_001'])",
             &[],
@@ -69,9 +69,9 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let empty_items = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-             session_ref, instrument_release_ref, release_content_digest, locale, \
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
              allowed_item_version_refs\
-         ) VALUES ('session_schema_empty', 'release_big_five_ko_v1', \
+         ) VALUES ('tenant_item_delivery', 'session_schema_empty', 'release_big_five_ko_v1', \
              'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
              'ko-KR', ARRAY[]::TEXT[])",
             &[],
@@ -85,9 +85,9 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let bad_digest = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-             session_ref, instrument_release_ref, release_content_digest, locale, \
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
              allowed_item_version_refs\
-         ) VALUES ('session_schema_digest', 'release_big_five_ko_v1', \
+         ) VALUES ('tenant_item_delivery', 'session_schema_digest', 'release_big_five_ko_v1', \
              'not-a-digest', 'ko-KR', ARRAY['item_version_001'])",
             &[],
         )
@@ -100,9 +100,9 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-                 session_ref, instrument_release_ref, release_content_digest, locale, \
+                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
                  allowed_item_version_refs\
-             ) VALUES ('session_schema_valid', 'release_big_five_ko_v1', \
+             ) VALUES ('tenant_item_delivery', 'session_schema_valid', 'release_big_five_ko_v1', \
                  'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
                  'ko-KR', ARRAY['item_version_001'])",
             &[],
@@ -112,10 +112,10 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let zero_sequence = client
         .execute(
             "INSERT INTO item_delivery_event (\
-             session_ref, delivery_event_ref, item_version_ref, presentation_context_ref, \
+             tenant_ref, session_ref, delivery_event_ref, item_version_ref, presentation_context_ref, \
              delivery_sequence\
-         ) VALUES ('session_schema_valid', 'delivery_event_001', 'item_version_001', \
-             'presentation_standard_v1', 0)",
+         ) VALUES ('tenant_item_delivery', 'session_schema_valid', 'delivery_event_001', \
+             'item_version_001', 'presentation_standard_v1', 0)",
             &[],
         )
         .unwrap_err();
@@ -127,9 +127,9 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let numeric_delivery = client
         .execute(
             "INSERT INTO item_delivery_event (\
-             session_ref, delivery_event_ref, item_version_ref, presentation_context_ref, \
+             tenant_ref, session_ref, delivery_event_ref, item_version_ref, presentation_context_ref, \
              delivery_sequence\
-         ) VALUES ('session_schema_valid', '99', 'item_version_001', \
+         ) VALUES ('tenant_item_delivery', 'session_schema_valid', '99', 'item_version_001', \
              'presentation_standard_v1', 1)",
             &[],
         )
