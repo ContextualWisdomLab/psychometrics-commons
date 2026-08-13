@@ -6,6 +6,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Added
 
+- PostgreSQL 18 purpose-specific consent persistence for one participant-bound ledger plus append-only grant/revoke events, with exact replay, fail-closed conflicting event identity, independent research-scope shape, and `READ COMMITTED` replay classification.
 - PostgreSQL 18 data-rights persistence for one requested export or deletion identity plus one local outbox event per declared dependent system, with exact replay, fail-closed evidence mismatch, unique-event identities, and `READ COMMITTED` replay classification.
 - PostgreSQL 18 instrument-release persistence for one immutable locale-specific publication identity plus reachable publication-state advance, with exact replay, fail-closed digest rebinding, fail-closed unreachable lifecycle rewind, and `READ COMMITTED` replay classification.
 - Initial Psychometrics Commons product requirements covering the IPIP-based Big Five consumer vertical slice, reflective modules, longitudinal participation, Research Commons, and Measurement Workbench.
