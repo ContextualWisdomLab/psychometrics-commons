@@ -1,3 +1,5 @@
+//! Rejected session commands leave the assessment session in its prior state.
+
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
