@@ -23,6 +23,15 @@ AS $item_delivery_reference_array$
 $item_delivery_reference_array$;
 
 CREATE TABLE IF NOT EXISTS item_delivery_ledger (
+    tenant_ref TEXT CONSTRAINT item_delivery_ledger_tenant_ref_not_null NOT NULL
+        CONSTRAINT item_delivery_ledger_tenant_ref_format_check CHECK (
+            tenant_ref = btrim(tenant_ref)
+            AND tenant_ref <> ''
+            AND NOT (
+                tenant_ref ~ '[[:digit:]]'
+                AND tenant_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
     session_ref TEXT CONSTRAINT item_delivery_ledger_session_ref_not_null NOT NULL
         CONSTRAINT item_delivery_ledger_session_ref_format_check CHECK (
             session_ref = btrim(session_ref)
@@ -59,10 +68,20 @@ CREATE TABLE IF NOT EXISTS item_delivery_ledger (
         ),
     created_at TIMESTAMPTZ CONSTRAINT item_delivery_ledger_created_at_not_null NOT NULL
         DEFAULT clock_timestamp(),
-    CONSTRAINT item_delivery_ledger_pkey PRIMARY KEY (session_ref)
+    CONSTRAINT item_delivery_ledger_pkey PRIMARY KEY (session_ref),
+    CONSTRAINT item_delivery_ledger_tenant_session_unique UNIQUE (tenant_ref, session_ref)
 );
 
 CREATE TABLE IF NOT EXISTS item_delivery_event (
+    tenant_ref TEXT CONSTRAINT item_delivery_event_tenant_ref_not_null NOT NULL
+        CONSTRAINT item_delivery_event_tenant_ref_format_check CHECK (
+            tenant_ref = btrim(tenant_ref)
+            AND tenant_ref <> ''
+            AND NOT (
+                tenant_ref ~ '[[:digit:]]'
+                AND tenant_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
     session_ref TEXT CONSTRAINT item_delivery_event_session_ref_not_null NOT NULL,
     delivery_event_ref TEXT CONSTRAINT item_delivery_event_delivery_ref_not_null NOT NULL
         CONSTRAINT item_delivery_event_delivery_ref_format_check CHECK (
@@ -107,8 +126,9 @@ CREATE TABLE IF NOT EXISTS item_delivery_event (
     created_at TIMESTAMPTZ CONSTRAINT item_delivery_event_created_at_not_null NOT NULL
         DEFAULT clock_timestamp(),
     CONSTRAINT item_delivery_event_pkey PRIMARY KEY (session_ref, delivery_event_ref),
-    CONSTRAINT item_delivery_event_session_fk FOREIGN KEY (session_ref)
-        REFERENCES item_delivery_ledger (session_ref),
+    CONSTRAINT item_delivery_event_delivery_ref_unique UNIQUE (delivery_event_ref),
+    CONSTRAINT item_delivery_event_session_tenant_fk FOREIGN KEY (tenant_ref, session_ref)
+        REFERENCES item_delivery_ledger (tenant_ref, session_ref),
     CONSTRAINT item_delivery_event_item_version_unique UNIQUE (session_ref, item_version_ref),
     CONSTRAINT item_delivery_event_sequence_unique UNIQUE (session_ref, delivery_sequence)
 );
