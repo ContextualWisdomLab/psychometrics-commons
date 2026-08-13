@@ -118,6 +118,62 @@ fn published_release_binds_created_session_to_exact_release_and_locale() {
 }
 
 #[test]
+fn later_release_withdrawal_does_not_rewrite_existing_session_provenance() {
+    let mut suspended_release = published_release();
+    let suspended_session = AssessmentSession::new(
+        "ses_cfa319dbad02431a8db35b1ae88f22c8",
+        PARTICIPANT_REF,
+        &suspended_release,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    suspended_release
+        .apply_command(
+            "publication_suspend_a5b9472f",
+            PublicationCommand::Suspend,
+            20_100,
+        )
+        .unwrap();
+    assert!(!suspended_release.accepts_new_sessions());
+    assert_eq!(suspended_session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(
+        suspended_session.instrument_version_ref(),
+        "instrument_version_big_five_ko_v1"
+    );
+    assert_eq!(
+        suspended_session.instrument_release_content_digest(),
+        VALID_DIGEST
+    );
+    assert_eq!(suspended_session.locale(), "ko-KR");
+
+    let mut retired_release = published_release();
+    let retired_session = AssessmentSession::new(
+        "ses_0d630c21194e4b93bb7cfb4c87665bd9",
+        PARTICIPANT_REF,
+        &retired_release,
+        "ko-KR",
+        21_000,
+    )
+    .unwrap();
+    retired_release
+        .apply_command(
+            "publication_retire_b6ca5830",
+            PublicationCommand::Retire,
+            21_100,
+        )
+        .unwrap();
+    assert!(!retired_release.accepts_new_sessions());
+    assert_eq!(retired_session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(
+        retired_session.instrument_version_ref(),
+        "instrument_version_big_five_ko_v1"
+    );
+    assert_eq!(retired_session.instrument_release_content_digest(), VALID_DIGEST);
+    assert_eq!(retired_session.locale(), "ko-KR");
+}
+
+#[test]
 fn session_creation_rejects_nonpublished_release_and_locale_mismatch() {
     let draft = InstrumentRelease::new(manifest(), 10_000).unwrap();
     assert_eq!(
