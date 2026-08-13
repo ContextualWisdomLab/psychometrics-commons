@@ -410,3 +410,73 @@ fn ledger_replay_select_failure_is_a_database_failure() {
         IdentityLinkPersistenceError::Database(_)
     ));
 }
+
+#[test]
+fn each_link_and_end_stored_field_mismatch_fails_closed() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_identity_link_migration(&mut client).unwrap();
+
+    let participant = linked("participant_field_mismatch");
+    persist_ok(&mut client, &participant);
+    for sql in [
+        "UPDATE participant_identity_link_event SET issuer_ref = 'issuer_other' \
+         WHERE participant_ref = 'participant_field_mismatch'",
+        "UPDATE participant_identity_link_event SET anonymous_proof_ref = 'proof_anonymous_other' \
+         WHERE participant_ref = 'participant_field_mismatch'",
+        "UPDATE participant_identity_link_event SET authenticated_proof_ref = 'proof_authenticated_other' \
+         WHERE participant_ref = 'participant_field_mismatch'",
+        "UPDATE participant_identity_link_event SET linked_at_unix_ms = 99999 \
+         WHERE participant_ref = 'participant_field_mismatch'",
+    ] {
+        client.batch_execute(sql).unwrap();
+        assert!(
+            matches!(
+                persist_err(&mut client, &participant),
+                IdentityLinkPersistenceError::ConflictingReplay
+            ),
+            "expected conflicting replay for {sql}"
+        );
+        client
+            .batch_execute(
+                "UPDATE participant_identity_link_event SET \
+                     issuer_ref = 'issuer_keyverse', \
+                     anonymous_proof_ref = 'proof_anonymous_alpha', \
+                     authenticated_proof_ref = 'proof_authenticated_alpha', \
+                     linked_at_unix_ms = 10500 \
+                 WHERE participant_ref = 'participant_field_mismatch'",
+            )
+            .unwrap();
+    }
+
+    let mut ended = linked("participant_end_field_mismatch");
+    ended
+        .record_link_end("link_end_event_alpha", "evidence_unlink_alpha", 11_000)
+        .unwrap();
+    persist_ok(&mut client, &ended);
+    for sql in [
+        "UPDATE participant_identity_link_end_event SET linked_event_ref = 'link_event_other' \
+         WHERE participant_ref = 'participant_end_field_mismatch'",
+        "UPDATE participant_identity_link_end_event SET ended_at_unix_ms = 99999 \
+         WHERE participant_ref = 'participant_end_field_mismatch'",
+    ] {
+        client.batch_execute(sql).unwrap();
+        assert!(
+            matches!(
+                persist_err(&mut client, &ended),
+                IdentityLinkPersistenceError::ConflictingReplay
+            ),
+            "expected conflicting replay for {sql}"
+        );
+        client
+            .batch_execute(
+                "UPDATE participant_identity_link_end_event SET \
+                     linked_event_ref = 'link_event_keyverse_alpha', \
+                     evidence_ref = 'evidence_unlink_alpha', \
+                     ended_at_unix_ms = 11000 \
+                 WHERE participant_ref = 'participant_end_field_mismatch'",
+            )
+            .unwrap();
+    }
+}
