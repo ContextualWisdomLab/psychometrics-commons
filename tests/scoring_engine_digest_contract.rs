@@ -13,6 +13,8 @@ use psychometrics_commons_runtime::session::SessionState;
 
 const CANONICAL_ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const CANONICAL_RESPONSE_DIGEST: &str =
+    "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn scoring_request() -> ScoringRequest {
     let mut ledger = ResponseLedger::new("session_engine_digest_contract").unwrap();
@@ -23,7 +25,7 @@ fn scoring_request() -> ScoringRequest {
                 server_event_ref: "response_event_engine_digest_contract",
                 client_event_ref: "client_event_engine_digest_contract",
                 item_version_ref: "item_version_engine_digest_contract",
-                payload_digest: "sha256:response_engine_digest_contract",
+                payload_digest: CANONICAL_RESPONSE_DIGEST,
             },
         )
         .unwrap();
