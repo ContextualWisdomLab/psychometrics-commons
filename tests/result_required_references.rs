@@ -9,6 +9,9 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::session::SessionState;
 
+const ENGINE_DIGEST: &str =
+    "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+
 fn request_and_result() -> (ScoringRequest, ScoringResult) {
     let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
@@ -42,7 +45,7 @@ fn request_and_result() -> (ScoringRequest, ScoringResult) {
     let result = ScoringResult::new(
         "scoring_result_ref",
         &request,
-        "sha256:engine",
+        ENGINE_DIGEST,
         vec![ScoreObservation::scored("construct_ref", 0.0, None).unwrap()],
     )
     .unwrap();
