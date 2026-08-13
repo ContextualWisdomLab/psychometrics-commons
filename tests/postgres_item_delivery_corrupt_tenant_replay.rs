@@ -8,8 +8,7 @@ use psychometrics_commons_runtime::postgres_item_delivery::{
 };
 use psychometrics_commons_runtime::session::SessionState;
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
