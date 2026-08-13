@@ -347,8 +347,8 @@ impl DataRightsRequest {
     /// `retained_scope_refs` is valid only for deletion. A non-empty retained set
     /// results in [`DataRightsState::PartiallyCompleted`] so the product never
     /// represents legally retained data as deleted. Retained scope references are
-    /// normalized and must be unique. An exact completion replay is idempotent even
-    /// after the request becomes terminal.
+    /// normalized, sorted into canonical order, and must be unique. An exact completion
+    /// replay is idempotent even when callers present the same retained set in a different order.
     ///
     /// # Errors
     ///
@@ -378,6 +378,7 @@ impl DataRightsRequest {
             }
             normalized_retention.push(reference.to_owned());
         }
+        normalized_retention.sort();
         if let (Some(existing_ref), Some(existing_at)) = (
             self.completion_evidence_ref.as_deref(),
             self.completed_at_unix_ms,
