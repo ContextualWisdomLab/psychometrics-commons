@@ -41,7 +41,7 @@ The active slice deliberately does **not** claim durable retry scheduling/reclai
 
 ## Active PR instrument-release physical schema
 
-`feat/instrument-release-persistence-20260813` is **Active PR**, not protected-main truth. Migration `migrations/0006_instrument_release.sql` maps one locale-specific `instrument_release` publication identity into a single PostgreSQL 18 relation owned by `src/postgres_instrument_release.rs`.
+PR #50 (`feat/instrument-release-persistence-20260813`) is **Active PR**, not protected-main truth. Migration `migrations/0006_instrument_release.sql` maps one locale-specific `instrument_release` publication identity into a single PostgreSQL 18 relation owned by `src/postgres_instrument_release.rs`.
 
 The active slice persists:
 
