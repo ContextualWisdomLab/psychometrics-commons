@@ -1,4 +1,4 @@
-//! PostgreSQL persistence for participant data-rights requests and dependent-system propagation.
+//! `PostgreSQL` persistence for participant data-rights requests and dependent-system propagation.
 //!
 //! The adapter stores product-owned request identity and, in the same local transaction,
 //! enqueues immutable integration events for each declared dependent system. It never opens
@@ -60,11 +60,11 @@ pub enum DataRightsPersistenceError {
     InvalidPropagationEnvelope,
     /// The request identity was replayed with different immutable evidence or target set.
     ConflictingReplay,
-    /// A timestamp cannot be represented by the PostgreSQL bigint contract.
+    /// A timestamp cannot be represented by the `PostgreSQL` bigint contract.
     ValueOutOfRange,
     /// Existing integration-outbox persistence rejected the event evidence.
     Integration(PersistenceError),
-    /// PostgreSQL rejected or could not execute the local transaction.
+    /// `PostgreSQL` rejected or could not execute the local transaction.
     Database(postgres::Error),
 }
 
@@ -74,9 +74,7 @@ impl Display for DataRightsPersistenceError {
             Self::InvalidReference => {
                 "data-rights propagation references must be opaque non-numeric values"
             }
-            Self::InvalidRequestState => {
-                "data-rights durable propagation requires Requested state"
-            }
+            Self::InvalidRequestState => "data-rights durable propagation requires Requested state",
             Self::EmptyTargetSet => {
                 "data-rights propagation requires at least one dependent system"
             }
@@ -127,14 +125,14 @@ impl From<PersistenceError> for DataRightsPersistenceError {
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL error if the migration cannot be applied.
+/// Returns the `PostgreSQL` error if the migration cannot be applied.
 pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::Error> {
     client.batch_execute(DATA_RIGHTS_MIGRATION)
 }
 
 /// Persist one requested data-rights resource and all declared dependent-system outbox events.
 ///
-/// The function owns one short local PostgreSQL transaction so a database or outbox error rolls
+/// The function owns one short local `PostgreSQL` transaction so a database or outbox error rolls
 /// back the request row, target rows, and any earlier event inserts together. It does not deliver
 /// events itself; the existing outbox worker owns retry, quarantine, and reconciliation behavior.
 /// Exact request replay is idempotent only when the target set and outbox evidence are unchanged.
@@ -230,7 +228,6 @@ fn validate_targets(
     let expected_type = match request.kind() {
         DataRightsRequestKind::Export => "data_rights.export.requested",
         DataRightsRequestKind::Deletion => "data_rights.deletion.requested",
-        _ => return Err(DataRightsPersistenceError::InvalidPropagationEnvelope),
     };
     let mut systems = Vec::with_capacity(targets.len());
     for target in targets {
@@ -285,6 +282,5 @@ const fn request_kind_name(kind: DataRightsRequestKind) -> &'static str {
     match kind {
         DataRightsRequestKind::Export => "export",
         DataRightsRequestKind::Deletion => "deletion",
-        _ => "unsupported",
     }
 }

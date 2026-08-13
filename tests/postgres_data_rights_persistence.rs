@@ -1,4 +1,4 @@
-//! PostgreSQL contract for durable participant data-rights propagation.
+//! `PostgreSQL` contract for durable participant data-rights propagation.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
@@ -58,6 +58,7 @@ fn event() -> IntegrationEvent {
     .unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn custom_event(
     event_ref: &str,
     event_type: &str,
