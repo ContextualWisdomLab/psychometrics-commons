@@ -212,6 +212,18 @@ impl ResponseLedger {
         self.events.is_empty()
     }
 
+    /// Return the stable session identity this ledger belongs to.
+    #[must_use]
+    pub fn session_ref(&self) -> &str {
+        &self.session_ref
+    }
+
+    /// Return accepted events in server-authoritative sequence order.
+    #[must_use]
+    pub fn events(&self) -> &[ResponseEvent] {
+        &self.events
+    }
+
     /// Record one response event or replay an identical prior event.
     ///
     /// Exact replay of an already accepted `client_event_ref` remains idempotent
