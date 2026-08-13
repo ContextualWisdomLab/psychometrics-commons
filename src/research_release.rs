@@ -187,9 +187,7 @@ impl Display for ResearchReleaseGateError {
             Self::InvalidManifestDigest => {
                 "research release manifest digest must be canonical sha256 evidence"
             }
-            Self::UnresolvedBlockingFinding => {
-                "research release has unresolved blocking findings"
-            }
+            Self::UnresolvedBlockingFinding => "research release has unresolved blocking findings",
             Self::SeparationOfDutiesViolation => {
                 "research release approver must be independent from ordinary administration"
             }
