@@ -39,7 +39,8 @@ fn canonical_serialization_is_stable_and_self_delimiting() {
         b"norm_version_ref_present\0\0\0\0\0\0\0\x011".as_slice(),
         b"norm_version_ref\0\0\0\0\0\0\0\x19norm_version_reference_v1".as_slice(),
         b"style_mapping_version_ref\0\0\0\0\0\0\0\x18style_mapping_version_v1".as_slice(),
-        b"interpretation_rule_bundle_digest\0\0\0\0\0\0\0\x47sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".as_slice(),
+        b"interpretation_rule_bundle_digest\0\0\0\0\0\0\0\x47sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .as_slice(),
         b"locale\0\0\0\0\0\0\0\x05en-US".as_slice(),
     ]
     .concat();
