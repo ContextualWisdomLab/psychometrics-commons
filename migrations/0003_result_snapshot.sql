@@ -1,0 +1,1 @@
+-- PostgreSQL 18 schema for immutable product result snapshots.
