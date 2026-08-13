@@ -116,11 +116,11 @@ pub struct AssessmentSession {
 }
 
 impl AssessmentSession {
-    /// Create a session bound to one exact published locale-specific instrument release.
+    /// Create a session from one exact published locale-specific instrument release.
     ///
-    /// This boundary enforces the no-silent-assessment-locale-fallback contract. Callers
-    /// must resolve a release whose exact locale matches the participant-requested locale;
-    /// the runtime does not substitute another published language.
+    /// `requested_locale` must exactly equal the locale stored on `release`. If they differ,
+    /// session creation fails with [`SessionCreationError::LocaleMismatch`]. This method never
+    /// substitutes another published locale or language.
     ///
     /// # Errors
     ///
