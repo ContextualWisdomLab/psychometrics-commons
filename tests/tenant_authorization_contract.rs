@@ -34,6 +34,13 @@ fn participant_may_manage_only_owned_resources_in_the_authenticated_tenant() {
             "session_beta",
         ),
         (
+            ProductPermission::ManageOwnConsent,
+            ResourceKind::ConsentLedger,
+            "consent_alpha",
+            "consent_other",
+            "consent_beta",
+        ),
+        (
             ProductPermission::ManageOwnDataRights,
             ResourceKind::DataRightsRequest,
             "data_rights_alpha",
@@ -75,6 +82,27 @@ fn participant_may_manage_only_owned_resources_in_the_authenticated_tenant() {
             Err(AuthorizationError::CrossTenantDenied)
         );
     }
+}
+
+#[test]
+fn consent_authority_requires_participant_ownership_shape() {
+    assert_eq!(
+        ResourceScope::tenant_scoped(ResourceKind::ConsentLedger, "tenant_alpha", "consent_alpha"),
+        Err(AuthorizationError::ResourceOwnershipMismatch)
+    );
+
+    let participant = participant_context();
+    let consent = ResourceScope::participant_owned(
+        ResourceKind::ConsentLedger,
+        "tenant_alpha",
+        "participant_alpha",
+        "consent_alpha",
+    )
+    .unwrap();
+    assert_eq!(
+        authorize(&participant, &consent, ProductPermission::ManageOwnSession),
+        Err(AuthorizationError::ResourceKindMismatch)
+    );
 }
 
 #[test]

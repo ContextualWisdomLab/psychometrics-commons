@@ -2,9 +2,9 @@
 //!
 //! This adapter persists product orchestration state only. Psychometric scoring remains
 //! owned by `fast-mlsirm`. The caller owns the database connection, credentials, and
-//! transaction boundary. Enqueue replay, worker claims, retry transitions, and terminal
-//! outcomes require `READ COMMITTED`; row locks and conditional updates preserve stale-worker
-//! fencing and immutable completion evidence.
+//! transaction boundary. Enqueue replay, worker claims, retry transitions, expired-lease
+//! recovery, and terminal outcomes require `READ COMMITTED`; row locks and conditional
+//! updates preserve stale-worker fencing and immutable completion evidence.
 
 use crate::reference::normalized_reference;
 use crate::scoring_job::{ScoringJob, ScoringJobState};
@@ -105,6 +105,8 @@ pub enum ScoringJobPersistenceError {
     StaleLease,
     /// A worker-side transition was observed at or after persisted lease expiry.
     LeaseExpired,
+    /// Expiry recovery was requested while the persisted lease is still live.
+    LeaseStillActive,
     /// A guarded terminal transition was suppressed after its lease evidence was validated.
     TransitionNotApplied,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
@@ -136,6 +138,7 @@ impl Display for ScoringJobPersistenceError {
             Self::NotLeased => "scoring job does not currently have a worker lease",
             Self::StaleLease => "scoring worker fencing token is stale",
             Self::LeaseExpired => "scoring worker lease has expired",
+            Self::LeaseStillActive => "scoring job lease has not expired",
             Self::TransitionNotApplied => "scoring terminal transition was not applied",
             Self::Database(_) => "PostgreSQL scoring-job persistence failed",
         })
@@ -318,6 +321,75 @@ pub fn claim_scoring_job(
         Err(ScoringJobPersistenceError::LeaseNotDue)
     } else {
         Err(ScoringJobPersistenceError::NotLeaseable)
+    }
+}
+
+/// Recover one expired leased scoring job into a due retry or quarantine.
+///
+/// Expiry never assigns another worker the expired fencing token. The row becomes
+/// `retry_scheduled` at the observation instant when attempt budget remains, or
+/// `quarantined` when the attempt is exhausted. A later [`claim_scoring_job`] issues
+/// the next fence. `READ COMMITTED` is required so concurrent expiry recovery observes
+/// the latest committed lease evidence.
+///
+/// # Errors
+///
+/// Returns [`ScoringJobPersistenceError`] for an invalid identity or timestamp,
+/// unsupported isolation, a missing or unleased job, a still-live lease, or a
+/// database failure.
+pub fn expire_scoring_lease(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    observed_at_unix_ms: u64,
+) -> Result<ScoringJobState, ScoringJobPersistenceError> {
+    let scoring_job_ref = required_reference(scoring_job_ref)?;
+    let observed_at_unix_ms = postgres_timestamp(observed_at_unix_ms)?;
+    require_read_committed(transaction)?;
+
+    let recovered = transaction.query_opt(
+        "UPDATE scoring_job_state \
+         SET scoring_state = CASE \
+                 WHEN attempt_count >= max_attempts THEN 'quarantined' \
+                 ELSE 'retry_scheduled' \
+             END,\
+             next_attempt_at_unix_ms = CASE \
+                 WHEN attempt_count >= max_attempts THEN NULL \
+                 ELSE $2::BIGINT \
+             END,\
+             last_failure_code = 'lease_expired',\
+             active_worker_ref = NULL,\
+             active_lease_ref = NULL,\
+             active_fencing_token = NULL,\
+             active_lease_expires_at_unix_ms = NULL,\
+             updated_at = clock_timestamp() \
+         WHERE scoring_job_ref = $1 \
+           AND scoring_state = 'leased' \
+           AND active_lease_expires_at_unix_ms <= $2 \
+         RETURNING scoring_state",
+        &[&scoring_job_ref, &observed_at_unix_ms],
+    )?;
+    if let Some(row) = recovered {
+        let state: String = row.get(0);
+        return Ok(if state == "quarantined" {
+            ScoringJobState::Quarantined
+        } else {
+            ScoringJobState::RetryScheduled
+        });
+    }
+
+    let row = transaction.query_opt(
+        "SELECT scoring_state = 'leased' AS leased \
+         FROM scoring_job_state WHERE scoring_job_ref = $1",
+        &[&scoring_job_ref],
+    )?;
+    let Some(row) = row else {
+        return Err(ScoringJobPersistenceError::JobNotFound);
+    };
+    let leased: bool = row.get(0);
+    if leased {
+        Err(ScoringJobPersistenceError::LeaseStillActive)
+    } else {
+        Err(ScoringJobPersistenceError::NotLeased)
     }
 }
 
