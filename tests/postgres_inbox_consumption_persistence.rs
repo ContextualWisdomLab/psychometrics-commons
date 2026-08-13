@@ -1109,3 +1109,69 @@ fn expired_claim_local_terminal_replay_is_idempotent() {
         ("quarantined".to_owned(), 0)
     );
 }
+
+fn drop_consumption_check_constraints(client: &mut Client) {
+    client
+        .batch_execute(
+            "DO $$\
+             DECLARE constraint_row record;\
+             BEGIN\
+               FOR constraint_row IN\
+                 SELECT conname FROM pg_constraint\
+                 WHERE conrelid = 'integration_consumption'::regclass AND contype = 'c'\
+               LOOP\
+                 EXECUTE format(\
+                     'ALTER TABLE integration_consumption DROP CONSTRAINT %I',\
+                     constraint_row.conname\
+                 );\
+               END LOOP;\
+             END $$;",
+        )
+        .unwrap();
+}
+
+#[test]
+fn terminal_replay_rejects_missing_stored_evidence() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_null_terminal_evidence");
+    let consumption = pending(
+        "event_null_terminal_evidence",
+        "consumption_null_terminal_evidence",
+        "side_effect_null_terminal_evidence",
+    );
+    persist_ok(&mut client, &consumption);
+    let mut complete = client.transaction().unwrap();
+    complete_inbox_consumption(
+        &mut complete,
+        &consumption,
+        20_001,
+        "completion_projection_applied",
+        0,
+    )
+    .unwrap();
+    complete.commit().unwrap();
+
+    drop_consumption_check_constraints(&mut client);
+    client
+        .execute(
+            "UPDATE integration_consumption SET completion_evidence_ref = NULL \
+             WHERE consumption_ref = 'consumption_null_terminal_evidence'",
+            &[],
+        )
+        .unwrap();
+
+    let mut replay = client.transaction().unwrap();
+    assert!(matches!(
+        complete_inbox_consumption(
+            &mut replay,
+            &consumption,
+            20_001,
+            "completion_projection_applied",
+            0,
+        ),
+        Err(InboxConsumptionPersistenceError::ConflictingReplay)
+    ));
+    replay.rollback().unwrap();
+}

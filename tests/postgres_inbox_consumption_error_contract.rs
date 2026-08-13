@@ -162,13 +162,8 @@ fn database_failure_paths_are_classified_in_fresh_transactions() {
     persist_transaction.rollback().unwrap();
 
     let mut begin_transaction = client.transaction().unwrap();
-    let begin_error = begin_inbox_consumption(
-        &mut begin_transaction,
-        &consumption,
-        20_001,
-        21_000,
-    )
-    .unwrap_err();
+    let begin_error =
+        begin_inbox_consumption(&mut begin_transaction, &consumption, 20_001, 21_000).unwrap_err();
     assert_database_error(&begin_error);
     begin_transaction.rollback().unwrap();
 
