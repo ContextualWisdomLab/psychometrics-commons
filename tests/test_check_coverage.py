@@ -1,8 +1,10 @@
-"""Regression tests for the fail-closed LLVM coverage contract."""
+"""Regression tests for the fail-closed LLVM production-coverage contract."""
 
 from __future__ import annotations
 
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,7 +17,7 @@ SPEC.loader.exec_module(CHECK_COVERAGE)
 
 
 class CoverageContractTests(unittest.TestCase):
-    """Verify numeric coverage totals cannot be forged by JSON booleans."""
+    """Verify production coverage is exact and cannot be forged."""
 
     def test_boolean_coverage_counts_fail_closed(self) -> None:
         """Reject bool even though Python exposes it as an int subclass."""
@@ -36,6 +38,72 @@ class CoverageContractTests(unittest.TestCase):
             ),
             "lines coverage: PASS (7/7, 100%)",
         )
+
+    def test_test_harness_gaps_do_not_dilute_production_coverage(self) -> None:
+        """Coverage enforcement must measure owned Rust production sources only."""
+        payload = {
+            "data": [
+                {
+                    "totals": {
+                        "lines": {"count": 10, "covered": 9},
+                        "branches": {"count": 4, "covered": 3},
+                    },
+                    "files": [
+                        {
+                            "filename": "/workspace/psychometrics-commons/src/runtime.rs",
+                            "summary": {
+                                "lines": {"count": 7, "covered": 7},
+                                "branches": {"count": 2, "covered": 2},
+                            },
+                        },
+                        {
+                            "filename": "/workspace/psychometrics-commons/tests/runtime_contract.rs",
+                            "summary": {
+                                "lines": {"count": 3, "covered": 2},
+                                "branches": {"count": 2, "covered": 1},
+                            },
+                        },
+                    ],
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage.json"
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(
+                CHECK_COVERAGE.validate_report(report, ("lines", "branches")),
+                [
+                    "lines coverage: PASS (7/7, 100%)",
+                    "branches coverage: PASS (2/2, 100%)",
+                ],
+            )
+
+    def test_uncovered_production_source_still_fails_closed(self) -> None:
+        """Ignoring test-harness files must never hide a production coverage gap."""
+        payload = {
+            "data": [
+                {
+                    "totals": {"lines": {"count": 9, "covered": 8}},
+                    "files": [
+                        {
+                            "filename": "/workspace/psychometrics-commons/src/runtime.rs",
+                            "summary": {"lines": {"count": 8, "covered": 7}},
+                        },
+                        {
+                            "filename": "/workspace/psychometrics-commons/tests/runtime_contract.rs",
+                            "summary": {"lines": {"count": 1, "covered": 1}},
+                        },
+                    ],
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage.json"
+            report.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "lines coverage is incomplete: 7/8"
+            ):
+                CHECK_COVERAGE.validate_report(report, ("lines",))
 
 
 if __name__ == "__main__":
