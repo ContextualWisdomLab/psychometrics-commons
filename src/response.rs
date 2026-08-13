@@ -221,7 +221,7 @@ impl ResponseLedger {
     /// still requires an active session. Identity-bearing references are normalized
     /// before replay/conflict checks so surrounding whitespace cannot create aliases.
     /// Response-payload identity must use exact `sha256:` plus 64 lowercase hexadecimal
-    /// characters, matching the durable PostgreSQL digest constraint.
+    /// characters, matching the durable `PostgreSQL` digest constraint.
     ///
     /// # Errors
     ///
