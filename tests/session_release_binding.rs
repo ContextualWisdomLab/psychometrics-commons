@@ -1,8 +1,8 @@
 //! Session-creation integration contract for immutable published instrument releases.
 
 use psychometrics_commons_runtime::instrument::{
-    InstrumentRelease, InstrumentReleaseManifest, PublicationCommand, PublicationEvidenceProvenance,
-    PublicationEvidenceRecord, PublicationEvidenceStatus,
+    InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
+    PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::session::{
     AssessmentSession, SessionCreationError, SessionState,
@@ -75,7 +75,9 @@ fn published_release() -> InstrumentRelease {
             10_100,
         )
         .unwrap();
-    release.bind_publication_evidence(approved_evidence()).unwrap();
+    release
+        .bind_publication_evidence(approved_evidence())
+        .unwrap();
     release
         .apply_command(
             "publish_session_binding_event",
