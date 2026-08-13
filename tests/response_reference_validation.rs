@@ -3,6 +3,9 @@
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
 use psychometrics_commons_runtime::session::SessionState;
 
+const PAYLOAD_DIGEST: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 fn write<'a>(
     server_event_ref: &'a str,
     client_event_ref: &'a str,
@@ -12,7 +15,7 @@ fn write<'a>(
         server_event_ref,
         client_event_ref,
         item_version_ref,
-        payload_digest: "sha256:response-payload-a",
+        payload_digest: PAYLOAD_DIGEST,
     }
 }
 

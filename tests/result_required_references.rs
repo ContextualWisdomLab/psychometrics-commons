@@ -18,7 +18,8 @@ fn request_and_result() -> (ScoringRequest, ScoringResult) {
                 server_event_ref: "event_ref",
                 client_event_ref: "client_ref",
                 item_version_ref: "item_version_ref",
-                payload_digest: "sha256:response",
+                payload_digest:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             },
         )
         .unwrap();
