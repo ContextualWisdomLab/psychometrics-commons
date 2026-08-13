@@ -325,4 +325,11 @@ fn replay_select_failure_is_a_database_failure() {
         persist_err(&mut client, &ledger),
         ResponsePersistenceError::Database(_)
     ));
+    client
+        .batch_execute(
+            "DROP TRIGGER IF EXISTS response_event_redirect_after_insert ON response_event;\
+             DROP FUNCTION IF EXISTS response_event_redirect_after_insert();\
+             DROP SCHEMA IF EXISTS response_event_select_failure_sink CASCADE;",
+        )
+        .unwrap();
 }
