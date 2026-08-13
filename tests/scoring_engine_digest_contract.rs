@@ -7,7 +7,7 @@
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{
-    ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
+    ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::session::SessionState;
 
@@ -78,15 +78,19 @@ fn scoring_result_rejects_noncanonical_engine_artifact_digest() {
         "SHA256:0000000000000000000000000000000000000000000000000000000000000000",
         "md5:00000000000000000000000000000000",
     ] {
-        assert!(
-            ScoringResult::new(
-                "scoring_result_engine_digest_contract",
-                &request,
-                invalid_digest,
-                vec![observation()],
-            )
-            .is_err(),
-            "noncanonical engine artifact digest must fail closed: {invalid_digest}"
+        let error = ScoringResult::new(
+            "scoring_result_engine_digest_contract",
+            &request,
+            invalid_digest,
+            vec![observation()],
+        )
+        .err()
+        .expect("noncanonical engine artifact digest must fail closed");
+
+        assert_eq!(error, ScoringContractError::InvalidEngineArtifactDigest);
+        assert_eq!(
+            error.to_string(),
+            "scoring engine artifact digest must be sha256: followed by 64 lowercase hexadecimal characters"
         );
     }
 }
