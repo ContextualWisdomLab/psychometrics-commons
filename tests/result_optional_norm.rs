@@ -17,7 +17,8 @@ fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
                 server_event_ref: "event_ref",
                 client_event_ref: "client_ref",
                 item_version_ref: "item_version_ref",
-                payload_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                payload_digest:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             },
         )
         .unwrap();
