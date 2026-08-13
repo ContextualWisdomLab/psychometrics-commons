@@ -68,6 +68,20 @@ fn persisted_payload_digest_requires_canonical_lowercase_sha256() {
         );
     }
 
+    let canonical_digest =
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let inserted = client
+        .execute(
+            "INSERT INTO response_event (\
+                 session_ref, server_event_ref, client_event_ref, item_version_ref, \
+                 payload_digest, server_sequence\
+             ) VALUES ('session_digest_contract', 'server_event_digest_ok', \
+                 'client_event_digest_ok', 'item_version_digest', $1, 100)",
+            &[&canonical_digest],
+        )
+        .unwrap();
+    assert_eq!(inserted, 1);
+
     client
         .batch_execute("DROP SCHEMA response_digest_constraint_test CASCADE;")
         .unwrap();
