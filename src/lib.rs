@@ -14,6 +14,7 @@ pub mod health;
 pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
+pub mod narrative;
 pub mod participant;
 pub mod postgres_integration;
 pub mod postgres_scoring_job;
