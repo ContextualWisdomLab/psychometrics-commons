@@ -10,6 +10,9 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::session::SessionState;
 
+const ENGINE_DIGEST: &str =
+    "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+
 fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnapshot {
     let mut ledger = ResponseLedger::new("session_ref").unwrap();
     ledger
@@ -53,7 +56,7 @@ fn scoring_result() -> ScoringResult {
     ScoringResult::new(
         "scoring_result_ref",
         &scoring_request(),
-        "sha256:engine",
+        ENGINE_DIGEST,
         vec![scored_observation()],
     )
     .unwrap()
@@ -224,7 +227,7 @@ fn scoring_result_pins_engine_request_and_observations() {
     let result = ScoringResult::new(
         "scoring_result_ref",
         &request,
-        "sha256:engine",
+        ENGINE_DIGEST,
         observations.clone(),
     )
     .unwrap();
@@ -232,7 +235,7 @@ fn scoring_result_pins_engine_request_and_observations() {
     assert_eq!(result.scoring_result_ref(), "scoring_result_ref");
     assert_eq!(result.scoring_request_ref(), "scoring_request_ref");
     assert_eq!(result.response_snapshot_ref(), "response_snapshot_ref");
-    assert_eq!(result.engine_artifact_digest(), "sha256:engine");
+    assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations(), observations.as_slice());
 }
 
@@ -240,7 +243,7 @@ fn scoring_result_pins_engine_request_and_observations() {
 fn scoring_result_rejects_missing_identity_empty_observations_and_duplicate_constructs() {
     let request = scoring_request();
     assert_eq!(
-        ScoringResult::new("", &request, "sha256:engine", vec![scored_observation()]).unwrap_err(),
+        ScoringResult::new("", &request, ENGINE_DIGEST, vec![scored_observation()]).unwrap_err(),
         ScoringContractError::EmptyReference
     );
     assert_eq!(
@@ -251,12 +254,11 @@ fn scoring_result_rejects_missing_identity_empty_observations_and_duplicate_cons
             vec![scored_observation()]
         )
         .unwrap_err(),
-        ScoringContractError::EmptyReference
+        ScoringContractError::InvalidEngineArtifactDigest
     );
 
     let no_observations =
-        ScoringResult::new("scoring_result_ref", &request, "sha256:engine", Vec::new())
-            .unwrap_err();
+        ScoringResult::new("scoring_result_ref", &request, ENGINE_DIGEST, Vec::new()).unwrap_err();
     assert_eq!(no_observations, ScoringContractError::EmptyObservationSet);
     assert_eq!(
         no_observations.to_string(),
@@ -266,7 +268,7 @@ fn scoring_result_rejects_missing_identity_empty_observations_and_duplicate_cons
     let duplicate = ScoringResult::new(
         "scoring_result_ref",
         &request,
-        "sha256:engine",
+        ENGINE_DIGEST,
         vec![scored_observation(), scored_observation()],
     )
     .unwrap_err();
@@ -310,7 +312,7 @@ fn result_snapshot_copies_scientific_provenance_without_recomputing_scores() {
         snapshot.consent_snapshot_refs(),
         ["service_consent_ref", "research_consent_ref"]
     );
-    assert_eq!(snapshot.engine_artifact_digest(), "sha256:engine");
+    assert_eq!(snapshot.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(snapshot.score_observations(), result.observations());
     assert_eq!(snapshot.created_at_unix_ms(), 1_786_240_000_000);
     assert_eq!(snapshot.supersedes_ref(), Some("prior_result_ref"));
@@ -336,7 +338,7 @@ fn result_snapshot_rejects_mismatched_scoring_request() {
     let result = ScoringResult::new(
         "scoring_result_ref",
         &second_request,
-        "sha256:engine",
+        ENGINE_DIGEST,
         vec![scored_observation()],
     )
     .unwrap();
