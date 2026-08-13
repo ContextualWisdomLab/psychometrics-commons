@@ -66,6 +66,30 @@ fn recorded_ledger(participant_ref: &str, inputs: &[ConsentEventInput<'_>]) -> C
     ledger
 }
 
+fn persist_ok(client: &mut Client, ledger: &ConsentLedger) -> ConsentPersistenceDisposition {
+    let mut transaction = client.transaction().unwrap();
+    let disposition = persist_consent_ledger(&mut transaction, ledger).unwrap();
+    transaction.commit().unwrap();
+    disposition
+}
+
+fn persist_err(client: &mut Client, ledger: &ConsentLedger) -> ConsentPersistenceError {
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_consent_ledger(&mut transaction, ledger).unwrap_err();
+    transaction.rollback().unwrap();
+    error
+}
+
+fn assert_conflicting_replay(client: &mut Client, ledger: &ConsentLedger) {
+    assert!(
+        matches!(
+            persist_err(client, ledger),
+            ConsentPersistenceError::ConflictingReplay
+        ),
+        "reusing an event identity with different immutable evidence must fail closed"
+    );
+}
+
 #[test]
 fn empty_consent_ledger_persist_is_exactly_idempotent() {
     let _guard = consent_test_guard();
@@ -142,6 +166,95 @@ fn accepted_consent_events_are_idempotent_and_conflicting_replay_fails_closed() 
         Err(ConsentPersistenceError::ConflictingReplay)
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn consent_replay_rejects_purpose_decision_scope_and_time_mismatches() {
+    let _guard = consent_test_guard();
+    let mut client = test_client();
+    reset_consent_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &recorded_ledger(
+            "participant_consent_field_mismatch",
+            &[grant(
+                "service_grant",
+                ConsentPurpose::ServiceOperation,
+                "service_form_v1",
+                None,
+                1_000,
+            )],
+        ),
+    );
+    assert_conflicting_replay(
+        &mut client,
+        &recorded_ledger(
+            "participant_consent_field_mismatch",
+            &[grant(
+                "service_grant",
+                ConsentPurpose::AccountPersistence,
+                "service_form_v1",
+                None,
+                1_000,
+            )],
+        ),
+    );
+    assert_conflicting_replay(
+        &mut client,
+        &recorded_ledger(
+            "participant_consent_field_mismatch",
+            &[ConsentEventInput {
+                event_ref: "service_grant",
+                purpose: ConsentPurpose::ServiceOperation,
+                decision: ConsentDecision::Revoked,
+                consent_form_version_ref: "service_form_v1",
+                research_scope_ref: None,
+                occurred_at_unix_ms: 1_000,
+            }],
+        ),
+    );
+    assert_conflicting_replay(
+        &mut client,
+        &recorded_ledger(
+            "participant_consent_field_mismatch",
+            &[grant(
+                "service_grant",
+                ConsentPurpose::ServiceOperation,
+                "service_form_v1",
+                None,
+                1_001,
+            )],
+        ),
+    );
+
+    persist_ok(
+        &mut client,
+        &recorded_ledger(
+            "participant_consent_scope_mismatch",
+            &[grant(
+                "research_grant",
+                ConsentPurpose::ResearchContribution,
+                "research_form_v1",
+                Some("research_scope_v1"),
+                2_000,
+            )],
+        ),
+    );
+    assert_conflicting_replay(
+        &mut client,
+        &recorded_ledger(
+            "participant_consent_scope_mismatch",
+            &[grant(
+                "research_grant",
+                ConsentPurpose::ResearchContribution,
+                "research_form_v1",
+                Some("research_scope_v2"),
+                2_000,
+            )],
+        ),
+    );
 }
 
 #[test]
