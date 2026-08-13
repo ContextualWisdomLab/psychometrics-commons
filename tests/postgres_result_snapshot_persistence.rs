@@ -389,6 +389,25 @@ fn replay_select_failure_is_a_database_failure() {
 }
 
 #[test]
+fn observation_replay_select_failure_is_a_database_failure() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let snapshot = default_snapshot("result_snapshot_hidden_observation_select");
+    persist_ok(&mut client, &snapshot);
+    client
+        .batch_execute("DROP TABLE result_snapshot_persistence_test.result_snapshot_observation;")
+        .unwrap();
+
+    assert!(matches!(
+        persist_err(&mut client, &snapshot),
+        ResultSnapshotPersistenceError::Database(_)
+    ));
+}
+
+#[test]
 fn observation_insert_failure_is_a_database_failure() {
     let _guard = result_snapshot_test_guard();
     let mut client = test_client();
