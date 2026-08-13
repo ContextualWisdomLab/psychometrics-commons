@@ -1,13 +1,18 @@
 //! Anonymous-first participant identity and optional account-link lifecycle semantics.
 //!
-//! Psychometrics Commons owns stable operational participant references. Keyverse owns
-//! credentials and authentication proof. A link records an issuer-scoped authenticated
-//! subject plus independent evidence that the caller controlled both the anonymous product
-//! identity and authenticated account. Ending a link is a separate audited lifecycle event:
-//! it clears only the current external-identity projection and never rewrites the participant
-//! reference, prior link evidence, results, or prior lifecycle history. A later relink is a new
-//! append-only link event. Exact historical event replay is idempotent; conflicting replay
-//! fails closed and can never resurrect or revoke a newer current link.
+//! Psychometrics Commons owns the stable participant reference; Keyverse owns credentials and
+//! authentication proof. The **current projection** is only the external issuer/subject link that
+//! callers may use now. It is not the participant's historical identity. A successful link appends
+//! immutable audit evidence: a recorded event whose identity, proof references, subject, issuer,
+//! and server time are never edited in place. Ending a link appends a second event and clears only
+//! that current projection; it does not delete the participant, prior link evidence, or results.
+//!
+//! **Replay** means receiving a command whose event reference was already recorded. An exact
+//! replay is idempotent: the prior outcome is reused and the same logical event is not processed a
+//! second time. Reusing that reference with different evidence fails closed. A later relink is a
+//! new append-only link event. Historical replays are recognized from history and therefore cannot
+//! resurrect an ended link or revoke a newer current link. Server-authoritative lifecycle time may
+//! stay equal between events but must never move backwards.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -70,6 +75,11 @@ impl Display for AccountLinkError {
 impl Error for AccountLinkError {}
 
 /// Immutable audit evidence for one successful participant account link.
+///
+/// Immutable audit evidence is the append-only record used to explain what identity-link command
+/// was accepted later. [`Self::link_event_ref`] is the idempotency reference: an exact retry with
+/// the same event reference and evidence reuses this event instead of processing a second logical
+/// link. The event stores only opaque proof references, never credentials or proof bytes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountLinkEvent {
     link_event_ref: String,
@@ -81,7 +91,7 @@ pub struct AccountLinkEvent {
 }
 
 impl AccountLinkEvent {
-    /// Return the opaque event reference used for replay detection.
+    /// Return the opaque event reference used for idempotent replay detection.
     #[must_use]
     pub fn link_event_ref(&self) -> &str {
         &self.link_event_ref
@@ -119,6 +129,11 @@ impl AccountLinkEvent {
 }
 
 /// Immutable audit evidence that a previously current identity link ended.
+///
+/// This record never edits the earlier [`AccountLinkEvent`]. `link_end_event_ref` is its
+/// idempotency reference, `linked_event_ref` identifies the exact historical link that ended, and
+/// `evidence_ref` points to the authorization/audit evidence held outside this domain object.
+/// Exact replay therefore confirms the already-recorded event rather than appending a duplicate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountLinkEndEvent {
     link_end_event_ref: String,
@@ -267,11 +282,18 @@ impl ParticipantRecord {
 
     /// Link this stable participant identity to one issuer-scoped authenticated subject.
     ///
-    /// Exact replay of any historical link event is idempotent and never changes the current
-    /// projection. Reusing a historical event reference with changed evidence fails closed. A
-    /// participant with a current link cannot be rebound in place; callers must first record a
-    /// separate link-end event. A new link after a prior link-end cannot move lifecycle time
-    /// backwards.
+    /// Processing follows these steps:
+    ///
+    /// 1. normalize the opaque references and reject zero time;
+    /// 2. look through the full history for `link_event_ref`; an exact historical replay is a
+    ///    no-op, while the same reference with changed evidence fails closed;
+    /// 3. reject a new event while another link is currently projected instead of silently
+    ///    rebinding the participant in place;
+    /// 4. require independent anonymous/authenticated proof references and monotonic time; and
+    /// 5. append the new immutable event, then expose it as the current projection.
+    ///
+    /// A later relink is therefore possible only after a separately recorded link-end event, and
+    /// its server time cannot precede that prior lifecycle event.
     ///
     /// # Errors
     ///
@@ -346,9 +368,13 @@ impl ParticipantRecord {
 
     /// Record that the current external identity link ended while preserving all history.
     ///
-    /// Exact replay of a historical link-end event is idempotent even after a later relink and
-    /// cannot clear that newer projection. A new link-end requires a current link and a
-    /// server-authoritative time not earlier than the current link time.
+    /// The method first recognizes exact historical replay by `link_end_event_ref`. That check is
+    /// deliberately performed before examining the current projection: replaying an older
+    /// already-recorded link-end event after a later relink must be a no-op, otherwise a delayed
+    /// duplicate could incorrectly clear the newer identity link. A genuinely new event requires
+    /// a current link, must not move server-authoritative lifecycle time backwards, appends an
+    /// immutable link-end record that points to the exact link event being ended, and only then
+    /// clears the current external projection.
     ///
     /// # Errors
     ///
@@ -383,7 +409,9 @@ impl ParticipantRecord {
         let Some(linked_event_ref) = self.link_event_ref.as_deref() else {
             return Err(AccountLinkError::NotLinked);
         };
-        let linked_at_unix_ms = self.linked_at_unix_ms.unwrap_or(self.created_at_unix_ms);
+        let linked_at_unix_ms = self
+            .linked_at_unix_ms
+            .unwrap_or(self.created_at_unix_ms);
         if ended_at_unix_ms < linked_at_unix_ms {
             return Err(AccountLinkError::NonMonotonicLifecycleTimestamp);
         }
