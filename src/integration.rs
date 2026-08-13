@@ -820,8 +820,9 @@ impl InboxConsumption {
     /// Mark the required side effect complete with verified evidence.
     ///
     /// A local effect may complete directly from pending with fencing token `0`.
-    /// A claimed worker must present the current fence. Exact replay of the same
-    /// evidence, time, and fence remains idempotent after completion.
+    /// A claimed worker must present the current fence. The authorizing fence is
+    /// recorded so exact replay of the same evidence, time, and fence remains
+    /// idempotent after an expired claim's leftover token.
     ///
     /// # Errors
     ///
@@ -857,6 +858,7 @@ impl InboxConsumption {
             return Err(IntegrationError::NonMonotonicTimestamp);
         }
         self.state = ConsumptionState::Completed;
+        self.fencing_token = expected_fence;
         self.claim_expires_at_unix_ms = 0;
         self.latest_event_at_unix_ms = observed_at_unix_ms;
         self.completion_evidence_ref = Some(completion_evidence_ref.to_owned());
@@ -865,8 +867,9 @@ impl InboxConsumption {
 
     /// Quarantine a pending or processing consumption for operator action.
     ///
-    /// Exact replay of the same cause, time, and fence remains idempotent after
-    /// quarantine. Completion evidence is never invented by quarantine.
+    /// The authorizing fence is recorded so exact replay of the same cause,
+    /// time, and fence remains idempotent after an expired claim's leftover
+    /// token. Completion evidence is never invented by quarantine.
     ///
     /// # Errors
     ///
@@ -902,6 +905,7 @@ impl InboxConsumption {
             return Err(IntegrationError::NonMonotonicTimestamp);
         }
         self.state = ConsumptionState::Quarantined;
+        self.fencing_token = expected_fence;
         self.claim_expires_at_unix_ms = 0;
         self.latest_event_at_unix_ms = observed_at_unix_ms;
         self.cause_code = Some(cause_code.to_owned());

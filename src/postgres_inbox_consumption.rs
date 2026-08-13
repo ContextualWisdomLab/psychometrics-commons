@@ -410,6 +410,7 @@ fn apply_terminal_transition(
             "UPDATE integration_consumption \
              SET consumption_state = 'completed', \
                  completion_evidence_ref = $6, \
+                 fencing_token = $8, \
                  claim_expires_at_unix_ms = NULL, \
                  latest_event_at_unix_ms = $7 \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \
@@ -425,6 +426,7 @@ fn apply_terminal_transition(
             "UPDATE integration_consumption \
              SET consumption_state = 'quarantined', \
                  cause_code = $6, \
+                 fencing_token = $8, \
                  claim_expires_at_unix_ms = NULL, \
                  latest_event_at_unix_ms = $7 \
              WHERE consumer_ref = $1 AND source_ref = $2 AND tenant_ref = $3 \

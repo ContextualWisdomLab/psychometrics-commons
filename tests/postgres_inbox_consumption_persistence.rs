@@ -677,7 +677,7 @@ fn expired_processing_claim_returns_pending_without_transferring_the_fence() {
     expired.commit().unwrap();
     assert_eq!(
         stored_state(&mut client, "event_expire", "consumption_expire"),
-        ("completed".to_owned(), 1)
+        ("completed".to_owned(), 0)
     );
 }
 
@@ -1031,4 +1031,81 @@ fn expired_claim_and_shifted_terminal_replay_conflict() {
         Err(InboxConsumptionPersistenceError::ConflictingReplay)
     ));
     complete.rollback().unwrap();
+}
+
+#[test]
+fn expired_claim_local_terminal_replay_is_idempotent() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_expired_local");
+    let completed = pending(
+        "event_expired_local",
+        "consumption_expired_local_complete",
+        "side_effect_expired_local_complete",
+    );
+    persist_ok(&mut client, &completed);
+    let mut complete = client.transaction().unwrap();
+    begin_inbox_consumption(&mut complete, &completed, 20_001, 21_000).unwrap();
+    expire_inbox_consumption(&mut complete, &completed, 21_000).unwrap();
+    assert_eq!(
+        complete_inbox_consumption(
+            &mut complete,
+            &completed,
+            21_001,
+            "completion_projection_applied",
+            0,
+        )
+        .unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    assert_eq!(
+        complete_inbox_consumption(
+            &mut complete,
+            &completed,
+            21_001,
+            "completion_projection_applied",
+            0,
+        )
+        .unwrap(),
+        InboxConsumptionDisposition::Duplicate
+    );
+    complete.commit().unwrap();
+    assert_eq!(
+        stored_state(
+            &mut client,
+            "event_expired_local",
+            "consumption_expired_local_complete"
+        ),
+        ("completed".to_owned(), 0)
+    );
+
+    let quarantined = pending(
+        "event_expired_local",
+        "consumption_expired_local_quarantine",
+        "side_effect_expired_local_quarantine",
+    );
+    persist_ok(&mut client, &quarantined);
+    let mut quarantine = client.transaction().unwrap();
+    begin_inbox_consumption(&mut quarantine, &quarantined, 20_001, 21_000).unwrap();
+    expire_inbox_consumption(&mut quarantine, &quarantined, 21_000).unwrap();
+    assert_eq!(
+        quarantine_inbox_consumption(&mut quarantine, &quarantined, 21_001, "poison_payload", 0)
+            .unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    assert_eq!(
+        quarantine_inbox_consumption(&mut quarantine, &quarantined, 21_001, "poison_payload", 0)
+            .unwrap(),
+        InboxConsumptionDisposition::Duplicate
+    );
+    quarantine.commit().unwrap();
+    assert_eq!(
+        stored_state(
+            &mut client,
+            "event_expired_local",
+            "consumption_expired_local_quarantine"
+        ),
+        ("quarantined".to_owned(), 0)
+    );
 }
