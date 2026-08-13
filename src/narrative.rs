@@ -152,12 +152,20 @@ pub struct StyleAssignmentIdentity<'a> {
     pub locale: &'a str,
 }
 
-/// Opaque SHA-256 identifier for one canonical deterministic style assignment.
+/// Stable SHA-256 identifier for one deterministic style assignment.
+///
+/// “Canonical” means the same valid behavior-affecting inputs always produce the same key.
+/// The key is “opaque”: callers should compare or store its bytes, not assign meaning to
+/// individual bytes. Its SHA-256 digest is the fixed 32-byte result derived from the validated
+/// canonical assignment identity. Invalid identity input is rejected before any key is produced.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct StyleAssignmentKey([u8; 32]);
 
 impl StyleAssignmentKey {
-    /// Return the exact 32-byte SHA-256 digest used as the assignment identity.
+    /// Return the 32-byte SHA-256 result for storage or equality checks.
+    ///
+    /// These bytes are opaque product identity data: do not interpret individual bytes as fields
+    /// or scientific meaning. Identical valid canonical inputs produce identical bytes.
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
@@ -192,9 +200,10 @@ impl Error for StyleAssignmentIdentityError {}
 impl StyleAssignmentIdentity<'_> {
     /// Compute the ADR-0018 SHA-256 key for this canonical deterministic assignment identity.
     ///
-    /// The digest is calculated only after the same fail-closed normalization and validation
-    /// performed by [`Self::canonical_bytes`]. This digest is a deterministic product identity,
-    /// not an authentication primitive or a replacement for tenant/resource authorization.
+    /// The method first validates and canonicalizes every behavior-affecting input. If validation
+    /// fails, it returns an error and does not produce a key. For valid input, the SHA-256 digest
+    /// is a deterministic product identity, not an authentication primitive or a replacement for
+    /// tenant/resource authorization.
     ///
     /// # Errors
     ///
