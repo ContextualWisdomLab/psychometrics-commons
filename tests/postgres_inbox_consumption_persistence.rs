@@ -821,3 +821,214 @@ fn expire_and_complete_reject_suppressed_updates() {
     ));
     complete.rollback().unwrap();
 }
+
+fn fail_consumption_updates(client: &mut Client) {
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION fail_inbox_consumption_update() \
+             RETURNS trigger LANGUAGE plpgsql AS $$\
+             BEGIN \
+                 RAISE EXCEPTION 'injected inbox consumption update failure'; \
+             END; \
+             $$; \
+             DROP TRIGGER IF EXISTS fail_inbox_consumption_update \
+                 ON integration_consumption; \
+             CREATE TRIGGER fail_inbox_consumption_update \
+             BEFORE UPDATE ON integration_consumption \
+             FOR EACH ROW EXECUTE FUNCTION fail_inbox_consumption_update();",
+        )
+        .unwrap();
+}
+
+#[test]
+fn inbox_lookup_and_lock_failures_are_database_failures() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_inbox_lookup");
+    let consumption = pending(
+        "event_inbox_lookup",
+        "consumption_inbox_lookup",
+        "side_effect_inbox_lookup",
+    );
+    persist_ok(&mut client, &consumption);
+    client
+        .batch_execute("DROP TABLE integration_inbox CASCADE;")
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &consumption),
+        InboxConsumptionPersistenceError::Database(_)
+    ));
+
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_lock_missing");
+    let lock_target = pending(
+        "event_lock_missing",
+        "consumption_lock_missing",
+        "side_effect_lock_missing",
+    );
+    persist_ok(&mut client, &lock_target);
+    client
+        .batch_execute("DROP TABLE integration_consumption;")
+        .unwrap();
+    let mut lock = client.transaction().unwrap();
+    assert!(matches!(
+        begin_inbox_consumption(&mut lock, &lock_target, 20_001, 21_000),
+        Err(InboxConsumptionPersistenceError::Database(_))
+    ));
+    assert!(matches!(
+        expire_inbox_consumption(&mut lock, &lock_target, 21_000),
+        Err(InboxConsumptionPersistenceError::Database(_))
+    ));
+    lock.rollback().unwrap();
+}
+
+#[test]
+fn claim_expire_and_complete_execute_failures_are_database_failures() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_update_failure");
+    let claim_target = pending(
+        "event_update_failure",
+        "consumption_claim_failure",
+        "side_effect_claim_failure",
+    );
+    persist_ok(&mut client, &claim_target);
+    fail_consumption_updates(&mut client);
+    let mut claim = client.transaction().unwrap();
+    assert!(matches!(
+        begin_inbox_consumption(&mut claim, &claim_target, 20_001, 21_000),
+        Err(InboxConsumptionPersistenceError::Database(_))
+    ));
+    claim.rollback().unwrap();
+
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_expire_failure");
+    let expire_target = pending(
+        "event_expire_failure",
+        "consumption_expire_failure",
+        "side_effect_expire_failure",
+    );
+    persist_ok(&mut client, &expire_target);
+    let mut claimed = client.transaction().unwrap();
+    begin_inbox_consumption(&mut claimed, &expire_target, 20_001, 21_000).unwrap();
+    claimed.commit().unwrap();
+    fail_consumption_updates(&mut client);
+    let mut expire = client.transaction().unwrap();
+    assert!(matches!(
+        expire_inbox_consumption(&mut expire, &expire_target, 21_000),
+        Err(InboxConsumptionPersistenceError::Database(_))
+    ));
+    expire.rollback().unwrap();
+
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_complete_failure");
+    let complete_target = pending(
+        "event_complete_failure",
+        "consumption_complete_failure",
+        "side_effect_complete_failure",
+    );
+    persist_ok(&mut client, &complete_target);
+    fail_consumption_updates(&mut client);
+    let mut complete = client.transaction().unwrap();
+    assert!(matches!(
+        complete_inbox_consumption(
+            &mut complete,
+            &complete_target,
+            20_001,
+            "completion_projection_applied",
+            0,
+        ),
+        Err(InboxConsumptionPersistenceError::Database(_))
+    ));
+    complete.rollback().unwrap();
+}
+
+#[test]
+fn replay_classify_select_failure_is_a_database_failure() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_classify_select");
+    let consumption = pending(
+        "event_classify_select",
+        "consumption_classify_select",
+        "side_effect_classify_select",
+    );
+    persist_ok(&mut client, &consumption);
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS inbox_consumption_select_failure_sink;\
+             CREATE OR REPLACE FUNCTION inbox_consumption_redirect_after_insert() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 PERFORM set_config('search_path', 'inbox_consumption_select_failure_sink', true); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER inbox_consumption_redirect_after_insert \
+             AFTER INSERT ON integration_consumption \
+             FOR EACH STATEMENT EXECUTE FUNCTION inbox_consumption_redirect_after_insert();",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &consumption),
+        InboxConsumptionPersistenceError::Database(_)
+    ));
+}
+
+#[test]
+fn expired_claim_and_shifted_terminal_replay_conflict() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_expired_replay");
+    let expired = pending(
+        "event_expired_replay",
+        "consumption_expired_replay",
+        "side_effect_expired_replay",
+    );
+    persist_ok(&mut client, &expired);
+    let mut claimed = client.transaction().unwrap();
+    begin_inbox_consumption(&mut claimed, &expired, 20_001, 21_000).unwrap();
+    claimed.commit().unwrap();
+    let mut expire = client.transaction().unwrap();
+    expire_inbox_consumption(&mut expire, &expired, 21_000).unwrap();
+    expire.commit().unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &expired),
+        InboxConsumptionPersistenceError::ConflictingReplay
+    ));
+
+    reset_tables(&mut client);
+    accept_inbox(&mut client, "event_shifted_complete");
+    let completed = pending(
+        "event_shifted_complete",
+        "consumption_shifted_complete",
+        "side_effect_shifted_complete",
+    );
+    persist_ok(&mut client, &completed);
+    let mut complete = client.transaction().unwrap();
+    assert_eq!(
+        complete_inbox_consumption(
+            &mut complete,
+            &completed,
+            20_001,
+            "completion_projection_applied",
+            0,
+        )
+        .unwrap(),
+        InboxConsumptionDisposition::Inserted
+    );
+    assert!(matches!(
+        complete_inbox_consumption(
+            &mut complete,
+            &completed,
+            20_002,
+            "completion_projection_applied",
+            0,
+        ),
+        Err(InboxConsumptionPersistenceError::ConflictingReplay)
+    ));
+    complete.rollback().unwrap();
+}
