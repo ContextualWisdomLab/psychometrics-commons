@@ -21,3 +21,37 @@ fn anonymous_session_context_is_a_product_authorization_primitive() {
     assert!(context.is_valid_at(1_999));
     assert!(!context.is_valid_at(2_000));
 }
+
+#[test]
+fn anonymous_session_context_matches_only_its_exact_resource_binding() {
+    let context = AnonymousSessionContext::new(
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        "evidence_alpha",
+        2_000,
+    )
+    .unwrap();
+
+    assert!(context.matches_binding(
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha"
+    ));
+    assert!(!context.matches_binding(
+        "tenant_beta",
+        "participant_alpha",
+        "session_alpha"
+    ));
+    assert!(!context.matches_binding(
+        "tenant_alpha",
+        "participant_other",
+        "session_alpha"
+    ));
+    assert!(!context.matches_binding(
+        "tenant_alpha",
+        "participant_alpha",
+        "session_other"
+    ));
+    assert!(!context.matches_binding("", "participant_alpha", "session_alpha"));
+}
