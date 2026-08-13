@@ -249,6 +249,86 @@ fn target_reference_and_envelope_validation_fail_closed() {
 }
 
 #[test]
+fn remaining_envelope_fields_fail_closed() {
+    let mut db = ready_client("data_rights_envelope_fields");
+    let request = request("scope_alpha");
+    for event in [
+        custom_event(
+            "data_rights_event_wrong_tenant",
+            "data_rights.deletion.requested",
+            "psychometrics_commons",
+            "tenant_beta",
+            "data_rights_request_alpha",
+            10_000,
+            "data_rights_request_alpha",
+            None,
+        ),
+        custom_event(
+            "data_rights_event_wrong_subject",
+            "data_rights.deletion.requested",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "data_rights_request_beta",
+            10_000,
+            "data_rights_request_alpha",
+            None,
+        ),
+        IntegrationEvent::new(
+            "data_rights_event_wrong_schema",
+            "data_rights.deletion.requested",
+            "v2",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "data_rights_request_alpha",
+            10_000,
+            "data_rights_request_alpha",
+            None,
+            DIGEST,
+        )
+        .unwrap(),
+        custom_event(
+            "data_rights_event_wrong_time",
+            "data_rights.deletion.requested",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "data_rights_request_alpha",
+            10_001,
+            "data_rights_request_alpha",
+            None,
+        ),
+        custom_event(
+            "data_rights_event_wrong_correlation",
+            "data_rights.deletion.requested",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "data_rights_request_alpha",
+            10_000,
+            "data_rights_request_beta",
+            None,
+        ),
+        custom_event(
+            "data_rights_event_with_causation",
+            "data_rights.deletion.requested",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "data_rights_request_alpha",
+            10_000,
+            "data_rights_request_alpha",
+            Some("data_rights_cause_alpha"),
+        ),
+    ] {
+        let mismatched = [DataRightsPropagationTarget::new(
+            "dependent_system_alpha",
+            &event,
+        )];
+        assert!(matches!(
+            persist_requested_data_rights_with_propagation(&mut db, &request, &mismatched, 3),
+            Err(DataRightsPersistenceError::InvalidPropagationEnvelope)
+        ));
+    }
+}
+
+#[test]
 fn export_request_persists_export_kind() {
     let mut db = ready_client("data_rights_export");
     let request = DataRightsRequest::new(
@@ -345,6 +425,95 @@ fn stored_target_count_and_identity_conflicts_fail_closed() {
         persist_requested_data_rights_with_propagation(&mut identity_db, &request, &targets, 3),
         Err(DataRightsPersistenceError::ConflictingReplay)
     ));
+
+    let mut source_db = ready_client("data_rights_target_source_conflict");
+    persist_requested_data_rights_with_propagation(&mut source_db, &request, &targets, 3).unwrap();
+    source_db
+        .batch_execute(
+            "INSERT INTO integration_outbox (
+                 event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,
+                 occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest,
+                 max_attempts, current_state, latest_event_at_unix_ms
+             )
+             SELECT event_ref, event_type, schema_version, 'other_bounded_context', tenant_ref,
+                    subject_ref, occurred_at_unix_ms, correlation_ref, causation_ref,
+                    payload_digest, max_attempts, current_state, latest_event_at_unix_ms
+             FROM integration_outbox WHERE event_ref = 'data_rights_event_alpha';
+             UPDATE data_rights_propagation_state SET source_ref = 'other_bounded_context';",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist_requested_data_rights_with_propagation(&mut source_db, &request, &targets, 3),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+
+    let mut event_db = ready_client("data_rights_target_event_conflict");
+    persist_requested_data_rights_with_propagation(&mut event_db, &request, &targets, 3).unwrap();
+    event_db
+        .batch_execute(
+            "INSERT INTO integration_outbox (
+                 event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,
+                 occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest,
+                 max_attempts, current_state, latest_event_at_unix_ms
+             )
+             SELECT 'data_rights_event_beta', event_type, schema_version, source_ref, tenant_ref,
+                    subject_ref, occurred_at_unix_ms, correlation_ref, causation_ref,
+                    payload_digest, max_attempts, current_state, latest_event_at_unix_ms
+             FROM integration_outbox WHERE event_ref = 'data_rights_event_alpha';
+             UPDATE data_rights_propagation_state SET event_ref = 'data_rights_event_beta';",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist_requested_data_rights_with_propagation(&mut event_db, &request, &targets, 3),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+}
+
+#[test]
+fn stored_request_field_mismatches_fail_closed() {
+    let request = request("scope_alpha");
+    let event = event();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+
+    for (schema, sql) in [
+        (
+            "data_rights_header_tenant",
+            "ALTER TABLE data_rights_propagation_state \
+             DROP CONSTRAINT data_rights_propagation_request_fk; \
+             UPDATE data_rights_request_state SET tenant_ref = 'tenant_beta'",
+        ),
+        (
+            "data_rights_header_participant",
+            "UPDATE data_rights_request_state SET participant_ref = 'participant_beta'",
+        ),
+        (
+            "data_rights_header_kind",
+            "UPDATE data_rights_request_state SET request_kind = 'export'",
+        ),
+        (
+            "data_rights_header_state",
+            "UPDATE data_rights_request_state SET current_state = 'processing'",
+        ),
+        (
+            "data_rights_header_requested_at",
+            "UPDATE data_rights_request_state SET requested_at_unix_ms = 9999",
+        ),
+        (
+            "data_rights_header_latest_event",
+            "UPDATE data_rights_request_state SET latest_event_at_unix_ms = 20000",
+        ),
+    ] {
+        let mut db = ready_client(schema);
+        persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3).unwrap();
+        db.batch_execute(sql).unwrap();
+        assert!(matches!(
+            persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3),
+            Err(DataRightsPersistenceError::ConflictingReplay)
+        ));
+    }
 }
 
 #[test]
@@ -357,6 +526,77 @@ fn missing_schema_is_a_typed_database_failure() {
         &event,
     )];
 
+    assert!(matches!(
+        persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+}
+
+#[test]
+fn propagation_insert_failure_is_a_database_failure() {
+    let mut db = ready_client("data_rights_hidden_propagation");
+    db.batch_execute(
+        "CREATE OR REPLACE FUNCTION data_rights_reject_propagation() \
+         RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN \
+             RAISE EXCEPTION 'data_rights propagation sink'; \
+         END $$; \
+         CREATE TRIGGER data_rights_reject_propagation \
+         BEFORE INSERT ON data_rights_propagation_state \
+         FOR EACH STATEMENT EXECUTE FUNCTION data_rights_reject_propagation();",
+    )
+    .unwrap();
+    let request = request("scope_alpha");
+    let event = event();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    assert!(matches!(
+        persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+}
+
+#[test]
+fn header_replay_select_failure_is_a_database_failure() {
+    let mut db = ready_client("data_rights_hidden_header");
+    let request = request("scope_alpha");
+    let event = event();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3).unwrap();
+    let sink = format!("data_rights_select_failure_sink_{}", std::process::id());
+    db.batch_execute(&format!(
+        "CREATE SCHEMA {sink};\
+         CREATE TABLE {sink}.data_rights_request_state (\
+             request_ref TEXT PRIMARY KEY\
+         );\
+         INSERT INTO {sink}.data_rights_request_state (request_ref) \
+         VALUES ('data_rights_request_alpha');\
+         SET search_path TO {sink};"
+    ))
+    .unwrap();
+    assert!(matches!(
+        persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+}
+
+#[test]
+fn target_replay_select_failure_is_a_database_failure() {
+    let mut db = ready_client("data_rights_hidden_targets");
+    let request = request("scope_alpha");
+    let event = event();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3).unwrap();
+    db.batch_execute("DROP TABLE data_rights_propagation_state;")
+        .unwrap();
     assert!(matches!(
         persist_requested_data_rights_with_propagation(&mut db, &request, &targets, 3),
         Err(DataRightsPersistenceError::Database(_))

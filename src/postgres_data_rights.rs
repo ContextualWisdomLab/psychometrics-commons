@@ -211,8 +211,7 @@ fn persist_request_header(
         "INSERT INTO data_rights_request_state (\
              request_ref, tenant_ref, participant_ref, request_kind, scope_ref, current_state,\
              requested_at_unix_ms, latest_event_at_unix_ms\
-         ) VALUES ($1,$2,$3,$4,$5,'requested',$6,$6) \
-         ON CONFLICT (request_ref) DO NOTHING",
+         ) VALUES ($1,$2,$3,$4,$5,'requested',$6,$6)",
         &[
             &request.request_ref(),
             &request.tenant_ref(),
@@ -308,11 +307,8 @@ fn stored_targets_match(
         return Ok(false);
     }
     Ok(targets.iter().all(|target| {
-        let Some(system) = normalized_reference(target.dependent_system_ref) else {
-            return false;
-        };
         rows.iter().any(|row| {
-            row.get::<_, String>(0) == system
+            row.get::<_, String>(0) == target.dependent_system_ref
                 && row.get::<_, String>(1) == target.event.source()
                 && row.get::<_, String>(2) == target.event.event_ref()
         })
