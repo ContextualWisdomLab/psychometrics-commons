@@ -2,13 +2,16 @@
 //!
 //! The operational participant reference is retained only in the product-owned
 //! restricted research boundary. Public research artifacts must use the separate
-//! pseudonymous research participant reference and must never expose this table.
-//! The authorizing [`ConsentSnapshot`] is supplied alongside the contribution so
-//! the adapter can fail closed if participant, snapshot, or research-scope
-//! evidence is rebound before persistence. The caller owns credentials and the
-//! surrounding transaction boundary.
+//! pseudonymous research participant reference and must never expose these tables.
+//!
+//! A [`ResearchContribution`] intentionally does not carry operational participant
+//! identity. To prevent write-time snapshot substitution from rebinding identity,
+//! callers must first persist the exact active research-consent snapshot projection.
+//! Contribution persistence then resolves participant and scope from that durable
+//! binding rather than trusting a second in-memory snapshot. The caller owns
+//! credentials and the surrounding transaction boundary.
 
-use crate::consent::{ConsentSnapshot, ResearchContribution, ResearchContributionState};
+use crate::consent::{ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -17,31 +20,33 @@ use std::fmt::{Display, Formatter};
 const RESEARCH_CONTRIBUTION_MIGRATION: &str =
     include_str!("../migrations/0017_research_contribution.sql");
 
-/// Outcome of persisting research-contribution lifecycle evidence.
+/// Outcome of persisting research-consent or contribution lifecycle evidence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResearchContributionPersistenceDisposition {
-    /// At least one new immutable contribution or withdrawal record was inserted.
+    /// New immutable evidence was inserted.
     Inserted,
-    /// The exact contribution and any withdrawal evidence already existed.
+    /// The exact immutable evidence already existed.
     Duplicate,
 }
 
-/// Fail-closed error for durable research-contribution persistence.
+/// Fail-closed error for durable research-consent and contribution persistence.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ResearchContributionPersistenceError {
-    /// A contribution, participant, snapshot, scope, or withdrawal identity is invalid.
+    /// A contribution, participant, snapshot, scope, form, or withdrawal identity is invalid.
     InvalidReference,
-    /// The supplied consent snapshot does not authorize this exact contribution evidence.
+    /// The supplied snapshot has no active explicit research-contribution grant.
+    ResearchConsentRequired,
+    /// Contribution persistence ran before its immutable consent snapshot projection existed.
+    ConsentSnapshotMissing,
+    /// Contribution scope does not match the durable authorizing snapshot binding.
     ConsentSnapshotMismatch,
     /// Operational and research participant namespaces were incorrectly reused.
     OperationalIdentityReuse,
     /// Contribution or withdrawal time cannot be represented safely in `PostgreSQL`.
     InvalidTimestamp,
-    /// Contribution lifecycle state and withdrawal evidence are internally inconsistent.
-    InvalidLifecycleEvidence,
-    /// An immutable contribution or withdrawal identity was rebound to different evidence.
+    /// An immutable snapshot, contribution, or withdrawal identity was rebound to other evidence.
     ConflictingReplay,
     /// Research-contribution persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
@@ -53,22 +58,25 @@ impl Display for ResearchContributionPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "research contribution persistence references must be opaque durable values"
+                "research persistence references must be opaque durable values"
+            }
+            Self::ResearchConsentRequired => {
+                "research consent snapshot requires an active explicit research grant"
+            }
+            Self::ConsentSnapshotMissing => {
+                "research contribution requires a durable authorizing consent snapshot"
             }
             Self::ConsentSnapshotMismatch => {
-                "research contribution is not bound to the supplied active research-consent snapshot"
+                "research contribution scope does not match its durable consent snapshot"
             }
             Self::OperationalIdentityReuse => {
                 "research participant reference must differ from the operational participant"
             }
             Self::InvalidTimestamp => {
-                "research contribution timestamp is outside the PostgreSQL bigint range"
-            }
-            Self::InvalidLifecycleEvidence => {
-                "research contribution lifecycle state is inconsistent with withdrawal evidence"
+                "research contribution timestamp must be positive and fit PostgreSQL bigint"
             }
             Self::ConflictingReplay => {
-                "research contribution identity was replayed with conflicting evidence"
+                "research persistence identity was replayed with conflicting evidence"
             }
             Self::UnsupportedIsolationLevel => {
                 "research contribution persistence requires read committed isolation"
@@ -104,30 +112,93 @@ pub fn apply_research_contribution_migration(
     client.batch_execute(RESEARCH_CONTRIBUTION_MIGRATION)
 }
 
-/// Persist one consent-bound research contribution and optional withdrawal.
+/// Persist the immutable active research-consent projection used for contribution authorization.
 ///
-/// The supplied consent snapshot must be the exact immutable snapshot referenced
-/// by `contribution`, must belong to a distinct operational participant identity,
-/// and must still carry the same active research scope. The start record is
-/// append-only. Withdrawal is stored as a separate append-only event so the
-/// original opt-in evidence is never rewritten. Exact replay is idempotent;
-/// rebinding any identity, scope, timestamp, or withdrawal evidence fails closed.
-///
-/// Replaying the original active contribution after a withdrawal remains an
-/// idempotent replay of the start record and never removes the stored withdrawal.
+/// This is a purpose-specific durable projection of an in-memory [`ConsentSnapshot`],
+/// not a replacement for the general consent ledger. It binds one snapshot reference
+/// to its operational participant, active research scope, and exact consent-form
+/// version before any contribution row may reference it. Exact replay is idempotent;
+/// reusing a snapshot reference for another binding fails closed.
 ///
 /// # Errors
 ///
-/// Returns [`ResearchContributionPersistenceError`] for invalid or rebound
-/// references, unsupported isolation, inconsistent lifecycle evidence, timestamp
-/// overflow, conflicting replay, or a database failure.
-pub fn persist_research_contribution(
+/// Returns [`ResearchContributionPersistenceError`] when the snapshot lacks an
+/// active research grant, contains an invalid reference, conflicts with an existing
+/// immutable binding, uses unsupported transaction isolation, or the database fails.
+pub fn persist_research_consent_snapshot(
     transaction: &mut Transaction<'_>,
     consent_snapshot: &ConsentSnapshot,
+) -> Result<ResearchContributionPersistenceDisposition, ResearchContributionPersistenceError> {
+    require_read_committed(transaction)?;
+    let snapshot_ref = required_reference(consent_snapshot.snapshot_ref())?;
+    let participant_ref = required_reference(consent_snapshot.participant_ref())?;
+    let research_scope_ref = consent_snapshot
+        .active_research_scope()
+        .and_then(normalized_reference)
+        .ok_or(ResearchContributionPersistenceError::ResearchConsentRequired)?;
+    let consent_form_version_ref = consent_snapshot
+        .active_form_version(ConsentPurpose::ResearchContribution)
+        .and_then(normalized_reference)
+        .ok_or(ResearchContributionPersistenceError::ResearchConsentRequired)?;
+
+    let inserted = transaction.execute(
+        "INSERT INTO research_consent_snapshot (\
+             consent_snapshot_ref, participant_ref, research_scope_ref, consent_form_version_ref\
+         ) VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (consent_snapshot_ref) DO NOTHING",
+        &[
+            &snapshot_ref,
+            &participant_ref,
+            &research_scope_ref,
+            &consent_form_version_ref,
+        ],
+    )?;
+    if inserted == 1 {
+        return Ok(ResearchContributionPersistenceDisposition::Inserted);
+    }
+
+    let row = transaction.query_one(
+        "SELECT participant_ref, research_scope_ref, consent_form_version_ref \
+         FROM research_consent_snapshot WHERE consent_snapshot_ref = $1",
+        &[&snapshot_ref],
+    )?;
+    let stored_participant_ref: String = row.get(0);
+    let stored_research_scope_ref: String = row.get(1);
+    let stored_form_version_ref: String = row.get(2);
+    if stored_participant_ref == participant_ref
+        && stored_research_scope_ref == research_scope_ref
+        && stored_form_version_ref == consent_form_version_ref
+    {
+        Ok(ResearchContributionPersistenceDisposition::Duplicate)
+    } else {
+        Err(ResearchContributionPersistenceError::ConflictingReplay)
+    }
+}
+
+/// Persist one contribution start record and optional immutable withdrawal evidence.
+///
+/// The contribution's `consent_snapshot_ref` must already exist in
+/// `research_consent_snapshot`. Operational participant identity is read only from
+/// that durable binding, never from a write-time snapshot argument. The stored
+/// scope must equal the contribution's immutable scope and the bound operational
+/// participant must differ from the pseudonymous research participant.
+///
+/// The contribution start record is append-only. Withdrawal is stored as a separate
+/// event, so replaying original active evidence after withdrawal cannot reactivate
+/// or erase the withdrawal. Exact replay is idempotent; rebinding immutable identity,
+/// scope, time, or withdrawal evidence fails closed.
+///
+/// # Errors
+///
+/// Returns [`ResearchContributionPersistenceError`] for a missing/mismatched
+/// consent binding, namespace reuse, invalid references/timestamps, conflicting
+/// replay, unsupported isolation, or a database failure.
+pub fn persist_research_contribution(
+    transaction: &mut Transaction<'_>,
     contribution: &ResearchContribution,
 ) -> Result<ResearchContributionPersistenceDisposition, ResearchContributionPersistenceError> {
     require_read_committed(transaction)?;
-    let evidence = validated_evidence(consent_snapshot, contribution)?;
+    let evidence = validated_contribution_evidence(transaction, contribution)?;
     let inserted_contribution = persist_contribution_start(transaction, &evidence)?;
     let inserted_withdrawal = match evidence.withdrawal {
         Some(withdrawal) => persist_withdrawal(transaction, evidence.contribution_ref, withdrawal)?,
@@ -144,7 +215,7 @@ pub fn persist_research_contribution(
 #[derive(Clone, Copy)]
 struct ValidatedEvidence<'a> {
     contribution_ref: &'a str,
-    participant_ref: &'a str,
+    participant_ref: String,
     research_participant_ref: &'a str,
     consent_snapshot_ref: &'a str,
     research_scope_ref: &'a str,
@@ -158,30 +229,45 @@ struct ValidatedWithdrawal<'a> {
     withdrawn_at_unix_ms: i64,
 }
 
-fn validated_evidence<'a>(
-    consent_snapshot: &'a ConsentSnapshot,
+fn validated_contribution_evidence<'a>(
+    transaction: &mut Transaction<'_>,
     contribution: &'a ResearchContribution,
 ) -> Result<ValidatedEvidence<'a>, ResearchContributionPersistenceError> {
     let contribution_ref = required_reference(contribution.contribution_ref())?;
-    let participant_ref = required_reference(consent_snapshot.participant_ref())?;
     let research_participant_ref = required_reference(contribution.research_participant_ref())?;
     let consent_snapshot_ref = required_reference(contribution.consent_snapshot_ref())?;
     let research_scope_ref = required_reference(contribution.research_scope_ref())?;
-    let supplied_snapshot_ref = required_reference(consent_snapshot.snapshot_ref())?;
-    let active_scope = consent_snapshot
-        .active_research_scope()
-        .and_then(normalized_reference)
-        .ok_or(ResearchContributionPersistenceError::ConsentSnapshotMismatch)?;
+    let started_at_unix_ms = bounded_timestamp(contribution.started_at_unix_ms())?;
 
-    if consent_snapshot_ref != supplied_snapshot_ref || research_scope_ref != active_scope {
+    let binding = transaction.query_opt(
+        "SELECT participant_ref, research_scope_ref \
+         FROM research_consent_snapshot WHERE consent_snapshot_ref = $1",
+        &[&consent_snapshot_ref],
+    )?;
+    let Some(binding) = binding else {
+        return Err(ResearchContributionPersistenceError::ConsentSnapshotMissing);
+    };
+    let participant_ref: String = binding.get(0);
+    let bound_scope_ref: String = binding.get(1);
+    if bound_scope_ref != research_scope_ref {
         return Err(ResearchContributionPersistenceError::ConsentSnapshotMismatch);
     }
     if participant_ref == research_participant_ref {
         return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
     }
 
-    let started_at_unix_ms = bounded_timestamp(contribution.started_at_unix_ms())?;
-    let withdrawal = validated_withdrawal(contribution, started_at_unix_ms)?;
+    let withdrawal = match contribution.state() {
+        ResearchContributionState::Active => None,
+        ResearchContributionState::Withdrawn => Some(ValidatedWithdrawal {
+            withdrawal_event_ref: required_reference(
+                contribution.withdrawal_event_ref().unwrap_or(""),
+            )?,
+            withdrawn_at_unix_ms: bounded_timestamp(
+                contribution.withdrawn_at_unix_ms().unwrap_or(0),
+            )?,
+        }),
+    };
+
     Ok(ValidatedEvidence {
         contribution_ref,
         participant_ref,
@@ -191,31 +277,6 @@ fn validated_evidence<'a>(
         started_at_unix_ms,
         withdrawal,
     })
-}
-
-fn validated_withdrawal<'a>(
-    contribution: &'a ResearchContribution,
-    started_at_unix_ms: i64,
-) -> Result<Option<ValidatedWithdrawal<'a>>, ResearchContributionPersistenceError> {
-    match (
-        contribution.state(),
-        contribution.withdrawal_event_ref(),
-        contribution.withdrawn_at_unix_ms(),
-    ) {
-        (ResearchContributionState::Active, None, None) => Ok(None),
-        (ResearchContributionState::Withdrawn, Some(event_ref), Some(withdrawn_at)) => {
-            let withdrawal_event_ref = required_reference(event_ref)?;
-            let withdrawn_at_unix_ms = bounded_timestamp(withdrawn_at)?;
-            if withdrawn_at_unix_ms <= started_at_unix_ms {
-                return Err(ResearchContributionPersistenceError::InvalidLifecycleEvidence);
-            }
-            Ok(Some(ValidatedWithdrawal {
-                withdrawal_event_ref,
-                withdrawn_at_unix_ms,
-            }))
-        }
-        _ => Err(ResearchContributionPersistenceError::InvalidLifecycleEvidence),
-    }
 }
 
 fn persist_contribution_start(
@@ -311,6 +372,9 @@ fn required_reference(
 }
 
 fn bounded_timestamp(value: u64) -> Result<i64, ResearchContributionPersistenceError> {
+    if value == 0 {
+        return Err(ResearchContributionPersistenceError::InvalidTimestamp);
+    }
     i64::try_from(value).map_err(|_| ResearchContributionPersistenceError::InvalidTimestamp)
 }
 
@@ -328,12 +392,10 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod validation_tests {
-    use super::{
-        bounded_timestamp, required_reference, ResearchContributionPersistenceError,
-    };
+    use super::{bounded_timestamp, required_reference, ResearchContributionPersistenceError};
 
     #[test]
-    fn invalid_references_and_timestamp_overflow_fail_closed() {
+    fn invalid_references_and_timestamps_fail_closed() {
         assert!(matches!(
             required_reference(" "),
             Err(ResearchContributionPersistenceError::InvalidReference)
@@ -346,6 +408,10 @@ mod validation_tests {
             required_reference("research_contribution_alpha").unwrap(),
             "research_contribution_alpha"
         );
+        assert!(matches!(
+            bounded_timestamp(0),
+            Err(ResearchContributionPersistenceError::InvalidTimestamp)
+        ));
         assert_eq!(bounded_timestamp(1).unwrap(), 1);
         assert!(matches!(
             bounded_timestamp(u64::MAX),
