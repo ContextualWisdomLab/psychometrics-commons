@@ -139,3 +139,10 @@ CREATE TRIGGER research_release_approval_immutable_guard
     BEFORE UPDATE OR DELETE ON research_release_approval
     FOR EACH ROW
     EXECUTE FUNCTION reject_research_release_approval_mutation();
+
+DROP TRIGGER IF EXISTS research_release_approval_truncate_guard
+    ON research_release_approval;
+CREATE TRIGGER research_release_approval_truncate_guard
+    BEFORE TRUNCATE ON research_release_approval
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_research_release_approval_mutation();
