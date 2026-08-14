@@ -203,6 +203,18 @@ impl ConsentLedger {
         self.events.is_empty()
     }
 
+    /// Return the operational participant bound to this ledger.
+    #[must_use]
+    pub fn participant_ref(&self) -> &str {
+        &self.participant_ref
+    }
+
+    /// Return accepted consent events in server-authoritative order.
+    #[must_use]
+    pub fn events(&self) -> &[ConsentEvent] {
+        &self.events
+    }
+
     /// Record a normalized consent event or replay an identical prior event.
     ///
     /// Research-purpose events require a non-empty research scope. Other
