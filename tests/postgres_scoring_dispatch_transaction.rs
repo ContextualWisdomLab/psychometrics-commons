@@ -9,8 +9,8 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, ScoringJobPersistenceDisposition,
 };
 use psychometrics_commons_runtime::postgres_scoring_request::{
-    apply_scoring_request_migration, persist_scoring_dispatch,
-    ScoringDispatchPersistenceError, ScoringRequestPersistenceDisposition,
+    apply_scoring_request_migration, persist_scoring_dispatch, ScoringDispatchPersistenceError,
+    ScoringRequestPersistenceDisposition,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
@@ -197,7 +197,10 @@ fn mismatched_job_request_fails_before_any_write() {
             .query_one(&format!("SELECT count(*) FROM {table}"), &[])
             .unwrap()
             .get(0);
-        assert_eq!(count, 0, "{table} must remain empty after rejected dispatch");
+        assert_eq!(
+            count, 0,
+            "{table} must remain empty after rejected dispatch"
+        );
     }
 }
 
@@ -257,5 +260,8 @@ fn outbox_conflict_rolls_back_request_and_job_insertions() {
         .get(0);
     assert_eq!(request_count, 0);
     assert_eq!(job_count, 0);
-    assert_eq!(outbox_count, 1, "pre-existing outbox evidence must remain intact");
+    assert_eq!(
+        outbox_count, 1,
+        "pre-existing outbox evidence must remain intact"
+    );
 }
