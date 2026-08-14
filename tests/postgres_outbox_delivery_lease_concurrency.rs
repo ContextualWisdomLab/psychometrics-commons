@@ -67,7 +67,7 @@ fn identity() -> OutboxPersistenceIdentity<'static> {
 }
 
 fn race_claim(
-    barrier: Arc<Barrier>,
+    barrier: &Barrier,
     worker_ref: &'static str,
     lease_ref: &'static str,
 ) -> ClaimOutcome {
@@ -126,14 +126,14 @@ fn concurrent_claims_have_one_winner_and_reclaim_advances_the_fence() {
     let second_barrier = Arc::clone(&barrier);
     let first = thread::spawn(move || {
         race_claim(
-            first_barrier,
+            &first_barrier,
             "worker_concurrent_alpha",
             "outbox_lease_concurrent_alpha",
         )
     });
     let second = thread::spawn(move || {
         race_claim(
-            second_barrier,
+            &second_barrier,
             "worker_concurrent_beta",
             "outbox_lease_concurrent_beta",
         )
