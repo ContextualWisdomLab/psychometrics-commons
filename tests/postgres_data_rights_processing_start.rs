@@ -7,8 +7,12 @@ use psychometrics_commons_runtime::data_rights::{
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_data_rights::{
     apply_data_rights_migration, persist_data_rights_identity_verification,
-    persist_data_rights_processing_start, persist_requested_data_rights_with_propagation,
-    DataRightsPersistenceError, DataRightsProcessingDisposition, DataRightsPropagationTarget,
+    persist_requested_data_rights_with_propagation, DataRightsPersistenceError,
+    DataRightsPropagationTarget,
+};
+use psychometrics_commons_runtime::postgres_data_rights_processing::{
+    apply_data_rights_processing_migration, persist_data_rights_processing_start,
+    DataRightsProcessingDisposition,
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
@@ -31,6 +35,8 @@ fn ready_client(schema_prefix: &str) -> Client {
     apply_integration_migration(&mut client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
+    apply_data_rights_processing_migration(&mut client).unwrap();
+    apply_data_rights_processing_migration(&mut client).unwrap();
     client
 }
 
@@ -111,13 +117,16 @@ fn processing_start_persists_and_replays_exactly() {
         )
         .unwrap();
     assert_eq!(row.get::<_, String>(0), "processing");
-    assert_eq!(row.get::<_, Option<String>>(1).as_deref(), Some("operation_alpha"));
+    assert_eq!(
+        row.get::<_, Option<String>>(1).as_deref(),
+        Some("operation_alpha")
+    );
     assert_eq!(row.get::<_, Option<i64>>(2), Some(10_200));
     assert_eq!(row.get::<_, i64>(3), 10_200);
 }
 
 #[test]
-fn processing_start_rejects_conflicting_operation_and_verification_evidence() {
+fn processing_start_rejects_conflicting_and_later_lifecycle_evidence() {
     let mut client = ready_client("data_rights_process_conflict");
     let mut request = persist_verified(&mut client, "data_rights_request_process");
     request.start_processing("operation_alpha", 10_200).unwrap();
@@ -152,6 +161,20 @@ fn processing_start_rejects_conflicting_operation_and_verification_evidence() {
     assert!(matches!(
         persist_data_rights_processing_start(&mut transaction, &conflicting_verification),
         Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .execute(
+            "UPDATE data_rights_request_state SET current_state = 'completed'
+             WHERE request_ref = $1",
+            &[&"data_rights_request_process"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &request),
+        Err(DataRightsPersistenceError::InvalidRequestState)
     ));
     transaction.rollback().unwrap();
 }
