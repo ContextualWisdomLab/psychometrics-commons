@@ -127,3 +127,100 @@ fn validate_propagation_envelope(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod envelope_tests {
+    use super::{validate_propagation_envelope, ConsentOutboxPersistenceError};
+    use crate::consent::{ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose};
+    use crate::integration::IntegrationEvent;
+
+    const DIGEST: &str =
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
+    fn ledger() -> ConsentLedger {
+        let mut ledger = ConsentLedger::new("participant_consent_envelope_unit").unwrap();
+        ledger
+            .record(ConsentEventInput {
+                event_ref: "consent_event_envelope_unit",
+                purpose: ConsentPurpose::ResearchContribution,
+                decision: ConsentDecision::Granted,
+                consent_form_version_ref: "consent_form_envelope_unit",
+                research_scope_ref: Some("research_scope_envelope_unit"),
+                occurred_at_unix_ms: 10_000,
+            })
+            .unwrap();
+        ledger
+    }
+
+    fn event(
+        source: &str,
+        subject: &str,
+        causation: Option<&str>,
+        occurred_at_unix_ms: u64,
+    ) -> IntegrationEvent {
+        IntegrationEvent::new(
+            "event_consent_envelope_unit",
+            "consent.changed",
+            "v1",
+            source,
+            "tenant_consent_envelope_unit",
+            subject,
+            occurred_at_unix_ms,
+            "correlation_consent_envelope_unit",
+            causation,
+            DIGEST,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn every_envelope_binding_boundary_fails_closed() {
+        let ledger = ledger();
+        let valid = event(
+            "psychometrics_commons",
+            ledger.participant_ref(),
+            Some("consent_event_envelope_unit"),
+            10_000,
+        );
+        assert!(validate_propagation_envelope(&ledger, &valid).is_ok());
+
+        let invalid = [
+            event(
+                "other_source",
+                ledger.participant_ref(),
+                Some("consent_event_envelope_unit"),
+                10_000,
+            ),
+            event(
+                "psychometrics_commons",
+                "participant_other",
+                Some("consent_event_envelope_unit"),
+                10_000,
+            ),
+            event(
+                "psychometrics_commons",
+                ledger.participant_ref(),
+                None,
+                10_000,
+            ),
+            event(
+                "psychometrics_commons",
+                ledger.participant_ref(),
+                Some("consent_event_unknown"),
+                10_000,
+            ),
+            event(
+                "psychometrics_commons",
+                ledger.participant_ref(),
+                Some("consent_event_envelope_unit"),
+                10_001,
+            ),
+        ];
+        for candidate in invalid {
+            assert!(matches!(
+                validate_propagation_envelope(&ledger, &candidate),
+                Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+            ));
+        }
+    }
+}
