@@ -98,11 +98,7 @@ fn completion_and_outbox_commit_and_replay_together() {
     reset_and_migrate(&mut client);
     let job_ref = "scoring_job_completion_alpha";
     let result_ref = "scoring_result_completion_alpha";
-    let fencing_token = persist_and_claim(
-        &mut client,
-        job_ref,
-        "scoring_request_completion_alpha",
-    );
+    let fencing_token = persist_and_claim(&mut client, job_ref, "scoring_request_completion_alpha");
     let event = completion_event("event_completion_alpha", job_ref, DIGEST_A);
 
     let mut transaction = client.transaction().unwrap();
@@ -167,11 +163,8 @@ fn late_outbox_conflict_rolls_back_the_completion_transition() {
     let mut client = test_client();
     reset_and_migrate(&mut client);
     let job_ref = "scoring_job_completion_conflict";
-    let fencing_token = persist_and_claim(
-        &mut client,
-        job_ref,
-        "scoring_request_completion_conflict",
-    );
+    let fencing_token =
+        persist_and_claim(&mut client, job_ref, "scoring_request_completion_conflict");
     let existing_event = completion_event("event_completion_conflict", job_ref, DIGEST_A);
     assert_eq!(
         enqueue_outbox_event(&mut client, &existing_event, 3).unwrap(),
