@@ -42,6 +42,33 @@ fn reset_table(client: &mut Client) {
         .unwrap();
 }
 
+fn inject_stored_tamper(
+    client: &mut Client,
+    column: &str,
+    value: &str,
+    release_ref: &str,
+) {
+    client
+        .batch_execute(
+            "ALTER TABLE research_release_approval \
+             DISABLE TRIGGER research_release_approval_immutable_guard;",
+        )
+        .unwrap();
+    let mutation = client.execute(
+        &format!(
+            "UPDATE research_release_approval SET {column} = $1 WHERE research_release_ref = $2"
+        ),
+        &[&value, &release_ref],
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE research_release_approval \
+             ENABLE TRIGGER research_release_approval_immutable_guard;",
+        )
+        .unwrap();
+    mutation.expect("test-only tamper injection must satisfy all non-immutability constraints");
+}
+
 fn approved_release(
     release_ref: &str,
     manifest_digest: &str,
@@ -263,26 +290,22 @@ fn every_persisted_approval_field_is_part_of_the_immutable_replay_identity() {
     ];
 
     for (column, tampered_value, original_value) in cases {
-        client
-            .execute(
-                &format!(
-                    "UPDATE research_release_approval SET {column} = $1 WHERE research_release_ref = $2"
-                ),
-                &[&tampered_value, &release.release_ref()],
-            )
-            .unwrap();
+        inject_stored_tamper(
+            &mut client,
+            column,
+            tampered_value,
+            release.release_ref(),
+        );
         assert!(matches!(
             persist_err(&mut client, &release),
             ResearchReleasePersistenceError::ConflictingReplay
         ));
-        client
-            .execute(
-                &format!(
-                    "UPDATE research_release_approval SET {column} = $1 WHERE research_release_ref = $2"
-                ),
-                &[&original_value, &release.release_ref()],
-            )
-            .unwrap();
+        inject_stored_tamper(
+            &mut client,
+            column,
+            original_value,
+            release.release_ref(),
+        );
     }
 
     assert_eq!(
@@ -293,7 +316,7 @@ fn every_persisted_approval_field_is_part_of_the_immutable_replay_identity() {
 }
 
 #[test]
-fn stored_evidence_tampering_is_detected_on_replay() {
+fn stored_evidence_tampering_is_detected_on_replay_even_if_database_guard_is_bypassed() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_table(&mut client);
@@ -306,14 +329,12 @@ fn stored_evidence_tampering_is_detected_on_replay() {
         "metadata_bundle_research_alpha",
     );
     persist_ok(&mut client, &release);
-    client
-        .execute(
-            "UPDATE research_release_approval \
-             SET scientific_review_ref = 'scientific_review_research_other' \
-             WHERE research_release_ref = 'research_release_tamper'",
-            &[],
-        )
-        .unwrap();
+    inject_stored_tamper(
+        &mut client,
+        "scientific_review_ref",
+        "scientific_review_research_other",
+        release.release_ref(),
+    );
     assert!(matches!(
         persist_err(&mut client, &release),
         ResearchReleasePersistenceError::ConflictingReplay
