@@ -15,6 +15,8 @@ use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
+const SOURCE_REF: &str = "psychometrics_commons";
+
 /// Durable dispositions produced by one atomic scoring-completion/outbox operation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScoringCompletionOutboxPersistence {
@@ -40,6 +42,8 @@ impl ScoringCompletionOutboxPersistence {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ScoringCompletionOutboxError {
+    /// The outbox envelope is not bound to this exact scoring-job completion boundary.
+    InvalidCompletionEnvelope,
     /// The fenced scoring-job completion transition failed validation or persistence.
     Completion(ScoringJobPersistenceError),
     /// The immutable integration outbox event failed validation or persistence.
@@ -49,6 +53,9 @@ pub enum ScoringCompletionOutboxError {
 impl Display for ScoringCompletionOutboxError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
+            Self::InvalidCompletionEnvelope => {
+                "scoring completion outbox must bind the exact job and completion time"
+            }
             Self::Completion(_) => "scoring completion persistence failed",
             Self::Outbox(_) => "scoring completion outbox persistence failed",
         })
@@ -58,6 +65,7 @@ impl Display for ScoringCompletionOutboxError {
 impl Error for ScoringCompletionOutboxError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::InvalidCompletionEnvelope => None,
             Self::Completion(error) => Some(error),
             Self::Outbox(error) => Some(error),
         }
@@ -66,19 +74,24 @@ impl Error for ScoringCompletionOutboxError {
 
 /// Persist one fenced successful scoring completion and one immutable outbox event atomically.
 ///
-/// The caller supplies and owns a `READ COMMITTED` transaction. The scoring-job transition runs
-/// first; the validated outbox insert then runs in the same transaction. If either stage fails,
-/// callers must roll the transaction back so no newly written completion state can survive without
-/// its outbox evidence. Exact replay remains idempotent at both existing adapters, and mixed exact
-/// dispositions can safely reconcile legacy partial state without mutating historical evidence.
+/// Before any write, the outbox event must be emitted by `psychometrics_commons`, identify the
+/// exact scoring job as its subject, and carry the same server-authoritative completion time. This
+/// prevents an otherwise valid scoring completion from being committed beside unrelated outbox
+/// evidence. Event type, tenant, schema version, correlation, causation, and payload semantics stay
+/// with the caller's versioned integration contract rather than being invented here.
 ///
-/// Event type, tenant, subject, correlation, causation, and payload semantics remain the caller's
-/// versioned integration-contract responsibility. This composition guarantees transactional
-/// durability, not semantic invention of a new external event contract.
+/// The caller supplies and owns a `READ COMMITTED` transaction. After envelope validation, the
+/// scoring-job transition runs first and the outbox insert runs in the same transaction. If either
+/// stage fails, callers must roll the transaction back so no newly written completion state can
+/// survive without its outbox evidence. Exact replay remains idempotent at both existing adapters,
+/// and mixed exact dispositions can safely reconcile legacy partial state without mutating
+/// historical evidence.
 ///
 /// # Errors
 ///
-/// Returns [`ScoringCompletionOutboxError::Completion`] when fenced scoring completion fails, or
+/// Returns [`ScoringCompletionOutboxError::InvalidCompletionEnvelope`] before writes when the
+/// integration event is bound to another source, job, or completion time,
+/// [`ScoringCompletionOutboxError::Completion`] when fenced scoring completion fails, or
 /// [`ScoringCompletionOutboxError::Outbox`] when the integration event cannot be persisted.
 #[allow(clippy::too_many_arguments)]
 pub fn record_successful_scoring_completion_with_outbox(
@@ -90,6 +103,7 @@ pub fn record_successful_scoring_completion_with_outbox(
     completion_event: &IntegrationEvent,
     outbox_max_attempts: usize,
 ) -> Result<ScoringCompletionOutboxPersistence, ScoringCompletionOutboxError> {
+    validate_completion_envelope(scoring_job_ref, completed_at_unix_ms, completion_event)?;
     let completion = record_successful_scoring_completion(
         transaction,
         scoring_job_ref,
@@ -102,4 +116,18 @@ pub fn record_successful_scoring_completion_with_outbox(
         .map_err(ScoringCompletionOutboxError::Outbox)?;
 
     Ok(ScoringCompletionOutboxPersistence { completion, outbox })
+}
+
+fn validate_completion_envelope(
+    scoring_job_ref: &str,
+    completed_at_unix_ms: u64,
+    completion_event: &IntegrationEvent,
+) -> Result<(), ScoringCompletionOutboxError> {
+    if completion_event.source() != SOURCE_REF
+        || completion_event.subject_ref() != scoring_job_ref
+        || completion_event.occurred_at_unix_ms() != completed_at_unix_ms
+    {
+        return Err(ScoringCompletionOutboxError::InvalidCompletionEnvelope);
+    }
+    Ok(())
 }
