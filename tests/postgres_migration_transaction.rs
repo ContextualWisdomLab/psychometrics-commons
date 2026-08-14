@@ -16,17 +16,27 @@ fn migration_files() -> Vec<PathBuf> {
     let migration_directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
     let mut files: Vec<PathBuf> = fs::read_dir(migration_directory)
         .expect("repository migrations directory must be readable")
-        .map(|entry| entry.expect("migration directory entry must be readable").path())
+        .map(|entry| {
+            entry
+                .expect("migration directory entry must be readable")
+                .path()
+        })
         .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
         .collect();
     files.sort();
-    assert!(!files.is_empty(), "repository must contain PostgreSQL migrations");
+    assert!(
+        !files.is_empty(),
+        "repository must contain PostgreSQL migrations"
+    );
     files
 }
 
 fn migration_sql(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|error| {
-        panic!("migration {} must be readable as UTF-8: {error}", path.display())
+        panic!(
+            "migration {} must be readable as UTF-8: {error}",
+            path.display()
+        )
     })
 }
 
@@ -63,7 +73,10 @@ fn complete_migration_chain_is_transactional_and_rolls_back_cleanly() {
         )
         .unwrap()
         .get(0);
-    assert!(table_count > 0, "migration chain must create product tables");
+    assert!(
+        table_count > 0,
+        "migration chain must create product tables"
+    );
 
     transaction.rollback().unwrap();
 
