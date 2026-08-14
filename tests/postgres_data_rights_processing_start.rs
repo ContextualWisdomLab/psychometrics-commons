@@ -1,0 +1,246 @@
+//! Durable processing-start evidence for an identity-verified data-rights request.
+
+use postgres::{Client, IsolationLevel, NoTls};
+use psychometrics_commons_runtime::data_rights::{
+    DataRightsRequest, DataRightsRequestKind, DataRightsState,
+};
+use psychometrics_commons_runtime::integration::IntegrationEvent;
+use psychometrics_commons_runtime::postgres_data_rights::{
+    apply_data_rights_migration, persist_data_rights_identity_verification,
+    persist_data_rights_processing_start, persist_requested_data_rights_with_propagation,
+    DataRightsPersistenceError, DataRightsProcessingDisposition, DataRightsPropagationTarget,
+};
+use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
+
+const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn test_client(schema_prefix: &str) -> Client {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let schema = format!("{schema_prefix}_{}", std::process::id());
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
+        .unwrap();
+    client
+}
+
+fn ready_client(schema_prefix: &str) -> Client {
+    let mut client = test_client(schema_prefix);
+    apply_integration_migration(&mut client).unwrap();
+    apply_data_rights_migration(&mut client).unwrap();
+    apply_data_rights_migration(&mut client).unwrap();
+    client
+}
+
+fn new_request(request_ref: &str) -> DataRightsRequest {
+    DataRightsRequest::new(
+        request_ref,
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Deletion,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap()
+}
+
+fn event(request_ref: &str) -> IntegrationEvent {
+    IntegrationEvent::new(
+        &format!("event_{request_ref}"),
+        "data_rights.deletion.requested",
+        "v1",
+        "psychometrics_commons",
+        "tenant_alpha",
+        request_ref,
+        10_000,
+        request_ref,
+        None,
+        DIGEST,
+    )
+    .unwrap()
+}
+
+fn persist_requested(client: &mut Client, request_ref: &str) -> DataRightsRequest {
+    let request = new_request(request_ref);
+    let event = event(request_ref);
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(client, &request, &targets, 3).unwrap();
+    request
+}
+
+fn persist_verified(client: &mut Client, request_ref: &str) -> DataRightsRequest {
+    let mut request = persist_requested(client, request_ref);
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_data_rights_identity_verification(&mut transaction, &request).unwrap();
+    transaction.commit().unwrap();
+    request
+}
+
+#[test]
+fn processing_start_persists_and_replays_exactly() {
+    let mut client = ready_client("data_rights_process_replay");
+    let mut request = persist_verified(&mut client, "data_rights_request_process");
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    assert_eq!(request.state(), DataRightsState::Processing);
+
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap(),
+        DataRightsProcessingDisposition::Started
+    );
+    assert_eq!(
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap(),
+        DataRightsProcessingDisposition::Duplicate
+    );
+    transaction.commit().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT current_state, operation_ref, processing_started_at_unix_ms,
+                    latest_event_at_unix_ms
+             FROM data_rights_request_state WHERE request_ref = $1",
+            &[&"data_rights_request_process"],
+        )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "processing");
+    assert_eq!(row.get::<_, Option<String>>(1).as_deref(), Some("operation_alpha"));
+    assert_eq!(row.get::<_, Option<i64>>(2), Some(10_200));
+    assert_eq!(row.get::<_, i64>(3), 10_200);
+}
+
+#[test]
+fn processing_start_rejects_conflicting_operation_and_verification_evidence() {
+    let mut client = ready_client("data_rights_process_conflict");
+    let mut request = persist_verified(&mut client, "data_rights_request_process");
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mut conflicting_operation = new_request("data_rights_request_process");
+    conflicting_operation
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    conflicting_operation
+        .start_processing("operation_beta", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &conflicting_operation),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut conflicting_verification = new_request("data_rights_request_process");
+    conflicting_verification
+        .verify_identity("verification_evidence_beta", 10_100)
+        .unwrap();
+    conflicting_verification
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &conflicting_verification),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn processing_start_rejects_invalid_state_missing_request_and_overflow() {
+    let mut client = ready_client("data_rights_process_invalid");
+    let verified = persist_verified(&mut client, "data_rights_request_process");
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &verified),
+        Err(DataRightsPersistenceError::InvalidRequestState)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut missing = new_request("data_rights_request_missing");
+    missing
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    missing.start_processing("operation_alpha", 10_200).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &missing),
+        Err(DataRightsPersistenceError::RequestNotFound)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut overflow = verified;
+    overflow.start_processing("operation_overflow", u64::MAX).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &overflow),
+        Err(DataRightsPersistenceError::ValueOutOfRange)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn processing_start_requires_read_committed_and_surfaces_database_failure() {
+    let mut client = ready_client("data_rights_process_isolation");
+    let mut request = persist_verified(&mut client, "data_rights_request_process");
+    request.start_processing("operation_alpha", 10_200).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &request),
+        Err(DataRightsPersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut missing_table = test_client("data_rights_process_missing_table");
+    let mut transaction = missing_table.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &request),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn processing_columns_enforce_pair_presence_reference_format_and_positive_time() {
+    let mut client = ready_client("data_rights_process_constraints");
+    persist_requested(&mut client, "data_rights_request_process");
+
+    assert!(client
+        .execute(
+            "UPDATE data_rights_request_state SET operation_ref = 'operation_alpha'
+             WHERE request_ref = $1",
+            &[&"data_rights_request_process"],
+        )
+        .is_err());
+    assert!(client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET operation_ref = '123', processing_started_at_unix_ms = 10200
+             WHERE request_ref = $1",
+            &[&"data_rights_request_process"],
+        )
+        .is_err());
+    assert!(client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET operation_ref = 'operation_alpha', processing_started_at_unix_ms = 0
+             WHERE request_ref = $1",
+            &[&"data_rights_request_process"],
+        )
+        .is_err());
+}
