@@ -5,12 +5,12 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- PostgreSQL persistence for a created assessment session bound to one published locale-specific instrument release, with exact replay and fail-closed rebinding of participant, release, digest, or locale identity.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
 - Assessment-session creation binds to one published locale-specific instrument release, copies immutable version/locale provenance, and fails closed on locale mismatch or unpublished eligibility.
 - PostgreSQL persistence for immutable version-pinned scoring-request identity, with exact replay and fail-closed rebinding of snapshot or measurement-version evidence.
 
+- PostgreSQL 18 purpose-specific consent persistence for one participant-bound ledger plus append-only grant/revoke events, with exact replay, fail-closed conflicting event identity, independent research-scope shape, and `READ COMMITTED` replay classification.
 - PostgreSQL 18 inbox-consumption persistence so an accepted inbox receipt is not side-effect completion: pending identity, fenced processing claims that cannot be stolen, expire-and-reclaim of a crashed claim without transferring the fence, local or claimed completion, and poison quarantine, with exact replay and `READ COMMITTED` fail-closed classification.
 - Participant-owned consent authorization: `ResourceKind::ConsentLedger` and `ProductPermission::ManageOwnConsent` reuse the fail-closed tenant, resource-kind, and owner checks so consent cannot be treated as an untyped generic concern.
 - PostgreSQL expired-lease recovery for scoring jobs: an expired leased row becomes a due retry or quarantine with typed `lease_expired` evidence, and a later claim issues the next fencing token instead of inheriting the crashed worker's lease.

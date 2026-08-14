@@ -17,16 +17,13 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
-| `integration_consumption` | integration | Implemented subset |
-| `assessment_session` | assessment | **Active PR** #61 created-session identity |
+| `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
-**Active PR** `migrations/0014_assessment_session.sql` persists created-session participant and published-release identity. It is not protected-main truth until integrated. Command-replay rows remain Target.
+## Active PR inbox-consumption physical schema
 
-## Implemented inbox-consumption physical schema
-
-Protected main now includes `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs`. That slice persists one consumption work item for an existing `integration_inbox` receipt: pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted.
+PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
 
 ## Protected-main scoring-job physical schema
 

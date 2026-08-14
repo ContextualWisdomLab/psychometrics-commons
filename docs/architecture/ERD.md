@@ -1,7 +1,7 @@
 # Logical Entity-Relationship Model
 
 - Status: Normative logical data model
-- Date: 2026-08-10
+- Date: 2026-08-13
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
@@ -36,6 +36,8 @@ erDiagram
     scoring_job ||--o| result_snapshot : produces
     assessment_participant ||--o{ result_snapshot : owns
 
+    assessment_participant ||--o| consent_ledger : records
+    consent_ledger ||--o{ consent_event : appends
     assessment_participant ||--o{ consent_snapshot : decides
     consent_form ||--o{ consent_snapshot : instantiated_as
     assessment_participant ||--o{ research_contribution : contributes
@@ -145,9 +147,7 @@ erDiagram
     assessment_session {
       string session_ref PK
       string participant_ref FK
-      string instrument_release_ref
       string instrument_version_ref FK
-      string instrument_release_content_digest
       string session_state
       string locale
       timestamp created_at
@@ -219,6 +219,22 @@ erDiagram
       string narrative_version_ref
       string engine_artifact_digest
       string supersedes_ref
+      timestamp created_at
+    }
+
+    consent_ledger {
+      string participant_ref PK
+      timestamp created_at
+    }
+
+    consent_event {
+      string participant_ref PK,FK
+      string event_ref PK
+      string consent_purpose
+      string consent_decision
+      string consent_form_version_ref
+      string research_scope_ref
+      int occurred_at_unix_ms
       timestamp created_at
     }
 
@@ -409,6 +425,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
+- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
 - `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
