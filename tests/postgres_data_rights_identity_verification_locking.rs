@@ -1,0 +1,118 @@
+//! Concurrency contract for data-rights identity-verification replay classification.
+//!
+//! Once replay state is classified inside a caller-owned transaction, the matched
+//! request row must remain locked until that transaction ends. Otherwise a second
+//! writer can advance the lifecycle after classification and make the returned
+//! disposition stale before the caller can compose further work atomically.
+
+use postgres::{Client, NoTls};
+use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
+use psychometrics_commons_runtime::integration::IntegrationEvent;
+use psychometrics_commons_runtime::postgres_data_rights::{
+    apply_data_rights_migration, persist_data_rights_identity_verification,
+    persist_requested_data_rights_with_propagation, DataRightsPropagationTarget,
+    DataRightsVerificationDisposition,
+};
+use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
+
+const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn schema_name(prefix: &str) -> String {
+    format!("{prefix}_{}", std::process::id())
+}
+
+fn connect() -> Client {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable")
+}
+
+fn ready_client(prefix: &str) -> Client {
+    let mut client = connect();
+    let schema = schema_name(prefix);
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
+        .unwrap();
+    apply_integration_migration(&mut client).unwrap();
+    apply_data_rights_migration(&mut client).unwrap();
+    client
+}
+
+fn requested_request(client: &mut Client) -> DataRightsRequest {
+    let request = DataRightsRequest::new(
+        "data_rights_request_verify_lock",
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Deletion,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap();
+    let event = IntegrationEvent::new(
+        "data_rights_event_verify_lock",
+        "data_rights.deletion.requested",
+        "v1",
+        "psychometrics_commons",
+        "tenant_alpha",
+        "data_rights_request_verify_lock",
+        10_000,
+        "data_rights_request_verify_lock",
+        None,
+        DIGEST,
+    )
+    .unwrap();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(client, &request, &targets, 3).unwrap();
+    request
+}
+
+#[test]
+fn duplicate_verification_classification_holds_row_lock_until_transaction_end() {
+    let prefix = "data_rights_verify_classification_lock";
+    let mut client = ready_client(prefix);
+    let mut request = requested_request(&mut client);
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_data_rights_identity_verification(&mut transaction, &request).unwrap(),
+            DataRightsVerificationDisposition::Verified
+        );
+        transaction.commit().unwrap();
+    }
+
+    let mut classifier = client.transaction().unwrap();
+    assert_eq!(
+        persist_data_rights_identity_verification(&mut classifier, &request).unwrap(),
+        DataRightsVerificationDisposition::Duplicate
+    );
+
+    let mut contender = connect();
+    let schema = schema_name(prefix);
+    contender
+        .batch_execute(&format!(
+            "SET search_path TO {schema}; SET lock_timeout TO '100ms';"
+        ))
+        .unwrap();
+    let error = contender
+        .execute(
+            "UPDATE data_rights_request_state
+             SET current_state = 'processing', updated_at = clock_timestamp()
+             WHERE request_ref = $1 AND tenant_ref = $2",
+            &[&"data_rights_request_verify_lock", &"tenant_alpha"],
+        )
+        .expect_err("classification must keep the matched request row locked");
+    assert_eq!(
+        error.code(),
+        Some(&postgres::error::SqlState::LOCK_NOT_AVAILABLE)
+    );
+
+    classifier.rollback().unwrap();
+}
