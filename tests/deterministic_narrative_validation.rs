@@ -181,6 +181,20 @@ fn display_text_rejects_padding_controls_and_blank_limitations() {
 }
 
 #[test]
+fn deterministic_fallback_requires_at_least_one_participant_limitation() {
+    let units = [unit()];
+    let missing_limitations = DeterministicNarrativeBundle {
+        limitations: &[],
+        ..bundle(&units)
+    };
+
+    assert_eq!(
+        missing_limitations.render(&identity(), &selection()),
+        Err(NarrativeFallbackError::MissingLimitations)
+    );
+}
+
+#[test]
 fn bundle_locale_must_be_canonical_display_text_before_identity_comparison() {
     let units = [unit()];
     let padded_locale = DeterministicNarrativeBundle {
