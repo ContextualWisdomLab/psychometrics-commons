@@ -75,6 +75,30 @@ BEGIN
         FROM pg_constraint AS constraint_record
         JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
         JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
+        WHERE constraint_record.conname = 'data_rights_completion_after_processing_check'
+          AND table_record.relname = 'data_rights_request_state'
+          AND schema_record.nspname = current_schema()
+    ) THEN
+        ALTER TABLE data_rights_request_state
+            ADD CONSTRAINT data_rights_completion_after_processing_check
+            CHECK (
+                completed_at_unix_ms IS NULL
+                OR (
+                    processing_started_at_unix_ms IS NOT NULL
+                    AND completed_at_unix_ms >= processing_started_at_unix_ms
+                )
+            );
+    END IF;
+END
+$$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint AS constraint_record
+        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
+        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
         WHERE constraint_record.conname = 'data_rights_completion_scope_fk_unique'
           AND table_record.relname = 'data_rights_request_state'
           AND schema_record.nspname = current_schema()
