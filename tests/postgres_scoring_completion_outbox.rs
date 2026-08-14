@@ -199,8 +199,8 @@ fn late_outbox_conflict_rolls_back_the_completion_transition() {
     let state: String = row.get(0);
     let stored_result_ref: Option<String> = row.get(1);
     let stored_fencing_token: Option<i64> = row.get(2);
-    let expected_fencing_token =
-        i64::try_from(fencing_token).expect("persisted scoring fencing token must fit PostgreSQL BIGINT");
+    let expected_fencing_token = i64::try_from(fencing_token)
+        .expect("persisted scoring fencing token must fit PostgreSQL BIGINT");
     assert_eq!(state, "leased");
     assert_eq!(stored_result_ref, None);
     assert_eq!(stored_fencing_token, Some(expected_fencing_token));
