@@ -137,6 +137,10 @@ pub fn persist_assessment_session(
     classify_existing_session(transaction, session, session_ref, created_at_unix_ms)
 }
 
+/// Compare an existing stored row with the requested immutable session identity.
+///
+/// Exact equality is treated as an idempotent duplicate; any changed participant,
+/// release, digest, locale, state, or creation time is a conflicting replay.
 fn classify_existing_session(
     transaction: &mut Transaction<'_>,
     session: &AssessmentSession,
@@ -171,14 +175,17 @@ fn classify_existing_session(
     }
 }
 
+/// Validate that a persistence reference is normalized, opaque, and non-numeric.
 fn required_reference(reference: &str) -> Result<&str, AssessmentSessionPersistenceError> {
     normalized_reference(reference).ok_or(AssessmentSessionPersistenceError::InvalidReference)
 }
 
+/// Convert an unsigned millisecond timestamp into the database `BIGINT` range.
 fn postgres_bigint(value: u64) -> Result<i64, AssessmentSessionPersistenceError> {
     i64::try_from(value).map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)
 }
 
+/// Map the domain session state to its stable persisted vocabulary.
 fn session_state_name(state: SessionState) -> &'static str {
     match state {
         SessionState::Created => "created",
@@ -194,6 +201,7 @@ fn session_state_name(state: SessionState) -> &'static str {
     }
 }
 
+/// Require the transaction isolation level used by the replay-classification contract.
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), AssessmentSessionPersistenceError> {
