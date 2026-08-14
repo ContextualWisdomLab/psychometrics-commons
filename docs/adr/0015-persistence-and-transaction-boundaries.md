@@ -2,307 +2,216 @@
 
 - Status: Accepted
 - Date: 2026-08-09
+- Last reconciled: 2026-08-15
 - Deciders: ContextualWisdomLab Psychometrics Commons maintainers
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main contains in-memory/domain lifecycle primitives only; active PR #24 carries the first PostgreSQL integration-evidence migration/adapter but is not protected-main truth until merged
-- Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
-- Migration status: active PR #24 introduces only the bounded integration-evidence slice; the remaining product schema still must be established from the logical ERD and this ADR without synthetic provenance backfills
+- Evaluated protected-main baseline: `cc5850a0d1eacbbf16d03075534fce460a8286e6`
+- Current/as-built status: **PARTIAL** — protected main contains bounded PostgreSQL 18 persistence for integration delivery/consumption, scoring jobs and requests, data-rights request/propagation plus identity verification, purpose-specific consent, immutable instrument release evidence, and immutable completed response snapshots. Other logical aggregates and transaction compositions remain incomplete.
+- Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics across every persisted product aggregate.
 
 ## Context
 
-The product must preserve session, response, consent, data-rights, result, research-contribution, and integration state durably while remaining independently deployable from Keyverse, fast-mlsirm, TEPP, semantic-data-portal, and other CWL services.
+Psychometrics Commons must preserve product-owned session, response, consent, data-rights, scoring-dispatch, result, research-contribution, and integration state durably while remaining independently deployable from Keyverse, fast-mlsirm, Gyeot, TEPP, semantic-data-portal, and other CWL services.
 
-The TRD and ADR-0011 already require service-owned databases and transactional outbox/inbox integration. A focused persistence decision is needed so implementation does not drift toward shared tables, distributed transactions, ad-hoc cross-module writes, or an undefined “PostgreSQL-compatible” behavior set whose transaction/locking semantics have not been verified.
+The TRD and ADR-0011 require service-owned data and transactional outbox/inbox integration. Persistence therefore cannot drift toward shared application databases, distributed transactions, ad-hoc cross-module writes, or an undefined “PostgreSQL-compatible” behavior class whose transaction and locking semantics are untested.
 
 ## Decision
 
-1. The initial supported operational database engine is **upstream PostgreSQL major version 18**. Deployments must use a currently supported PostgreSQL 18.x minor release. Forks, proxies, serverless products, and “PostgreSQL-compatible” services are **not implicitly supported**; adding one requires an explicit adapter/capability decision and real conformance/crash tests proving the invariants in this ADR.
-2. The product may initially use one physical database, but logical modules own their tables and invariants. Shared physical storage does not permit ad-hoc cross-module mutation.
-3. A local domain mutation and its durable outbound event are committed in **one local PostgreSQL transaction** using a transactional outbox.
-4. Event receipt is not equivalent to externally visible side-effect completion. Inbox processing uses durable `pending`, `processing`, `completed`, and `quarantined`/terminal-failure evidence. A local side effect and inbox completion are committed atomically when they share the same database. A non-local side effect is represented by durable local recoverable work/outbox state or is marked complete only after the external idempotency-key result and completion evidence are verified.
+1. The initial supported operational relational engine is **upstream PostgreSQL major version 18**. A deployment uses a currently supported 18.x minor release. Forks, proxies, serverless products, or wire-compatible services are not implicitly supported; each requires an explicit compatibility decision and real conformance/recovery evidence.
+2. One physical database may host multiple product modules, but logical module ownership remains authoritative. Shared storage does not authorize bypassing aggregate invariants.
+3. A local domain mutation and its durable outbound event are committed in **one local PostgreSQL transaction** when both belong to this service.
+4. Event receipt is not side-effect completion. Inbox processing preserves durable pending/processing/completed/quarantined or equivalent terminal evidence. A non-local effect is complete only after verifiable external idempotency/completion evidence is recorded.
 5. No distributed two-phase commit is used across CWL bounded contexts.
-6. No service receives another service's normal application-database credentials. Cross-service state is exchanged through versioned APIs, events, or immutable artifacts.
-7. Published/frozen scientific/product artifacts are append-only or superseded rather than updated in place.
-8. The first integration-evidence adapter uses the scoped outbox identity `(source_ref, tenant_ref, event_ref)`. `event_ref` is not assumed globally unique across sources or tenants.
-9. The first integration-evidence adapter's insert-then-inspect duplicate classifier supports PostgreSQL **READ COMMITTED** isolation only. The adapter verifies the effective transaction isolation and fails closed on `REPEATABLE READ`, `SERIALIZABLE`, or an unknown value. A future implementation may support stronger isolation only if its SQL algorithm and real concurrent replay tests prove identical duplicate-versus-conflict semantics.
+6. No service receives another service's normal application-database credentials. Cross-service state moves through versioned APIs, events, or immutable artifacts.
+7. Published/frozen scientific and product artifacts are append-only or superseded rather than rewritten in place.
+8. Public product references are opaque and non-numeric; durable replay classification is scoped by the documented tenant/resource identity rather than guessed global uniqueness.
+9. Persistence adapters must either prove their transaction-isolation algorithm or fail closed on unsupported isolation. Existing insert-then-inspect adapters explicitly require **READ COMMITTED** where statement-snapshot refresh is part of the replay classifier.
+10. A persistence replay is classified from immutable command/resource evidence. Mutable later lifecycle state must not silently convert an otherwise exact immutable creation replay into a conflict unless the operation's contract explicitly defines that lifecycle state as part of replay identity.
+
+## Protected-main as-built persistence
+
+On protected main `cc5850a0d1eacbbf16d03075534fce460a8286e6`, the physical migration set is exactly:
+
+```text
+migrations/0001_integration_delivery.sql
+migrations/0002_scoring_job_state.sql
+migrations/0003_data_rights_propagation.sql
+migrations/0005_consent_lifecycle.sql
+migrations/0006_instrument_release.sql
+migrations/0010_response_snapshot.sql
+migrations/0011_scoring_request.sql
+migrations/0012_integration_consumption.sql
+migrations/0015_data_rights_identity_verification.sql
+```
+
+The matching protected-main adapter surface includes:
+
+```text
+src/postgres_integration.rs
+src/postgres_scoring_job.rs
+src/postgres_data_rights.rs
+src/postgres_consent.rs
+src/postgres_instrument_release.rs
+src/postgres_response_snapshot.rs
+src/postgres_scoring_request.rs
+src/postgres_health.rs
+```
+
+This list is an as-built inventory, not a claim that the full logical ERD or hosted product lifecycle is already persisted. Item-delivery ledgers, response-event ledgers, created-session persistence, result persistence, identity-link history, research-contribution/release evidence, later data-rights processing/completion, recovery fixtures, and broader atomic transaction compositions may exist on active PRs but are not protected-main truth until integrated.
 
 ## Ownership and boundaries
 
-| Responsibility | Owner | Interface | Forbidden coupling |
+| Responsibility | Owner | Durable interface | Forbidden coupling |
 |---|---|---|---|
-| Product operational relational state | psychometrics-commons | PostgreSQL 18.x persistence adapter + migrations | another CWL service directly querying product tables |
-| Module-level persistence invariants | owning product module | repository/adaptor contracts | ad-hoc writes bypassing aggregate invariants |
-| Cross-service propagation | owning producer/consumer bounded contexts | versioned API/event/artifact + local outbox/inbox | distributed 2PC or shared application DB |
-| Restricted research identity linkage | psychometrics-commons restricted data boundary | separately authorized repository/role | normal assessment/reporting role access |
-| Scientific numerical artifacts | fast-mlsirm | immutable upstream references/digests | copying numerical kernel ownership into product DB logic |
+| Product operational relational state | psychometrics-commons | PostgreSQL 18.x adapters + repository migrations | another CWL service directly querying product tables |
+| Module-level persistence invariants | owning product module | typed repository/adapter contracts | ad-hoc SQL bypassing aggregate invariants |
+| Cross-service propagation | producer/consumer bounded contexts | versioned API/event/artifact + local outbox/inbox | distributed 2PC or shared application DB |
+| Restricted research identity linkage | psychometrics-commons restricted boundary | separately authorized product repository/role | normal assessment/reporting role access |
+| Scientific numerical artifacts | fast-mlsirm | immutable upstream references/digests | copying psychometric numerical kernels into product persistence logic |
+| Public research catalog/release registration | semantic-data-portal | immutable handoff/registration contract | Commons directly owning the public catalog |
 
 ## Database capability contract
 
-The first persistence adapter targets upstream PostgreSQL 18.x only and relies on documented PostgreSQL semantics for:
+Adapters may rely only on PostgreSQL behavior covered by repository acceptance evidence, including where used:
 
 - ACID local transactions and MVCC;
-- unique/foreign-key/check constraints needed for idempotency and tenant/resource integrity;
-- row-level locking or optimistic version checks selected per aggregate;
+- unique, foreign-key, and check constraints for idempotency and tenant/resource integrity;
+- row locking or explicit compare-and-set/fencing selected by the owning aggregate;
 - transaction-scoped outbox creation;
-- `READ COMMITTED` statement-snapshot refresh for the first integration-evidence adapter's two-statement insert/replay-classification sequence;
-- JSON/JSONB only where a reviewed schema requires it, never as an excuse to avoid versioned typed contracts;
-- transactional DDL characteristics only where migrations explicitly depend on them;
-- indexes and partial/expression indexes only when the migration and supported-query contract require them.
+- `READ COMMITTED` statement-snapshot refresh for insert-then-inspect replay classifiers that require it;
+- bounded, typed JSON/JSONB only where a versioned schema requires it;
+- migration/DDL behavior actually exercised by the migration chain; and
+- indexes required by a reviewed query/invariant contract.
 
-The integration-evidence adapter verifies `SHOW transaction_isolation` before a persistence effect after deterministic input validation. This prevents a caller-owned stronger-isolation transaction from silently misclassifying a concurrent exact replay whose row is not visible in the transaction's fixed snapshot.
+An adapter that depends on effective transaction isolation checks `SHOW transaction_isolation` before its persistence effect. Stronger isolation is not silently downgraded. Support for PostgreSQL 19, a fork, proxy, or hosted compatibility layer requires an explicit compatibility PR and the complete persistence/concurrency/recovery suite.
 
-Every supported minor version is tested through the same real-database migration/concurrency/crash suite. PostgreSQL 19 or any other major version is not added merely because it exists; support requires a compatibility PR that runs the full persistence acceptance suite and updates the supported-version contract. Cloud products or forks may be added later only with an explicit capability matrix covering transaction isolation, locking, constraints, JSON semantics, migrations/DDL, indexes, backup/restore, connection/proxy behavior, and the exact features this product uses.
+## Logical ownership
 
-## Logical schema ownership
+The logical ERD remains authoritative for conceptual ownership even when one entity is physically split or co-located:
 
-| Module | Logical entities |
+| Module | Representative logical entities |
 |---|---|
-| `instrument_publication` | `instrument_definition`, `instrument_version`, `instrument_item`, item/version references |
-| `assessment_session` | `assessment_participant`, `assessment_session` |
-| `response_event` | `response_event`, `response_snapshot`, `response_snapshot_entry` |
-| `scoring_dispatch` | `scoring_job`, scoring attempt/evidence records |
-| `result_snapshot` | `result_snapshot`, narrative/result-access metadata |
-| `consent_record` | `consent_form`, `consent_snapshot` |
-| `research_contribution` | `research_contribution`, research staging references |
-| restricted identity boundary | `research_participant`, `research_identity_linkage` with separately restricted access |
-| `data_rights` | `data_rights_request` and durable operation/evidence references |
-| integration | `integration_outbox`, delivery attempts, `integration_inbox`, `integration_consumption`, quarantine/reconciliation evidence |
+| instrument publication | instrument definition/version/item/release evidence |
+| assessment session | participant/session/item-delivery lifecycle |
+| response | response event, immutable response snapshot/entries |
+| scoring dispatch | scoring request/job/attempt/evidence |
+| result | immutable result snapshot + presentation provenance |
+| consent | consent form/snapshot/change evidence |
+| research contribution | contribution, withdrawal, restricted staging references |
+| restricted identity | research participant/linkage with separately restricted access |
+| data rights | request, verification, operation/completion/retention evidence |
+| integration | outbox, delivery attempt/lease, inbox/consumption/quarantine evidence |
 
-A physical migration may split an entity across tables or co-locate value objects, but it must preserve the logical ownership and invariants documented in `docs/architecture/ERD.md`.
+A physical optimization may differ from the conceptual table layout only when it preserves ownership, cardinality, immutability, tenant/resource binding, and transaction invariants documented in `docs/architecture/ERD.md` and `docs/architecture/AS_BUILT_SCHEMA.md`.
 
 ## Transaction boundaries
 
-### Response recording
+### Response recording and completion
 
-One transaction validates the current session state, reserves server sequence, applies the idempotency/uniqueness contract, and stores the accepted response event. Two concurrent requests cannot both create the same logical `client_event_ref`.
+Response acceptance must serialize server sequencing and idempotency evidence for one session. Completion freezes one exact accepted response prefix. The durable completed response snapshot already exists on protected main; a future hosted transaction that also transitions session state and dispatches scoring must commit the required local business evidence atomically rather than leave an accepted snapshot without recoverable scoring work.
 
-### Session completion
+### Scoring dispatch and completion
 
-One transaction:
+Scoring requests/jobs are product-owned durable evidence, while fast-mlsirm owns scientific numerics. Dispatch, retry, fencing, result acceptance, and downstream outbox publication must preserve exact request/version/provenance identity. A stale worker cannot complete a newer attempt. Open transaction-composition work is not treated as protected-main implementation until merged.
 
-1. validates that completion is legal;
-2. freezes the exact accepted response prefix into an immutable response snapshot;
-3. transitions the session to Completed;
-4. writes the scoring-request outbox record.
+### Integration outbox and inbox
 
-The scoring worker is not called inside this transaction.
-
-### Scoring completion
-
-A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
-
-### Integration outbox enqueue
-
-The first physical integration slice inserts an immutable outbox row under the composite identity `(source_ref, tenant_ref, event_ref)`. `INSERT ... ON CONFLICT DO NOTHING` is followed by an exact immutable-evidence query only when the insert did not create a row. Because a caller may supply its own transaction, this algorithm explicitly requires `READ COMMITTED`, where each statement receives a fresh command snapshot after a conflicting transaction completes. Stronger isolation is rejected rather than converting an invisible concurrent duplicate into a false `ConflictingReplay` result.
-
-Delivery-attempt rows reference the same composite outbox identity. An identical `event_ref` from another tenant or source is therefore an independent event rather than a collision.
-
-### Inbox consumption and external effects
-
-On receipt, a consumer validates source/schema/digest/tenant/resource identity and creates or finds the deduplication record. Processing then follows one of two safe patterns:
-
-1. **Local effect:** the domain change and transition of the inbox record to `completed` happen in the same PostgreSQL transaction.
-2. **Non-local effect:** the consumer transaction records `processing` plus a local durable outbox/work item carrying the external operation's stable idempotency key. A worker retries that operation after crashes. The inbox becomes `completed` only after verifiable completion evidence is recorded. If the external service itself exposes a durable idempotency-key result, a retry queries/reuses that result rather than guessing whether the effect happened.
-
-The first physical inbox deduplication slice also uses an insert-then-inspect duplicate classifier and therefore has the same explicit `READ COMMITTED` requirement as outbox enqueue.
-
-An inbox row that merely proves receipt is never marked `completed` before the required effect is locally atomic or durably recoverable. Unknown/mismatched semantics are quarantined without applying the effect.
+The outbox identity is scoped by its documented source/tenant/event identity. Exact replay reuses identical immutable evidence; conflicting replay fails closed. Inbox receipt is distinct from effect completion. Local effects and inbox completion share one transaction; non-local effects require durable recoverable work and an external idempotency/completion contract.
 
 ### Consent and data rights
 
-Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
+Consent decisions and data-rights lifecycle evidence are append-only or monotonic. Purpose-specific research consent remains separate from service use. Data-rights propagation is asynchronous and reconciled; local state never claims that another bounded context completed deletion/export merely because a local event was enqueued or received.
 
-## Concurrency and idempotency
+### Research handoff
 
-Physical constraints must enforce equivalents of:
+Restricted operational/research linkage remains inside the separately authorized Commons research boundary. Public release/catalog registration belongs to semantic-data-portal. No public artifact may contain operational participant identifiers merely because the data shares one physical PostgreSQL deployment.
 
-- unique `(session_ref, client_event_ref)`;
-- unique `(session_ref, server_sequence)`;
-- unique server/public event references within their documented source/tenant scope;
-- one canonical frozen response snapshot per completion/supersession policy;
-- unique outbox identity `(source_ref, tenant_ref, event_ref)` for the first integration persistence slice;
-- delivery attempts foreign-keyed to that same scoped outbox identity;
-- tenant-bound consumer deduplication identity consistent with ADR-0014;
-- tenant/resource-scoped request idempotency keys;
-- manifest/result content digest consistency;
-- monotonic or version-checked aggregate updates where concurrent commands can race.
+## Concurrency and idempotency invariants
 
-### Concurrency invariants
-
-1. Two concurrent writes for the same logical idempotency key cannot create two domain effects.
-2. Session completion racing a response write produces one serializable domain outcome: a response is either included before the immutable completion snapshot or rejected after collection closes; it cannot appear in an ambiguous half-state.
-3. Two workers cannot both own the same processing lease/attempt without fencing or an equivalent compare-and-set guarantee.
-4. A stale worker may not mark a job/inbox/outbox effect completed after a newer lease/fencing token supersedes it.
-5. Isolation/locking choices must be demonstrated by real PostgreSQL tests; in-memory mutex behavior is not evidence.
-6. Deadlock/serialization errors are classified as bounded retryable only when the same immutable command/idempotency identity can be retried safely.
-7. A persistence function may not silently assume a caller-owned transaction uses an isolation level compatible with its SQL algorithm; supported isolation is checked or the algorithm must be isolation-independent.
-
-The initial integration-evidence adapter is deliberately narrower than the eventual aggregate persistence layer: `READ COMMITTED` is the only accepted isolation level for its two-statement replay classifier. Other aggregates may select optimistic locking, row locking, or a stronger isolation level when their own adapter semantics and real-database tests prove the required invariants.
-
-## Immutable payloads and large content
-
-Routine rows store references/digests where raw sensitive payloads are unnecessary. Raw response or report payloads may reside in PostgreSQL or an approved encrypted object store.
-
-The adapter must bind payload/reference to digest and preserve authorization, encryption, export/deletion, snapshot replay, and backup/restore semantics. Moving bytes to object storage does not change data ownership.
-
-## Data and persistence impact
-
-Protected main still has no physical product persistence. Active PR #24 introduces only three bounded integration-evidence tables and their adapter; it does not establish the complete product schema. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
+1. Two concurrent commands for one logical idempotency identity cannot create two logical effects.
+2. Exact immutable replay is idempotent; any changed immutable tenant/resource/digest/version/evidence binding fails closed.
+3. Session completion racing response acceptance yields one unambiguous serial order.
+4. Two workers cannot both own the same processing attempt without fencing or an equivalent compare-and-set guarantee.
+5. A stale worker cannot mark work complete after a newer fence supersedes it.
+6. Locking/isolation claims require real PostgreSQL tests; in-memory synchronization is not evidence.
+7. Deadlock/serialization retries are bounded and safe only when the immutable command identity can be retried exactly.
+8. An adapter never assumes a caller-owned transaction uses compatible isolation without checking or using an isolation-independent algorithm.
+9. Mutable lifecycle timestamps/states are not retroactively part of an immutable creation command identity unless the operation contract explicitly says so.
 
 ## Migration policy
 
-- Database object names contain at least two descriptive words and use `snake_case` by default.
+- Database objects use descriptive two-or-more-word `snake_case` names by default.
 - Public opaque references remain stable across migrations.
-- Schema changes support at least one backward-compatible application deployment window unless a separately approved maintenance migration proves otherwise.
-- Destructive migrations require verified backup/restore evidence and explicit roll-forward/rollback instructions.
-- New immutable identity/digest fields are deterministically backfilled or the migration fails; synthetic placeholder provenance is forbidden.
-- Published scientific payloads are not rewritten merely to simplify a schema transition.
-- PostgreSQL major-version upgrades are operational migrations and require full persistence/concurrency/restore acceptance on the target major before support is declared.
-
-The first migration is a clean-install migration only because protected main has no prior physical product schema. Before that migration may be treated as shipped, its composite outbox identity, delivery-attempt foreign key, tenant/source-scoped inbox identity, opaque-reference checks, digest checks, bounded states, and replay behavior must pass real PostgreSQL tests on the exact reviewed head.
+- New immutable identity/digest/provenance fields are deterministically derived or the migration fails; synthetic placeholder provenance is forbidden.
+- Published scientific payloads are not rewritten to simplify a migration.
+- Destructive migrations require verified backup/restore evidence plus an explicit recovery path.
+- PostgreSQL major upgrades are operational migrations and require the complete acceptance suite before support is declared.
+- Physical migrations and `AS_BUILT_SCHEMA.md` are reconciled in the same workstream.
 
 ## Failure and degraded modes
 
-- Transaction failure: no partial domain transition and no orphan outbox event.
-- Unsupported transaction isolation for an adapter path: fail before the persistence effect with a typed safe error; do not silently downgrade the caller's transaction.
-- Outbox publication failure: local committed resource remains valid; dispatch retries are bounded and observable.
-- Duplicate message: inbox deduplication reuses existing processing/completion evidence and prevents duplicate logical effect.
-- Consumer crash after receipt but before local effect: pending/processing evidence remains retryable; receipt alone does not suppress the effect.
-- External effect uncertainty after network failure: retry/query through the same external idempotency identity; do not mark completed without evidence.
-- Poison/invalid event: bounded attempts then quarantine with typed cause and reconciliation path.
-- Cross-service outage: does not roll back already-valid local participant action.
-- Digest or tenant/resource conflict during reconciliation: fail closed and require operator/scientific adjudication; last-write-wins is forbidden.
-- Database major/minor incompatibility: readiness/upgrade fails closed rather than silently running an unvalidated persistence contract.
+- Transaction failure leaves no partial local transition/orphan required outbox effect.
+- Unsupported isolation fails before the persistence effect with a typed safe error.
+- Outbox publication failure does not invalidate an already-committed local resource; durable delivery remains retryable and observable.
+- Duplicate message receipt reuses existing processing/completion evidence and cannot duplicate the logical effect.
+- Crash after receipt but before effect leaves durable recoverable work.
+- External effect uncertainty is retried/queried through the same external idempotency identity; completion is never guessed.
+- Invalid/poison evidence is bounded and quarantined or rejected with a typed cause.
+- Cross-service outage cannot force a valid independent participant action to use another service's database.
+- Digest/tenant/resource conflicts fail closed; last-write-wins is forbidden.
+- Database compatibility failure blocks readiness rather than silently running an unvalidated contract.
 
 ## Security, privacy, and tenancy
 
-- Tenant context is required for tenant-scoped state and is derived from authorized context.
-- Database roles enforce least privilege; normal runtime paths do not receive unrestricted access to `research_identity_linkage`.
-- Cross-service credentials cannot be used to query another service's application tables.
-- Routine logs and outbox metadata contain resource references/digests rather than raw sensitive assessment content.
-- Backup copies retain the same classification and access obligations as primary data.
-- Tenant/resource binding is validated before event consumption and included in physical uniqueness/authorization constraints where appropriate.
-- Outbox `event_ref` is scoped by both `source_ref` and `tenant_ref`; one source/tenant cannot suppress another source/tenant solely by reusing the same opaque event reference.
-
-## Deployment and operations impact
-
-The Community, Hosted, and Enterprise profiles may package PostgreSQL differently, but the initial product persistence contract remains upstream PostgreSQL 18.x unless a later adapter decision expands support. Operators must expose database compatibility, migration status, pool health, transaction/lock timeout failures, outbox/inbox age, processing leases, quarantine, and restore readiness without exposing sensitive payloads. Connection pool settings and retry budgets must be bounded to prevent overload amplification.
-
-The integration-evidence adapter additionally requires its caller/session configuration to use `READ COMMITTED`. A profile that forces a different isolation policy is incompatible with this adapter until an isolation-independent implementation or separately proven stronger-isolation algorithm lands.
+- Tenant context is required for tenant-scoped durable state and comes from authorized product context.
+- Runtime roles apply least privilege; restricted research linkage is not visible to ordinary assessment/reporting roles.
+- Cross-service credentials cannot query another service's application tables.
+- Routine logs/outbox metadata prefer opaque references and digests over raw sensitive assessment payloads.
+- Backup copies retain the same classification/access obligations as primary data.
+- Public research release never inherits operational identity simply because the restricted linkage exists in Commons.
 
 ## Validation and release evidence
 
-When physical persistence exists, required evidence includes:
+A release claiming production persistence must provide, on one exact protected head as applicable:
 
-- clean install and migration on upstream PostgreSQL 18.x current supported minor;
-- migration upgrade/rollback or tested roll-forward strategy;
-- real-database concurrency/idempotency tests;
-- exact replay and conflicting replay tests scoped by `(source_ref, tenant_ref, event_ref)`;
-- proof that identical `event_ref` values from different tenants and sources persist independently;
-- contract tests proving the current integration adapter accepts `READ COMMITTED` and fails closed on `REPEATABLE READ` and `SERIALIZABLE` before the persistence effect;
-- crash tests around transaction/outbox/inbox/worker boundaries;
-- inbox pending/processing/completed/quarantine replay tests;
-- external side-effect idempotency/recovery tests using a deterministic contract test service;
-- cross-tenant database/API negative tests;
+- clean migration chain on supported PostgreSQL 18.x;
+- real-database exact/conflicting replay and concurrency tests;
+- cross-tenant negative tests;
+- transaction/outbox/inbox crash and recovery tests;
+- worker lease/fencing tests;
 - immutable snapshot/result/release constraint tests;
-- lock/deadlock/serialization-retry tests under bounded timeouts for adapters that actually support those retry classes;
-- restore tests preserving deduplication, tenant, provenance, and restricted-linkage boundaries;
-- schema-to-logical-ERD fitness validation;
-- unsupported database/fork/major-version rejection tests until separately supported.
+- backup/restore evidence preserving deduplication, tenant, provenance, and restricted-data boundaries;
+- schema-to-logical-ERD and AS_BUILT_SCHEMA reconciliation;
+- unsupported database/isolation rejection tests; and
+- deployment-profile migration/rollback or roll-forward evidence.
 
-## Architecture-view impact
-
-- `docs/architecture/ERD.md` must reflect tenant-bound outbox/inbox and processing evidence, including source/tenant-scoped event identity.
-- `docs/architecture/UML.md` sequences must not imply that receipt alone completes non-local effects.
-- `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` must name PostgreSQL 18.x as the initial validated store rather than an undefined compatible class.
-- `docs/TRACEABILITY.md` must classify active-PR persistence separately from protected-main implementation until migrations and real-database tests land on protected main.
-
-## Alternatives considered
-
-### Undefined “PostgreSQL-compatible” operational store
-
-Rejected for the initial release. Compatibility claims differ in transaction isolation, DDL/migration behavior, locking, extensions, JSON, indexing, failover, and proxy semantics. Support is earned by conformance evidence, not a wire-protocol label.
-
-### Support every currently maintained PostgreSQL major immediately
-
-Rejected as unnecessary pre-GA compatibility burden. The initial baseline targets PostgreSQL 18.x; additional major versions require explicit evidence and can be added when buyer/deployment needs justify them.
-
-### Shared organization-wide database
-
-Rejected. It bypasses bounded contexts, expands credential blast radius, and prevents independent deployment.
-
-### Distributed two-phase commit across CWL services
-
-Rejected. It couples independent availability and deployment domains and is unnecessary when durable outbox/inbox plus reconciliation preserve product semantics.
-
-### Globally unique `event_ref` without source/tenant scope
-
-Rejected. The domain contract does not guarantee global uniqueness across bounded-context sources or tenants. A single-column primary key could reject a valid event in one tenant because another source or tenant used the same opaque event reference.
-
-### Allow stronger isolation without changing the replay classifier
-
-Rejected. `REPEATABLE READ` and `SERIALIZABLE` retain transaction snapshots that can make the post-conflict inspection unable to observe the row that caused `ON CONFLICT DO NOTHING`. The adapter fails closed instead of reporting a deterministic duplicate/conflict result it cannot prove.
-
-### Mark inbox completed at receipt before non-local side effect
-
-Rejected. A crash after receipt but before the side effect could make retries suppress an effect that never happened.
-
-### Synchronous call to downstream service inside every product transaction
-
-Rejected. A transient dependency outage must not erase or partially commit a participant's valid local action.
-
-### Event sourcing for every aggregate
-
-Not selected as a universal storage pattern. Append-only evidence is required where it serves audit/scientific semantics, but full event sourcing would add complexity without a demonstrated product need.
+Architecture documents, active PRs, or an isolated passing unit test do not constitute GA evidence by themselves. `docs/TRACEABILITY.md` records the exact protected-main maturity baseline.
 
 ## Consequences
 
-Positive:
+### Positive
 
-- precise database compatibility instead of an unverifiable “compatible” claim;
-- tenant/source-scoped outbox identity aligned with the event-domain contract;
-- fail-closed, explicit isolation behavior for caller-owned transactions;
-- clear ownership and recovery boundaries;
-- crash-safe cross-service propagation;
-- independent service deployability;
-- durable, reproducible product/scientific evidence.
+- Product ownership remains explicit without shared-database coupling.
+- Crash-safe local transactions and transactional outbox/inbox provide defensible recovery semantics.
+- Immutable provenance and exact replay semantics support audit, privacy, acquisition diligence, and scientific reproducibility.
+- Compatibility claims become evidence-based rather than protocol-label based.
 
-Costs:
+### Costs
 
-- PostgreSQL 18.x becomes an explicit initial operational dependency;
-- the first integration adapter is intentionally limited to `READ COMMITTED` until redesigned/proven otherwise;
-- explicit worker/reconciliation machinery;
-- duplicate/idempotency/processing state;
-- migration, concurrency, crash, and restore testing burden;
-- additional database services/forks/major versions require separate conformance work.
-
-## Follow-up work
-
-- complete and merge the first PostgreSQL 18.x integration-evidence migration/adapter only after exact-head review and evidence gates pass;
-- implement the remaining typed repository adapters from `docs/architecture/ERD.md`;
-- add real PostgreSQL concurrency/crash tests for response completion, outbox, inbox, and worker leases;
-- implement durable inbox processing states and delivery-attempt APIs consistent with ADR-0014;
-- evaluate whether a single-statement replay classifier can safely remove the integration adapter's `READ COMMITTED` restriction without weakening duplicate/conflict semantics;
-- add profile-specific database install/upgrade/restore runbooks;
-- evaluate additional managed PostgreSQL services only when a concrete deployment need exists and record a capability/conformance matrix before claiming support.
-
-## Traceability
-
-- Product requirements: `docs/PRD.md` product persistence, security/privacy, and release acceptance.
-- Technical requirements: `docs/TRD.md` transaction, database, integration, naming, observability, failure and release sections.
-- Architecture: `ARCHITECTURE.md`, `docs/architecture/ERD.md`, `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`.
-- Event integrity/consumption: ADR-0014.
-- Recovery: ADR-0017.
-- Delivery state: `docs/TRACEABILITY.md`, `docs/ROADMAP.md`.
-
-## Reversal conditions
-
-The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed. The `READ COMMITTED` restriction may be removed only when a replacement replay algorithm is proven isolation-correct by real concurrent PostgreSQL tests and the documentation/traceability contract is updated in the same change.
+- PostgreSQL 18 is initially a deliberately narrow support target.
+- Real concurrency/recovery testing is mandatory and more expensive than in-memory tests.
+- Additional transaction-composition work is required before the hosted lifecycle can be called complete.
+- Restricted research linkage requires separate authorization/operational controls even if physically co-located.
 
 ## References
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
-
-PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+- `docs/TRD.md`
+- `ARCHITECTURE.md`
+- `docs/architecture/ERD.md`
+- `docs/architecture/AS_BUILT_SCHEMA.md`
+- `docs/architecture/UML.md`
+- `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`
+- `docs/TRACEABILITY.md`
+- ADR-0001, ADR-0003, ADR-0004, ADR-0005, ADR-0006, ADR-0010, ADR-0011, ADR-0014, ADR-0017
