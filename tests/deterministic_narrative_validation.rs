@@ -8,6 +8,8 @@ use psychometrics_commons_runtime::narrative::{ScoreIdentity, StyleAssignmentIde
 const RULE_DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const ALT_RULE_DIGEST: &str =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const MIXED_RULE_DIGEST: &str =
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn identity() -> StyleAssignmentIdentity<'static> {
     StyleAssignmentIdentity {
@@ -93,6 +95,36 @@ fn malformed_digest_prefix_and_noncanonical_hex_are_rejected() {
             Err(NarrativeFallbackError::InvalidDigest)
         );
     }
+}
+
+#[test]
+fn canonical_digest_accepts_decimal_hex_and_rejects_wrong_length() {
+    let units = [unit()];
+    let mixed_identity = StyleAssignmentIdentity {
+        interpretation_rule_bundle_digest: MIXED_RULE_DIGEST,
+        ..identity()
+    };
+    let mixed_selection = ApprovedStyleSelection {
+        assignment_key: mixed_identity.assignment_key().unwrap(),
+        ..selection()
+    };
+    let mixed_bundle = DeterministicNarrativeBundle {
+        interpretation_rule_bundle_digest: MIXED_RULE_DIGEST,
+        ..bundle(&units)
+    };
+    assert!(mixed_bundle
+        .render(&mixed_identity, &mixed_selection)
+        .is_ok());
+
+    let short_digest = DeterministicNarrativeBundle {
+        interpretation_rule_bundle_digest:
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ..bundle(&units)
+    };
+    assert_eq!(
+        short_digest.render(&identity(), &selection()),
+        Err(NarrativeFallbackError::InvalidDigest)
+    );
 }
 
 #[test]
