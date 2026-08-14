@@ -12,6 +12,12 @@ use std::fmt::{Display, Formatter};
 
 const RESEARCH_RELEASE_MIGRATION: &str =
     include_str!("../migrations/0016_research_release_approval.sql");
+const RESEARCH_RELEASE_SELECT: &str =
+    "SELECT dataset_snapshot_ref, research_scope_ref, manifest_digest, privacy_review_ref,\
+            scientific_review_ref, metadata_bundle_ref, license_record_ref,\
+            measurement_provenance_ref, access_approval_ref, citation_metadata_ref,\
+            release_approver_ref, ordinary_admin_ref, access_class \
+     FROM research_release_approval WHERE research_release_ref = $1";
 
 /// Outcome of persisting one immutable approved research release.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,14 +137,8 @@ fn classify_existing_release(
     release: &ApprovedResearchRelease,
     access_class: &str,
 ) -> Result<ResearchReleasePersistenceDisposition, ResearchReleasePersistenceError> {
-    let row = transaction.query_one(
-        "SELECT dataset_snapshot_ref, research_scope_ref, manifest_digest, privacy_review_ref,\
-                scientific_review_ref, metadata_bundle_ref, license_record_ref,\
-                measurement_provenance_ref, access_approval_ref, citation_metadata_ref,\
-                release_approver_ref, ordinary_admin_ref, access_class \
-         FROM research_release_approval WHERE research_release_ref = $1",
-        &[&release.release_ref()],
-    )?;
+    let release_ref = release.release_ref();
+    let row = transaction.query_one(RESEARCH_RELEASE_SELECT, &[&release_ref])?;
     let stored_dataset: String = row.get(0);
     let stored_scope: String = row.get(1);
     let stored_manifest: String = row.get(2);
