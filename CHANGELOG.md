@@ -6,6 +6,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Added
 - PostgreSQL 18 item-delivery persistence for one session-bound ledger plus append-only delivery events, with exact replay, fail-closed release rebinding, duplicate-item protection, unique server sequences, opaque-reference/digest/locale bounds, and `READ COMMITTED` replay classification.
+- PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
 - Assessment-session creation binds to one published locale-specific instrument release, copies immutable version/locale provenance, and fails closed on locale mismatch or unpublished eligibility.
 - PostgreSQL persistence for immutable version-pinned scoring-request identity, with exact replay and fail-closed rebinding of snapshot or measurement-version evidence.
 
