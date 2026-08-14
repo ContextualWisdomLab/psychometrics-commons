@@ -353,7 +353,8 @@ fn classify_select_failure_after_conflict_is_a_database_failure() {
     let sink = format!("assessment_session_classify_sink_{}", std::process::id());
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA {sink};
+            "DROP SCHEMA IF EXISTS {sink} CASCADE;
+             CREATE SCHEMA {sink};
              CREATE OR REPLACE FUNCTION assessment_session_redirect_after_insert()
              RETURNS trigger LANGUAGE plpgsql AS $$
              BEGIN
@@ -367,9 +368,19 @@ fn classify_select_failure_after_conflict_is_a_database_failure() {
         .unwrap();
 
     let mut transaction = client.transaction().unwrap();
+    let result = persist_assessment_session(&mut transaction, &session);
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(&format!(
+            "DROP TRIGGER IF EXISTS assessment_session_redirect_after_insert ON assessment_session;
+             DROP FUNCTION IF EXISTS {SCHEMA}.assessment_session_redirect_after_insert();
+             DROP SCHEMA IF EXISTS {sink} CASCADE;"
+        ))
+        .unwrap();
+
     assert!(matches!(
-        persist_assessment_session(&mut transaction, &session),
+        result,
         Err(AssessmentSessionPersistenceError::Database(_))
     ));
-    transaction.rollback().unwrap();
 }
