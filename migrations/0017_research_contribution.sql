@@ -1,3 +1,51 @@
+CREATE TABLE IF NOT EXISTS research_consent_snapshot (
+    consent_snapshot_ref TEXT CONSTRAINT research_consent_snapshot_ref_not_null NOT NULL
+        CONSTRAINT research_consent_snapshot_ref_format_check CHECK (
+            consent_snapshot_ref = btrim(consent_snapshot_ref)
+            AND consent_snapshot_ref <> ''
+            AND NOT (
+                consent_snapshot_ref ~ '[[:digit:]]'
+                AND consent_snapshot_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
+    participant_ref TEXT CONSTRAINT research_consent_snapshot_participant_ref_not_null NOT NULL
+        CONSTRAINT research_consent_snapshot_participant_ref_format_check CHECK (
+            participant_ref = btrim(participant_ref)
+            AND participant_ref <> ''
+            AND NOT (
+                participant_ref ~ '[[:digit:]]'
+                AND participant_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
+    research_scope_ref TEXT CONSTRAINT research_consent_snapshot_scope_ref_not_null NOT NULL
+        CONSTRAINT research_consent_snapshot_scope_ref_format_check CHECK (
+            research_scope_ref = btrim(research_scope_ref)
+            AND research_scope_ref <> ''
+            AND NOT (
+                research_scope_ref ~ '[[:digit:]]'
+                AND research_scope_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
+    consent_form_version_ref TEXT
+        CONSTRAINT research_consent_snapshot_form_version_ref_not_null NOT NULL
+        CONSTRAINT research_consent_snapshot_form_version_ref_format_check CHECK (
+            consent_form_version_ref = btrim(consent_form_version_ref)
+            AND consent_form_version_ref <> ''
+            AND NOT (
+                consent_form_version_ref ~ '[[:digit:]]'
+                AND consent_form_version_ref ~ '^[[:digit:]+,.eE-]+$'
+            )
+        ),
+    created_at TIMESTAMPTZ CONSTRAINT research_consent_snapshot_created_at_not_null NOT NULL
+        DEFAULT clock_timestamp(),
+    CONSTRAINT research_consent_snapshot_pkey PRIMARY KEY (consent_snapshot_ref),
+    CONSTRAINT research_consent_snapshot_binding_unique UNIQUE (
+        consent_snapshot_ref,
+        participant_ref,
+        research_scope_ref
+    )
+);
+
 CREATE TABLE IF NOT EXISTS research_contribution (
     contribution_ref TEXT CONSTRAINT research_contribution_ref_not_null NOT NULL
         CONSTRAINT research_contribution_ref_format_check CHECK (
@@ -53,7 +101,16 @@ CREATE TABLE IF NOT EXISTS research_contribution (
         CONSTRAINT research_contribution_started_at_positive_check CHECK (started_at_unix_ms > 0),
     created_at TIMESTAMPTZ CONSTRAINT research_contribution_created_at_not_null NOT NULL
         DEFAULT clock_timestamp(),
-    CONSTRAINT research_contribution_pkey PRIMARY KEY (contribution_ref)
+    CONSTRAINT research_contribution_pkey PRIMARY KEY (contribution_ref),
+    CONSTRAINT research_contribution_consent_binding_fk FOREIGN KEY (
+        consent_snapshot_ref,
+        participant_ref,
+        research_scope_ref
+    ) REFERENCES research_consent_snapshot (
+        consent_snapshot_ref,
+        participant_ref,
+        research_scope_ref
+    )
 );
 
 CREATE TABLE IF NOT EXISTS research_withdrawal_event (
