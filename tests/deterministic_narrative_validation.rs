@@ -207,3 +207,49 @@ fn bundle_locale_must_be_canonical_display_text_before_identity_comparison() {
         Err(NarrativeFallbackError::InvalidText)
     );
 }
+
+#[test]
+fn every_fallback_error_has_stable_beginner_readable_display_text() {
+    let cases = [
+        (
+            NarrativeFallbackError::InvalidReference,
+            "narrative references must be opaque non-numeric values",
+        ),
+        (
+            NarrativeFallbackError::InvalidText,
+            "narrative text must be nonblank canonical display text",
+        ),
+        (
+            NarrativeFallbackError::InvalidDigest,
+            "narrative rule digest must be canonical lowercase SHA-256",
+        ),
+        (
+            NarrativeFallbackError::InvalidIdentity,
+            "style-assignment identity is invalid",
+        ),
+        (
+            NarrativeFallbackError::IdentityMismatch,
+            "narrative provenance does not match style assignment",
+        ),
+        (
+            NarrativeFallbackError::DuplicateReference,
+            "narrative style or interpretation reference is duplicated",
+        ),
+        (
+            NarrativeFallbackError::EmptySelection,
+            "narrative selection must contain interpretation units",
+        ),
+        (
+            NarrativeFallbackError::MissingLimitations,
+            "deterministic narrative bundle must include participant-facing limitations",
+        ),
+        (
+            NarrativeFallbackError::MissingInterpretationUnit,
+            "selected interpretation unit is absent from the approved bundle",
+        ),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(error.to_string(), expected);
+    }
+}
