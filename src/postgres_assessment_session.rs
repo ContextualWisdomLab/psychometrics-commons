@@ -145,13 +145,16 @@ fn classify_existing_session(
     session_ref: &str,
     created_at_unix_ms: i64,
 ) -> Result<AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError> {
-    let row = transaction.query_one(
+    let row = match transaction.query_one(
         "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
                 instrument_release_content_digest, locale, session_state,
                 created_at_unix_ms
          FROM assessment_session WHERE session_ref = $1",
         &[&session_ref],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(AssessmentSessionPersistenceError::from(error)),
+    };
     let stored_participant: String = row.get(0);
     let stored_release: String = row.get(1);
     let stored_version: String = row.get(2);
