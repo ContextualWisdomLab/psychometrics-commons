@@ -240,10 +240,30 @@ fn unsupported_isolation_fails_before_write() {
 }
 
 #[test]
-fn persistence_errors_have_operator_facing_display_and_sources() {
+fn database_failure_is_typed_and_exposes_the_postgres_source() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_table(&mut client);
+    apply_research_release_migration(&mut client).unwrap();
+    client
+        .batch_execute("DROP TABLE research_release_approval")
+        .unwrap();
+    let release = approved_release(
+        "research_release_database_error",
+        DIGEST_A,
+        ResearchAccessClass::Embargoed,
+        "metadata_bundle_research_alpha",
+    );
+
+    let error = persist_err(&mut client, &release);
+    assert!(matches!(error, ResearchReleasePersistenceError::Database(_)));
+    assert_eq!(error.to_string(), "PostgreSQL research-release persistence failed");
+    assert!(error.source().is_some());
+}
+
+#[test]
+fn non_database_errors_have_operator_facing_display_without_sources() {
     let errors = [
-        ResearchReleasePersistenceError::InvalidReference,
-        ResearchReleasePersistenceError::InvalidManifestDigest,
         ResearchReleasePersistenceError::UnsupportedIsolationLevel,
         ResearchReleasePersistenceError::ConflictingReplay,
     ];
