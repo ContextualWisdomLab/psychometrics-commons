@@ -122,3 +122,20 @@ CREATE TABLE IF NOT EXISTS research_release_approval (
         release_approver_ref <> ordinary_admin_ref
     )
 );
+
+CREATE OR REPLACE FUNCTION reject_research_release_approval_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'research_release_approval rows are immutable'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS research_release_approval_immutable_guard
+    ON research_release_approval;
+CREATE TRIGGER research_release_approval_immutable_guard
+    BEFORE UPDATE OR DELETE ON research_release_approval
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_research_release_approval_mutation();
