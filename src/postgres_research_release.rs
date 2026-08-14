@@ -5,7 +5,6 @@
 //! restricted research linkage, or call `semantic-data-portal`; public catalog registration
 //! remains owned by that bounded context. Exact replay requires `READ COMMITTED`.
 
-use crate::reference::normalized_reference;
 use crate::research_release::{ApprovedResearchRelease, ResearchAccessClass};
 use postgres::Transaction;
 use std::error::Error;
@@ -28,10 +27,6 @@ pub enum ResearchReleasePersistenceDisposition {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ResearchReleasePersistenceError {
-    /// An approval evidence reference was blank or numeric-like.
-    InvalidReference,
-    /// The manifest digest was not canonical lowercase SHA-256 evidence.
-    InvalidManifestDigest,
     /// Release identity was replayed with different immutable approval evidence.
     ConflictingReplay,
     /// Persistence requires `PostgreSQL` `READ COMMITTED` isolation.
@@ -43,12 +38,6 @@ pub enum ResearchReleasePersistenceError {
 impl Display for ResearchReleasePersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => {
-                "research release persistence references must be opaque values"
-            }
-            Self::InvalidManifestDigest => {
-                "research release persistence manifest must be canonical sha256 evidence"
-            }
             Self::ConflictingReplay => {
                 "research release identity was replayed with conflicting approval evidence"
             }
@@ -88,22 +77,23 @@ pub fn apply_research_release_migration(
 
 /// Persist immutable product-side approval evidence for one Research Commons release.
 ///
-/// Exact replay is idempotent. Reusing `release_ref` with any different dataset snapshot,
-/// research scope, manifest digest, review, rights, provenance, metadata, approval, citation,
-/// separation-of-duties, or access-class evidence fails closed. Historical approval evidence is
-/// never updated in place. This function does not imply that public catalog registration has
-/// occurred; that later handoff remains a separate `semantic-data-portal` contract.
+/// The accepted domain type has already validated opaque references, canonical manifest digest,
+/// unresolved blockers, and separation of duties. Exact replay is idempotent. Reusing
+/// `release_ref` with any different dataset snapshot, research scope, manifest digest, review,
+/// rights, provenance, metadata, approval, citation, separation-of-duties, or access-class
+/// evidence fails closed. Historical approval evidence is never updated in place. This function
+/// does not imply that public catalog registration has occurred; that later handoff remains a
+/// separate `semantic-data-portal` contract.
 ///
 /// # Errors
 ///
-/// Returns [`ResearchReleasePersistenceError`] for malformed evidence, unsupported isolation,
-/// conflicting replay, or a database failure.
+/// Returns [`ResearchReleasePersistenceError`] for unsupported isolation, conflicting replay, or
+/// a database failure.
 pub fn persist_approved_research_release(
     transaction: &mut Transaction<'_>,
     release: &ApprovedResearchRelease,
 ) -> Result<ResearchReleasePersistenceDisposition, ResearchReleasePersistenceError> {
     require_read_committed(transaction)?;
-    validate_release(release)?;
     let access_class = access_class_name(release.access_class());
     let inserted = transaction.execute(
         "INSERT INTO research_release_approval (\
@@ -183,33 +173,6 @@ fn classify_existing_release(
     }
 }
 
-fn validate_release(
-    release: &ApprovedResearchRelease,
-) -> Result<(), ResearchReleasePersistenceError> {
-    for reference in [
-        release.release_ref(),
-        release.dataset_snapshot_ref(),
-        release.research_scope_ref(),
-        release.privacy_review_ref(),
-        release.scientific_review_ref(),
-        release.metadata_bundle_ref(),
-        release.license_record_ref(),
-        release.measurement_provenance_ref(),
-        release.access_approval_ref(),
-        release.citation_metadata_ref(),
-        release.release_approver_ref(),
-        release.ordinary_admin_ref(),
-    ] {
-        if normalized_reference(reference).is_none() {
-            return Err(ResearchReleasePersistenceError::InvalidReference);
-        }
-    }
-    if !valid_sha256_digest(release.manifest_digest()) {
-        return Err(ResearchReleasePersistenceError::InvalidManifestDigest);
-    }
-    Ok(())
-}
-
 const fn access_class_name(access_class: ResearchAccessClass) -> &'static str {
     match access_class {
         ResearchAccessClass::Public => "public",
@@ -217,16 +180,6 @@ const fn access_class_name(access_class: ResearchAccessClass) -> &'static str {
         ResearchAccessClass::Private => "private",
         ResearchAccessClass::Embargoed => "embargoed",
     }
-}
-
-fn valid_sha256_digest(digest: &str) -> bool {
-    let Some(hex) = digest.strip_prefix("sha256:") else {
-        return false;
-    };
-    hex.len() == 64
-        && hex
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn require_read_committed(
@@ -243,7 +196,7 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod helper_tests {
-    use super::{access_class_name, valid_sha256_digest};
+    use super::access_class_name;
     use crate::research_release::ResearchAccessClass;
 
     #[test]
@@ -258,22 +211,5 @@ mod helper_tests {
             access_class_name(ResearchAccessClass::Embargoed),
             "embargoed"
         );
-    }
-
-    #[test]
-    fn canonical_sha256_validation_rejects_every_shape_error() {
-        assert!(valid_sha256_digest(
-            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        ));
-        assert!(!valid_sha256_digest(
-            "sha512:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        ));
-        assert!(!valid_sha256_digest("sha256:abcd"));
-        assert!(!valid_sha256_digest(
-            "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        ));
-        assert!(!valid_sha256_digest(
-            "sha256:gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
-        ));
     }
 }
