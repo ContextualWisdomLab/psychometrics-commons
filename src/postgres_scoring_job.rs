@@ -14,6 +14,16 @@ use std::fmt::{Display, Formatter};
 
 const SCORING_JOB_MIGRATION: &str = include_str!("../migrations/0002_scoring_job_state.sql");
 
+/// Outcome of persisting a scoring-job cancellation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ScoringJobCancellationDisposition {
+    /// A cancellable job was marked cancelled for the first time.
+    Cancelled,
+    /// The job was already cancelled and the request was replayed exactly.
+    Duplicate,
+}
+
 /// Outcome of persisting the immutable identity of a scoring job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -109,6 +119,8 @@ pub enum ScoringJobPersistenceError {
     LeaseStillActive,
     /// A guarded terminal transition was suppressed after its lease evidence was validated.
     TransitionNotApplied,
+    /// Completed or quarantined jobs cannot be rewritten as cancelled.
+    TerminalState,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -140,6 +152,7 @@ impl Display for ScoringJobPersistenceError {
             Self::LeaseExpired => "scoring worker lease has expired",
             Self::LeaseStillActive => "scoring job lease has not expired",
             Self::TransitionNotApplied => "scoring terminal transition was not applied",
+            Self::TerminalState => "completed or quarantined scoring jobs cannot be cancelled",
             Self::Database(_) => "PostgreSQL scoring-job persistence failed",
         })
     }
@@ -390,6 +403,63 @@ pub fn expire_scoring_lease(
         Err(ScoringJobPersistenceError::LeaseStillActive)
     } else {
         Err(ScoringJobPersistenceError::NotLeased)
+    }
+}
+
+/// Cancel queued, leased, or retry-scheduled scoring work without transferring a fence.
+///
+/// Cancellation clears any active lease and due-retry instant. Exact replay of an
+/// already cancelled job is idempotent. Completed or quarantined evidence cannot be
+/// rewritten. `READ COMMITTED` is required so concurrent completion is visible.
+///
+/// # Errors
+///
+/// Returns [`ScoringJobPersistenceError`] for an invalid identity, unsupported
+/// isolation, a missing job, a completed or quarantined job, a suppressed
+/// transition, or a database failure.
+pub fn cancel_scoring_job(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+) -> Result<ScoringJobCancellationDisposition, ScoringJobPersistenceError> {
+    let scoring_job_ref = required_reference(scoring_job_ref)?;
+    require_read_committed(transaction)?;
+
+    let cancelled = match transaction.query_opt(
+        "UPDATE scoring_job_state
+         SET scoring_state = 'cancelled',
+             next_attempt_at_unix_ms = NULL,
+             active_worker_ref = NULL,
+             active_lease_ref = NULL,
+             active_fencing_token = NULL,
+             active_lease_expires_at_unix_ms = NULL,
+             updated_at = clock_timestamp()
+         WHERE scoring_job_ref = $1
+           AND scoring_state IN ('queued', 'leased', 'retry_scheduled')
+         RETURNING scoring_job_ref",
+        &[&scoring_job_ref],
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(ScoringJobPersistenceError::from(error)),
+    };
+    if cancelled.is_some() {
+        return Ok(ScoringJobCancellationDisposition::Cancelled);
+    }
+
+    let row = match transaction.query_opt(
+        "SELECT scoring_state FROM scoring_job_state WHERE scoring_job_ref = $1",
+        &[&scoring_job_ref],
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(ScoringJobPersistenceError::from(error)),
+    };
+    let Some(row) = row else {
+        return Err(ScoringJobPersistenceError::JobNotFound);
+    };
+    let state: String = row.get(0);
+    match state.as_str() {
+        "cancelled" => Ok(ScoringJobCancellationDisposition::Duplicate),
+        "completed" | "quarantined" => Err(ScoringJobPersistenceError::TerminalState),
+        _ => Err(ScoringJobPersistenceError::TransitionNotApplied),
     }
 }
 
