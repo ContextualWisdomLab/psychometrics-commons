@@ -438,11 +438,14 @@ pub fn claim_outbox_delivery(
         });
     }
 
-    let exists = transaction.query_opt(
+    let exists = match transaction.query_opt(
         "SELECT 1 FROM integration_outbox
          WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
         &[&source_ref, &tenant_ref, &event_ref],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(PersistenceError::from(error)),
+    };
     if exists.is_some() {
         Err(PersistenceError::NotLeaseable)
     } else {
@@ -475,7 +478,7 @@ pub fn expire_outbox_delivery_lease(
     let observed_at_unix_ms = postgres_bigint(observed_at_unix_ms)?;
     require_read_committed(transaction)?;
 
-    let recovered = transaction.query_opt(
+    let recovered = match transaction.query_opt(
         "UPDATE integration_outbox
          SET lease_worker_ref = NULL,
              lease_ref = NULL,
@@ -488,7 +491,10 @@ pub fn expire_outbox_delivery_lease(
            AND lease_expires_at_unix_ms <= $4
          RETURNING event_ref",
         &[&source_ref, &tenant_ref, &event_ref, &observed_at_unix_ms],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(PersistenceError::from(error)),
+    };
     if recovered.is_some() {
         return Ok(());
     }
@@ -544,16 +550,18 @@ pub fn record_leased_outbox_delivery_attempt(
     let fencing_token = postgres_bigint(fencing_token)?;
     require_read_committed(transaction)?;
 
-    let outbox_row = transaction
-        .query_opt(
-            "SELECT max_attempts, current_state, latest_event_at_unix_ms,
-                    lease_fencing_token, lease_expires_at_unix_ms
-             FROM integration_outbox
-             WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3
-             FOR UPDATE",
-            &[&source_ref, &tenant_ref, &event_ref],
-        )?
-        .ok_or(PersistenceError::OutboxNotFound)?;
+    let outbox_row = match transaction.query_opt(
+        "SELECT max_attempts, current_state, latest_event_at_unix_ms,
+                lease_fencing_token, lease_expires_at_unix_ms
+         FROM integration_outbox
+         WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3
+         FOR UPDATE",
+        &[&source_ref, &tenant_ref, &event_ref],
+    ) {
+        Ok(Some(row)) => row,
+        Ok(None) => return Err(PersistenceError::OutboxNotFound),
+        Err(error) => return Err(PersistenceError::from(error)),
+    };
     let max_attempts: i32 = outbox_row.get(0);
     let stored_state: String = outbox_row.get(1);
     let current_state = parse_outbox_state(&stored_state)?;
@@ -762,7 +770,7 @@ fn persist_new_delivery_attempt(
         DeliveryOutcome::RetryableFailure => OutboxState::Pending,
     };
     let next_state_name = outbox_state_name(next_state);
-    if write.clear_lease {
+    let update_result = if write.clear_lease {
         transaction.execute(
             "UPDATE integration_outbox
              SET current_state = $4,
@@ -779,7 +787,7 @@ fn persist_new_delivery_attempt(
                 &next_state_name,
                 &write.occurred_at_unix_ms,
             ],
-        )?;
+        )
     } else {
         transaction.execute(
             "UPDATE integration_outbox
@@ -792,7 +800,10 @@ fn persist_new_delivery_attempt(
                 &next_state_name,
                 &write.occurred_at_unix_ms,
             ],
-        )?;
+        )
+    };
+    if let Err(error) = update_result {
+        return Err(PersistenceError::from(error));
     }
 
     Ok(DeliveryAttemptPersistence {

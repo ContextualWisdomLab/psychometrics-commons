@@ -713,3 +713,81 @@ fn expiry_classify_select_failure_is_a_database_failure() {
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn claim_classify_select_failure_is_a_database_failure() {
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    apply_integration_migration(&mut client).unwrap();
+    enqueue(&mut client, "event_claim_classify_hidden");
+    let sink = format!("outbox_claim_classify_sink_{}", std::process::id());
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {sink};
+             CREATE OR REPLACE FUNCTION outbox_claim_redirect_after_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM set_config('search_path', '{sink}', false);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER outbox_claim_redirect_after_update
+             AFTER UPDATE ON integration_outbox
+             FOR EACH STATEMENT EXECUTE FUNCTION outbox_claim_redirect_after_update();"
+        ))
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        claim_outbox_delivery(
+            &mut transaction,
+            identity("event_claim_missing_after_update"),
+            "worker_claim_hidden",
+            "outbox_lease_claim_hidden",
+            10_000,
+            11_000,
+        ),
+        Err(PersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn leased_outbox_update_failure_is_a_database_failure() {
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    apply_integration_migration(&mut client).unwrap();
+    let fence = enqueue_and_claim(
+        &mut client,
+        "event_lease_update_failure",
+        "worker_update",
+        "outbox_lease_update",
+        20_000,
+    );
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION outbox_fail_lease_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 RAISE EXCEPTION 'forced outbox lease update failure';
+             END $$;
+             CREATE TRIGGER outbox_fail_lease_update
+             BEFORE UPDATE ON integration_outbox
+             FOR EACH ROW EXECUTE FUNCTION outbox_fail_lease_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        record_leased_outbox_delivery_attempt(
+            &mut transaction,
+            identity("event_lease_update_failure"),
+            "attempt_update_failure",
+            DeliveryOutcome::Delivered,
+            10_001,
+            None,
+            fence,
+        ),
+        Err(PersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
