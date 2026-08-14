@@ -342,8 +342,9 @@ pub fn claim_scoring_job(
 /// Expiry never assigns another worker the expired fencing token. The row becomes
 /// `retry_scheduled` at the observation instant when attempt budget remains, or
 /// `quarantined` when the attempt is exhausted. A later [`claim_scoring_job`] issues
-/// the next fence. `READ COMMITTED` is required so concurrent expiry recovery observes
-/// the latest committed lease evidence.
+/// the next fence. Fallback classification locks the current row until the caller
+/// commits so a concurrent worker cannot rewrite unleased evidence. `READ COMMITTED`
+/// is required so concurrent expiry recovery observes the latest committed lease.
 ///
 /// # Errors
 ///
@@ -390,11 +391,16 @@ pub fn expire_scoring_lease(
         });
     }
 
-    let row = transaction.query_opt(
-        "SELECT scoring_state = 'leased' AS leased \
-         FROM scoring_job_state WHERE scoring_job_ref = $1",
+    let row = match transaction.query_opt(
+        "SELECT scoring_state = 'leased' AS leased
+         FROM scoring_job_state
+         WHERE scoring_job_ref = $1
+         FOR UPDATE",
         &[&scoring_job_ref],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(ScoringJobPersistenceError::from(error)),
+    };
     let Some(row) = row else {
         return Err(ScoringJobPersistenceError::JobNotFound);
     };
@@ -410,7 +416,9 @@ pub fn expire_scoring_lease(
 ///
 /// Cancellation clears any active lease and due-retry instant. Exact replay of an
 /// already cancelled job is idempotent. Completed or quarantined evidence cannot be
-/// rewritten. `READ COMMITTED` is required so concurrent completion is visible.
+/// rewritten. Fallback classification locks the current row until the caller commits
+/// so a concurrent worker cannot rewrite terminal evidence. `READ COMMITTED` is
+/// required so concurrent completion is visible.
 ///
 /// # Errors
 ///
@@ -446,7 +454,10 @@ pub fn cancel_scoring_job(
     }
 
     let row = match transaction.query_opt(
-        "SELECT scoring_state FROM scoring_job_state WHERE scoring_job_ref = $1",
+        "SELECT scoring_state
+         FROM scoring_job_state
+         WHERE scoring_job_ref = $1
+         FOR UPDATE",
         &[&scoring_job_ref],
     ) {
         Ok(row) => row,
