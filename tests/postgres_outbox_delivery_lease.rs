@@ -642,35 +642,45 @@ fn missing_outbox_relation_is_a_database_failure() {
     let mut client = test_client();
     reset_integration_tables(&mut client);
 
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        claim_outbox_delivery(
-            &mut transaction,
-            identity("event_missing_table"),
-            "worker_missing",
-            "outbox_lease_missing",
-            10_000,
-            11_000,
-        ),
-        Err(PersistenceError::Database(_))
-    ));
-    assert!(matches!(
-        expire_outbox_delivery_lease(&mut transaction, identity("event_missing_table"), 11_000),
-        Err(PersistenceError::Database(_))
-    ));
-    assert!(matches!(
-        record_leased_outbox_delivery_attempt(
-            &mut transaction,
-            identity("event_missing_table"),
-            "attempt_missing",
-            DeliveryOutcome::Delivered,
-            10_001,
-            None,
-            1,
-        ),
-        Err(PersistenceError::Database(_))
-    ));
-    transaction.rollback().unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            claim_outbox_delivery(
+                &mut transaction,
+                identity("event_missing_table"),
+                "worker_missing",
+                "outbox_lease_missing",
+                10_000,
+                11_000,
+            ),
+            Err(PersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            expire_outbox_delivery_lease(&mut transaction, identity("event_missing_table"), 11_000),
+            Err(PersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            record_leased_outbox_delivery_attempt(
+                &mut transaction,
+                identity("event_missing_table"),
+                "attempt_missing",
+                DeliveryOutcome::Delivered,
+                10_001,
+                None,
+                1,
+            ),
+            Err(PersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
 }
 
 #[test]
