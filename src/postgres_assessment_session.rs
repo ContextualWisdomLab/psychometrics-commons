@@ -5,7 +5,6 @@
 //! when the release is later suspended or retired. This first slice persists
 //! only [`SessionState::Created`] rows. Replay requires `READ COMMITTED`.
 
-use crate::reference::normalized_reference;
 use crate::session::{AssessmentSession, SessionState};
 use postgres::Transaction;
 use std::error::Error;
@@ -28,8 +27,6 @@ pub enum AssessmentSessionPersistenceDisposition {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum AssessmentSessionPersistenceError {
-    /// A session, participant, or release identity was blank or numeric-like.
-    InvalidReference,
     /// A creation timestamp cannot be represented by the bounded database column.
     ValueOutOfRange,
     /// Only a newly created session can be inserted by this first persist slice.
@@ -45,9 +42,6 @@ pub enum AssessmentSessionPersistenceError {
 impl Display for AssessmentSessionPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => {
-                "assessment session persistence references must be opaque values"
-            }
             Self::ValueOutOfRange => {
                 "assessment session persistence value exceeds the PostgreSQL range"
             }
@@ -95,11 +89,14 @@ pub fn apply_assessment_session_migration(
 ///
 /// Exact replay of the same session, participant, release, digest, locale, state,
 /// and creation time is idempotent. Rebinding any stored field fails closed.
+/// Session and participant references are already validated and normalized by
+/// [`AssessmentSession::new`], so this adapter does not add an unreachable second
+/// reference-validation layer.
 ///
 /// # Errors
 ///
 /// Returns [`AssessmentSessionPersistenceError`] for unsupported isolation,
-/// a non-created session, conflicting replay, an invalid reference or timestamp,
+/// a non-created session, conflicting replay, an out-of-range timestamp,
 /// or a database failure.
 pub fn persist_assessment_session(
     transaction: &mut Transaction<'_>,
@@ -109,8 +106,8 @@ pub fn persist_assessment_session(
     if session.state() != SessionState::Created {
         return Err(AssessmentSessionPersistenceError::UnsupportedInitialState);
     }
-    let session_ref = required_reference(session.session_ref())?;
-    let participant_ref = required_reference(session.participant_ref())?;
+    let session_ref = session.session_ref();
+    let participant_ref = session.participant_ref();
     let created_at_unix_ms = postgres_bigint(session.created_at_unix_ms())?;
     let session_state = session_state_name(session.state());
     let inserted = transaction.execute(
@@ -176,11 +173,6 @@ fn classify_existing_session(
     }
 }
 
-/// Validate that a persistence reference is normalized, opaque, and non-numeric.
-fn required_reference(reference: &str) -> Result<&str, AssessmentSessionPersistenceError> {
-    normalized_reference(reference).ok_or(AssessmentSessionPersistenceError::InvalidReference)
-}
-
 /// Convert an unsigned millisecond timestamp into the database `BIGINT` range.
 fn postgres_bigint(value: u64) -> Result<i64, AssessmentSessionPersistenceError> {
     i64::try_from(value).map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)
@@ -223,10 +215,6 @@ mod tests {
     #[test]
     fn session_persistence_errors_are_safe_and_specific() {
         for (error, expected) in [
-            (
-                AssessmentSessionPersistenceError::InvalidReference,
-                "assessment session persistence references must be opaque values",
-            ),
             (
                 AssessmentSessionPersistenceError::ValueOutOfRange,
                 "assessment session persistence value exceeds the PostgreSQL range",
