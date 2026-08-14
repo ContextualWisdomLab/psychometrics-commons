@@ -267,3 +267,63 @@ fn processing_columns_enforce_pair_presence_reference_format_and_positive_time()
         )
         .is_err());
 }
+
+#[test]
+fn processing_migration_repairs_constraints_when_columns_preexist() {
+    let mut client = test_client("data_rights_process_repair_constraints");
+    apply_integration_migration(&mut client).unwrap();
+    apply_data_rights_migration(&mut client).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE data_rights_request_state ADD COLUMN operation_ref TEXT;
+             ALTER TABLE data_rights_request_state
+                 ADD COLUMN processing_started_at_unix_ms BIGINT;",
+        )
+        .unwrap();
+
+    apply_data_rights_processing_migration(&mut client).unwrap();
+    apply_data_rights_processing_migration(&mut client).unwrap();
+
+    for constraint_name in [
+        "data_rights_operation_ref_format_check",
+        "data_rights_processing_started_time_positive_check",
+        "data_rights_processing_presence_check",
+    ] {
+        let exists: bool = client
+            .query_one(
+                "SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint AS constraint_record
+                    JOIN pg_class AS table_record
+                      ON table_record.oid = constraint_record.conrelid
+                    JOIN pg_namespace AS schema_record
+                      ON schema_record.oid = table_record.relnamespace
+                    WHERE constraint_record.conname = $1
+                      AND table_record.relname = 'data_rights_request_state'
+                      AND schema_record.nspname = current_schema()
+                )",
+                &[&constraint_name],
+            )
+            .unwrap()
+            .get(0);
+        assert!(exists, "missing repaired constraint {constraint_name}");
+    }
+
+    persist_requested(&mut client, "data_rights_request_repair");
+    assert!(client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET operation_ref = '123', processing_started_at_unix_ms = 10200
+             WHERE request_ref = $1",
+            &[&"data_rights_request_repair"],
+        )
+        .is_err());
+    assert!(client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET operation_ref = 'operation_alpha', processing_started_at_unix_ms = 0
+             WHERE request_ref = $1",
+            &[&"data_rights_request_repair"],
+        )
+        .is_err());
+}
