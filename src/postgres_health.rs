@@ -5,7 +5,9 @@
 //! can safely accept product-owned state changes. It does not own credentials,
 //! connection pooling, migrations, backup, or recovery.
 
-use crate::health::{CapabilityHealth, CapabilityState, HealthContractError};
+use crate::health::{
+    CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError,
+};
 use postgres::GenericClient;
 
 /// Initial supported PostgreSQL server major version from ADR-0015.
@@ -126,4 +128,35 @@ pub fn probe_postgres_runtime(
         server_version_num,
         transaction_read_only,
     ))
+}
+
+/// Probe whether every caller-declared relation required by this application build exists.
+///
+/// The application or packaged deployment remains responsible for declaring the exact
+/// relation set that represents its compatible schema version. Relation names are passed
+/// as query parameters, never interpolated into SQL. A missing required relation is a
+/// known incompatibility and therefore fails state-changing readiness closed through
+/// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is vacuously verified.
+///
+/// This probe deliberately does not claim that relation presence alone proves migration,
+/// column, constraint, digest, tenant, or provenance integrity. Those stronger invariants
+/// remain separate evidence and must not be promoted from this narrow check.
+///
+/// # Errors
+///
+/// Returns the PostgreSQL driver error when relation existence cannot be established.
+/// Callers must map probe failure to unknown/unready data-integrity state and avoid
+/// exposing raw database errors on public health endpoints.
+pub fn probe_postgres_relation_integrity(
+    client: &mut impl GenericClient,
+    required_relations: &[&str],
+) -> Result<DataIntegrityHealth, postgres::Error> {
+    for relation in required_relations {
+        let row = client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation])?;
+        let exists: bool = row.get(0);
+        if !exists {
+            return Ok(DataIntegrityHealth::Incompatible);
+        }
+    }
+    Ok(DataIntegrityHealth::Verified)
 }
