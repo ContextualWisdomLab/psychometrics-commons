@@ -136,7 +136,10 @@ fn unrelated_source_subject_or_snapshot_causation_is_rejected_before_writes() {
                 .query_one(&format!("SELECT count(*) FROM {table}"), &[])
                 .unwrap()
                 .get(0);
-            assert_eq!(count, 0, "invalid envelope case {index} must not write {table}");
+            assert_eq!(
+                count, 0,
+                "invalid envelope case {index} must not write {table}"
+            );
         }
     }
 
