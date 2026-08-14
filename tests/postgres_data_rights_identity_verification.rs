@@ -218,3 +218,48 @@ fn identity_verification_requires_read_committed_and_surfaces_database_failure()
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn applying_data_rights_migration_without_outbox_tables_fails() {
+    let mut client = test_client("data_rights_verify_no_outbox");
+    assert!(apply_data_rights_migration(&mut client).is_err());
+}
+
+#[test]
+fn unmatched_verification_select_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_verify_select_hidden");
+    let mut request = persist_requested(&mut client);
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET current_state = 'processing'
+             WHERE request_ref = $1",
+            &[&"data_rights_request_verify"],
+        )
+        .unwrap();
+    let sink = format!("data_rights_verify_select_sink_{}", std::process::id());
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {sink};
+             CREATE OR REPLACE FUNCTION data_rights_verify_redirect_after_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM set_config('search_path', '{sink}', false);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER data_rights_verify_redirect_after_update
+             AFTER UPDATE ON data_rights_request_state
+             FOR EACH STATEMENT EXECUTE FUNCTION data_rights_verify_redirect_after_update();"
+        ))
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_identity_verification(&mut transaction, &request),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
