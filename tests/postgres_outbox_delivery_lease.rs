@@ -12,6 +12,7 @@ use psychometrics_commons_runtime::postgres_integration::{
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SCHEMA: &str = "outbox_delivery_lease_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4C53;
+const LIVE_LEASE_DURATION_MS: u64 = 60_000;
 
 fn database_test_guard() -> Client {
     let mut client = connect_client();
@@ -96,6 +97,40 @@ fn enqueue_and_claim(
     lease.fencing_token()
 }
 
+fn database_now_unix_ms(client: &mut Client) -> u64 {
+    let value: i64 = client
+        .query_one(
+            "SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    u64::try_from(value).unwrap()
+}
+
+fn enqueue_and_claim_live(
+    client: &mut Client,
+    event_ref: &str,
+    worker_ref: &str,
+    lease_ref: &str,
+) -> u64 {
+    enqueue(client, event_ref);
+    let claimed_at_unix_ms = database_now_unix_ms(client);
+    let expires_at_unix_ms = claimed_at_unix_ms + LIVE_LEASE_DURATION_MS;
+    let mut transaction = client.transaction().unwrap();
+    let lease = claim_outbox_delivery(
+        &mut transaction,
+        identity(event_ref),
+        worker_ref,
+        lease_ref,
+        claimed_at_unix_ms,
+        expires_at_unix_ms,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    lease.fencing_token()
+}
+
 fn lease_row(client: &mut Client, event_ref: &str) -> (Option<String>, Option<i64>, String) {
     let row = client
         .query_one(
@@ -160,12 +195,11 @@ fn fenced_retryable_failure_clears_lease_for_the_next_claim() {
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
-    let fence = enqueue_and_claim(
+    let fence = enqueue_and_claim_live(
         &mut client,
         "event_fenced_retry",
         "worker_retry",
         "outbox_lease_retry",
-        20_000,
     );
 
     let mut transaction = client.transaction().unwrap();
@@ -235,12 +269,11 @@ fn live_lease_blocks_unfenced_attempt_and_matching_fence_delivers() {
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
-    let fence = enqueue_and_claim(
+    let fence = enqueue_and_claim_live(
         &mut client,
         "event_fenced_deliver",
         "worker_owner",
         "outbox_lease_owner",
-        20_000,
     );
 
     let mut transaction = client.transaction().unwrap();
@@ -418,6 +451,30 @@ fn fenced_attempt_validation_fails_closed() {
         Err(PersistenceError::InvalidTimestamp)
     ));
     assert!(matches!(
+        record_leased_outbox_delivery_attempt(
+            &mut transaction,
+            identity("event_absent_row"),
+            "attempt_missing",
+            DeliveryOutcome::Delivered,
+            10_001,
+            None,
+            1,
+        ),
+        Err(PersistenceError::OutboxNotFound)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn lease_command_validation_fails_closed() {
+    let _database_guard = database_test_guard();
+    let mut client = test_client();
+    reset_integration_tables(&mut client);
+    apply_integration_migration(&mut client).unwrap();
+    enqueue(&mut client, "event_never_claimed");
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
         claim_outbox_delivery(
             &mut transaction,
             identity("event_never_claimed"),
@@ -457,21 +514,9 @@ fn fenced_attempt_validation_fails_closed() {
             "worker_live",
             "outbox_lease_live",
             10_000,
-            0,
+            9_999,
         ),
-        Err(PersistenceError::InvalidTimestamp)
-    ));
-    assert!(matches!(
-        record_leased_outbox_delivery_attempt(
-            &mut transaction,
-            identity("event_absent_row"),
-            "attempt_missing",
-            DeliveryOutcome::Delivered,
-            10_001,
-            None,
-            1,
-        ),
-        Err(PersistenceError::OutboxNotFound)
+        Err(PersistenceError::InvalidLeaseWindow)
     ));
     assert!(matches!(
         expire_outbox_delivery_lease(&mut transaction, identity(" "), 20_000),
@@ -544,12 +589,11 @@ fn fenced_attempt_replay_is_idempotent_and_conflicts_fail_closed() {
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
-    let fence = enqueue_and_claim(
+    let fence = enqueue_and_claim_live(
         &mut client,
         "event_fenced_replay",
         "worker_replay",
         "outbox_lease_replay",
-        20_000,
     );
 
     let mut transaction = client.transaction().unwrap();
@@ -721,7 +765,8 @@ fn expiry_classify_select_failure_is_a_database_failure() {
     let sink = format!("outbox_lease_classify_sink_{}", std::process::id());
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA {sink};
+            "DROP SCHEMA IF EXISTS {sink} CASCADE;
+             CREATE SCHEMA {sink};
              CREATE OR REPLACE FUNCTION outbox_lease_redirect_after_update()
              RETURNS trigger LANGUAGE plpgsql AS $$
              BEGIN
@@ -744,6 +789,9 @@ fn expiry_classify_select_failure_is_a_database_failure() {
         Err(PersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
+    client
+        .batch_execute(&format!("DROP SCHEMA IF EXISTS {sink} CASCADE;"))
+        .unwrap();
 }
 
 #[test]
@@ -756,7 +804,8 @@ fn claim_classify_select_failure_is_a_database_failure() {
     let sink = format!("outbox_claim_classify_sink_{}", std::process::id());
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA {sink};
+            "DROP SCHEMA IF EXISTS {sink} CASCADE;
+             CREATE SCHEMA {sink};
              CREATE OR REPLACE FUNCTION outbox_claim_redirect_after_update()
              RETURNS trigger LANGUAGE plpgsql AS $$
              BEGIN
@@ -782,6 +831,9 @@ fn claim_classify_select_failure_is_a_database_failure() {
         Err(PersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
+    client
+        .batch_execute(&format!("DROP SCHEMA IF EXISTS {sink} CASCADE;"))
+        .unwrap();
 }
 
 #[test]
@@ -790,12 +842,11 @@ fn leased_outbox_update_failure_is_a_database_failure() {
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
-    let fence = enqueue_and_claim(
+    let fence = enqueue_and_claim_live(
         &mut client,
         "event_lease_update_failure",
         "worker_update",
         "outbox_lease_update",
-        20_000,
     );
     client
         .batch_execute(
