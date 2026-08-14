@@ -8,32 +8,57 @@ use psychometrics_commons_runtime::data_rights::{
 };
 
 #[test]
-fn whitespace_padded_public_references_are_rejected_at_construction() {
-    for invalid_reference in [" tenant_ref", "tenant_ref ", "\ttenant_ref", "tenant_ref\n"] {
-        assert_eq!(
-            AnonymousSessionContext::new(
-                invalid_reference,
+fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() {
+    for invalid_reference in [
+        " tenant_ref",
+        "tenant_ref ",
+        "\ttenant_ref",
+        "tenant_ref\n",
+        "\u{00a0}tenant_ref",
+        "tenant_ref\u{2003}",
+    ] {
+        for field_index in 0..4 {
+            let mut references = [
+                "tenant_ref",
                 "participant_ref",
                 "session_ref",
                 "authorization_evidence_ref",
-                10_000,
-            ),
-            Err(AnonymousSessionContextError::InvalidReference),
-            "anonymous-session construction must reject non-canonical reference spelling {invalid_reference:?}",
-        );
+            ];
+            references[field_index] = invalid_reference;
+            assert_eq!(
+                AnonymousSessionContext::new(
+                    references[0],
+                    references[1],
+                    references[2],
+                    references[3],
+                    10_000,
+                ),
+                Err(AnonymousSessionContextError::InvalidReference),
+                "anonymous-session field {field_index} must reject non-canonical reference spelling {invalid_reference:?}",
+            );
+        }
 
-        assert_eq!(
-            DataRightsRequest::new(
+        for field_index in 0..4 {
+            let mut references = [
                 "request_ref",
-                invalid_reference,
+                "tenant_ref",
                 "participant_ref",
-                DataRightsRequestKind::Export,
                 "account_data_scope",
-                1_000,
-            ),
-            Err(DataRightsError::InvalidReference),
-            "data-rights construction must reject non-canonical reference spelling {invalid_reference:?}",
-        );
+            ];
+            references[field_index] = invalid_reference;
+            assert_eq!(
+                DataRightsRequest::new(
+                    references[0],
+                    references[1],
+                    references[2],
+                    DataRightsRequestKind::Export,
+                    references[3],
+                    1_000,
+                ),
+                Err(DataRightsError::InvalidReference),
+                "data-rights field {field_index} must reject non-canonical reference spelling {invalid_reference:?}",
+            );
+        }
     }
 }
 
