@@ -118,7 +118,8 @@ BEGIN
     IF OLD.consumption_state = 'processing'
        AND NEW.consumption_state IN ('completed', 'quarantined')
        AND OLD.claim_expires_at_unix_ms IS NOT NULL
-       AND NEW.latest_event_at_unix_ms >= OLD.claim_expires_at_unix_ms THEN
+       AND floor(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+           >= OLD.claim_expires_at_unix_ms THEN
         RAISE EXCEPTION 'expired inbox processing claim cannot perform a terminal transition'
             USING ERRCODE = '55000';
     END IF;
