@@ -5,8 +5,7 @@ use psychometrics_commons_runtime::deterministic_narrative::{
 };
 use psychometrics_commons_runtime::narrative::{ScoreIdentity, StyleAssignmentIdentity};
 
-const RULE_DIGEST: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const RULE_DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn identity() -> StyleAssignmentIdentity<'static> {
     StyleAssignmentIdentity {
@@ -68,7 +67,10 @@ fn approved_selection_renders_deterministically_without_mutating_score_identity(
     assert_eq!(rendered.primary_style_ref, "style_exploratory");
     assert_eq!(rendered.adjacent_style_refs, vec!["style_deliberative"]);
     assert_eq!(rendered.sections.len(), 2);
-    assert_eq!(rendered.sections[0].interpretation_unit_ref, "unit_openness");
+    assert_eq!(
+        rendered.sections[0].interpretation_unit_ref,
+        "unit_openness"
+    );
     assert_eq!(rendered.sections[1].heading, "How you organize");
     assert_eq!(
         rendered.limitations,
