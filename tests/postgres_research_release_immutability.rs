@@ -9,11 +9,7 @@ fn isolated_schema_name() -> String {
         .duration_since(UNIX_EPOCH)
         .expect("system clock must be after the Unix epoch")
         .as_nanos();
-    format!(
-        "research_release_immutability_{}_{}",
-        std::process::id(),
-        nonce
-    )
+    format!("research_release_immutability_{}_{}", std::process::id(), nonce)
 }
 
 #[test]
