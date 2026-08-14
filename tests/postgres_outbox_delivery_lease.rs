@@ -716,6 +716,7 @@ fn expiry_classify_select_failure_is_a_database_failure() {
 
 #[test]
 fn claim_classify_select_failure_is_a_database_failure() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
@@ -753,6 +754,7 @@ fn claim_classify_select_failure_is_a_database_failure() {
 
 #[test]
 fn leased_outbox_update_failure_is_a_database_failure() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
