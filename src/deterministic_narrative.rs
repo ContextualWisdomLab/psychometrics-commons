@@ -105,6 +105,8 @@ pub enum NarrativeFallbackError {
     DuplicateReference,
     /// The approved selection contained no interpretation units.
     EmptySelection,
+    /// The approved deterministic bundle omitted participant-facing limitations.
+    MissingLimitations,
     /// A selected interpretation unit did not exist in the approved localized bundle.
     MissingInterpretationUnit,
 }
@@ -119,6 +121,9 @@ impl Display for NarrativeFallbackError {
             Self::IdentityMismatch => "narrative provenance does not match style assignment",
             Self::DuplicateReference => "narrative style or interpretation reference is duplicated",
             Self::EmptySelection => "narrative selection must contain interpretation units",
+            Self::MissingLimitations => {
+                "deterministic narrative bundle must include participant-facing limitations"
+            }
             Self::MissingInterpretationUnit => {
                 "selected interpretation unit is absent from the approved bundle"
             }
@@ -218,6 +223,9 @@ impl DeterministicNarrativeBundle<'_> {
             required_text(unit.heading)?;
             required_text(unit.body)?;
         }
+        if self.limitations.is_empty() {
+            return Err(NarrativeFallbackError::MissingLimitations);
+        }
         for limitation in self.limitations {
             required_text(limitation)?;
         }
@@ -246,7 +254,7 @@ fn validate_interpretation_selection(
     if interpretation_unit_refs.is_empty() {
         return Err(NarrativeFallbackError::EmptySelection);
     }
-    let mut seen = Vec::with_capacity(interpretation_unit_refs.len());
+    let mut seen = Vec::with_capacity(interpolation_unit_refs.len());
     for unit_ref in interpretation_unit_refs {
         let unit_ref = required_reference(unit_ref)?;
         if seen.contains(&unit_ref) {
