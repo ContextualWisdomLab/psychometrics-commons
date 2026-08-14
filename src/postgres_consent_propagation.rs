@@ -134,8 +134,7 @@ mod envelope_tests {
     use crate::consent::{ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose};
     use crate::integration::IntegrationEvent;
 
-    const DIGEST: &str =
-        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    const DIGEST: &str = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 
     fn ledger() -> ConsentLedger {
         let mut ledger = ConsentLedger::new("participant_consent_envelope_unit").unwrap();
