@@ -125,7 +125,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #55 persists completed `ResponseSnapshot` values through `migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs`. Scoring, result snapshots, response-event ledgers, and HTTP transport remain outside this slice.
+**Active PR** #55 is not protected-main truth; it persists completed `ResponseSnapshot` values through `migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs`. Scoring, result snapshots, response-event ledgers, and HTTP transport remain outside this slice.
 
 ## 5. ADR traceability by concern
 
