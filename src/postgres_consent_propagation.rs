@@ -2,7 +2,8 @@
 //!
 //! Consent remains purpose-specific, append-only product evidence. This module composes the
 //! existing consent adapter with the existing transactional outbox and verifies that the emitted
-//! event is bound to the same participant and one exact consent event before any durable write.
+//! event is bound to the same participant and latest accepted consent event before any durable
+//! write.
 
 use crate::consent::ConsentLedger;
 use crate::integration::IntegrationEvent;
@@ -41,7 +42,7 @@ impl ConsentOutboxPersistence {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ConsentOutboxPersistenceError {
-    /// The propagation envelope does not identify this participant and one exact ledger event.
+    /// The propagation envelope does not identify this participant and latest ledger event.
     InvalidPropagationEnvelope,
     /// Durable consent evidence failed validation or persistence.
     Consent(ConsentPersistenceError),
@@ -53,7 +54,7 @@ impl Display for ConsentOutboxPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidPropagationEnvelope => {
-                "consent propagation event must bind the exact participant and consent event"
+                "consent propagation event must bind the participant's latest consent event"
             }
             Self::Consent(_) => "consent propagation consent persistence failed",
             Self::Outbox(_) => "consent propagation outbox persistence failed",
@@ -71,14 +72,16 @@ impl Error for ConsentOutboxPersistenceError {
     }
 }
 
-/// Persist one consent ledger and one causally bound outbox event in the same transaction.
+/// Persist one consent ledger and its latest causally bound outbox event in the same transaction.
 ///
 /// The integration event must be emitted by `psychometrics_commons`, use the consent ledger's
-/// participant as its subject, identify one exact consent event through `causation_ref`, and use
-/// that consent event's server-authoritative occurrence time. These checks run before persistence,
-/// preventing a valid consent decision from being durably paired with unrelated propagation
-/// evidence. The event type, tenant, correlation reference, schema version, and payload digest
-/// remain owned by the caller's versioned integration contract.
+/// participant as its subject, identify the latest accepted consent event through `causation_ref`,
+/// and use that consent event's server-authoritative occurrence time. Binding propagation to the
+/// ledger tail prevents a later revocation or grant from being durably paired with stale historical
+/// propagation evidence. These checks run before persistence, preventing a valid consent decision
+/// from being durably paired with unrelated or superseded propagation evidence. The event type,
+/// tenant, correlation reference, schema version, and payload digest remain owned by the caller's
+/// versioned integration contract.
 ///
 /// The caller owns the `READ COMMITTED` transaction and final commit/rollback decision. If either
 /// durable adapter fails, callers must roll the transaction back so newly accepted consent evidence
@@ -87,8 +90,8 @@ impl Error for ConsentOutboxPersistenceError {
 /// # Errors
 ///
 /// Returns [`ConsentOutboxPersistenceError::InvalidPropagationEnvelope`] before writes for an
-/// unrelated source, participant, causation reference, or timestamp. Consent and outbox failures
-/// are preserved in typed error variants.
+/// unrelated source, participant, stale or missing causation reference, or timestamp. Consent and
+/// outbox failures are preserved in typed error variants.
 pub fn persist_consent_ledger_with_outbox(
     transaction: &mut Transaction<'_>,
     ledger: &ConsentLedger,
@@ -117,8 +120,8 @@ fn validate_propagation_envelope(
     };
     let Some(consent_event) = ledger
         .events()
-        .iter()
-        .find(|event| event.event_ref() == causation_ref)
+        .last()
+        .filter(|event| event.event_ref() == causation_ref)
     else {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     };
