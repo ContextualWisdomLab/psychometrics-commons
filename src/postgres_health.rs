@@ -5,9 +5,7 @@
 //! can safely accept product-owned state changes. It does not own credentials,
 //! connection pooling, migrations, backup, or recovery.
 
-use crate::health::{
-    CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError,
-};
+use crate::health::{CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError};
 use postgres::GenericClient;
 
 /// Initial supported PostgreSQL server major version from ADR-0015.
@@ -117,11 +115,14 @@ pub const fn classify_postgres_runtime(
 pub fn probe_postgres_runtime(
     client: &mut impl GenericClient,
 ) -> Result<PostgresRuntimeHealth, postgres::Error> {
-    let row = client.query_one(
+    let row = match client.query_one(
         "SELECT current_setting('server_version_num')::integer, \
                 current_setting('transaction_read_only')::boolean",
         &[],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(error),
+    };
     let server_version_num: i32 = row.get(0);
     let transaction_read_only: bool = row.get(1);
     Ok(classify_postgres_runtime(
@@ -152,7 +153,10 @@ pub fn probe_postgres_relation_integrity(
     required_relations: &[&str],
 ) -> Result<DataIntegrityHealth, postgres::Error> {
     for relation in required_relations {
-        let row = client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation])?;
+        let row = match client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation]) {
+            Ok(row) => row,
+            Err(error) => return Err(error),
+        };
         let exists: bool = row.get(0);
         if !exists {
             return Ok(DataIntegrityHealth::Incompatible);

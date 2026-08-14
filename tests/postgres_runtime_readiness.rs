@@ -24,7 +24,10 @@ fn supported_writable_postgres_is_ready_for_new_operational_work() {
     assert!(health.accepts_new_work());
 
     let capability = health.capability_health().unwrap();
-    assert_eq!(capability.capability_ref(), POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF);
+    assert_eq!(
+        capability.capability_ref(),
+        POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF
+    );
     assert_eq!(capability.state(), CapabilityState::Available);
     assert!(capability.accepts_new_work());
 }
@@ -48,7 +51,10 @@ fn unsupported_postgres_major_fails_readiness_closed_even_when_writable() {
     let health = classify_postgres_runtime(170_009, false);
 
     assert_eq!(health.server_major_version(), 17);
-    assert_eq!(health.status(), PostgresRuntimeStatus::UnsupportedMajorVersion);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    );
     assert_eq!(health.capability_state(), CapabilityState::Unavailable);
     assert!(!health.accepts_new_work());
 }
@@ -77,6 +83,15 @@ fn live_probe_detects_a_read_only_transaction() {
 }
 
 #[test]
+fn live_probe_surfaces_a_database_failure() {
+    let mut client = test_client();
+    let mut transaction = client.transaction().unwrap();
+    assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+
+    assert!(probe_postgres_runtime(&mut transaction).is_err());
+}
+
+#[test]
 fn relation_integrity_probe_verifies_all_required_relations() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(
@@ -93,7 +108,10 @@ fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(
         &mut client,
-        &["pg_catalog.pg_class", "psychometrics_commons_missing_relation"],
+        &[
+            "pg_catalog.pg_class",
+            "psychometrics_commons_missing_relation",
+        ],
     )
     .unwrap();
 
@@ -106,4 +124,13 @@ fn empty_relation_requirement_is_vacuously_verified() {
     let integrity = probe_postgres_relation_integrity(&mut client, &[]).unwrap();
 
     assert_eq!(integrity, DataIntegrityHealth::Verified);
+}
+
+#[test]
+fn relation_integrity_probe_surfaces_a_database_failure() {
+    let mut client = test_client();
+    let mut transaction = client.transaction().unwrap();
+    assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+
+    assert!(probe_postgres_relation_integrity(&mut transaction, &["pg_catalog.pg_class"]).is_err());
 }
