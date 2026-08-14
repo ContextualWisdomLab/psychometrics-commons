@@ -1,7 +1,7 @@
-//! Real PostgreSQL recovery acceptance for the currently persisted product state.
+//! Real `PostgreSQL` recovery acceptance for the currently persisted product state.
 //!
 //! This is deliberately narrower than a production backup-service claim. It rebuilds a clean
-//! schema from the repository migration chain, streams recovery-critical rows through PostgreSQL
+//! schema from the repository migration chain, streams recovery-critical rows through `PostgreSQL`
 //! `COPY ... FORMAT BINARY`, restores them into that clean schema, and then proves that immutable
 //! provenance, tenant-scoped deduplication, and in-flight fencing evidence still behave correctly.
 
@@ -130,34 +130,7 @@ fn copy_table_in(client: &mut Client, schema: &str, table: &str, bytes: &[u8]) {
         .unwrap_or_else(|error| panic!("{schema}.{table} restore stream must commit: {error}"));
 }
 
-#[test]
-fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
-    let mut client = connect_client();
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("shared PostgreSQL recovery-test advisory lock should be acquired");
-
-    let files = migration_files();
-    apply_migration_chain(&mut client, SOURCE_SCHEMA, &files);
-    seed_recovery_critical_state(&mut client);
-
-    let tables = [
-        "integration_outbox",
-        "integration_inbox",
-        "integration_consumption",
-        "response_snapshot",
-        "response_snapshot_entry",
-    ];
-    let backups: Vec<(&str, Vec<u8>)> = tables
-        .iter()
-        .map(|table| (*table, copy_table_out(&mut client, SOURCE_SCHEMA, table)))
-        .collect();
-
-    apply_migration_chain(&mut client, RESTORED_SCHEMA, &files);
-    for (table, bytes) in &backups {
-        copy_table_in(&mut client, RESTORED_SCHEMA, table, bytes);
-    }
-
+fn assert_restored_evidence(client: &mut Client) {
     let restored_outbox = client
         .query_one(
             &format!(
@@ -210,7 +183,9 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+}
 
+fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
     let duplicate = client.execute(
         &format!(
             "INSERT INTO {RESTORED_SCHEMA}.integration_outbox (
@@ -247,6 +222,38 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         )
         .expect("restored tenant-scoped deduplication must not become globally keyed");
     assert_eq!(independent_tenant, 1);
+}
+
+#[test]
+fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
+    let mut client = connect_client();
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL recovery-test advisory lock should be acquired");
+
+    let files = migration_files();
+    apply_migration_chain(&mut client, SOURCE_SCHEMA, &files);
+    seed_recovery_critical_state(&mut client);
+
+    let tables = [
+        "integration_outbox",
+        "integration_inbox",
+        "integration_consumption",
+        "response_snapshot",
+        "response_snapshot_entry",
+    ];
+    let backups: Vec<(&str, Vec<u8>)> = tables
+        .iter()
+        .map(|table| (*table, copy_table_out(&mut client, SOURCE_SCHEMA, table)))
+        .collect();
+
+    apply_migration_chain(&mut client, RESTORED_SCHEMA, &files);
+    for (table, bytes) in &backups {
+        copy_table_in(&mut client, RESTORED_SCHEMA, table, bytes);
+    }
+
+    assert_restored_evidence(&mut client);
+    assert_restored_tenant_scoped_deduplication(&mut client);
 
     client
         .batch_execute(&format!(
