@@ -10,7 +10,9 @@ fn ready_client() -> Client {
         .expect("isolated CI PostgreSQL database must be reachable");
     let schema = format!("outbox_lease_fence_integrity_{}", std::process::id());
     client
-        .batch_execute(&format!("CREATE SCHEMA {schema}; SET search_path TO {schema};"))
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
         .unwrap();
     apply_integration_migration(&mut client).unwrap();
     client

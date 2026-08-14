@@ -440,6 +440,17 @@ fn fenced_attempt_validation_fails_closed() {
         Err(PersistenceError::InvalidTimestamp)
     ));
     assert!(matches!(
+        claim_outbox_delivery(
+            &mut transaction,
+            identity("event_never_claimed"),
+            "worker_live",
+            "outbox_lease_live",
+            10_000,
+            0,
+        ),
+        Err(PersistenceError::InvalidTimestamp)
+    ));
+    assert!(matches!(
         record_leased_outbox_delivery_attempt(
             &mut transaction,
             identity("event_absent_row"),
