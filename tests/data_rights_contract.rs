@@ -63,7 +63,9 @@ fn export_request_requires_verified_identity_before_processing() {
     assert_eq!(request.state(), DataRightsState::Processing);
     assert_eq!(request.operation_ref(), Some("operation_ref"));
     assert_eq!(request.processing_started_at_unix_ms(), Some(1_100));
-    request.complete("completion_evidence_ref", &[], 1_200).unwrap();
+    request
+        .complete("completion_evidence_ref", &[], 1_200)
+        .unwrap();
     assert_eq!(request.state(), DataRightsState::Completed);
     assert_eq!(
         request.completion_evidence_ref(),
