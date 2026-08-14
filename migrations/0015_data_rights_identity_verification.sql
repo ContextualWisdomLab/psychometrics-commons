@@ -1,6 +1,6 @@
 ALTER TABLE data_rights_request_state
     ADD COLUMN IF NOT EXISTS verification_evidence_ref TEXT
-        CHECK (
+        CONSTRAINT data_rights_verification_evidence_format_check CHECK (
             verification_evidence_ref IS NULL
             OR (
                 verification_evidence_ref = btrim(verification_evidence_ref)
@@ -14,7 +14,9 @@ ALTER TABLE data_rights_request_state
 
 ALTER TABLE data_rights_request_state
     ADD COLUMN IF NOT EXISTS verified_at_unix_ms BIGINT
-        CHECK (verified_at_unix_ms IS NULL OR verified_at_unix_ms > 0);
+        CONSTRAINT data_rights_verified_time_positive_check CHECK (
+            verified_at_unix_ms IS NULL OR verified_at_unix_ms > 0
+        );
 
 DO $$
 BEGIN
