@@ -3,10 +3,20 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4C53;
+
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn database_test_guard() -> Client {
+    let mut client = test_client();
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL outbox-lease test advisory lock should be acquired");
+    client
 }
 
 fn constraint_count(client: &mut Client, schema_name: &str) -> i64 {
@@ -29,6 +39,7 @@ fn constraint_count(client: &mut Client, schema_name: &str) -> i64 {
 
 #[test]
 fn lease_presence_constraint_is_installed_independently_in_each_schema() {
+    let _database_guard = database_test_guard();
     let mut client = test_client();
     client
         .batch_execute(
@@ -56,4 +67,11 @@ fn lease_presence_constraint_is_installed_independently_in_each_schema() {
         1,
         "a same-named constraint in another schema must not suppress this schema's constraint"
     );
+
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS outbox_lease_migration_alpha CASCADE;
+             DROP SCHEMA IF EXISTS outbox_lease_migration_beta CASCADE;",
+        )
+        .expect("isolated migration schemas should be removed");
 }
