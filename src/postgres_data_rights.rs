@@ -165,8 +165,9 @@ pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::
 /// The function owns one short local `PostgreSQL` transaction so a database or outbox error rolls
 /// back the request row, target rows, and any earlier event inserts together. It does not deliver
 /// events itself; the existing outbox worker owns retry, quarantine, and reconciliation behavior.
-/// Exact request replay is idempotent only when the target set and outbox evidence are unchanged.
-/// The insert-then-inspect first-write classifier requires `READ COMMITTED`, matching the existing
+/// Exact creation replay remains idempotent after the stored lifecycle advances when the immutable
+/// request evidence, target set, event identities, and outbox evidence are unchanged. The
+/// insert-then-inspect first-write classifier requires `READ COMMITTED`, matching the existing
 /// integration outbox replay contract, and fails closed when the session default uses stronger
 /// isolation.
 ///
@@ -355,8 +356,7 @@ fn persist_request_header(
     }
 
     let row = transaction.query_one(
-        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, current_state, \
-                requested_at_unix_ms, latest_event_at_unix_ms \
+        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, requested_at_unix_ms \
          FROM data_rights_request_state WHERE request_ref = $1",
         &[&request.request_ref()],
     )?;
@@ -364,9 +364,7 @@ fn persist_request_header(
         && row.get::<_, String>(1) == request.participant_ref()
         && row.get::<_, String>(2) == request_kind_name(request.kind())
         && row.get::<_, String>(3) == request.scope_ref()
-        && row.get::<_, String>(4) == "requested"
-        && row.get::<_, i64>(5) == requested_at
-        && row.get::<_, i64>(6) == requested_at;
+        && row.get::<_, i64>(4) == requested_at;
     if exact && stored_targets_match(transaction, request, targets)? {
         Ok(DataRightsPersistenceDisposition::Duplicate)
     } else {
