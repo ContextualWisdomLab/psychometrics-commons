@@ -1,4 +1,4 @@
-//! Creation replay stays idempotent after the durable request lifecycle advances.
+//! Creation and verification replay stay idempotent after the durable request lifecycle advances.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
@@ -6,7 +6,7 @@ use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_data_rights::{
     apply_data_rights_migration, persist_data_rights_identity_verification,
     persist_requested_data_rights_with_propagation, DataRightsPersistenceDisposition,
-    DataRightsPropagationTarget,
+    DataRightsPropagationTarget, DataRightsVerificationDisposition,
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
@@ -54,6 +54,26 @@ fn event() -> IntegrationEvent {
     .unwrap()
 }
 
+fn persist_requested(client: &mut Client) {
+    let event = event();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    assert_eq!(
+        persist_requested_data_rights_with_propagation(client, &request(), &targets, 3).unwrap(),
+        DataRightsPersistenceDisposition::Inserted
+    );
+}
+
+fn verified_request() -> DataRightsRequest {
+    let mut request = request();
+    request
+        .verify_identity("verification_evidence_creation_replay", 10_100)
+        .unwrap();
+    request
+}
+
 #[test]
 fn exact_creation_replay_remains_duplicate_after_identity_verification() {
     let mut client = ready_client();
@@ -63,16 +83,9 @@ fn exact_creation_replay_remains_duplicate_after_identity_verification() {
         &event,
     )];
 
-    assert_eq!(
-        persist_requested_data_rights_with_propagation(&mut client, &request(), &targets, 3)
-            .unwrap(),
-        DataRightsPersistenceDisposition::Inserted
-    );
+    persist_requested(&mut client);
 
-    let mut advanced = request();
-    advanced
-        .verify_identity("verification_evidence_creation_replay", 10_100)
-        .unwrap();
+    let advanced = verified_request();
     {
         let mut transaction = client.transaction().unwrap();
         persist_data_rights_identity_verification(&mut transaction, &advanced).unwrap();
@@ -85,4 +98,37 @@ fn exact_creation_replay_remains_duplicate_after_identity_verification() {
         DataRightsPersistenceDisposition::Duplicate,
         "retrying immutable creation evidence must not conflict merely because the stored lifecycle advanced"
     );
+}
+
+#[test]
+fn exact_identity_verification_replay_remains_duplicate_after_processing_state() {
+    let mut client = ready_client();
+    persist_requested(&mut client);
+
+    let verified = verified_request();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_data_rights_identity_verification(&mut transaction, &verified).unwrap(),
+            DataRightsVerificationDisposition::Verified
+        );
+        transaction.commit().unwrap();
+    }
+
+    client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET current_state = 'processing', latest_event_at_unix_ms = $2
+             WHERE request_ref = $1",
+            &[&verified.request_ref(), &10_200_i64],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_data_rights_identity_verification(&mut transaction, &verified).unwrap(),
+        DataRightsVerificationDisposition::Duplicate,
+        "retrying immutable verification evidence must remain idempotent after a later lifecycle transition"
+    );
+    transaction.commit().unwrap();
 }
