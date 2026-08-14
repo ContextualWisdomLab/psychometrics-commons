@@ -219,6 +219,59 @@ fn conflicting_session_identity_and_non_created_state_fail_closed() {
     ));
     transaction.commit().unwrap();
 
+    for (column, value) in [
+        ("instrument_version_ref", "instrument_version_conflict_v1"),
+        ("instrument_release_content_digest", OTHER_DIGEST),
+        ("locale", "en-US"),
+        ("session_state", "active"),
+    ] {
+        client
+            .execute(
+                &format!("UPDATE assessment_session SET {column} = $2 WHERE session_ref = $1"),
+                &[&"ses_conflict_alpha", &value],
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(
+            matches!(
+                persist_assessment_session(&mut transaction, &session),
+                Err(AssessmentSessionPersistenceError::ConflictingReplay)
+            ),
+            "replay must fail closed when stored {column} is rebound"
+        );
+        transaction.rollback().unwrap();
+        client
+            .execute(
+                "UPDATE assessment_session
+                 SET instrument_version_ref = $2,
+                     instrument_release_content_digest = $3,
+                     locale = $4,
+                     session_state = $5
+                 WHERE session_ref = $1",
+                &[
+                    &"ses_conflict_alpha",
+                    &"instrument_version_big_five_ko_v1",
+                    &VALID_DIGEST,
+                    &"ko-KR",
+                    &"created",
+                ],
+            )
+            .unwrap();
+    }
+
+    client
+        .execute(
+            "UPDATE assessment_session SET created_at_unix_ms = $2 WHERE session_ref = $1",
+            &[&"ses_conflict_alpha", &30_000_i64],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
     let mut activated = session;
     activated
         .apply_command("cmd_activate_session", 1, SessionCommand::Activate)
@@ -263,6 +316,21 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
         "PostgreSQL assessment-session persistence failed"
     );
     assert!(std::error::Error::source(&missing_table).is_some());
+    transaction.rollback().unwrap();
+
+    let overflow = AssessmentSession::new(
+        "ses_overflow_alpha",
+        PARTICIPANT_REF,
+        &published_release("release_big_five_ko_v1", VALID_DIGEST),
+        "ko-KR",
+        u64::MAX,
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session(&mut transaction, &overflow),
+        Err(AssessmentSessionPersistenceError::ValueOutOfRange)
+    ));
     transaction.rollback().unwrap();
 }
 
