@@ -19,6 +19,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const SCORING_REQUEST_MIGRATION: &str = include_str!("../migrations/0011_scoring_request.sql");
+const PRODUCT_EVENT_SOURCE: &str = "psychometrics_commons";
 
 /// Outcome of persisting one immutable scoring request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,6 +69,8 @@ impl ScoringDispatchPersistence {
 pub enum ScoringDispatchPersistenceError {
     /// The scoring job names a different immutable scoring request.
     MismatchedScoringRequest,
+    /// The dispatch outbox envelope is not causally bound to this local request/job pair.
+    InvalidDispatchEnvelope,
     /// Immutable scoring-request persistence failed.
     Request(ScoringRequestPersistenceError),
     /// Durable scoring-job persistence failed.
@@ -82,6 +85,9 @@ impl Display for ScoringDispatchPersistenceError {
             Self::MismatchedScoringRequest => {
                 "scoring job must reference the immutable scoring request in the same dispatch"
             }
+            Self::InvalidDispatchEnvelope => {
+                "scoring dispatch outbox envelope must identify the local job and response snapshot"
+            }
             Self::Request(_) => "scoring dispatch request persistence failed",
             Self::Job(_) => "scoring dispatch job persistence failed",
             Self::Outbox(_) => "scoring dispatch outbox persistence failed",
@@ -92,7 +98,7 @@ impl Display for ScoringDispatchPersistenceError {
 impl Error for ScoringDispatchPersistenceError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::MismatchedScoringRequest => None,
+            Self::MismatchedScoringRequest | Self::InvalidDispatchEnvelope => None,
             Self::Request(error) => Some(error),
             Self::Job(error) => Some(error),
             Self::Outbox(error) => Some(error),
@@ -167,10 +173,10 @@ pub fn apply_scoring_request_migration(
 /// The caller owns the transaction and therefore the final commit/rollback decision. This
 /// function composes the existing immutable request, job, and transactional-outbox adapters
 /// without introducing a second transaction boundary. The job must name exactly the supplied
-/// scoring request. Event schema, subject, tenant, correlation, and payload semantics remain
-/// the caller's versioned integration-contract responsibility; this function only guarantees
-/// that the validated outbox envelope cannot commit independently from newly written local
-/// dispatch state.
+/// scoring request. The outbox envelope must be emitted by this bounded context, use the scoring
+/// job as its subject, and identify the immutable response snapshot as its causation reference.
+/// Event type/schema, tenant, correlation, and payload semantics remain the caller's versioned
+/// integration-contract responsibility after that causal binding is established.
 ///
 /// Exact replay is idempotent. Pre-existing exact evidence may produce mixed dispositions,
 /// allowing a caller to reconcile a legacy partial state without rewriting immutable rows.
@@ -180,8 +186,9 @@ pub fn apply_scoring_request_migration(
 /// # Errors
 ///
 /// Returns [`ScoringDispatchPersistenceError::MismatchedScoringRequest`] before writing when
-/// the job is bound to another request. Request, job, or outbox persistence failures are
-/// preserved in the corresponding typed error variant.
+/// the job is bound to another request, [`ScoringDispatchPersistenceError::InvalidDispatchEnvelope`]
+/// when the outbox envelope is not causally bound to this local dispatch, or the typed request,
+/// job, or outbox persistence error when one of those stages fails.
 pub fn persist_scoring_dispatch(
     transaction: &mut Transaction<'_>,
     request: &ScoringRequest,
@@ -191,6 +198,12 @@ pub fn persist_scoring_dispatch(
 ) -> Result<ScoringDispatchPersistence, ScoringDispatchPersistenceError> {
     if job.scoring_request_ref() != request.scoring_request_ref() {
         return Err(ScoringDispatchPersistenceError::MismatchedScoringRequest);
+    }
+    if dispatch_event.source() != PRODUCT_EVENT_SOURCE
+        || dispatch_event.subject_ref() != job.scoring_job_ref()
+        || dispatch_event.causation_ref() != Some(request.response_snapshot_ref())
+    {
+        return Err(ScoringDispatchPersistenceError::InvalidDispatchEnvelope);
     }
 
     let scoring_request = persist_scoring_request(transaction, request)
