@@ -3,19 +3,37 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4649;
+
+fn schema_name() -> String {
+    format!("outbox_lease_fence_integrity_{}", std::process::id())
+}
+
 fn ready_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let schema = format!("outbox_lease_fence_integrity_{}", std::process::id());
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL outbox fencing integrity lock should be acquired");
+    let schema = schema_name();
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+            "DROP SCHEMA IF EXISTS {schema} CASCADE;
+             CREATE SCHEMA {schema};
+             SET search_path TO {schema};"
         ))
         .unwrap();
     apply_integration_migration(&mut client).unwrap();
     client
+}
+
+fn cleanup(client: &mut Client) {
+    let schema = schema_name();
+    client
+        .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE;"))
+        .unwrap();
 }
 
 #[test]
@@ -61,4 +79,5 @@ fn current_lease_fencing_token_must_equal_persisted_generation() {
         error.code(),
         Some(&postgres::error::SqlState::CHECK_VIOLATION)
     );
+    cleanup(&mut client);
 }
