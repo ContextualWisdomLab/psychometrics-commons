@@ -223,11 +223,11 @@ pub fn persist_requested_data_rights_with_propagation(
 
 /// Persist requester identity verification for one already requested data-rights identity.
 ///
-/// Exact replay of the same evidence and verification time is idempotent. A later
-/// conflicting verification fails closed. Replay classification locks the matched
-/// request row until the caller-owned transaction ends so the classified lifecycle
-/// cannot change before the caller composes subsequent atomic work.
-/// This adapter does not start processing or complete the request.
+/// Exact replay of the same evidence and verification time is idempotent, including after later
+/// lifecycle transitions that preserve the original verification evidence. A conflicting
+/// verification fails closed. Replay classification locks the matched request row until the
+/// caller-owned transaction ends so the classified lifecycle cannot change before the caller
+/// composes subsequent atomic work. This adapter does not start processing or complete the request.
 ///
 /// # Errors
 ///
@@ -288,7 +288,7 @@ pub fn persist_data_rights_identity_verification(
     let row = query_optional_row(
         transaction,
         "SELECT participant_ref, request_kind, scope_ref,
-                current_state, verification_evidence_ref, verified_at_unix_ms
+                verification_evidence_ref, verified_at_unix_ms
          FROM data_rights_request_state
          WHERE request_ref = $1 AND tenant_ref = $2
          FOR UPDATE",
@@ -300,20 +300,18 @@ pub fn persist_data_rights_identity_verification(
     let stored_participant: String = row.get(0);
     let stored_kind: String = row.get(1);
     let stored_scope: String = row.get(2);
-    let stored_state: String = row.get(3);
-    let stored_evidence: Option<String> = row.get(4);
-    let stored_verified_at: Option<i64> = row.get(5);
+    let stored_evidence: Option<String> = row.get(3);
+    let stored_verified_at: Option<i64> = row.get(4);
     let identity_matches = stored_participant == request.participant_ref()
         && stored_kind == request_kind
         && stored_scope == request.scope_ref();
     if !identity_matches {
         Err(DataRightsPersistenceError::ConflictingReplay)
-    } else if stored_state == "identity_verified"
-        && stored_evidence.as_deref() == Some(evidence_ref)
+    } else if stored_evidence.as_deref() == Some(evidence_ref)
         && stored_verified_at == Some(verified_at)
     {
         Ok(DataRightsVerificationDisposition::Duplicate)
-    } else if stored_state == "identity_verified" {
+    } else if stored_evidence.is_some() || stored_verified_at.is_some() {
         Err(DataRightsPersistenceError::ConflictingReplay)
     } else {
         Err(DataRightsPersistenceError::InvalidRequestState)
