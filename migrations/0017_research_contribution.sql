@@ -133,3 +133,55 @@ CREATE TABLE IF NOT EXISTS research_withdrawal_event (
         REFERENCES research_contribution (contribution_ref),
     CONSTRAINT research_withdrawal_event_ref_unique UNIQUE (withdrawal_event_ref)
 );
+
+CREATE OR REPLACE FUNCTION reject_research_contribution_evidence_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'research contribution evidence is immutable'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS research_consent_snapshot_immutable_guard
+    ON research_consent_snapshot;
+CREATE TRIGGER research_consent_snapshot_immutable_guard
+    BEFORE UPDATE OR DELETE ON research_consent_snapshot
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_research_contribution_evidence_mutation();
+
+DROP TRIGGER IF EXISTS research_consent_snapshot_truncate_guard
+    ON research_consent_snapshot;
+CREATE TRIGGER research_consent_snapshot_truncate_guard
+    BEFORE TRUNCATE ON research_consent_snapshot
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_research_contribution_evidence_mutation();
+
+DROP TRIGGER IF EXISTS research_contribution_immutable_guard
+    ON research_contribution;
+CREATE TRIGGER research_contribution_immutable_guard
+    BEFORE UPDATE OR DELETE ON research_contribution
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_research_contribution_evidence_mutation();
+
+DROP TRIGGER IF EXISTS research_contribution_truncate_guard
+    ON research_contribution;
+CREATE TRIGGER research_contribution_truncate_guard
+    BEFORE TRUNCATE ON research_contribution
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_research_contribution_evidence_mutation();
+
+DROP TRIGGER IF EXISTS research_withdrawal_event_immutable_guard
+    ON research_withdrawal_event;
+CREATE TRIGGER research_withdrawal_event_immutable_guard
+    BEFORE UPDATE OR DELETE ON research_withdrawal_event
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_research_contribution_evidence_mutation();
+
+DROP TRIGGER IF EXISTS research_withdrawal_event_truncate_guard
+    ON research_withdrawal_event;
+CREATE TRIGGER research_withdrawal_event_truncate_guard
+    BEFORE TRUNCATE ON research_withdrawal_event
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_research_contribution_evidence_mutation();
