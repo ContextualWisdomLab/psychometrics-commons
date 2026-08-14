@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
 - Assessment-session creation binds to one published locale-specific instrument release, copies immutable version/locale provenance, and fails closed on locale mismatch or unpublished eligibility.
 - PostgreSQL persistence for immutable version-pinned scoring-request identity, with exact replay and fail-closed rebinding of snapshot or measurement-version evidence.
