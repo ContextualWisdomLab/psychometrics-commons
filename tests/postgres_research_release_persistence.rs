@@ -96,7 +96,11 @@ fn every_access_class_persists_and_exact_replay_is_idempotent() {
     apply_research_release_migration(&mut client).unwrap();
 
     let cases = [
-        ("research_release_public", ResearchAccessClass::Public, "public"),
+        (
+            "research_release_public",
+            ResearchAccessClass::Public,
+            "public",
+        ),
         (
             "research_release_controlled",
             ResearchAccessClass::Controlled,
@@ -256,8 +260,14 @@ fn database_failure_is_typed_and_exposes_the_postgres_source() {
     );
 
     let error = persist_err(&mut client, &release);
-    assert!(matches!(error, ResearchReleasePersistenceError::Database(_)));
-    assert_eq!(error.to_string(), "PostgreSQL research-release persistence failed");
+    assert!(matches!(
+        error,
+        ResearchReleasePersistenceError::Database(_)
+    ));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL research-release persistence failed"
+    );
     assert!(error.source().is_some());
 }
 
