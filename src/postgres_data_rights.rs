@@ -166,10 +166,10 @@ pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::
 /// back the request row, target rows, and any earlier event inserts together. It does not deliver
 /// events itself; the existing outbox worker owns retry, quarantine, and reconciliation behavior.
 /// Exact creation replay remains idempotent after the stored lifecycle advances when the immutable
-/// request evidence, target set, event identities, and outbox evidence are unchanged. The
-/// insert-then-inspect first-write classifier requires `READ COMMITTED`, matching the existing
-/// integration outbox replay contract, and fails closed when the session default uses stronger
-/// isolation.
+/// request evidence, target set, event identities, outbox evidence, and stored lifecycle evidence
+/// are internally coherent. The insert-then-inspect first-write classifier requires
+/// `READ COMMITTED`, matching the existing integration outbox replay contract, and fails closed
+/// when the session default uses stronger isolation.
 ///
 /// # Errors
 ///
@@ -354,7 +354,35 @@ fn persist_request_header(
     }
 
     let row = transaction.query_one(
-        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, requested_at_unix_ms \
+        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, requested_at_unix_ms,
+                CASE
+                  WHEN current_state = 'requested' THEN
+                    latest_event_at_unix_ms = requested_at_unix_ms
+                    AND verification_evidence_ref IS NULL
+                    AND verified_at_unix_ms IS NULL
+                  WHEN current_state = 'identity_verified' THEN
+                    verification_evidence_ref IS NOT NULL
+                    AND verified_at_unix_ms IS NOT NULL
+                    AND verified_at_unix_ms >= requested_at_unix_ms
+                    AND latest_event_at_unix_ms = verified_at_unix_ms
+                  WHEN current_state IN ('processing','completed','partially_completed','failed') THEN
+                    verification_evidence_ref IS NOT NULL
+                    AND verified_at_unix_ms IS NOT NULL
+                    AND verified_at_unix_ms >= requested_at_unix_ms
+                    AND latest_event_at_unix_ms >= verified_at_unix_ms
+                  WHEN current_state = 'rejected' THEN
+                    latest_event_at_unix_ms >= requested_at_unix_ms
+                    AND (
+                      (verification_evidence_ref IS NULL AND verified_at_unix_ms IS NULL)
+                      OR (
+                        verification_evidence_ref IS NOT NULL
+                        AND verified_at_unix_ms IS NOT NULL
+                        AND verified_at_unix_ms >= requested_at_unix_ms
+                        AND latest_event_at_unix_ms >= verified_at_unix_ms
+                      )
+                    )
+                  ELSE FALSE
+                END AS lifecycle_is_coherent
          FROM data_rights_request_state WHERE request_ref = $1",
         &[&request.request_ref()],
     )?;
@@ -362,7 +390,8 @@ fn persist_request_header(
         && row.get::<_, String>(1) == request.participant_ref()
         && row.get::<_, String>(2) == request_kind_name(request.kind())
         && row.get::<_, String>(3) == request.scope_ref()
-        && row.get::<_, i64>(4) == requested_at;
+        && row.get::<_, i64>(4) == requested_at
+        && row.get::<_, bool>(5);
     if exact && stored_targets_match(transaction, request, targets)? {
         Ok(DataRightsPersistenceDisposition::Duplicate)
     } else {
