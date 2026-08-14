@@ -126,6 +126,65 @@ fn processing_start_persists_and_replays_exactly() {
 }
 
 #[test]
+fn export_processing_start_persists_request_kind_branch() {
+    let mut client = ready_client("data_rights_process_export");
+    let request_ref = "data_rights_request_export";
+    let mut request = DataRightsRequest::new(
+        request_ref,
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Export,
+        "scope_export",
+        11_000,
+    )
+    .unwrap();
+    let event = IntegrationEvent::new(
+        "event_data_rights_request_export",
+        "data_rights.export.requested",
+        "v1",
+        "psychometrics_commons",
+        "tenant_alpha",
+        request_ref,
+        11_000,
+        request_ref,
+        None,
+        DIGEST,
+    )
+    .unwrap();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(&mut client, &request, &targets, 3).unwrap();
+
+    request
+        .verify_identity("verification_evidence_export", 11_100)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_data_rights_identity_verification(&mut transaction, &request).unwrap();
+    transaction.commit().unwrap();
+
+    request
+        .start_processing("operation_export", 11_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap(),
+        DataRightsProcessingDisposition::Started
+    );
+    transaction.commit().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT request_kind, current_state FROM data_rights_request_state WHERE request_ref = $1",
+            &[&request_ref],
+        )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "export");
+    assert_eq!(row.get::<_, String>(1), "processing");
+}
+
+#[test]
 fn processing_start_rejects_conflicting_and_later_lifecycle_evidence() {
     let mut client = ready_client("data_rights_process_conflict");
     let mut request = persist_verified(&mut client, "data_rights_request_process");
