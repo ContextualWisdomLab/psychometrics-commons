@@ -5,7 +5,7 @@
 //! `COPY ... FORMAT BINARY`, restores them into that clean schema, and then proves that immutable
 //! provenance, tenant-scoped deduplication, and in-flight fencing evidence still behave correctly.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -186,24 +186,29 @@ fn assert_restored_evidence(client: &mut Client) {
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
-    let duplicate = client.execute(
-        &format!(
-            "INSERT INTO {RESTORED_SCHEMA}.integration_outbox (
-                event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,
-                occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest, max_attempts,
-                current_state, latest_event_at_unix_ms
-             ) VALUES (
-                'event_recovery_alpha', 'assessment.result.available', 'v1',
-                'psychometrics_commons', 'tenant_recovery_alpha', 'result_recovery_alpha',
-                10000, 'correlation_recovery_alpha', NULL, '{DIGEST_B}', 5, 'pending', 10000
-             )"
-        ),
-        &[],
-    );
-    assert!(
-        duplicate.is_err(),
-        "restore must preserve the original scoped outbox identity instead of permitting a conflicting replay"
-    );
+    let duplicate = client
+        .execute(
+            &format!(
+                "INSERT INTO {RESTORED_SCHEMA}.integration_outbox (
+                    event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref,
+                    occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest, max_attempts,
+                    current_state, latest_event_at_unix_ms
+                 ) VALUES (
+                    'event_recovery_alpha', 'assessment.result.available', 'v1',
+                    'psychometrics_commons', 'tenant_recovery_alpha', 'result_recovery_alpha',
+                    10000, 'correlation_recovery_alpha', NULL, '{DIGEST_B}', 5, 'pending', 10000
+                 )"
+            ),
+            &[],
+        )
+        .expect_err(
+            "restore must preserve the original scoped outbox identity instead of permitting a conflicting replay",
+        );
+    let database_error = duplicate
+        .as_db_error()
+        .expect("conflicting restored outbox replay must fail at the database constraint boundary");
+    assert_eq!(database_error.code(), &SqlState::UNIQUE_VIOLATION);
+    assert_eq!(database_error.constraint(), Some("integration_outbox_pkey"));
 
     let independent_tenant = client
         .execute(
