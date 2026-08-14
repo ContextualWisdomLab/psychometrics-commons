@@ -72,7 +72,9 @@ fn race_claim(
     lease_ref: &'static str,
 ) -> ClaimOutcome {
     let mut client = schema_client();
-    let mut transaction = client.transaction().expect("worker transaction should begin");
+    let mut transaction = client
+        .transaction()
+        .expect("worker transaction should begin");
     barrier.wait();
 
     match claim_outbox_delivery(
@@ -123,10 +125,18 @@ fn concurrent_claims_have_one_winner_and_reclaim_advances_the_fence() {
     let first_barrier = Arc::clone(&barrier);
     let second_barrier = Arc::clone(&barrier);
     let first = thread::spawn(move || {
-        race_claim(first_barrier, "worker_concurrent_alpha", "outbox_lease_concurrent_alpha")
+        race_claim(
+            first_barrier,
+            "worker_concurrent_alpha",
+            "outbox_lease_concurrent_alpha",
+        )
     });
     let second = thread::spawn(move || {
-        race_claim(second_barrier, "worker_concurrent_beta", "outbox_lease_concurrent_beta")
+        race_claim(
+            second_barrier,
+            "worker_concurrent_beta",
+            "outbox_lease_concurrent_beta",
+        )
     });
 
     let outcomes = [
