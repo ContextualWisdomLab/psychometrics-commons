@@ -109,3 +109,26 @@ CREATE TABLE IF NOT EXISTS integration_consumption (
         )
     )
 );
+
+CREATE OR REPLACE FUNCTION reject_expired_inbox_claim_terminal_transition()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.consumption_state = 'processing'
+       AND NEW.consumption_state IN ('completed', 'quarantined')
+       AND OLD.claim_expires_at_unix_ms IS NOT NULL
+       AND NEW.latest_event_at_unix_ms >= OLD.claim_expires_at_unix_ms THEN
+        RAISE EXCEPTION 'expired inbox processing claim cannot perform a terminal transition'
+            USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS integration_consumption_claim_expiry_guard
+    ON integration_consumption;
+CREATE TRIGGER integration_consumption_claim_expiry_guard
+    BEFORE UPDATE ON integration_consumption
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_expired_inbox_claim_terminal_transition();
