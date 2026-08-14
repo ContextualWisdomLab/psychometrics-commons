@@ -120,3 +120,55 @@ CREATE TABLE IF NOT EXISTS participant_identity_link_end_event (
         FOREIGN KEY (participant_ref, linked_event_ref)
         REFERENCES participant_identity_link_event (participant_ref, link_event_ref)
 );
+
+CREATE OR REPLACE FUNCTION reject_participant_identity_history_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'participant identity history is append-only'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS participant_identity_ledger_immutable_guard
+    ON participant_identity_ledger;
+CREATE TRIGGER participant_identity_ledger_immutable_guard
+    BEFORE UPDATE OR DELETE ON participant_identity_ledger
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_participant_identity_history_mutation();
+
+DROP TRIGGER IF EXISTS participant_identity_ledger_truncate_guard
+    ON participant_identity_ledger;
+CREATE TRIGGER participant_identity_ledger_truncate_guard
+    BEFORE TRUNCATE ON participant_identity_ledger
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_participant_identity_history_mutation();
+
+DROP TRIGGER IF EXISTS participant_identity_link_event_immutable_guard
+    ON participant_identity_link_event;
+CREATE TRIGGER participant_identity_link_event_immutable_guard
+    BEFORE UPDATE OR DELETE ON participant_identity_link_event
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_participant_identity_history_mutation();
+
+DROP TRIGGER IF EXISTS participant_identity_link_event_truncate_guard
+    ON participant_identity_link_event;
+CREATE TRIGGER participant_identity_link_event_truncate_guard
+    BEFORE TRUNCATE ON participant_identity_link_event
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_participant_identity_history_mutation();
+
+DROP TRIGGER IF EXISTS participant_identity_link_end_event_immutable_guard
+    ON participant_identity_link_end_event;
+CREATE TRIGGER participant_identity_link_end_event_immutable_guard
+    BEFORE UPDATE OR DELETE ON participant_identity_link_end_event
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_participant_identity_history_mutation();
+
+DROP TRIGGER IF EXISTS participant_identity_link_end_event_truncate_guard
+    ON participant_identity_link_end_event;
+CREATE TRIGGER participant_identity_link_end_event_truncate_guard
+    BEFORE TRUNCATE ON participant_identity_link_end_event
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_participant_identity_history_mutation();
