@@ -9,8 +9,55 @@ use psychometrics_commons_runtime::postgres_data_rights::{
     DataRightsPropagationTarget,
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
+use std::ops::{Deref, DerefMut};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+struct IsolatedClient {
+    client: Client,
+    schema: String,
+}
+
+impl Deref for IsolatedClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for IsolatedClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+impl Drop for IsolatedClient {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema
+        ));
+    }
+}
+
+fn ready_client() -> IsolatedClient {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let backend_pid: i32 = client
+        .query_one("SELECT pg_backend_pid()", &[])
+        .expect("PostgreSQL backend identity must be available")
+        .get(0);
+    let schema = format!("data_rights_processing_replay_{backend_pid}");
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
+        .unwrap();
+    apply_integration_migration(&mut client).unwrap();
+    apply_data_rights_migration(&mut client).unwrap();
+    IsolatedClient { client, schema }
+}
 
 fn request() -> DataRightsRequest {
     DataRightsRequest::new(
@@ -42,21 +89,7 @@ fn event() -> IntegrationEvent {
 
 #[test]
 fn exact_creation_replay_remains_duplicate_after_processing_starts() {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
-    let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
-    let backend_pid: i32 = client
-        .query_one("SELECT pg_backend_pid()", &[])
-        .expect("PostgreSQL backend identity must be available")
-        .get(0);
-    let schema = format!("data_rights_processing_replay_{backend_pid}");
-    client
-        .batch_execute(&format!(
-            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
-        ))
-        .unwrap();
-
-    apply_integration_migration(&mut client).unwrap();
-    apply_data_rights_migration(&mut client).unwrap();
+    let mut client = ready_client();
 
     let original = request();
     let original_event = event();
@@ -99,10 +132,4 @@ fn exact_creation_replay_remains_duplicate_after_processing_starts() {
         DataRightsPersistenceDisposition::Duplicate,
         "the original creation command must stay replay-safe after processing begins"
     );
-
-    client
-        .batch_execute(&format!(
-            "SET search_path TO public; DROP SCHEMA IF EXISTS {schema} CASCADE;"
-        ))
-        .unwrap();
 }
