@@ -253,6 +253,7 @@ pub fn persist_data_rights_identity_verification(
         _ => return Err(DataRightsPersistenceError::InvalidRequestState),
     };
     require_read_committed(transaction)?;
+    let request_kind = request_kind_name(request.kind());
 
     let updated = query_optional_row(
         transaction,
@@ -264,6 +265,9 @@ pub fn persist_data_rights_identity_verification(
              updated_at = clock_timestamp()
          WHERE request_ref = $1
            AND tenant_ref = $2
+           AND participant_ref = $5
+           AND request_kind = $6
+           AND scope_ref = $7
            AND current_state = 'requested'
          RETURNING request_ref",
         &[
@@ -271,6 +275,9 @@ pub fn persist_data_rights_identity_verification(
             &request.tenant_ref(),
             &evidence_ref,
             &verified_at,
+            &request.participant_ref(),
+            &request_kind,
+            &request.scope_ref(),
         ],
     )?;
     if updated.is_some() {
@@ -279,7 +286,8 @@ pub fn persist_data_rights_identity_verification(
 
     let row = query_optional_row(
         transaction,
-        "SELECT current_state, verification_evidence_ref, verified_at_unix_ms
+        "SELECT participant_ref, request_kind, scope_ref,
+                current_state, verification_evidence_ref, verified_at_unix_ms
          FROM data_rights_request_state
          WHERE request_ref = $1 AND tenant_ref = $2
          FOR UPDATE",
@@ -288,10 +296,18 @@ pub fn persist_data_rights_identity_verification(
     let Some(row) = row else {
         return Err(DataRightsPersistenceError::RequestNotFound);
     };
-    let stored_state: String = row.get(0);
-    let stored_evidence: Option<String> = row.get(1);
-    let stored_verified_at: Option<i64> = row.get(2);
-    if stored_state == "identity_verified"
+    let stored_participant: String = row.get(0);
+    let stored_kind: String = row.get(1);
+    let stored_scope: String = row.get(2);
+    let stored_state: String = row.get(3);
+    let stored_evidence: Option<String> = row.get(4);
+    let stored_verified_at: Option<i64> = row.get(5);
+    let identity_matches = stored_participant == request.participant_ref()
+        && stored_kind == request_kind
+        && stored_scope == request.scope_ref();
+    if !identity_matches {
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    } else if stored_state == "identity_verified"
         && stored_evidence.as_deref() == Some(evidence_ref)
         && stored_verified_at == Some(verified_at)
     {
