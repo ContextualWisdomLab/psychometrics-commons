@@ -156,7 +156,7 @@ pub enum PersistenceError {
     LeaseStillActive,
     /// A worker presented a fencing token that does not own the current lease.
     StaleLease,
-    /// A worker-side transition was observed at or after persisted lease expiry.
+    /// The database clock reached or passed the persisted lease expiry.
     LeaseExpired,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
@@ -519,8 +519,9 @@ pub fn expire_outbox_delivery_lease(
 
 /// Persist a delivery attempt for the worker that owns the current fenced lease.
 ///
-/// Exact attempt replay remains idempotent. A matching first attempt advances the
-/// outbox and clears the exclusive lease so a later claim issues a new fence.
+/// Exact attempt replay remains idempotent after a completed attempt has cleared its
+/// lease. While a lease is present, the database clock and fencing token are checked
+/// before replay classification so stale or expired workers fail closed.
 ///
 /// # Errors
 ///
@@ -569,6 +570,12 @@ pub fn record_leased_outbox_delivery_attempt(
     let latest_event_at_unix_ms: i64 = outbox_row.get(2);
     let stored_fence: Option<i64> = outbox_row.get(3);
     let lease_expires_at_unix_ms: Option<i64> = outbox_row.get(4);
+    let database_now_unix_ms: i64 = transaction
+        .query_one(
+            "SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint",
+            &[],
+        )?
+        .get(0);
 
     let write = DeliveryAttemptWrite {
         source_ref,
@@ -583,20 +590,26 @@ pub fn record_leased_outbox_delivery_attempt(
         max_attempts,
         clear_lease: true,
     };
-    if let Some(replay) = classify_existing_delivery_attempt(transaction, &write)? {
-        return Ok(replay);
-    }
 
-    let (Some(stored_fence), Some(lease_expires_at_unix_ms)) =
-        (stored_fence, lease_expires_at_unix_ms)
-    else {
-        return Err(PersistenceError::NotLeased);
-    };
-    if stored_fence != fencing_token {
-        return Err(PersistenceError::StaleLease);
-    }
-    if lease_expires_at_unix_ms <= occurred_at_unix_ms {
-        return Err(PersistenceError::LeaseExpired);
+    match (stored_fence, lease_expires_at_unix_ms) {
+        (Some(stored_fence), Some(lease_expires_at_unix_ms)) => {
+            if stored_fence != fencing_token {
+                return Err(PersistenceError::StaleLease);
+            }
+            if lease_expires_at_unix_ms <= database_now_unix_ms {
+                return Err(PersistenceError::LeaseExpired);
+            }
+            if let Some(replay) = classify_existing_delivery_attempt(transaction, &write)? {
+                return Ok(replay);
+            }
+        }
+        (None, None) => {
+            if let Some(replay) = classify_existing_delivery_attempt(transaction, &write)? {
+                return Ok(replay);
+            }
+            return Err(PersistenceError::NotLeased);
+        }
+        _ => return Err(PersistenceError::NotLeased),
     }
 
     persist_new_delivery_attempt(transaction, &write)
