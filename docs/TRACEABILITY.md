@@ -24,8 +24,8 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
-| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs`; **Active PR** #55 persists the frozen prefix |
-| Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance; live fast-mlsirm integration is Target |
+| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
+| Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance; **Active PR** #56 persists request identity; live fast-mlsirm integration is Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle in `src/scoring_job.rs` plus PostgreSQL enqueue identity and initial worker-lease fencing; durable retry/completion/expiry recovery, crash/restart recovery, and live fast-mlsirm execution remain Target |
 | Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result-serving transport is Target |
 | Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010, ADR-0018 | Target |
@@ -73,7 +73,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs`; `src/postgres_data_rights.rs` persists the requested identity and local propagation events | Keyverse/account/anonymous transport integration |
 | Legal retention represented explicitly | TRD §13 | `src/data_rights.rs` partial completion | dependency execution/restore tests after local propagation |
 | No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy only | deployment credential/fitness-function test |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0006_instrument_release.sql`, and the matching PostgreSQL adapters, including expired-lease recovery on the existing scoring-job row; **Active PR** #55 adds `migrations/0010_response_snapshot.sql` | remaining product aggregates, crash/restart restore acceptance |
+| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0006_instrument_release.sql`, and the matching PostgreSQL adapters, including expired-lease recovery on the existing scoring-job row; **Active PR** #56 adds `migrations/0011_scoring_request.sql` | remaining product aggregates, crash/restart restore acceptance |
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence and delivery-attempt persistence | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL integration evidence does not claim side-effect completion | durable pending/processing/completed persistence + crash/retry tests |
@@ -125,7 +125,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #55 is not protected-main truth. It persists completed `ResponseSnapshot` values through `migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs`. Scoring, result snapshots, response-event ledgers, and HTTP transport remain outside this slice.
+**Active PR** #56 is not protected-main truth. It persists version-pinned `ScoringRequest` identity through `migrations/0011_scoring_request.sql` and `src/postgres_scoring_request.rs`. Live fast-mlsirm execution, result snapshots, and HTTP transport remain outside this slice.
 
 ## 5. ADR traceability by concern
 
