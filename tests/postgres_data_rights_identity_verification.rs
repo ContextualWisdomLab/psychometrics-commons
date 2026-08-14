@@ -165,6 +165,57 @@ fn conflicting_verification_and_unverified_requests_fail_closed() {
 }
 
 #[test]
+fn exact_verification_replay_rejects_request_identity_rebinding() {
+    let mut client = ready_client("data_rights_verify_identity_rebind");
+    let mut request = persist_requested(&mut client);
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_identity_verification(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    for (participant_ref, kind, scope_ref) in [
+        (
+            "participant_beta",
+            DataRightsRequestKind::Deletion,
+            "scope_alpha",
+        ),
+        (
+            "participant_alpha",
+            DataRightsRequestKind::Export,
+            "scope_alpha",
+        ),
+        (
+            "participant_alpha",
+            DataRightsRequestKind::Deletion,
+            "scope_beta",
+        ),
+    ] {
+        let mut rebound = DataRightsRequest::new(
+            "data_rights_request_verify",
+            "tenant_alpha",
+            participant_ref,
+            kind,
+            scope_ref,
+            10_000,
+        )
+        .unwrap();
+        rebound
+            .verify_identity("verification_evidence_alpha", 10_100)
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_data_rights_identity_verification(&mut transaction, &rebound),
+            Err(DataRightsPersistenceError::ConflictingReplay)
+        ));
+        transaction.rollback().unwrap();
+    }
+}
+
+#[test]
 fn stored_non_requested_state_and_overflowing_time_fail_closed() {
     let mut client = ready_client("data_rights_verify_invalid");
     let mut request = persist_requested(&mut client);
