@@ -35,6 +35,9 @@ pub enum ResearchReleasePersistenceDisposition {
 pub enum ResearchReleasePersistenceError {
     /// Release identity was replayed with different immutable approval evidence.
     ConflictingReplay,
+    /// A conflicting insert was observed but the stored approval evidence disappeared before
+    /// replay classification could verify it.
+    MissingStoredEvidence,
     /// Persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
@@ -46,6 +49,9 @@ impl Display for ResearchReleasePersistenceError {
         formatter.write_str(match self {
             Self::ConflictingReplay => {
                 "research release identity was replayed with conflicting approval evidence"
+            }
+            Self::MissingStoredEvidence => {
+                "stored research-release approval evidence disappeared during replay classification"
             }
             Self::UnsupportedIsolationLevel => {
                 "research release persistence requires read committed isolation"
@@ -93,8 +99,8 @@ pub fn apply_research_release_migration(
 ///
 /// # Errors
 ///
-/// Returns [`ResearchReleasePersistenceError`] for unsupported isolation, conflicting replay, or
-/// a database failure.
+/// Returns [`ResearchReleasePersistenceError`] for unsupported isolation, conflicting replay,
+/// missing stored evidence during replay classification, or a database failure.
 pub fn persist_approved_research_release(
     transaction: &mut Transaction<'_>,
     release: &ApprovedResearchRelease,
@@ -138,7 +144,9 @@ fn classify_existing_release(
     access_class: &str,
 ) -> Result<ResearchReleasePersistenceDisposition, ResearchReleasePersistenceError> {
     let release_ref = release.release_ref();
-    let row = transaction.query_one(RESEARCH_RELEASE_SELECT, &[&release_ref])?;
+    let Some(row) = transaction.query_opt(RESEARCH_RELEASE_SELECT, &[&release_ref])? else {
+        return Err(ResearchReleasePersistenceError::MissingStoredEvidence);
+    };
     let stored_dataset: String = row.get(0);
     let stored_scope: String = row.get(1);
     let stored_manifest: String = row.get(2);
