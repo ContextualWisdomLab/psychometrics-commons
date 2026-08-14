@@ -68,16 +68,41 @@ BEGIN
 END
 $$;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint AS constraint_record
+        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
+        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
+        WHERE constraint_record.conname = 'data_rights_completion_scope_fk_unique'
+          AND table_record.relname = 'data_rights_request_state'
+          AND schema_record.nspname = current_schema()
+    ) THEN
+        ALTER TABLE data_rights_request_state
+            ADD CONSTRAINT data_rights_completion_scope_fk_unique
+            UNIQUE (request_ref, tenant_ref, request_kind, current_state);
+    END IF;
+END
+$$;
+
 CREATE TABLE IF NOT EXISTS data_rights_retained_scope_evidence (
     request_ref TEXT NOT NULL,
     tenant_ref TEXT NOT NULL,
+    request_kind TEXT NOT NULL DEFAULT 'deletion',
+    completion_state TEXT NOT NULL DEFAULT 'partially_completed',
     retained_scope_ref TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (request_ref, retained_scope_ref),
     CONSTRAINT data_rights_retained_scope_request_fk
-        FOREIGN KEY (request_ref, tenant_ref)
-        REFERENCES data_rights_request_state (request_ref, tenant_ref)
+        FOREIGN KEY (request_ref, tenant_ref, request_kind, completion_state)
+        REFERENCES data_rights_request_state
+            (request_ref, tenant_ref, request_kind, current_state)
         ON DELETE RESTRICT,
+    CONSTRAINT data_rights_retained_scope_kind_check
+        CHECK (request_kind = 'deletion'),
+    CONSTRAINT data_rights_retained_scope_state_check
+        CHECK (completion_state = 'partially_completed'),
     CONSTRAINT data_rights_retained_scope_ref_format_check CHECK (
         retained_scope_ref = btrim(retained_scope_ref)
         AND retained_scope_ref <> ''
