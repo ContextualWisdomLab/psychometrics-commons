@@ -30,6 +30,7 @@ fn ready_client(schema_prefix: &str) -> Client {
     let mut client = test_client(schema_prefix);
     apply_integration_migration(&mut client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
+    // Intentional second application proves the migration remains idempotent.
     apply_data_rights_migration(&mut client).unwrap();
     client
 }
@@ -315,6 +316,9 @@ fn unmatched_verification_select_failure_is_a_database_failure() {
         ))
         .unwrap();
 
+    // A statement-level AFTER UPDATE trigger runs even when UPDATE matches zero rows.
+    // It redirects this session's search_path so the fallback SELECT fails closed;
+    // do not reuse this connection for unrelated statements after this assertion.
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist_data_rights_identity_verification(&mut transaction, &request),
