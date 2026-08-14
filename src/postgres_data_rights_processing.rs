@@ -73,10 +73,8 @@ pub fn persist_data_rights_processing_start(
         ) => {
             let started_at = i64::try_from(started_at_ms)
                 .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
-            // `DataRightsRequest::start_processing` enforces monotonic event time, so a
-            // representable processing-start time proves the earlier verified time is also
-            // representable by PostgreSQL BIGINT.
-            let verified_at = verified_at_ms as i64;
+            let verified_at = i64::try_from(verified_at_ms)
+                .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
             (
                 operation_ref,
                 started_at,
