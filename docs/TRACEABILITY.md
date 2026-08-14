@@ -2,7 +2,7 @@
 
 - Status: Normative traceability index
 - Date: 2026-08-14
-- Evaluated protected-main implementation baseline: `31b585b65f7db62b96d82e824ee79962dca7cece`
+- Evaluated protected-main implementation baseline: `76f4e28fc6c89923acea54cd0b7a7ab85fc11401`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -20,7 +20,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Requirement | PRD source | Technical/architecture contract | ADR(s) | Evaluated-main implementation |
 |---|---|---|---|---|
-| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; **Active PR** #61 persists created-session identity; anonymous credential/HTTP flow is Target |
+| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
@@ -52,7 +52,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
-| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation; **Active PR** #61 persists `SessionState::Created` identity | command-replay persistence and API concurrency test |
+| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
@@ -63,7 +63,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
 | Instrument release bytes/version/item order are immutable | TRD §7 | `src/instrument.rs` + publication contract tests; `src/postgres_instrument_release.rs` persists immutable manifest columns | API publication integration |
-| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession::new` binds creation to that published locale-specific release; **Active PR** #61 persists that binding | API session-creation integration test |
+| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch | session-creation persistence/API integration test |
 | Publication event replay is idempotent/conflicting reuse fails closed | TRD §7 | `src/instrument.rs` | durable DB uniqueness/concurrency test |
 | Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | `src/instrument.rs` binds approved evidence status, provenance/scope, mandatory evidence references, validity window, and immutable release identity before publication/reactivation | persistence/API publication integration and real instrument-specific evidence artifacts |
 | Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID | append-only identity-link persistence + unlink/relink/recovery audit tests |
@@ -73,7 +73,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs`; `src/postgres_data_rights.rs` persists the requested identity and local propagation events | Keyverse/account/anonymous transport integration |
 | Legal retention represented explicitly | TRD §13 | `src/data_rights.rs` partial completion | dependency execution/restore tests after local propagation |
 | No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy only | deployment credential/fitness-function test |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0006_instrument_release.sql`, `migrations/0011_scoring_request.sql`, `migrations/0012_integration_consumption.sql`, matching adapters, and PostgreSQL operational-store readiness; **Active PR** #61 adds `migrations/0014_assessment_session.sql` | remaining product aggregates, crash/restart restore acceptance |
+| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0006_instrument_release.sql`, `migrations/0011_scoring_request.sql`, `migrations/0012_integration_consumption.sql`, **Active PR** #61 adds `migrations/0014_assessment_session.sql` | remaining product aggregates, crash/restart restore acceptance |
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence, delivery-attempt persistence, and inbox consumption | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL inbox consumption persists pending/processing/completed and expire-and-reclaim | live adapter crash/retry tests |
@@ -89,7 +89,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `31b585b65f7db62b96d82e824ee79962dca7cece`:
+Current protected-main Rust module surface on `76f4e28fc6c89923acea54cd0b7a7ab85fc11401`:
 
 ```text
 src/lib.rs
@@ -103,7 +103,6 @@ src/lib.rs
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
-├── postgres_health.rs  # PostgreSQL major/write-readiness and relation-integrity probe
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
