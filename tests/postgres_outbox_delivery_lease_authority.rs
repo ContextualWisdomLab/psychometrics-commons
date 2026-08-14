@@ -15,8 +15,8 @@ const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4155;
 fn ready_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client =
-        Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
     client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL outbox authority test lock should be acquired");
