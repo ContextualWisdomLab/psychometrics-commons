@@ -108,10 +108,7 @@ fn consent_and_outbox_commit_and_replay_together() {
     let mut transaction = client.transaction().unwrap();
     let inserted =
         persist_consent_ledger_with_outbox(&mut transaction, &ledger, &event, 3).unwrap();
-    assert_eq!(
-        inserted.consent(),
-        ConsentPersistenceDisposition::Inserted
-    );
+    assert_eq!(inserted.consent(), ConsentPersistenceDisposition::Inserted);
     assert_eq!(inserted.outbox(), PersistenceDisposition::Inserted);
     transaction.commit().unwrap();
 
