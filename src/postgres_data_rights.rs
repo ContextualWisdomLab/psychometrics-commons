@@ -223,8 +223,10 @@ pub fn persist_requested_data_rights_with_propagation(
 /// Persist requester identity verification for one already requested data-rights identity.
 ///
 /// Exact replay of the same evidence and verification time is idempotent. A later
-/// conflicting verification fails closed. This adapter does not start processing
-/// or complete the request.
+/// conflicting verification fails closed. Replay classification locks the matched
+/// request row until the caller-owned transaction ends so the classified lifecycle
+/// cannot change before the caller composes subsequent atomic work.
+/// This adapter does not start processing or complete the request.
 ///
 /// # Errors
 ///
@@ -279,7 +281,8 @@ pub fn persist_data_rights_identity_verification(
         transaction,
         "SELECT current_state, verification_evidence_ref, verified_at_unix_ms
          FROM data_rights_request_state
-         WHERE request_ref = $1 AND tenant_ref = $2",
+         WHERE request_ref = $1 AND tenant_ref = $2
+         FOR UPDATE",
         &[&request.request_ref(), &request.tenant_ref()],
     )?;
     let Some(row) = row else {
