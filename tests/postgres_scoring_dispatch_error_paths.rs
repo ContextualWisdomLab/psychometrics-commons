@@ -184,8 +184,14 @@ fn nonfresh_job_failure_rolls_back_request_insert() {
 #[test]
 fn dispatch_error_display_and_sources_are_typed() {
     let cases = [
-        (ScoringDispatchPersistenceError::MismatchedScoringRequest, false),
-        (ScoringDispatchPersistenceError::InvalidDispatchEnvelope, false),
+        (
+            ScoringDispatchPersistenceError::MismatchedScoringRequest,
+            false,
+        ),
+        (
+            ScoringDispatchPersistenceError::InvalidDispatchEnvelope,
+            false,
+        ),
         (
             ScoringDispatchPersistenceError::Request(
                 ScoringRequestPersistenceError::InvalidReference,
