@@ -132,6 +132,14 @@ fn conflicting_verification_and_unverified_requests_fail_closed() {
         persist_data_rights_identity_verification(&mut transaction, &conflicting),
         Err(DataRightsPersistenceError::ConflictingReplay)
     ));
+    let mut same_evidence_later = new_request();
+    same_evidence_later
+        .verify_identity("verification_evidence_alpha", 10_200)
+        .unwrap();
+    assert!(matches!(
+        persist_data_rights_identity_verification(&mut transaction, &same_evidence_later),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
     let unverified = new_request();
     assert!(matches!(
         persist_data_rights_identity_verification(&mut transaction, &unverified),
