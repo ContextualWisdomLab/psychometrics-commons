@@ -421,6 +421,30 @@ fn integration_errors_have_stable_safe_messages() {
             IntegrationError::TerminalOutboxState,
             "terminal outbox entry cannot accept a new delivery attempt",
         ),
+        (
+            IntegrationError::TerminalConsumptionState,
+            "terminal inbox consumption cannot accept a new processing transition",
+        ),
+        (
+            IntegrationError::ConsumptionNotClaimable,
+            "inbox consumption can be claimed only from the pending state",
+        ),
+        (
+            IntegrationError::StaleConsumptionFence,
+            "inbox consumption fencing token does not match the current claim",
+        ),
+        (
+            IntegrationError::InvalidConsumptionClaimWindow,
+            "inbox consumption claim expiry must be later than claim time",
+        ),
+        (
+            IntegrationError::ConsumptionClaimStillActive,
+            "inbox consumption processing claim has not expired",
+        ),
+        (
+            IntegrationError::ConsumptionNotProcessing,
+            "inbox consumption claim expiry requires the processing state",
+        ),
     ];
 
     for (error, expected) in cases {
