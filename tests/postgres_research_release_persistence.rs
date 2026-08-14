@@ -185,6 +185,114 @@ fn immutable_rebinding_fails_closed() {
 }
 
 #[test]
+fn every_persisted_approval_field_is_part_of_the_immutable_replay_identity() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_table(&mut client);
+    apply_research_release_migration(&mut client).unwrap();
+
+    let release = approved_release(
+        "research_release_field_identity",
+        DIGEST_A,
+        ResearchAccessClass::Controlled,
+        "metadata_bundle_research_alpha",
+    );
+    assert_eq!(
+        persist_ok(&mut client, &release),
+        ResearchReleasePersistenceDisposition::Inserted
+    );
+
+    let cases = [
+        (
+            "dataset_snapshot_ref",
+            "dataset_snapshot_research_other",
+            "dataset_snapshot_research_alpha",
+        ),
+        (
+            "research_scope_ref",
+            "research_scope_research_other",
+            "research_scope_research_alpha",
+        ),
+        ("manifest_digest", DIGEST_B, DIGEST_A),
+        (
+            "privacy_review_ref",
+            "privacy_review_research_other",
+            "privacy_review_research_alpha",
+        ),
+        (
+            "scientific_review_ref",
+            "scientific_review_research_other",
+            "scientific_review_research_alpha",
+        ),
+        (
+            "metadata_bundle_ref",
+            "metadata_bundle_research_other",
+            "metadata_bundle_research_alpha",
+        ),
+        (
+            "license_record_ref",
+            "license_record_research_other",
+            "license_record_research_alpha",
+        ),
+        (
+            "measurement_provenance_ref",
+            "measurement_provenance_research_other",
+            "measurement_provenance_research_alpha",
+        ),
+        (
+            "access_approval_ref",
+            "access_approval_research_other",
+            "access_approval_research_alpha",
+        ),
+        (
+            "citation_metadata_ref",
+            "citation_metadata_research_other",
+            "citation_metadata_research_alpha",
+        ),
+        (
+            "release_approver_ref",
+            "release_approver_research_other",
+            "release_approver_research_alpha",
+        ),
+        (
+            "ordinary_admin_ref",
+            "ordinary_admin_research_other",
+            "ordinary_admin_research_alpha",
+        ),
+        ("access_class", "private", "controlled"),
+    ];
+
+    for (column, tampered_value, original_value) in cases {
+        client
+            .execute(
+                &format!(
+                    "UPDATE research_release_approval SET {column} = $1 WHERE research_release_ref = $2"
+                ),
+                &[&tampered_value, &release.release_ref()],
+            )
+            .unwrap();
+        assert!(matches!(
+            persist_err(&mut client, &release),
+            ResearchReleasePersistenceError::ConflictingReplay
+        ));
+        client
+            .execute(
+                &format!(
+                    "UPDATE research_release_approval SET {column} = $1 WHERE research_release_ref = $2"
+                ),
+                &[&original_value, &release.release_ref()],
+            )
+            .unwrap();
+    }
+
+    assert_eq!(
+        persist_ok(&mut client, &release),
+        ResearchReleasePersistenceDisposition::Duplicate,
+        "restoring every immutable field must recover exact-replay identity"
+    );
+}
+
+#[test]
 fn stored_evidence_tampering_is_detected_on_replay() {
     let _guard = test_guard();
     let mut client = test_client();
