@@ -12,13 +12,13 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn ready_client() -> Client {
+fn ready_client(schema_prefix: &str) -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
-    let schema = format!("data_rights_creation_replay_{}", std::process::id());
+    let schema = format!("{schema_prefix}_{}", std::process::id());
     client
         .batch_execute(&format!(
-            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; SET search_path TO {schema};"
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
         ))
         .unwrap();
     apply_integration_migration(&mut client).unwrap();
@@ -76,7 +76,7 @@ fn verified_request() -> DataRightsRequest {
 
 #[test]
 fn exact_creation_replay_remains_duplicate_after_identity_verification() {
-    let mut client = ready_client();
+    let mut client = ready_client("data_rights_creation_replay_after_verification");
     let event = event();
     let targets = [DataRightsPropagationTarget::new(
         "dependent_system_alpha",
@@ -102,7 +102,7 @@ fn exact_creation_replay_remains_duplicate_after_identity_verification() {
 
 #[test]
 fn exact_identity_verification_replay_remains_duplicate_after_processing_state() {
-    let mut client = ready_client();
+    let mut client = ready_client("data_rights_verification_replay_after_processing");
     persist_requested(&mut client);
 
     let verified = verified_request();
