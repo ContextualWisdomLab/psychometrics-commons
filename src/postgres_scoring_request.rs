@@ -195,8 +195,8 @@ pub fn persist_scoring_dispatch(
 
     let scoring_request = persist_scoring_request(transaction, request)
         .map_err(ScoringDispatchPersistenceError::Request)?;
-    let scoring_job =
-        persist_scoring_job(transaction, job).map_err(ScoringDispatchPersistenceError::Job)?;
+    let scoring_job = persist_scoring_job(transaction, job)
+        .map_err(ScoringDispatchPersistenceError::Job)?;
     let outbox = enqueue_outbox_event(transaction, dispatch_event, outbox_max_attempts)
         .map_err(ScoringDispatchPersistenceError::Outbox)?;
 
