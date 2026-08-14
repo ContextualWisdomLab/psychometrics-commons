@@ -2,7 +2,7 @@
 
 - Status: Normative traceability index
 - Date: 2026-08-14
-- Evaluated protected-main implementation baseline: `31b585b65f7db62b96d82e824ee79962dca7cece`
+- Evaluated protected-main implementation baseline: `76f4e28fc6c89923acea54cd0b7a7ab85fc11401`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -89,7 +89,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `31b585b65f7db62b96d82e824ee79962dca7cece`:
+Current protected-main Rust module surface on `76f4e28fc6c89923acea54cd0b7a7ab85fc11401`:
 
 ```text
 src/lib.rs
@@ -129,7 +129,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #63 migration-chain rollback/reapply coverage is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It proves the complete migration set applies, rolls back, and reapplies without schema drift. Live adapter crash/restore remains outside this slice.
+**Active PR** #66 scoring-job fallback classification locking is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Cancel and lease-expiry classify terminal or unleased rows under `FOR UPDATE` so a concurrent worker cannot rewrite that evidence. Live fast-mlsirm execution remains outside this slice.
 
 ## 5. ADR traceability by concern
 
