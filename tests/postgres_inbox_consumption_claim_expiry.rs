@@ -62,18 +62,49 @@ fn pending(event_ref: &str, consumption_ref: &str) -> InboxConsumption {
     .unwrap()
 }
 
-fn prepare_claim(client: &mut Client, event_ref: &str, consumption_ref: &str) -> InboxConsumption {
+fn database_now_unix_ms(client: &mut Client) -> u64 {
+    let now: i64 = client
+        .query_one(
+            "SELECT floor(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    u64::try_from(now).expect("database clock must be after the Unix epoch")
+}
+
+fn prepare_claim_with_window(
+    client: &mut Client,
+    event_ref: &str,
+    consumption_ref: &str,
+    observed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+) -> InboxConsumption {
     accept_inbox_event(client, "consumer_alpha", &source_event(event_ref), 20_000).unwrap();
     let consumption = pending(event_ref, consumption_ref);
     let mut transaction = client.transaction().unwrap();
     persist_inbox_consumption(&mut transaction, &consumption).unwrap();
-    let fence = begin_inbox_consumption(&mut transaction, &consumption, 20_001, 21_000).unwrap();
+    let fence = begin_inbox_consumption(
+        &mut transaction,
+        &consumption,
+        observed_at_unix_ms,
+        expires_at_unix_ms,
+    )
+    .unwrap();
     assert_eq!(fence, 1);
     transaction.commit().unwrap();
     consumption
 }
 
-fn assert_processing(client: &mut Client, consumption_ref: &str) {
+fn prepare_claim(client: &mut Client, event_ref: &str, consumption_ref: &str) -> InboxConsumption {
+    prepare_claim_with_window(client, event_ref, consumption_ref, 20_001, 21_000)
+}
+
+fn assert_processing_with_expiry(
+    client: &mut Client,
+    consumption_ref: &str,
+    expected_expiry: i64,
+) {
     let row = client
         .query_one(
             "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms \
@@ -83,7 +114,11 @@ fn assert_processing(client: &mut Client, consumption_ref: &str) {
         .unwrap();
     assert_eq!(row.get::<_, String>(0), "processing");
     assert_eq!(row.get::<_, i64>(1), 1);
-    assert_eq!(row.get::<_, Option<i64>>(2), Some(21_000));
+    assert_eq!(row.get::<_, Option<i64>>(2), Some(expected_expiry));
+}
+
+fn assert_processing(client: &mut Client, consumption_ref: &str) {
+    assert_processing_with_expiry(client, consumption_ref, 21_000);
 }
 
 #[test]
@@ -142,6 +177,73 @@ fn expired_claim_cannot_quarantine_at_or_after_expiry_with_current_fence() {
         transaction.rollback().unwrap();
         assert_processing(&mut client, consumption.consumption_ref());
     }
+
+    client
+        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
+        .unwrap();
+}
+
+#[test]
+fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
+    let (mut client, schema_name) = isolated_client();
+    let database_now = database_now_unix_ms(&mut client);
+    let claimed_at = database_now
+        .checked_sub(2_000)
+        .expect("database clock must be at least two seconds after the Unix epoch");
+    let expired_at = database_now - 1_000;
+    let stale_observed_at = claimed_at + 1;
+
+    let completion = prepare_claim_with_window(
+        &mut client,
+        "event_expired_stale_complete",
+        "consumption_expired_stale_complete",
+        claimed_at,
+        expired_at,
+    );
+    let mut complete = client.transaction().unwrap();
+    assert!(
+        complete_inbox_consumption(
+            &mut complete,
+            &completion,
+            stale_observed_at,
+            "completion_with_stale_clock",
+            1,
+        )
+        .is_err(),
+        "database time, not a stale caller timestamp, must fence an expired completion"
+    );
+    complete.rollback().unwrap();
+    assert_processing_with_expiry(
+        &mut client,
+        completion.consumption_ref(),
+        i64::try_from(expired_at).unwrap(),
+    );
+
+    let quarantine = prepare_claim_with_window(
+        &mut client,
+        "event_expired_stale_quarantine",
+        "consumption_expired_stale_quarantine",
+        claimed_at,
+        expired_at,
+    );
+    let mut quarantine_transaction = client.transaction().unwrap();
+    assert!(
+        quarantine_inbox_consumption(
+            &mut quarantine_transaction,
+            &quarantine,
+            stale_observed_at,
+            "poison_payload",
+            1,
+        )
+        .is_err(),
+        "database time, not a stale caller timestamp, must fence an expired quarantine"
+    );
+    quarantine_transaction.rollback().unwrap();
+    assert_processing_with_expiry(
+        &mut client,
+        quarantine.consumption_ref(),
+        i64::try_from(expired_at).unwrap(),
+    );
 
     client
         .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
