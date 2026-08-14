@@ -14,6 +14,21 @@ use std::sync::{Mutex, MutexGuard};
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const TAMPERABLE_COLUMNS: [&str; 13] = [
+    "dataset_snapshot_ref",
+    "research_scope_ref",
+    "manifest_digest",
+    "privacy_review_ref",
+    "scientific_review_ref",
+    "metadata_bundle_ref",
+    "license_record_ref",
+    "measurement_provenance_ref",
+    "access_approval_ref",
+    "citation_metadata_ref",
+    "release_approver_ref",
+    "ordinary_admin_ref",
+    "access_class",
+];
 static RESEARCH_RELEASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn test_guard() -> MutexGuard<'static, ()> {
@@ -48,6 +63,10 @@ fn inject_stored_tamper(
     value: &str,
     release_ref: &str,
 ) {
+    assert!(
+        TAMPERABLE_COLUMNS.contains(&column),
+        "tamper injection must target a known immutable evidence column"
+    );
     client
         .batch_execute(
             "ALTER TABLE research_release_approval \
