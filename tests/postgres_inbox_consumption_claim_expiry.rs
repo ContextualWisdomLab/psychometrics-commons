@@ -100,11 +100,7 @@ fn prepare_claim(client: &mut Client, event_ref: &str, consumption_ref: &str) ->
     prepare_claim_with_window(client, event_ref, consumption_ref, 20_001, 21_000)
 }
 
-fn assert_processing_with_expiry(
-    client: &mut Client,
-    consumption_ref: &str,
-    expected_expiry: i64,
-) {
+fn assert_processing_with_expiry(client: &mut Client, consumption_ref: &str, expected_expiry: i64) {
     let row = client
         .query_one(
             "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms \
