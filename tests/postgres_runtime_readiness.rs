@@ -1,10 +1,10 @@
 //! Real PostgreSQL contract for product-owned operational-store readiness.
 
 use postgres::{Client, NoTls};
-use psychometrics_commons_runtime::health::CapabilityState;
+use psychometrics_commons_runtime::health::{CapabilityState, DataIntegrityHealth};
 use psychometrics_commons_runtime::postgres_health::{
-    classify_postgres_runtime, probe_postgres_runtime, PostgresRuntimeStatus,
-    POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_MAJOR,
+    classify_postgres_runtime, probe_postgres_relation_integrity, probe_postgres_runtime,
+    PostgresRuntimeStatus, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_MAJOR,
 };
 
 fn test_client() -> Client {
@@ -74,4 +74,36 @@ fn live_probe_detects_a_read_only_transaction() {
     assert_eq!(health.status(), PostgresRuntimeStatus::ReadOnly);
     assert_eq!(health.capability_state(), CapabilityState::Unavailable);
     assert!(!health.accepts_new_work());
+}
+
+#[test]
+fn relation_integrity_probe_verifies_all_required_relations() {
+    let mut client = test_client();
+    let integrity = probe_postgres_relation_integrity(
+        &mut client,
+        &["pg_catalog.pg_class", "pg_catalog.pg_namespace"],
+    )
+    .unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Verified);
+}
+
+#[test]
+fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
+    let mut client = test_client();
+    let integrity = probe_postgres_relation_integrity(
+        &mut client,
+        &["pg_catalog.pg_class", "psychometrics_commons_missing_relation"],
+    )
+    .unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Incompatible);
+}
+
+#[test]
+fn empty_relation_requirement_is_vacuously_verified() {
+    let mut client = test_client();
+    let integrity = probe_postgres_relation_integrity(&mut client, &[]).unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Verified);
 }
