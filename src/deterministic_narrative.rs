@@ -194,7 +194,11 @@ impl DeterministicNarrativeBundle<'_> {
                 .map(|reference| required_reference(reference).map(str::to_owned))
                 .collect::<Result<Vec<_>, _>>()?,
             sections,
-            limitations: self.limitations.iter().map(|text| (*text).to_owned()).collect(),
+            limitations: self
+                .limitations
+                .iter()
+                .map(|text| (*text).to_owned())
+                .collect(),
         })
     }
 
