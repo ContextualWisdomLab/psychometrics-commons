@@ -40,6 +40,25 @@ fn reset_identity_link_tables(client: &mut Client) {
         .unwrap();
 }
 
+fn cleanup_select_failure_objects(client: &mut Client) {
+    client
+        .batch_execute(
+            "DROP TRIGGER IF EXISTS identity_link_redirect_after_insert \
+                 ON identity_link_persistence_test.participant_identity_link_event;\
+             DROP FUNCTION IF EXISTS identity_link_persistence_test.identity_link_redirect_after_insert();\
+             DROP SCHEMA IF EXISTS identity_link_select_failure_sink CASCADE;\
+             DROP TRIGGER IF EXISTS identity_link_end_redirect_after_insert \
+                 ON identity_link_persistence_test.participant_identity_link_end_event;\
+             DROP FUNCTION IF EXISTS identity_link_persistence_test.identity_link_end_redirect_after_insert();\
+             DROP SCHEMA IF EXISTS identity_link_end_select_failure_sink CASCADE;\
+             DROP TRIGGER IF EXISTS identity_link_ledger_redirect_after_insert \
+                 ON identity_link_persistence_test.participant_identity_ledger;\
+             DROP FUNCTION IF EXISTS identity_link_persistence_test.identity_link_ledger_redirect_after_insert();\
+             DROP SCHEMA IF EXISTS identity_link_ledger_select_failure_sink CASCADE;",
+        )
+        .unwrap();
+}
+
 fn persist_ok(
     client: &mut Client,
     participant: &ParticipantRecord,
@@ -258,7 +277,8 @@ fn replay_select_failure_is_a_database_failure() {
     persist_ok(&mut client, &participant);
     client
         .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS identity_link_select_failure_sink;\
+            "DROP SCHEMA IF EXISTS identity_link_select_failure_sink CASCADE;\
+             CREATE SCHEMA identity_link_select_failure_sink;\
              CREATE OR REPLACE FUNCTION identity_link_redirect_after_insert() \
              RETURNS trigger LANGUAGE plpgsql AS $$ \
              BEGIN \
@@ -274,6 +294,7 @@ fn replay_select_failure_is_a_database_failure() {
         persist_err(&mut client, &participant),
         IdentityLinkPersistenceError::Database(_)
     ));
+    cleanup_select_failure_objects(&mut client);
 }
 
 #[test]
@@ -367,7 +388,8 @@ fn end_event_replay_select_failure_is_a_database_failure() {
     persist_ok(&mut client, &ended);
     client
         .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS identity_link_end_select_failure_sink;\
+            "DROP SCHEMA IF EXISTS identity_link_end_select_failure_sink CASCADE;\
+             CREATE SCHEMA identity_link_end_select_failure_sink;\
              CREATE OR REPLACE FUNCTION identity_link_end_redirect_after_insert() \
              RETURNS trigger LANGUAGE plpgsql AS $$ \
              BEGIN \
@@ -383,6 +405,7 @@ fn end_event_replay_select_failure_is_a_database_failure() {
         persist_err(&mut client, &ended),
         IdentityLinkPersistenceError::Database(_)
     ));
+    cleanup_select_failure_objects(&mut client);
 }
 
 #[test]
@@ -396,7 +419,8 @@ fn ledger_replay_select_failure_is_a_database_failure() {
     persist_ok(&mut client, &participant);
     client
         .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS identity_link_ledger_select_failure_sink;\
+            "DROP SCHEMA IF EXISTS identity_link_ledger_select_failure_sink CASCADE;\
+             CREATE SCHEMA identity_link_ledger_select_failure_sink;\
              CREATE OR REPLACE FUNCTION identity_link_ledger_redirect_after_insert() \
              RETURNS trigger LANGUAGE plpgsql AS $$ \
              BEGIN \
@@ -412,6 +436,7 @@ fn ledger_replay_select_failure_is_a_database_failure() {
         persist_err(&mut client, &participant),
         IdentityLinkPersistenceError::Database(_)
     ));
+    cleanup_select_failure_objects(&mut client);
 }
 
 #[test]
