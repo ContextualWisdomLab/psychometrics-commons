@@ -162,14 +162,14 @@ pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::
 
 /// Persist one requested data-rights resource and all declared dependent-system outbox events.
 ///
-/// The function owns one short local `PostgreSQL` transaction so a database or outbox error rolls
-/// back the request row, target rows, and any earlier event inserts together. It does not deliver
-/// events itself; the existing outbox worker owns retry, quarantine, and reconciliation behavior.
-/// Exact creation replay remains idempotent after the stored lifecycle advances when the immutable
-/// request evidence, target set, event identities, outbox evidence, and stored lifecycle evidence
-/// are internally coherent. The insert-then-inspect first-write classifier requires
-/// `READ COMMITTED`, matching the existing integration outbox replay contract, and fails closed
-/// when the session default uses stronger isolation.
+/// Retrying the same creation request does not create another record when it still names the same
+/// participant, scope, dependent systems, event identities, and outbox evidence, even if the
+/// stored request has already moved to a later valid processing state. The function owns one short
+/// local `PostgreSQL` transaction so a database or outbox error rolls back the request row, target
+/// rows, and any earlier event inserts together. It does not deliver events itself; the existing
+/// outbox worker owns retry, quarantine, and reconciliation behavior. The insert-then-inspect
+/// first-write classifier requires `READ COMMITTED`, matching the existing integration outbox
+/// replay contract, and fails closed when the session default uses stronger isolation.
 ///
 /// # Errors
 ///
@@ -223,11 +223,12 @@ pub fn persist_requested_data_rights_with_propagation(
 
 /// Persist requester identity verification for one already requested data-rights identity.
 ///
-/// Exact replay of the same evidence and verification time is idempotent, including after later
-/// lifecycle transitions that preserve the original verification evidence. A conflicting
-/// verification fails closed. Replay classification locks the matched request row until the
-/// caller-owned transaction ends so the classified lifecycle cannot change before the caller
-/// composes subsequent atomic work. This adapter does not start processing or complete the request.
+/// Retrying the same verification does not create a second verification when the evidence and
+/// verification time are unchanged, even after the request has moved to a later valid processing
+/// state. A conflicting verification fails closed. Replay classification locks the matched request
+/// row until the caller-owned transaction ends so the classified lifecycle cannot change before
+/// the caller composes subsequent atomic work. This adapter does not start processing or complete
+/// the request.
 ///
 /// # Errors
 ///
