@@ -17,6 +17,7 @@ pub mod item_delivery;
 pub mod narrative;
 pub mod participant;
 pub mod postgres_data_rights;
+pub mod postgres_health;
 pub mod postgres_identity_link;
 pub mod postgres_inbox_consumption;
 pub mod postgres_instrument_release;
