@@ -6,7 +6,7 @@ use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_data_rights::{
     apply_data_rights_migration, persist_data_rights_identity_verification,
     persist_requested_data_rights_with_propagation, DataRightsPersistenceDisposition,
-    DataRightsPropagationTarget,
+    DataRightsPersistenceError, DataRightsPropagationTarget,
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 use std::ops::{Deref, DerefMut};
@@ -87,10 +87,7 @@ fn event() -> IntegrationEvent {
     .unwrap()
 }
 
-#[test]
-fn exact_creation_replay_remains_duplicate_after_processing_starts() {
-    let mut client = ready_client();
-
+fn persist_and_verify(client: &mut Client) -> DataRightsRequest {
     let original = request();
     let original_event = event();
     let targets = [DataRightsPropagationTarget::new(
@@ -98,8 +95,7 @@ fn exact_creation_replay_remains_duplicate_after_processing_starts() {
         &original_event,
     )];
     assert_eq!(
-        persist_requested_data_rights_with_propagation(&mut client, &original, &targets, 3)
-            .unwrap(),
+        persist_requested_data_rights_with_propagation(client, &original, &targets, 3).unwrap(),
         DataRightsPersistenceDisposition::Inserted
     );
 
@@ -107,11 +103,17 @@ fn exact_creation_replay_remains_duplicate_after_processing_starts() {
     verified
         .verify_identity("verification_evidence_processing_replay", 10_100)
         .unwrap();
-    {
-        let mut transaction = client.transaction().unwrap();
-        persist_data_rights_identity_verification(&mut transaction, &verified).unwrap();
-        transaction.commit().unwrap();
-    }
+    let mut transaction = client.transaction().unwrap();
+    persist_data_rights_identity_verification(&mut transaction, &verified).unwrap();
+    transaction.commit().unwrap();
+    verified
+}
+
+#[test]
+fn exact_creation_replay_remains_duplicate_after_processing_starts() {
+    let mut client = ready_client();
+    let verified = persist_and_verify(&mut client);
+
     client
         .execute(
             "UPDATE data_rights_request_state
@@ -132,4 +134,29 @@ fn exact_creation_replay_remains_duplicate_after_processing_starts() {
         DataRightsPersistenceDisposition::Duplicate,
         "the original creation command must stay replay-safe after processing begins"
     );
+}
+
+#[test]
+fn creation_replay_rejects_incoherent_processing_history() {
+    let mut client = ready_client();
+    let verified = persist_and_verify(&mut client);
+
+    client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET current_state = 'processing', latest_event_at_unix_ms = $2
+             WHERE request_ref = $1",
+            &[&verified.request_ref(), &10_050_i64],
+        )
+        .unwrap();
+
+    let replay_event = event();
+    let replay_targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &replay_event,
+    )];
+    assert!(matches!(
+        persist_requested_data_rights_with_propagation(&mut client, &request(), &replay_targets, 3),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
 }
