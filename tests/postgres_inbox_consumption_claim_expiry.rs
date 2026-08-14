@@ -12,8 +12,10 @@ use psychometrics_commons_runtime::postgres_integration::{
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const LEGACY_INBOX_CONSUMPTION_MIGRATION: &str =
+    include_str!("../migrations/0012_integration_consumption.sql");
 
-fn isolated_client() -> (Client, String) {
+fn schema_client(prefix: &str) -> (Client, String) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
@@ -22,14 +24,27 @@ fn isolated_client() -> (Client, String) {
         .duration_since(UNIX_EPOCH)
         .expect("system clock must be after the Unix epoch")
         .as_nanos();
-    let schema_name = format!("inbox_claim_expiry_{}_{}", std::process::id(), nonce);
+    let schema_name = format!("{prefix}_{}_{}", std::process::id(), nonce);
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
         ))
         .unwrap();
     apply_integration_migration(&mut client).unwrap();
+    (client, schema_name)
+}
+
+fn isolated_client() -> (Client, String) {
+    let (mut client, schema_name) = schema_client("inbox_claim_expiry");
     apply_inbox_consumption_migration(&mut client).unwrap();
+    (client, schema_name)
+}
+
+fn legacy_isolated_client() -> (Client, String) {
+    let (mut client, schema_name) = schema_client("inbox_claim_upgrade");
+    client
+        .batch_execute(LEGACY_INBOX_CONSUMPTION_MIGRATION)
+        .unwrap();
     (client, schema_name)
 }
 
@@ -242,6 +257,63 @@ fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
         quarantine.consumption_ref(),
         i64::try_from(expired_at).unwrap(),
     );
+
+    client
+        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
+        .unwrap();
+}
+
+#[test]
+fn forward_migration_fails_closed_for_preexisting_processing_claim() {
+    let (mut client, schema_name) = legacy_isolated_client();
+    let consumption = prepare_claim(
+        &mut client,
+        "event_preexisting_processing",
+        "consumption_preexisting_processing",
+    );
+
+    let legacy_column_count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM information_schema.columns \
+             WHERE table_schema = current_schema() \
+               AND table_name = 'integration_consumption' \
+               AND column_name = 'claim_deadline_at'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(legacy_column_count, 0);
+
+    apply_inbox_consumption_migration(&mut client).unwrap();
+    apply_inbox_consumption_migration(&mut client).unwrap();
+
+    let upgraded = client
+        .query_one(
+            "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms, \
+                    claim_deadline_at IS NOT NULL \
+             FROM integration_consumption WHERE consumption_ref = $1",
+            &[&consumption.consumption_ref()],
+        )
+        .unwrap();
+    assert_eq!(upgraded.get::<_, String>(0), "processing");
+    assert_eq!(upgraded.get::<_, i64>(1), 1);
+    assert_eq!(upgraded.get::<_, Option<i64>>(2), Some(21_000));
+    assert!(upgraded.get::<_, bool>(3));
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        complete_inbox_consumption(
+            &mut transaction,
+            &consumption,
+            20_002,
+            "completion_after_upgrade",
+            1,
+        )
+        .is_err(),
+        "an in-flight claim without trustworthy wall-clock provenance must fail closed after upgrade"
+    );
+    transaction.rollback().unwrap();
+    assert_processing(&mut client, consumption.consumption_ref());
 
     client
         .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
