@@ -103,7 +103,7 @@ src/lib.rs
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
-├── postgres_health.rs  # PostgreSQL supported-major and write-readiness probe
+├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/terminal persistence
@@ -121,7 +121,8 @@ migrations/
 ├── 0002_scoring_job_state.sql
 ├── 0003_data_rights_propagation.sql
 ├── 0006_instrument_release.sql
-└── 0011_scoring_request.sql
+├── 0011_scoring_request.sql
+└── 0012_integration_consumption.sql
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.

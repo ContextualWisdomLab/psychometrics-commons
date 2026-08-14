@@ -1,6 +1,6 @@
-//! PostgreSQL operational-store compatibility and write-readiness evidence.
+//! `PostgreSQL` operational-store compatibility and write-readiness evidence.
 //!
-//! The runtime's initial persistence contract supports upstream PostgreSQL 18.x.
+//! The runtime's initial persistence contract supports upstream `PostgreSQL` 18.x.
 //! This module probes the caller-owned connection and classifies whether the database
 //! can safely accept product-owned state changes. It does not own credentials,
 //! connection pooling, migrations, backup, or recovery.
@@ -8,7 +8,7 @@
 use crate::health::{CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError};
 use postgres::GenericClient;
 
-/// Initial supported PostgreSQL server major version from ADR-0015.
+/// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
 
 /// Capability identity used by operation-scoped runtime readiness.
@@ -18,15 +18,15 @@ pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operationa
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PostgresRuntimeStatus {
-    /// The supported PostgreSQL major is reachable and accepts writes.
+    /// The supported `PostgreSQL` major is reachable and accepts writes.
     Ready,
-    /// The PostgreSQL server major is outside the repository's validated support boundary.
+    /// The `PostgreSQL` server major is outside the repository's validated support boundary.
     UnsupportedMajorVersion,
-    /// The supported PostgreSQL server is currently read-only for this connection.
+    /// The supported `PostgreSQL` server is currently read-only for this connection.
     ReadOnly,
 }
 
-/// Point-in-time PostgreSQL compatibility and readiness evidence.
+/// Point-in-time `PostgreSQL` compatibility and readiness evidence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PostgresRuntimeHealth {
     server_major_version: i32,
@@ -34,7 +34,7 @@ pub struct PostgresRuntimeHealth {
 }
 
 impl PostgresRuntimeHealth {
-    /// Return the observed PostgreSQL server major version.
+    /// Return the observed `PostgreSQL` server major version.
     #[must_use]
     pub const fn server_major_version(self) -> i32 {
         self.server_major_version
@@ -80,7 +80,7 @@ impl PostgresRuntimeHealth {
 
 /// Classify server-version and transaction-read-only evidence without performing I/O.
 ///
-/// PostgreSQL 10 and later encode `server_version_num` as `major * 10000 + minor`, so
+/// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
 /// integer division yields the server major used by the repository support policy.
 #[must_use]
 pub const fn classify_postgres_runtime(
@@ -101,28 +101,25 @@ pub const fn classify_postgres_runtime(
     }
 }
 
-/// Probe the caller-owned PostgreSQL connection for supported-major and write readiness.
+/// Probe the caller-owned `PostgreSQL` connection for supported-major and write readiness.
 ///
-/// The probe reads only PostgreSQL server settings and never returns credentials,
+/// The probe reads only `PostgreSQL` server settings and never returns credentials,
 /// assessment content, tenant identifiers, or restricted linkage data. Callers must map
 /// the returned database error to an operator-safe error class before exposing it across
 /// a public health endpoint.
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL driver error when the server cannot provide the required
+/// Returns the `PostgreSQL` driver error when the server cannot provide the required
 /// settings. Failure to probe must be treated as unknown/unready by the caller.
 pub fn probe_postgres_runtime(
     client: &mut impl GenericClient,
 ) -> Result<PostgresRuntimeHealth, postgres::Error> {
-    let row = match client.query_one(
+    let row = client.query_one(
         "SELECT current_setting('server_version_num')::integer, \
                 current_setting('transaction_read_only')::boolean",
         &[],
-    ) {
-        Ok(row) => row,
-        Err(error) => return Err(error),
-    };
+    )?;
     let server_version_num: i32 = row.get(0);
     let transaction_read_only: bool = row.get(1);
     Ok(classify_postgres_runtime(
@@ -145,7 +142,7 @@ pub fn probe_postgres_runtime(
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL driver error when relation existence cannot be established.
+/// Returns the `PostgreSQL` driver error when relation existence cannot be established.
 /// Callers must map probe failure to unknown/unready data-integrity state and avoid
 /// exposing raw database errors on public health endpoints.
 pub fn probe_postgres_relation_integrity(
@@ -153,10 +150,7 @@ pub fn probe_postgres_relation_integrity(
     required_relations: &[&str],
 ) -> Result<DataIntegrityHealth, postgres::Error> {
     for relation in required_relations {
-        let row = match client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation]) {
-            Ok(row) => row,
-            Err(error) => return Err(error),
-        };
+        let row = client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation])?;
         let exists: bool = row.get(0);
         if !exists {
             return Ok(DataIntegrityHealth::Incompatible);

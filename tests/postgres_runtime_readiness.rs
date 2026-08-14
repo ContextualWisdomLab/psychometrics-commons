@@ -1,4 +1,4 @@
-//! Real PostgreSQL contract for product-owned operational-store readiness.
+//! Real `PostgreSQL` contract for product-owned operational-store readiness.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::health::{CapabilityState, DataIntegrityHealth};
@@ -57,6 +57,10 @@ fn unsupported_postgres_major_fails_readiness_closed_even_when_writable() {
     );
     assert_eq!(health.capability_state(), CapabilityState::Unavailable);
     assert!(!health.accepts_new_work());
+
+    let capability = health.capability_health().unwrap();
+    assert_eq!(capability.state(), CapabilityState::Unavailable);
+    assert!(!capability.accepts_new_work());
 }
 
 #[test]
@@ -89,6 +93,14 @@ fn live_probe_surfaces_a_database_failure() {
     assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
 
     assert!(probe_postgres_runtime(&mut transaction).is_err());
+}
+
+#[test]
+fn live_probe_surfaces_a_closed_connection_failure() {
+    let mut client = test_client();
+    let _ = client.batch_execute("SELECT pg_terminate_backend(pg_backend_pid())");
+
+    assert!(probe_postgres_runtime(&mut client).is_err());
 }
 
 #[test]
