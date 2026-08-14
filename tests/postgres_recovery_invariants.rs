@@ -122,9 +122,9 @@ fn copy_table_in(client: &mut Client, schema: &str, table: &str, bytes: &[u8]) {
     let mut writer = client
         .copy_in(&format!("COPY {schema}.{table} FROM STDIN (FORMAT BINARY)"))
         .unwrap_or_else(|error| panic!("{schema}.{table} restore stream must open: {error}"));
-    writer
-        .write_all(bytes)
-        .unwrap_or_else(|error| panic!("{schema}.{table} restore stream must accept data: {error}"));
+    writer.write_all(bytes).unwrap_or_else(|error| {
+        panic!("{schema}.{table} restore stream must accept data: {error}")
+    });
     writer
         .finish()
         .unwrap_or_else(|error| panic!("{schema}.{table} restore stream must commit: {error}"));
@@ -200,9 +200,15 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
             &[],
         )
         .expect("immutable response provenance should survive restore");
-    assert_eq!(restored_snapshot.get::<_, String>(0), "session_recovery_alpha");
+    assert_eq!(
+        restored_snapshot.get::<_, String>(0),
+        "session_recovery_alpha"
+    );
     assert_eq!(restored_snapshot.get::<_, i64>(1), 1);
-    assert_eq!(restored_snapshot.get::<_, String>(2), "response_recovery_alpha");
+    assert_eq!(
+        restored_snapshot.get::<_, String>(2),
+        "response_recovery_alpha"
+    );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
 
     let duplicate = client.execute(
