@@ -101,8 +101,5 @@ pub fn record_successful_scoring_completion_with_outbox(
     let outbox = enqueue_outbox_event(transaction, completion_event, outbox_max_attempts)
         .map_err(ScoringCompletionOutboxError::Outbox)?;
 
-    Ok(ScoringCompletionOutboxPersistence {
-        completion,
-        outbox,
-    })
+    Ok(ScoringCompletionOutboxPersistence { completion, outbox })
 }
