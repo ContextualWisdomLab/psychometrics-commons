@@ -24,13 +24,32 @@ fn processing_retention_request() -> DataRightsRequest {
 }
 
 #[test]
-fn duplicate_retained_scopes_fail_closed_after_normalization() {
+fn noncanonical_retained_scope_fails_closed_before_uniqueness() {
     let mut request = processing_retention_request();
 
     assert_eq!(
         request.complete(
             "completion_ref",
             &[" legal_retention_scope ", "legal_retention_scope"],
+            1_300,
+        ),
+        Err(DataRightsError::InvalidReference)
+    );
+
+    assert_eq!(request.state(), DataRightsState::Processing);
+    assert_eq!(request.completion_evidence_ref(), None);
+    assert_eq!(request.completed_at_unix_ms(), None);
+    assert!(request.retained_scope_refs().is_empty());
+}
+
+#[test]
+fn duplicate_canonical_retained_scopes_fail_closed() {
+    let mut request = processing_retention_request();
+
+    assert_eq!(
+        request.complete(
+            "completion_ref",
+            &["legal_retention_scope", "legal_retention_scope"],
             1_300,
         ),
         Err(DataRightsError::DuplicateRetentionScope)
