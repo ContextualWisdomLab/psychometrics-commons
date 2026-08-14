@@ -32,8 +32,14 @@ fn database_rejects_outer_control_whitespace_in_scalar_and_array_references() {
         .expect("item-delivery migration should install the physical schema");
 
     for (invalid_session_ref, expected_constraint) in [
-        ("\tsession_reference_tab", "item_delivery_ledger_session_ref_format_check"),
-        ("session_reference_newline\n", "item_delivery_ledger_session_ref_format_check"),
+        (
+            "\tsession_reference_tab",
+            "item_delivery_ledger_session_ref_format_check",
+        ),
+        (
+            "session_reference_newline\n",
+            "item_delivery_ledger_session_ref_format_check",
+        ),
     ] {
         let error = client
             .execute(
@@ -55,7 +61,10 @@ fn database_rejects_outer_control_whitespace_in_scalar_and_array_references() {
     }
 
     for invalid_item_ref in ["\titem_reference_tab", "item_reference_newline\n"] {
-        let session_ref = format!("session_{}", invalid_item_ref.replace(['\t', '\n'], "control"));
+        let session_ref = format!(
+            "session_{}",
+            invalid_item_ref.replace(['\t', '\n'], "control")
+        );
         let error = client
             .execute(
                 "INSERT INTO item_delivery_ledger (\
