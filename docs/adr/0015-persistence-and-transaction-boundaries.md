@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main contains in-memory/domain lifecycle primitives only; active PR #24 carries the first PostgreSQL integration-evidence migration/adapter but is not protected-main truth until merged
+- Current/as-built status: evaluated protected main `eb1184a767a07056cb68b80e377364dbce6eaa0d` contains bounded PostgreSQL 18 persistence for integration delivery/consumption, scoring jobs and scoring-request identity, data-rights propagation, purpose-specific consent, locale-specific instrument releases, plus operational-store readiness; response/session/result and other remaining aggregate persistence is still incomplete
 - Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
-- Migration status: active PR #24 introduces only the bounded integration-evidence slice; the remaining product schema still must be established from the logical ERD and this ADR without synthetic provenance backfills
+- Migration status: protected main contains `0001_integration_delivery.sql`, `0002_scoring_job_state.sql`, `0003_data_rights_propagation.sql`, `0005_consent_lifecycle.sql`, `0006_instrument_release.sql`, `0011_scoring_request.sql`, and `0012_integration_consumption.sql`; later migrations remain implementation-gated and are not protected-main truth until integrated
 
 ## Context
 
@@ -149,7 +149,7 @@ The adapter must bind payload/reference to digest and preserve authorization, en
 
 ## Data and persistence impact
 
-Protected main still has no physical product persistence. Active PR #24 introduces only three bounded integration-evidence tables and their adapter; it does not establish the complete product schema. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
+Protected main now contains multiple bounded physical persistence slices rather than an empty persistence layer: integration outbox/delivery/inbox consumption, scoring jobs and scoring-request identity, data-rights request propagation, consent ledgers/events, locale-specific instrument releases, and database readiness checks are implemented with real PostgreSQL tests. This remains **partial** product persistence: assessment-session persistence, response/snapshot atomicity, immutable result persistence, participant identity-link history, restricted research linkage, research staging/release state, and end-to-end crash/restore evidence are not promoted to protected-main truth until their own reviewed slices integrate. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
 
 ## Migration policy
 
@@ -161,7 +161,7 @@ Protected main still has no physical product persistence. Active PR #24 introduc
 - Published scientific payloads are not rewritten merely to simplify a schema transition.
 - PostgreSQL major-version upgrades are operational migrations and require full persistence/concurrency/restore acceptance on the target major before support is declared.
 
-The first migration is a clean-install migration only because protected main has no prior physical product schema. Before that migration may be treated as shipped, its composite outbox identity, delivery-attempt foreign key, tenant/source-scoped inbox identity, opaque-reference checks, digest checks, bounded states, and replay behavior must pass real PostgreSQL tests on the exact reviewed head.
+The initial clean-install integration migration has landed and is no longer an active-PR claim. Every later migration must preserve its composite outbox identity, delivery-attempt foreign key, tenant/source-scoped inbox identity, opaque-reference checks, digest checks, bounded states, and replay behavior, and must prove its own new invariants with real PostgreSQL tests on the exact reviewed head.
 
 ## Failure and degraded modes
 
@@ -194,7 +194,7 @@ The integration-evidence adapter additionally requires its caller/session config
 
 ## Validation and release evidence
 
-When physical persistence exists, required evidence includes:
+For implemented and future physical persistence slices, required evidence includes:
 
 - clean install and migration on upstream PostgreSQL 18.x current supported minor;
 - migration upgrade/rollback or tested roll-forward strategy;
@@ -280,10 +280,9 @@ Costs:
 
 ## Follow-up work
 
-- complete and merge the first PostgreSQL 18.x integration-evidence migration/adapter only after exact-head review and evidence gates pass;
-- implement the remaining typed repository adapters from `docs/architecture/ERD.md`;
+- continue the remaining typed repository adapters from `docs/architecture/ERD.md`, preserving reviewed migration ordering and protected-main maturity labels;
 - add real PostgreSQL concurrency/crash tests for response completion, outbox, inbox, and worker leases;
-- implement durable inbox processing states and delivery-attempt APIs consistent with ADR-0014;
+- complete durable side-effect execution/reconciliation around the already-persisted inbox/outbox state;
 - evaluate whether a single-statement replay classifier can safely remove the integration adapter's `READ COMMITTED` restriction without weakening duplicate/conflict semantics;
 - add profile-specific database install/upgrade/restore runbooks;
 - evaluate additional managed PostgreSQL services only when a concrete deployment need exists and record a capability/conformance matrix before claiming support.
