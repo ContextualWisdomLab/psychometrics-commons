@@ -140,7 +140,8 @@ pub fn persist_assessment_session(
 /// Compare an existing stored row with the requested immutable session identity.
 ///
 /// Exact equality is treated as an idempotent duplicate; any changed participant,
-/// release, digest, locale, state, or creation time is a conflicting replay.
+/// release, `instrument_version_ref`, digest, locale, state, or creation time is a
+/// conflicting replay.
 fn classify_existing_session(
     transaction: &mut Transaction<'_>,
     session: &AssessmentSession,
