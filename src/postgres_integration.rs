@@ -431,10 +431,8 @@ pub fn claim_outbox_delivery(
         return Ok(PersistedOutboxLease {
             worker_ref: worker_ref.to_owned(),
             lease_ref: lease_ref.to_owned(),
-            fencing_token: u64::try_from(fencing_token)
-                .map_err(|_| PersistenceError::ValueOutOfRange)?,
-            expires_at_unix_ms: u64::try_from(expires_at_unix_ms)
-                .map_err(|_| PersistenceError::ValueOutOfRange)?,
+            fencing_token: postgres_u64(fencing_token)?,
+            expires_at_unix_ms: postgres_u64(expires_at_unix_ms)?,
         });
     }
 
@@ -499,12 +497,15 @@ pub fn expire_outbox_delivery_lease(
         return Ok(());
     }
 
-    let row = transaction.query_opt(
+    let row = match transaction.query_opt(
         "SELECT lease_worker_ref IS NOT NULL AS leased
          FROM integration_outbox
          WHERE source_ref = $1 AND tenant_ref = $2 AND event_ref = $3",
         &[&source_ref, &tenant_ref, &event_ref],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(PersistenceError::from(error)),
+    };
     let Some(row) = row else {
         return Err(PersistenceError::OutboxNotFound);
     };
@@ -855,9 +856,16 @@ fn postgres_bigint(value: u64) -> Result<i64, PersistenceError> {
     i64::try_from(value).map_err(|_| PersistenceError::ValueOutOfRange)
 }
 
+fn postgres_u64(value: i64) -> Result<u64, PersistenceError> {
+    match u64::try_from(value) {
+        Ok(value) => Ok(value),
+        Err(_) => Err(PersistenceError::ValueOutOfRange),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_outbox_state, PersistenceError};
+    use super::{parse_outbox_state, postgres_u64, PersistenceError};
     use crate::integration::OutboxState;
 
     #[test]
@@ -916,5 +924,14 @@ mod tests {
             parse_outbox_state("unexpected"),
             Err(PersistenceError::InvalidStoredState)
         ));
+    }
+
+    #[test]
+    fn persisted_lease_tokens_reject_negative_database_values() {
+        assert!(matches!(
+            postgres_u64(-1),
+            Err(PersistenceError::ValueOutOfRange)
+        ));
+        assert_eq!(postgres_u64(1).unwrap(), 1);
     }
 }
