@@ -1,4 +1,4 @@
-//! PostgreSQL migration-chain acceptance for transactional rollback safety.
+//! `PostgreSQL` migration-chain acceptance for transactional rollback safety.
 
 use postgres::{Client, NoTls, Transaction};
 use std::fs;
