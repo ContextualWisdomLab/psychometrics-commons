@@ -26,7 +26,7 @@ static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 fn test_client() -> (MutexGuard<'static, ()>, Client) {
     let guard = DATABASE_TEST_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
