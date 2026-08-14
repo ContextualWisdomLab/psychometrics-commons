@@ -101,16 +101,10 @@ fn cancellation_terminal_classification_locks_the_row_until_transaction_end() {
 
     let mut transaction = owner.transaction().unwrap();
     assert!(matches!(
-        cancel_scoring_job(
-            &mut transaction,
-            "scoring_job_cancel_classification_lock"
-        ),
+        cancel_scoring_job(&mut transaction, "scoring_job_cancel_classification_lock"),
         Err(ScoringJobPersistenceError::TerminalState)
     ));
-    assert_row_update_waits_for_lock(
-        &mut contender,
-        "scoring_job_cancel_classification_lock",
-    );
+    assert_row_update_waits_for_lock(&mut contender, "scoring_job_cancel_classification_lock");
     transaction.rollback().unwrap();
 }
 
@@ -134,9 +128,6 @@ fn expiry_nonleased_classification_locks_the_row_until_transaction_end() {
         ),
         Err(ScoringJobPersistenceError::NotLeased)
     ));
-    assert_row_update_waits_for_lock(
-        &mut contender,
-        "scoring_job_expiry_classification_lock",
-    );
+    assert_row_update_waits_for_lock(&mut contender, "scoring_job_expiry_classification_lock");
     transaction.rollback().unwrap();
 }
