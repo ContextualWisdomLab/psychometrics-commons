@@ -63,7 +63,11 @@ fn apply_migrations(client: &mut Client) {
     apply_scoring_request_migration(client).unwrap();
 }
 
-fn request_named(session_ref: &str, scoring_request_ref: &str, snapshot_ref: &str) -> ScoringRequest {
+fn request_named(
+    session_ref: &str,
+    scoring_request_ref: &str,
+    snapshot_ref: &str,
+) -> ScoringRequest {
     let mut ledger = ResponseLedger::new(session_ref).unwrap();
     ledger
         .record(
