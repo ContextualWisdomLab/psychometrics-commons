@@ -373,7 +373,7 @@ fn classify_select_failure_after_conflict_is_a_database_failure() {
 
     client
         .batch_execute(&format!(
-            "DROP TRIGGER IF EXISTS assessment_session_redirect_after_insert ON assessment_session;
+            "DROP TRIGGER IF EXISTS assessment_session_redirect_after_insert ON {SCHEMA}.assessment_session;
              DROP FUNCTION IF EXISTS {SCHEMA}.assessment_session_redirect_after_insert();
              DROP SCHEMA IF EXISTS {sink} CASCADE;"
         ))
