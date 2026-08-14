@@ -49,6 +49,20 @@ fn reset_result_snapshot_tables(client: &mut Client) {
         .unwrap();
 }
 
+fn cleanup_result_snapshot_fault_injection(client: &mut Client) {
+    client
+        .batch_execute(
+            "DROP TRIGGER IF EXISTS result_snapshot_redirect_after_insert \
+                 ON result_snapshot_persistence_test.result_snapshot;\
+             DROP FUNCTION IF EXISTS result_snapshot_persistence_test.result_snapshot_redirect_after_insert();\
+             DROP SCHEMA IF EXISTS result_snapshot_select_failure_sink CASCADE;\
+             DROP TRIGGER IF EXISTS result_snapshot_reject_observation \
+                 ON result_snapshot_persistence_test.result_snapshot_observation;\
+             DROP FUNCTION IF EXISTS result_snapshot_persistence_test.result_snapshot_reject_observation();",
+        )
+        .unwrap();
+}
+
 fn snapshot_named(
     session_ref: &str,
     result_snapshot_ref: &str,
@@ -369,7 +383,8 @@ fn replay_select_failure_is_a_database_failure() {
 
     client
         .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS result_snapshot_select_failure_sink;\
+            "DROP SCHEMA IF EXISTS result_snapshot_select_failure_sink CASCADE;\
+             CREATE SCHEMA result_snapshot_select_failure_sink;\
              CREATE OR REPLACE FUNCTION result_snapshot_redirect_after_insert() \
              RETURNS trigger LANGUAGE plpgsql AS $$ \
              BEGIN \
@@ -386,6 +401,7 @@ fn replay_select_failure_is_a_database_failure() {
         persist_err(&mut client, &snapshot),
         ResultSnapshotPersistenceError::Database(_)
     ));
+    cleanup_result_snapshot_fault_injection(&mut client);
 }
 
 #[test]
@@ -432,4 +448,5 @@ fn observation_insert_failure_is_a_database_failure() {
         persist_err(&mut client, &snapshot),
         ResultSnapshotPersistenceError::Database(_)
     ));
+    cleanup_result_snapshot_fault_injection(&mut client);
 }
