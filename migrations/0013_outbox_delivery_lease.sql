@@ -59,5 +59,24 @@ BEGIN
                 AND (lease_worker_ref IS NULL) = (lease_expires_at_unix_ms IS NULL)
             );
     END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint AS constraint_row
+        JOIN pg_class AS relation_row
+          ON relation_row.oid = constraint_row.conrelid
+        JOIN pg_namespace AS namespace_row
+          ON namespace_row.oid = relation_row.relnamespace
+        WHERE constraint_row.conname = 'integration_outbox_fencing_generation_check'
+          AND relation_row.relname = 'integration_outbox'
+          AND namespace_row.nspname = current_schema()
+    ) THEN
+        ALTER TABLE integration_outbox
+            ADD CONSTRAINT integration_outbox_fencing_generation_check
+            CHECK (
+                lease_fencing_token IS NULL
+                OR lease_fencing_token = delivery_lease_generation
+            );
+    END IF;
 END
 $$;
