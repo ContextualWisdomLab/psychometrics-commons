@@ -257,10 +257,12 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
 
     reset_session_table(&mut client);
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_assessment_session(&mut transaction, &session),
-        Err(AssessmentSessionPersistenceError::Database(_))
-    ));
+    let missing_table = persist_assessment_session(&mut transaction, &session).unwrap_err();
+    assert_eq!(
+        missing_table.to_string(),
+        "PostgreSQL assessment-session persistence failed"
+    );
+    assert!(std::error::Error::source(&missing_table).is_some());
     transaction.rollback().unwrap();
 }
 
@@ -280,8 +282,20 @@ fn classify_select_failure_after_conflict_is_a_database_failure() {
         persist_assessment_session(&mut transaction, &session).unwrap();
         transaction.commit().unwrap();
     }
+    let sink = format!("assessment_session_classify_sink_{}", std::process::id());
     client
-        .batch_execute("ALTER TABLE assessment_session DROP COLUMN locale;")
+        .batch_execute(&format!(
+            "CREATE SCHEMA {sink};
+             CREATE OR REPLACE FUNCTION assessment_session_redirect_after_insert()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM set_config('search_path', '{sink}', false);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER assessment_session_redirect_after_insert
+             AFTER INSERT ON assessment_session
+             FOR EACH STATEMENT EXECUTE FUNCTION assessment_session_redirect_after_insert();"
+        ))
         .unwrap();
 
     let mut transaction = client.transaction().unwrap();
