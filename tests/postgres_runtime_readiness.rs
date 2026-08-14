@@ -63,3 +63,15 @@ fn live_probe_accepts_the_repository_supported_postgres_major() {
     assert_eq!(health.capability_state(), CapabilityState::Available);
     assert!(health.accepts_new_work());
 }
+
+#[test]
+fn live_probe_detects_a_read_only_transaction() {
+    let mut client = test_client();
+    let mut transaction = client.build_transaction().read_only(true).start().unwrap();
+    let health = probe_postgres_runtime(&mut transaction).unwrap();
+
+    assert_eq!(health.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
+    assert_eq!(health.status(), PostgresRuntimeStatus::ReadOnly);
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
+}
