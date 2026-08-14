@@ -185,3 +185,39 @@ fn stale_fence_is_rejected_before_exact_attempt_replay_is_classified() {
     transaction.rollback().unwrap();
     cleanup(&mut client);
 }
+
+#[test]
+fn partial_persisted_lease_shape_fails_closed_when_schema_integrity_is_bypassed() {
+    let mut client = ready_client();
+    let now = database_now_unix_ms(&mut client);
+    let event_time = now - 10_000;
+    enqueue(&mut client, "event_partial_lease_shape", event_time);
+    client
+        .batch_execute(
+            "ALTER TABLE integration_outbox
+                 DROP CONSTRAINT integration_outbox_lease_presence_check;
+             UPDATE integration_outbox
+             SET lease_fencing_token = 1,
+                 delivery_lease_generation = 1
+             WHERE source_ref = 'psychometrics_commons'
+               AND tenant_ref = 'tenant_alpha'
+               AND event_ref = 'event_partial_lease_shape';",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        record_leased_outbox_delivery_attempt(
+            &mut transaction,
+            identity("event_partial_lease_shape"),
+            "attempt_partial_lease_shape",
+            DeliveryOutcome::Delivered,
+            event_time + 1,
+            None,
+            1,
+        ),
+        Err(PersistenceError::NotLeased)
+    ));
+    transaction.rollback().unwrap();
+    cleanup(&mut client);
+}
