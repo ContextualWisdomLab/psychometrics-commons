@@ -181,3 +181,41 @@ CREATE TABLE IF NOT EXISTS result_snapshot_observation (
         )
     )
 );
+
+CREATE OR REPLACE FUNCTION reject_result_snapshot_evidence_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'result snapshot evidence is immutable'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS result_snapshot_immutable_guard
+    ON result_snapshot;
+CREATE TRIGGER result_snapshot_immutable_guard
+    BEFORE UPDATE OR DELETE ON result_snapshot
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_result_snapshot_evidence_mutation();
+
+DROP TRIGGER IF EXISTS result_snapshot_truncate_guard
+    ON result_snapshot;
+CREATE TRIGGER result_snapshot_truncate_guard
+    BEFORE TRUNCATE ON result_snapshot
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_result_snapshot_evidence_mutation();
+
+DROP TRIGGER IF EXISTS result_snapshot_observation_immutable_guard
+    ON result_snapshot_observation;
+CREATE TRIGGER result_snapshot_observation_immutable_guard
+    BEFORE UPDATE OR DELETE ON result_snapshot_observation
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_result_snapshot_evidence_mutation();
+
+DROP TRIGGER IF EXISTS result_snapshot_observation_truncate_guard
+    ON result_snapshot_observation;
+CREATE TRIGGER result_snapshot_observation_truncate_guard
+    BEFORE TRUNCATE ON result_snapshot_observation
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_result_snapshot_evidence_mutation();
