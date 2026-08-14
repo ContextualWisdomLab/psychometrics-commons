@@ -45,7 +45,7 @@ pub enum DataRightsState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum DataRightsError {
-    /// A reference was blank or numeric-only instead of an opaque identifier.
+    /// A reference was blank, numeric-only, or noncanonical instead of an opaque identifier.
     InvalidReference,
     /// A timestamp was zero.
     InvalidTimestamp,
@@ -66,7 +66,7 @@ pub enum DataRightsError {
 impl Display for DataRightsError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "data-rights references must be opaque non-numeric values",
+            Self::InvalidReference => "data-rights references must be canonical opaque non-numeric values",
             Self::InvalidTimestamp => "data-rights timestamps must be greater than zero",
             Self::NonMonotonicTimestamp => "data-rights event time must not move backwards",
             Self::IdentityVerificationRequired => {
@@ -117,9 +117,9 @@ impl DataRightsRequest {
     ///
     /// # Errors
     ///
-    /// Returns [`DataRightsError::InvalidReference`] when any reference is blank
-    /// or numeric-only, and [`DataRightsError::InvalidTimestamp`] when
-    /// `requested_at_unix_ms` is zero.
+    /// Returns [`DataRightsError::InvalidReference`] when any reference is blank,
+    /// numeric-only, or not already in canonical spelling, and
+    /// [`DataRightsError::InvalidTimestamp`] when `requested_at_unix_ms` is zero.
     pub fn new(
         request_ref: &str,
         tenant_ref: &str,
@@ -345,14 +345,14 @@ impl DataRightsRequest {
     /// `retained_scope_refs` is valid only for deletion. A non-empty retained set
     /// results in [`DataRightsState::PartiallyCompleted`] so the product never
     /// represents legally retained data as deleted. Retained scope references are
-    /// normalized, sorted into canonical order, and must be unique. An exact completion
+    /// validated, sorted into canonical order, and must be unique. An exact completion
     /// replay is idempotent even when callers present the same retained set in a different order.
     ///
     /// # Errors
     ///
     /// Returns [`DataRightsError::RetentionExceptionNotAllowed`] for export
     /// retention exceptions, [`DataRightsError::DuplicateRetentionScope`] when a
-    /// normalized retention scope is repeated, [`DataRightsError::ConflictingReplay`]
+    /// retained scope is repeated, [`DataRightsError::ConflictingReplay`]
     /// when completion evidence is replayed inconsistently, or another
     /// [`DataRightsError`] for invalid evidence, time, retained scopes, or lifecycle state.
     pub fn complete(
@@ -495,5 +495,8 @@ impl DataRightsRequest {
 }
 
 fn required_reference(reference: &str) -> Result<&str, DataRightsError> {
-    normalized_reference(reference).ok_or(DataRightsError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(DataRightsError::InvalidReference),
+    }
 }
