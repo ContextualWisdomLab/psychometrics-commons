@@ -58,21 +58,6 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
-## Active PR result-snapshot physical schema
-
-`feat/result-snapshot-persistence-20260813` is **Active PR**, not protected-main truth. Migration `migrations/0007_result_snapshot.sql` maps one immutable `result_snapshot` plus copied `result_snapshot_observation` rows into PostgreSQL 18 relations owned by `src/postgres_result_snapshot.rs`.
-
-The active slice persists:
-
-- opaque result-snapshot identity and participant/session/response/scoring provenance;
-- copied engine-artifact digest and construct-level observations without recomputation;
-- optional norm and supersession references;
-- exact-replay classification under `READ COMMITTED`;
-- fail-closed identity/observation rebinding;
-- CHECK constraints rejecting numeric identities, empty consent sets, self-supersession, and scored observations without a score.
-
-The slice does **not** persist result-serving HTTP transport, narrative rendering, or live fast-mlsirm execution. Those remain Target.
-
 ## Logical-to-physical mapping rule
 
 A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:
