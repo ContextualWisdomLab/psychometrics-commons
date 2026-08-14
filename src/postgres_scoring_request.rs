@@ -6,8 +6,14 @@
 //! `fast-mlsirm` and does not store numeric scores. Replay requires
 //! `READ COMMITTED`.
 
+use crate::integration::IntegrationEvent;
+use crate::postgres_integration::{enqueue_outbox_event, PersistenceDisposition, PersistenceError};
+use crate::postgres_scoring_job::{
+    persist_scoring_job, ScoringJobPersistenceDisposition, ScoringJobPersistenceError,
+};
 use crate::reference::normalized_reference;
 use crate::scoring::ScoringRequest;
+use crate::scoring_job::ScoringJob;
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -22,6 +28,76 @@ pub enum ScoringRequestPersistenceDisposition {
     Inserted,
     /// The same immutable scoring-request identity already existed.
     Duplicate,
+}
+
+/// Durable dispositions produced by one atomic scoring-dispatch persistence call.
+///
+/// Mixed dispositions are valid when this transaction safely reconciles pre-existing
+/// exact evidence from an older write path. Every newly inserted row is still committed
+/// or rolled back together by the caller-owned transaction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScoringDispatchPersistence {
+    scoring_request: ScoringRequestPersistenceDisposition,
+    scoring_job: ScoringJobPersistenceDisposition,
+    outbox: PersistenceDisposition,
+}
+
+impl ScoringDispatchPersistence {
+    /// Return whether immutable scoring-request evidence was inserted or replayed.
+    #[must_use]
+    pub const fn scoring_request(self) -> ScoringRequestPersistenceDisposition {
+        self.scoring_request
+    }
+
+    /// Return whether immutable scoring-job evidence was inserted or replayed.
+    #[must_use]
+    pub const fn scoring_job(self) -> ScoringJobPersistenceDisposition {
+        self.scoring_job
+    }
+
+    /// Return whether immutable outbox evidence was inserted or replayed.
+    #[must_use]
+    pub const fn outbox(self) -> PersistenceDisposition {
+        self.outbox
+    }
+}
+
+/// Fail-closed error for one atomic scoring-dispatch persistence operation.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ScoringDispatchPersistenceError {
+    /// The scoring job names a different immutable scoring request.
+    MismatchedScoringRequest,
+    /// Immutable scoring-request persistence failed.
+    Request(ScoringRequestPersistenceError),
+    /// Durable scoring-job persistence failed.
+    Job(ScoringJobPersistenceError),
+    /// Transactional outbox persistence failed.
+    Outbox(PersistenceError),
+}
+
+impl Display for ScoringDispatchPersistenceError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MismatchedScoringRequest => {
+                "scoring job must reference the immutable scoring request in the same dispatch"
+            }
+            Self::Request(_) => "scoring dispatch request persistence failed",
+            Self::Job(_) => "scoring dispatch job persistence failed",
+            Self::Outbox(_) => "scoring dispatch outbox persistence failed",
+        })
+    }
+}
+
+impl Error for ScoringDispatchPersistenceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::MismatchedScoringRequest => None,
+            Self::Request(error) => Some(error),
+            Self::Job(error) => Some(error),
+            Self::Outbox(error) => Some(error),
+        }
+    }
 }
 
 /// Fail-closed error for durable scoring-request persistence.
@@ -84,6 +160,51 @@ pub fn apply_scoring_request_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
     client.batch_execute(SCORING_REQUEST_MIGRATION)
+}
+
+/// Persist a scoring request, its fresh asynchronous job, and one outbox event atomically.
+///
+/// The caller owns the transaction and therefore the final commit/rollback decision. This
+/// function composes the existing immutable request, job, and transactional-outbox adapters
+/// without introducing a second transaction boundary. The job must name exactly the supplied
+/// scoring request. Event schema, subject, tenant, correlation, and payload semantics remain
+/// the caller's versioned integration-contract responsibility; this function only guarantees
+/// that the validated outbox envelope cannot commit independently from newly written local
+/// dispatch state.
+///
+/// Exact replay is idempotent. Pre-existing exact evidence may produce mixed dispositions,
+/// allowing a caller to reconcile a legacy partial state without rewriting immutable rows.
+/// If any stage returns an error, callers must roll back the transaction rather than commit
+/// earlier successful stages.
+///
+/// # Errors
+///
+/// Returns [`ScoringDispatchPersistenceError::MismatchedScoringRequest`] before writing when
+/// the job is bound to another request. Request, job, or outbox persistence failures are
+/// preserved in the corresponding typed error variant.
+pub fn persist_scoring_dispatch(
+    transaction: &mut Transaction<'_>,
+    request: &ScoringRequest,
+    job: &ScoringJob,
+    dispatch_event: &IntegrationEvent,
+    outbox_max_attempts: usize,
+) -> Result<ScoringDispatchPersistence, ScoringDispatchPersistenceError> {
+    if job.scoring_request_ref() != request.scoring_request_ref() {
+        return Err(ScoringDispatchPersistenceError::MismatchedScoringRequest);
+    }
+
+    let scoring_request = persist_scoring_request(transaction, request)
+        .map_err(ScoringDispatchPersistenceError::Request)?;
+    let scoring_job =
+        persist_scoring_job(transaction, job).map_err(ScoringDispatchPersistenceError::Job)?;
+    let outbox = enqueue_outbox_event(transaction, dispatch_event, outbox_max_attempts)
+        .map_err(ScoringDispatchPersistenceError::Outbox)?;
+
+    Ok(ScoringDispatchPersistence {
+        scoring_request,
+        scoring_job,
+        outbox,
+    })
 }
 
 /// Persist one immutable scoring-request identity.
