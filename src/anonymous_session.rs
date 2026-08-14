@@ -55,12 +55,12 @@ pub struct AnonymousSessionContext {
 }
 
 impl AnonymousSessionContext {
-    /// Create a normalized anonymous-session authorization context.
+    /// Create a canonical anonymous-session authorization context.
     ///
     /// # Errors
     ///
     /// Returns [`AnonymousSessionContextError::InvalidReference`] when any reference
-    /// is not an opaque product reference, or
+    /// is not an opaque product reference in canonical spelling, or
     /// [`AnonymousSessionContextError::InvalidValidityBoundary`] when
     /// `valid_until_unix_ms` is zero.
     pub fn new(
@@ -158,7 +158,10 @@ impl AnonymousSessionContext {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
-    normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(AnonymousSessionContextError::InvalidReference),
+    }
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
