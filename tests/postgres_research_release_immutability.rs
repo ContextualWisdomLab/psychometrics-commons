@@ -12,8 +12,15 @@ fn isolated_schema_name() -> String {
     format!("research_release_immutability_{}_{}", std::process::id(), nonce)
 }
 
+fn assert_immutable_guard(error: &postgres::Error) {
+    let database_error = error
+        .as_db_error()
+        .expect("immutable release mutations must fail at the database boundary");
+    assert_eq!(database_error.code().code(), "55000");
+}
+
 #[test]
-fn approved_research_release_rows_reject_update_and_delete() {
+fn approved_research_release_rows_reject_update_delete_and_truncate() {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
@@ -53,7 +60,7 @@ fn approved_research_release_rows_reject_update_and_delete() {
             &[],
         )
         .expect_err("approved release evidence must reject in-place update");
-    assert!(update_error.as_db_error().is_some());
+    assert_immutable_guard(&update_error);
 
     let delete_error = client
         .execute(
@@ -62,7 +69,12 @@ fn approved_research_release_rows_reject_update_and_delete() {
             &[],
         )
         .expect_err("approved release evidence must reject in-place deletion");
-    assert!(delete_error.as_db_error().is_some());
+    assert_immutable_guard(&delete_error);
+
+    let truncate_error = client
+        .batch_execute("TRUNCATE TABLE research_release_approval;")
+        .expect_err("approved release evidence must reject table truncation");
+    assert_immutable_guard(&truncate_error);
 
     let row = client
         .query_one(
