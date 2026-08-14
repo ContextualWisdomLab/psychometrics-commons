@@ -5,6 +5,8 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Assessment-session creation binds to one published locale-specific instrument release, copies immutable version/locale provenance, and fails closed on locale mismatch or unpublished eligibility.
+- PostgreSQL persistence for immutable version-pinned scoring-request identity, with exact replay and fail-closed rebinding of snapshot or measurement-version evidence.
 
 - PostgreSQL 18 inbox-consumption persistence so an accepted inbox receipt is not side-effect completion: pending identity, fenced processing claims that cannot be stolen, expire-and-reclaim of a crashed claim without transferring the fence, local or claimed completion, and poison quarantine, with exact replay and `READ COMMITTED` fail-closed classification.
 - Participant-owned consent authorization: `ResourceKind::ConsentLedger` and `ProductPermission::ManageOwnConsent` reuse the fail-closed tenant, resource-kind, and owner checks so consent cannot be treated as an untyped generic concern.
