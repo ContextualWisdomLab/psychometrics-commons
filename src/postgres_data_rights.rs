@@ -14,8 +14,19 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const DATA_RIGHTS_MIGRATION: &str = include_str!("../migrations/0003_data_rights_propagation.sql");
+const DATA_RIGHTS_VERIFICATION_MIGRATION: &str =
+    include_str!("../migrations/0015_data_rights_identity_verification.sql");
 const SOURCE_REF: &str = "psychometrics_commons";
 const SCHEMA_VERSION: &str = "v1";
+
+/// Outcome of persisting requester identity verification for one data-rights request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DataRightsVerificationDisposition {
+    /// The requested identity was verified for the first time.
+    Verified,
+    /// The same verification evidence was replayed exactly.
+    Duplicate,
+}
 
 /// Whether a durable request was inserted or an exact prior request was replayed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,7 +61,7 @@ impl<'a> DataRightsPropagationTarget<'a> {
 pub enum DataRightsPersistenceError {
     /// A dependent-system reference was invalid.
     InvalidReference,
-    /// Only newly requested domain resources may enter this first durable slice.
+    /// The domain resource is not in a state this persistence operation accepts.
     InvalidRequestState,
     /// At least one dependent-system target is required by this propagation operation.
     EmptyTargetSet,
@@ -68,6 +79,8 @@ pub enum DataRightsPersistenceError {
     ValueOutOfRange,
     /// Existing integration-outbox persistence rejected the event evidence.
     Integration(PersistenceError),
+    /// The requested data-rights identity does not exist.
+    RequestNotFound,
     /// `PostgreSQL` rejected or could not execute the local transaction.
     Database(postgres::Error),
 }
@@ -78,7 +91,9 @@ impl Display for DataRightsPersistenceError {
             Self::InvalidReference => {
                 "data-rights propagation references must be opaque non-numeric values"
             }
-            Self::InvalidRequestState => "data-rights durable propagation requires Requested state",
+            Self::InvalidRequestState => {
+                "data-rights persistence received a request in a state this operation does not accept"
+            }
             Self::EmptyTargetSet => {
                 "data-rights propagation requires at least one dependent system"
             }
@@ -100,6 +115,7 @@ impl Display for DataRightsPersistenceError {
             Self::ValueOutOfRange => {
                 "data-rights persistence value exceeds the PostgreSQL bigint range"
             }
+            Self::RequestNotFound => "data-rights request does not exist",
             Self::Integration(_) => "data-rights outbox evidence failed persistence validation",
             Self::Database(_) => "PostgreSQL data-rights persistence operation failed",
         })
@@ -128,16 +144,20 @@ impl From<PersistenceError> for DataRightsPersistenceError {
     }
 }
 
-/// Apply the idempotent data-rights propagation migration.
+/// Apply the idempotent data-rights propagation and identity-verification migrations.
 ///
 /// Integration migration `0001` must already be present because propagation rows reference
-/// durable outbox identities.
+/// durable outbox identities. Verification columns are added only after the request table
+/// exists.
 ///
 /// # Errors
 ///
 /// Returns the `PostgreSQL` error if the migration cannot be applied.
 pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::Error> {
-    client.batch_execute(DATA_RIGHTS_MIGRATION)
+    match client.batch_execute(DATA_RIGHTS_MIGRATION) {
+        Ok(()) => client.batch_execute(DATA_RIGHTS_VERIFICATION_MIGRATION),
+        Err(error) => Err(error),
+    }
 }
 
 /// Persist one requested data-rights resource and all declared dependent-system outbox events.
@@ -198,6 +218,105 @@ pub fn persist_requested_data_rights_with_propagation(
 
     transaction.commit()?;
     Ok(disposition)
+}
+
+/// Persist requester identity verification for one already requested data-rights identity.
+///
+/// Exact replay of the same evidence and verification time is idempotent. A later
+/// conflicting verification fails closed. Replay classification locks the matched
+/// request row until the caller-owned transaction ends so the classified lifecycle
+/// cannot change before the caller composes subsequent atomic work.
+/// This adapter does not start processing or complete the request.
+///
+/// # Errors
+///
+/// Returns [`DataRightsPersistenceError`] when the domain state is not identity-verified,
+/// isolation is unsupported, the request is missing, stored evidence conflicts, a
+/// timestamp is out of range, or the database operation fails.
+pub fn persist_data_rights_identity_verification(
+    transaction: &mut Transaction<'_>,
+    request: &DataRightsRequest,
+) -> Result<DataRightsVerificationDisposition, DataRightsPersistenceError> {
+    let (evidence_ref, verified_at) = match (
+        request.state(),
+        request
+            .verification_evidence_ref()
+            .and_then(normalized_reference),
+        request.verified_at_unix_ms(),
+    ) {
+        (DataRightsState::IdentityVerified, Some(evidence_ref), Some(verified_at_ms)) => {
+            match i64::try_from(verified_at_ms) {
+                Ok(verified_at) => (evidence_ref, verified_at),
+                Err(_) => return Err(DataRightsPersistenceError::ValueOutOfRange),
+            }
+        }
+        _ => return Err(DataRightsPersistenceError::InvalidRequestState),
+    };
+    require_read_committed(transaction)?;
+    let request_kind = request_kind_name(request.kind());
+
+    let updated = query_optional_row(
+        transaction,
+        "UPDATE data_rights_request_state
+         SET current_state = 'identity_verified',
+             verification_evidence_ref = $3,
+             verified_at_unix_ms = $4,
+             latest_event_at_unix_ms = $4,
+             updated_at = clock_timestamp()
+         WHERE request_ref = $1
+           AND tenant_ref = $2
+           AND participant_ref = $5
+           AND request_kind = $6
+           AND scope_ref = $7
+           AND current_state = 'requested'
+         RETURNING request_ref",
+        &[
+            &request.request_ref(),
+            &request.tenant_ref(),
+            &evidence_ref,
+            &verified_at,
+            &request.participant_ref(),
+            &request_kind,
+            &request.scope_ref(),
+        ],
+    )?;
+    if updated.is_some() {
+        return Ok(DataRightsVerificationDisposition::Verified);
+    }
+
+    let row = query_optional_row(
+        transaction,
+        "SELECT participant_ref, request_kind, scope_ref,
+                current_state, verification_evidence_ref, verified_at_unix_ms
+         FROM data_rights_request_state
+         WHERE request_ref = $1 AND tenant_ref = $2
+         FOR UPDATE",
+        &[&request.request_ref(), &request.tenant_ref()],
+    )?;
+    let Some(row) = row else {
+        return Err(DataRightsPersistenceError::RequestNotFound);
+    };
+    let stored_participant: String = row.get(0);
+    let stored_kind: String = row.get(1);
+    let stored_scope: String = row.get(2);
+    let stored_state: String = row.get(3);
+    let stored_evidence: Option<String> = row.get(4);
+    let stored_verified_at: Option<i64> = row.get(5);
+    let identity_matches = stored_participant == request.participant_ref()
+        && stored_kind == request_kind
+        && stored_scope == request.scope_ref();
+    if !identity_matches {
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    } else if stored_state == "identity_verified"
+        && stored_evidence.as_deref() == Some(evidence_ref)
+        && stored_verified_at == Some(verified_at)
+    {
+        Ok(DataRightsVerificationDisposition::Duplicate)
+    } else if stored_state == "identity_verified" {
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    } else {
+        Err(DataRightsPersistenceError::InvalidRequestState)
+    }
 }
 
 fn persist_request_header(
@@ -313,6 +432,17 @@ fn stored_targets_match(
                 && row.get::<_, String>(2) == target.event.event_ref()
         })
     }))
+}
+
+fn query_optional_row(
+    transaction: &mut Transaction<'_>,
+    statement: &str,
+    params: &[&(dyn postgres::types::ToSql + Sync)],
+) -> Result<Option<postgres::Row>, DataRightsPersistenceError> {
+    match transaction.query_opt(statement, params) {
+        Ok(row) => Ok(row),
+        Err(error) => Err(DataRightsPersistenceError::from(error)),
+    }
 }
 
 fn is_unique_violation(error: &postgres::Error) -> bool {
