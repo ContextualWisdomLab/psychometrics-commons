@@ -12,7 +12,7 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
-| `integration_outbox` | integration | Implemented subset; **Active PR** exclusive delivery-lease columns |
+| `integration_outbox` | integration | Implemented subset |
 | `integration_delivery_attempt` | integration | Implemented subset |
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
@@ -21,9 +21,7 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
-**Active PR** #60 `migrations/0013_outbox_delivery_lease.sql` adds exclusive delivery-lease columns on `integration_outbox` (`lease_worker_ref`, `lease_ref`, `lease_fencing_token`, `lease_expires_at_unix_ms`, `delivery_lease_generation`) so a crashed worker cannot keep the expired fence. It is not protected-main truth until integrated.
-
-## Implemented inbox-consumption physical schema
+## Active PR inbox-consumption physical schema
 
 PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
 
