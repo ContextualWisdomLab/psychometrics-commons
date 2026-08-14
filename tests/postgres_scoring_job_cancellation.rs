@@ -331,3 +331,41 @@ fn cancellation_surfaces_database_failure_and_terminal_error_message_is_stable()
         "completed or quarantined scoring jobs cannot be cancelled"
     );
 }
+
+#[test]
+fn cancellation_surfaces_database_failure_from_post_transition_state_lookup() {
+    let (_guard, mut client) = test_client();
+    reset_scoring_job_table(&mut client);
+    apply_scoring_job_migration(&mut client).unwrap();
+    enqueue(
+        &mut client,
+        "scoring_job_cancel_lookup_failure",
+        "scoring_request_cancel_lookup_failure",
+        2,
+    );
+
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION suppress_cancel_then_hide_relation() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 PERFORM set_config('search_path', 'missing_cancel_lookup_schema', true); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER suppress_cancel_then_hide_relation \
+             BEFORE UPDATE ON scoring_job_state \
+             FOR EACH ROW EXECUTE FUNCTION suppress_cancel_then_hide_relation();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        cancel_scoring_job(&mut transaction, "scoring_job_cancel_lookup_failure"),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute("DROP TRIGGER suppress_cancel_then_hide_relation ON scoring_job_state;")
+        .unwrap();
+}
