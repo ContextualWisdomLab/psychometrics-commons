@@ -84,7 +84,10 @@ fn assert_row_update_waits_for_lock(contender: &mut Client, job_ref: &str) {
             &[&job_ref],
         )
         .unwrap_err();
-    assert_eq!(error.code().map(|code| code.code()), Some("55P03"));
+    assert_eq!(
+        error.code().map(postgres::error::SqlState::code),
+        Some("55P03")
+    );
 }
 
 #[test]
