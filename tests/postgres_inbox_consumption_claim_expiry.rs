@@ -186,8 +186,8 @@ fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
     let claimed_at = database_now
         .checked_sub(2_000)
         .expect("database clock must be at least two seconds after the Unix epoch");
-    let expired_at = database_now - 1_000;
-    let stale_observed_at = claimed_at + 1;
+    let expired_at = claimed_at + 1;
+    let stale_observed_at = claimed_at;
 
     let completion = prepare_claim_with_window(
         &mut client,
@@ -196,6 +196,7 @@ fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
         claimed_at,
         expired_at,
     );
+    client.simple_query("SELECT pg_sleep(0.02)").unwrap();
     let mut complete = client.transaction().unwrap();
     assert!(
         complete_inbox_consumption(
@@ -222,6 +223,7 @@ fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
         claimed_at,
         expired_at,
     );
+    client.simple_query("SELECT pg_sleep(0.02)").unwrap();
     let mut quarantine_transaction = client.transaction().unwrap();
     assert!(
         quarantine_inbox_consumption(
