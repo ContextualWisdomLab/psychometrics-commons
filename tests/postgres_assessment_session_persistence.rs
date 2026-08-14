@@ -1,5 +1,7 @@
 //! Real `PostgreSQL` contract for created assessment-session identity.
 
+use std::sync::{Mutex, MutexGuard};
+
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -19,8 +21,12 @@ const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "assessment_session_persistence_test";
+static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn test_client() -> Client {
+fn test_client() -> (MutexGuard<'static, ()>, Client) {
+    let guard = DATABASE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
@@ -30,7 +36,7 @@ fn test_client() -> Client {
             "CREATE SCHEMA IF NOT EXISTS {SCHEMA}; SET search_path TO {SCHEMA};"
         ))
         .unwrap();
-    client
+    (guard, client)
 }
 
 fn reset_session_table(client: &mut Client) {
@@ -134,7 +140,7 @@ fn created_session(
 
 #[test]
 fn created_session_persists_release_binding_and_replays_exactly() {
-    let mut client = test_client();
+    let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
     apply_assessment_session_migration(&mut client).unwrap();
     let session = created_session(
@@ -179,7 +185,7 @@ fn created_session_persists_release_binding_and_replays_exactly() {
 
 #[test]
 fn conflicting_session_identity_and_non_created_state_fail_closed() {
-    let mut client = test_client();
+    let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
     apply_assessment_session_migration(&mut client).unwrap();
     let session = created_session(
@@ -228,7 +234,7 @@ fn conflicting_session_identity_and_non_created_state_fail_closed() {
 
 #[test]
 fn session_persist_requires_read_committed_and_surfaces_database_failure() {
-    let mut client = test_client();
+    let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
     apply_assessment_session_migration(&mut client).unwrap();
     let session = created_session(
@@ -260,7 +266,7 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
 
 #[test]
 fn classify_select_failure_after_conflict_is_a_database_failure() {
-    let mut client = test_client();
+    let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
     apply_assessment_session_migration(&mut client).unwrap();
     let session = created_session(
