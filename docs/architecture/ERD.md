@@ -145,7 +145,9 @@ erDiagram
     assessment_session {
       string session_ref PK
       string participant_ref FK
+      string instrument_release_ref
       string instrument_version_ref FK
+      string instrument_release_content_digest
       string session_state
       string locale
       timestamp created_at

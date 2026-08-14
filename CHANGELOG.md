@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- PostgreSQL persistence for a created assessment session bound to one published locale-specific instrument release, with exact replay and fail-closed rebinding of participant, release, digest, or locale identity.
 - Assessment-session creation binds to one published locale-specific instrument release, copies immutable version/locale provenance, and fails closed on locale mismatch or unpublished eligibility.
 - PostgreSQL persistence for immutable version-pinned scoring-request identity, with exact replay and fail-closed rebinding of snapshot or measurement-version evidence.
 
