@@ -203,7 +203,9 @@ fn processing_start_rejects_invalid_state_missing_request_and_overflow() {
     transaction.rollback().unwrap();
 
     let mut overflow = verified;
-    overflow.start_processing("operation_overflow", u64::MAX).unwrap();
+    overflow
+        .start_processing("operation_overflow", u64::MAX)
+        .unwrap();
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist_data_rights_processing_start(&mut transaction, &overflow),
