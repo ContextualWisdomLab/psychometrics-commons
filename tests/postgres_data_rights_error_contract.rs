@@ -19,7 +19,7 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
         ),
         (
             DataRightsPersistenceError::InvalidRequestState,
-            "data-rights durable propagation requires Requested state",
+            "data-rights persistence received a request in a state this operation does not accept",
         ),
         (
             DataRightsPersistenceError::EmptyTargetSet,
@@ -48,6 +48,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
         (
             DataRightsPersistenceError::ValueOutOfRange,
             "data-rights persistence value exceeds the PostgreSQL bigint range",
+        ),
+        (
+            DataRightsPersistenceError::RequestNotFound,
+            "data-rights request does not exist",
         ),
     ] {
         assert_eq!(error.to_string(), expected_message);
