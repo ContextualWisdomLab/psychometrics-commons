@@ -22,6 +22,17 @@ pub enum DataRightsCompletionDisposition {
     Duplicate,
 }
 
+struct CompletionEvidence<'a> {
+    target_state: &'static str,
+    completion_ref: &'a str,
+    completed_at: i64,
+    verification_ref: &'a str,
+    verified_at: i64,
+    operation_ref: &'a str,
+    processing_started_at: i64,
+    retained_scopes: Vec<&'a str>,
+}
+
 /// Apply the idempotent data-rights completion migration.
 ///
 /// The base request, identity-verification, and processing-start migrations must already exist.
@@ -54,59 +65,7 @@ pub fn persist_data_rights_completion(
     transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
 ) -> Result<DataRightsCompletionDisposition, DataRightsPersistenceError> {
-    let (target_state, completion_ref, completed_at_ms) = match (
-        request.state(),
-        request.completion_evidence_ref().and_then(normalized_reference),
-        request.completed_at_unix_ms(),
-        request.retained_scope_refs().is_empty(),
-    ) {
-        (DataRightsState::Completed, Some(completion_ref), Some(completed_at), true) => {
-            ("completed", completion_ref, completed_at)
-        }
-        (
-            DataRightsState::PartiallyCompleted,
-            Some(completion_ref),
-            Some(completed_at),
-            false,
-        ) if request.kind() == DataRightsRequestKind::Deletion => {
-            ("partially_completed", completion_ref, completed_at)
-        }
-        _ => return Err(DataRightsPersistenceError::InvalidRequestState),
-    };
-
-    let verification_ref = request
-        .verification_evidence_ref()
-        .and_then(normalized_reference)
-        .ok_or(DataRightsPersistenceError::InvalidRequestState)?;
-    let operation_ref = request
-        .operation_ref()
-        .and_then(normalized_reference)
-        .ok_or(DataRightsPersistenceError::InvalidRequestState)?;
-    let verified_at_ms = request
-        .verified_at_unix_ms()
-        .ok_or(DataRightsPersistenceError::InvalidRequestState)?;
-    let processing_started_at_ms = request
-        .processing_started_at_unix_ms()
-        .ok_or(DataRightsPersistenceError::InvalidRequestState)?;
-    let completed_at = i64::try_from(completed_at_ms)
-        .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
-    if processing_started_at_ms > completed_at_ms || verified_at_ms > processing_started_at_ms {
-        return Err(DataRightsPersistenceError::InvalidRequestState);
-    }
-    let verified_at = verified_at_ms as i64;
-    let processing_started_at = processing_started_at_ms as i64;
-
-    let retained_scopes = request
-        .retained_scope_refs()
-        .iter()
-        .map(|reference| {
-            normalized_reference(reference).ok_or(DataRightsPersistenceError::InvalidReference)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if request.kind() == DataRightsRequestKind::Export && !retained_scopes.is_empty() {
-        return Err(DataRightsPersistenceError::InvalidRequestState);
-    }
-
+    let evidence = completion_evidence(request)?;
     require_read_committed(transaction)?;
     let request_kind = request_kind_name(request.kind());
     let updated = transaction.query_opt(
@@ -131,21 +90,21 @@ pub fn persist_data_rights_completion(
         &[
             &request.request_ref(),
             &request.tenant_ref(),
-            &target_state,
-            &completion_ref,
-            &completed_at,
+            &evidence.target_state,
+            &evidence.completion_ref,
+            &evidence.completed_at,
             &request.participant_ref(),
             &request_kind,
             &request.scope_ref(),
-            &verification_ref,
-            &verified_at,
-            &operation_ref,
-            &processing_started_at,
+            &evidence.verification_ref,
+            &evidence.verified_at,
+            &evidence.operation_ref,
+            &evidence.processing_started_at,
         ],
     )?;
 
     if updated.is_some() {
-        for retained_scope in &retained_scopes {
+        for retained_scope in &evidence.retained_scopes {
             transaction.execute(
                 "INSERT INTO data_rights_retained_scope_evidence
                     (request_ref, tenant_ref, retained_scope_ref)
@@ -156,10 +115,77 @@ pub fn persist_data_rights_completion(
         return Ok(DataRightsCompletionDisposition::Completed);
     }
 
-    classify_replay(
-        transaction,
-        request,
-        request_kind,
+    classify_replay(transaction, request, request_kind, &evidence)
+}
+
+fn completion_evidence<'a>(
+    request: &'a DataRightsRequest,
+) -> Result<CompletionEvidence<'a>, DataRightsPersistenceError> {
+    let (target_state, completion_ref, completed_at_ms, verification_ref, verified_at_ms,
+        operation_ref, processing_started_at_ms) = match (
+        request.state(),
+        request.completion_evidence_ref().and_then(normalized_reference),
+        request.completed_at_unix_ms(),
+        request
+            .verification_evidence_ref()
+            .and_then(normalized_reference),
+        request.verified_at_unix_ms(),
+        request.operation_ref().and_then(normalized_reference),
+        request.processing_started_at_unix_ms(),
+        request.retained_scope_refs().is_empty(),
+    ) {
+        (
+            DataRightsState::Completed,
+            Some(completion_ref),
+            Some(completed_at),
+            Some(verification_ref),
+            Some(verified_at),
+            Some(operation_ref),
+            Some(processing_started_at),
+            true,
+        ) => (
+            "completed",
+            completion_ref,
+            completed_at,
+            verification_ref,
+            verified_at,
+            operation_ref,
+            processing_started_at,
+        ),
+        (
+            DataRightsState::PartiallyCompleted,
+            Some(completion_ref),
+            Some(completed_at),
+            Some(verification_ref),
+            Some(verified_at),
+            Some(operation_ref),
+            Some(processing_started_at),
+            false,
+        ) if request.kind() == DataRightsRequestKind::Deletion => (
+            "partially_completed",
+            completion_ref,
+            completed_at,
+            verification_ref,
+            verified_at,
+            operation_ref,
+            processing_started_at,
+        ),
+        _ => return Err(DataRightsPersistenceError::InvalidRequestState),
+    };
+
+    let completed_at = i64::try_from(completed_at_ms)
+        .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
+    // The domain lifecycle enforces verification <= processing start <= completion. Once the
+    // terminal completion timestamp fits PostgreSQL BIGINT, the preceding timestamps fit as well.
+    let verified_at = verified_at_ms as i64;
+    let processing_started_at = processing_started_at_ms as i64;
+    let retained_scopes = request
+        .retained_scope_refs()
+        .iter()
+        .map(String::as_str)
+        .collect();
+
+    Ok(CompletionEvidence {
         target_state,
         completion_ref,
         completed_at,
@@ -167,23 +193,15 @@ pub fn persist_data_rights_completion(
         verified_at,
         operation_ref,
         processing_started_at,
-        &retained_scopes,
-    )
+        retained_scopes,
+    })
 }
 
-#[allow(clippy::too_many_arguments)]
 fn classify_replay(
     transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
     request_kind: &str,
-    target_state: &str,
-    completion_ref: &str,
-    completed_at: i64,
-    verification_ref: &str,
-    verified_at: i64,
-    operation_ref: &str,
-    processing_started_at: i64,
-    retained_scopes: &[&str],
+    evidence: &CompletionEvidence<'_>,
 ) -> Result<DataRightsCompletionDisposition, DataRightsPersistenceError> {
     let row = transaction.query_opt(
         "SELECT participant_ref, request_kind, scope_ref, current_state,
@@ -202,24 +220,24 @@ fn classify_replay(
     let identity_matches = row.get::<_, String>(0) == request.participant_ref()
         && row.get::<_, String>(1) == request_kind
         && row.get::<_, String>(2) == request.scope_ref()
-        && row.get::<_, Option<String>>(4).as_deref() == Some(verification_ref)
-        && row.get::<_, Option<i64>>(5) == Some(verified_at)
-        && row.get::<_, Option<String>>(6).as_deref() == Some(operation_ref)
-        && row.get::<_, Option<i64>>(7) == Some(processing_started_at);
+        && row.get::<_, Option<String>>(4).as_deref() == Some(evidence.verification_ref)
+        && row.get::<_, Option<i64>>(5) == Some(evidence.verified_at)
+        && row.get::<_, Option<String>>(6).as_deref() == Some(evidence.operation_ref)
+        && row.get::<_, Option<i64>>(7) == Some(evidence.processing_started_at);
     if !identity_matches {
         return Err(DataRightsPersistenceError::ConflictingReplay);
     }
 
     let stored_state: String = row.get(3);
-    if stored_state != target_state {
+    if stored_state != evidence.target_state {
         return if matches!(stored_state.as_str(), "completed" | "partially_completed") {
             Err(DataRightsPersistenceError::ConflictingReplay)
         } else {
             Err(DataRightsPersistenceError::InvalidRequestState)
         };
     }
-    if row.get::<_, Option<String>>(8).as_deref() != Some(completion_ref)
-        || row.get::<_, Option<i64>>(9) != Some(completed_at)
+    if row.get::<_, Option<String>>(8).as_deref() != Some(evidence.completion_ref)
+        || row.get::<_, Option<i64>>(9) != Some(evidence.completed_at)
     {
         return Err(DataRightsPersistenceError::ConflictingReplay);
     }
@@ -235,7 +253,8 @@ fn classify_replay(
         .into_iter()
         .map(|row| row.get::<_, String>(0))
         .collect::<Vec<_>>();
-    let expected_retained = retained_scopes
+    let expected_retained = evidence
+        .retained_scopes
         .iter()
         .map(|reference| (*reference).to_owned())
         .collect::<Vec<_>>();
