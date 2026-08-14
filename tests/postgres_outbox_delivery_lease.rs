@@ -694,7 +694,7 @@ fn expiry_classify_select_failure_is_a_database_failure() {
         "event_classify_hidden",
         "worker_hidden",
         "outbox_lease_hidden",
-        11_000,
+        20_000,
     );
     let sink = format!("outbox_lease_classify_sink_{}", std::process::id());
     client
