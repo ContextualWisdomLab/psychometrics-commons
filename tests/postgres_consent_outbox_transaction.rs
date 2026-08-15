@@ -19,6 +19,7 @@ use std::sync::{Mutex, MutexGuard};
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const TENANT_REF: &str = "tenant_consent_outbox_alpha";
 
 static CONSENT_OUTBOX_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -74,6 +75,7 @@ fn research_ledger(event_ref: &str, decision: ConsentDecision) -> ConsentLedger 
 fn propagation_event(
     event_ref: &str,
     consent_event_ref: &str,
+    tenant_ref: &str,
     subject_ref: &str,
     digest: &str,
 ) -> IntegrationEvent {
@@ -82,7 +84,7 @@ fn propagation_event(
         "consent.research.changed",
         "v1",
         "psychometrics_commons",
-        "tenant_consent_outbox_alpha",
+        tenant_ref,
         subject_ref,
         10_000,
         "correlation_consent_outbox_alpha",
@@ -101,20 +103,33 @@ fn consent_and_outbox_commit_and_replay_together() {
     let event = propagation_event(
         "event_consent_research_grant",
         "consent_event_research_grant",
+        TENANT_REF,
         ledger.participant_ref(),
         DIGEST_A,
     );
 
     let mut transaction = client.transaction().unwrap();
-    let inserted =
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &event, 3).unwrap();
+    let inserted = persist_consent_ledger_with_outbox(
+        &mut transaction,
+        TENANT_REF,
+        &ledger,
+        &event,
+        3,
+    )
+    .unwrap();
     assert_eq!(inserted.consent(), ConsentPersistenceDisposition::Inserted);
     assert_eq!(inserted.outbox(), PersistenceDisposition::Inserted);
     transaction.commit().unwrap();
 
     let mut transaction = client.transaction().unwrap();
-    let duplicate =
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &event, 3).unwrap();
+    let duplicate = persist_consent_ledger_with_outbox(
+        &mut transaction,
+        TENANT_REF,
+        &ledger,
+        &event,
+        3,
+    )
+    .unwrap();
     assert_eq!(
         duplicate.consent(),
         ConsentPersistenceDisposition::Duplicate
@@ -135,21 +150,49 @@ fn consent_and_outbox_commit_and_replay_together() {
 }
 
 #[test]
-fn propagation_envelope_must_bind_the_exact_consent_event_and_participant() {
+fn propagation_envelope_must_bind_tenant_participant_and_exact_consent_event() {
     let _guard = consent_outbox_guard();
     let mut client = test_client();
     reset_and_migrate(&mut client);
     let ledger = research_ledger("consent_event_envelope_alpha", ConsentDecision::Revoked);
+    let wrong_tenant = propagation_event(
+        "event_consent_wrong_tenant",
+        "consent_event_envelope_alpha",
+        "tenant_consent_outbox_other",
+        ledger.participant_ref(),
+        DIGEST_A,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger,
+            &wrong_tenant,
+            3,
+        ),
+        Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+    ));
+    transaction.rollback().unwrap();
+
     let wrong_subject = propagation_event(
         "event_consent_wrong_subject",
         "consent_event_envelope_alpha",
+        TENANT_REF,
         "participant_other",
         DIGEST_A,
     );
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &wrong_subject, 3),
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger,
+            &wrong_subject,
+            3,
+        ),
         Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
     ));
     transaction.rollback().unwrap();
@@ -157,12 +200,19 @@ fn propagation_envelope_must_bind_the_exact_consent_event_and_participant() {
     let wrong_causation = propagation_event(
         "event_consent_wrong_causation",
         "consent_event_other",
+        TENANT_REF,
         ledger.participant_ref(),
         DIGEST_A,
     );
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &wrong_causation, 3),
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger,
+            &wrong_causation,
+            3,
+        ),
         Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
     ));
     transaction.rollback().unwrap();
@@ -183,6 +233,7 @@ fn late_outbox_conflict_rolls_back_new_consent_evidence() {
     let existing_event = propagation_event(
         "event_consent_conflict_alpha",
         "consent_event_conflict_alpha",
+        TENANT_REF,
         ledger.participant_ref(),
         DIGEST_A,
     );
@@ -193,13 +244,20 @@ fn late_outbox_conflict_rolls_back_new_consent_evidence() {
     let conflicting_event = propagation_event(
         "event_consent_conflict_alpha",
         "consent_event_conflict_alpha",
+        TENANT_REF,
         ledger.participant_ref(),
         DIGEST_B,
     );
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &conflicting_event, 3),
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger,
+            &conflicting_event,
+            3,
+        ),
         Err(ConsentOutboxPersistenceError::Outbox(
             PersistenceError::ConflictingReplay
         ))
