@@ -162,10 +162,7 @@ impl AnonymousSessionContext {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
-    match normalized_reference(reference) {
-        Some(normalized) if normalized == reference => Ok(reference),
-        _ => Err(AnonymousSessionContextError::InvalidReference),
-    }
+    normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
