@@ -207,7 +207,8 @@ mod tests {
     #[test]
     fn optional_row_query_maps_database_errors() {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
-        let mut client = Client::connect(&url, postgres::NoTls).expect("CI PostgreSQL must be reachable");
+        let mut client =
+            Client::connect(&url, postgres::NoTls).expect("CI PostgreSQL must be reachable");
         let mut transaction = client.transaction().unwrap();
 
         assert!(matches!(

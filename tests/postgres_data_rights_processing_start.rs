@@ -185,6 +185,62 @@ fn export_processing_start_persists_request_kind_branch() {
 }
 
 #[test]
+fn processing_start_rejects_same_operation_with_a_later_start_time() {
+    let mut client = ready_client("data_rights_process_start_time");
+    let mut request = persist_verified(&mut client, "data_rights_request_process");
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mut later_start = new_request("data_rights_request_process");
+    later_start
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    later_start
+        .start_processing("operation_alpha", 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &later_start),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn processing_start_classify_select_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_process_classify_select");
+    let mut request = persist_requested(&mut client, "data_rights_request_process");
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION data_rights_processing_drop_after_update() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 EXECUTE format('DROP TABLE %I.data_rights_request_state', TG_TABLE_SCHEMA); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER data_rights_processing_drop_after_update \
+             AFTER UPDATE ON data_rights_request_state \
+             FOR EACH STATEMENT EXECUTE FUNCTION data_rights_processing_drop_after_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &request),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn processing_start_rejects_conflicting_and_later_lifecycle_evidence() {
     let mut client = ready_client("data_rights_process_conflict");
     let mut request = persist_verified(&mut client, "data_rights_request_process");
