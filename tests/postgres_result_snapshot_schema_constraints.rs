@@ -50,12 +50,15 @@ const SNAPSHOT_COLUMNS: &str =
      requested_output_schema_version, narrative_version_ref, \
      consent_snapshot_refs, engine_artifact_digest, created_at_unix_ms";
 
+const VALID_ENGINE_DIGEST: &str =
+    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const VALID_SNAPSHOT_VALUES: &str = "'result_snapshot_valid', 'participant_result_one', \
      'scoring_result_result_one', 'session_result_one', \
      'response_snapshot_result_one', 'assessment_spec_big_five_v1', \
      'instrument_version_big_five_ko_v1', 'scoring_version_big_five_v1', \
      'calibration_big_five_ko_v1', NULL, 1, 'narrative_version_big_five_v1', \
-     ARRAY['consent_snapshot_service_v1'], 'engine_digest_one', 70000";
+     ARRAY['consent_snapshot_service_v1'], \
+     'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 70000";
 
 #[test]
 fn schema_rejects_numeric_identity_empty_consent_and_self_supersession() {
@@ -106,6 +109,71 @@ fn schema_rejects_numeric_identity_empty_consent_and_self_supersession() {
     assert_eq!(
         constraint_name(&self_supersede),
         "result_snapshot_supersedes_ref_format_check"
+    );
+}
+
+#[test]
+fn schema_rejects_noncanonical_engine_digest_and_nonfinite_score_evidence() {
+    let _guard = schema_test_guard();
+    let mut client = test_client();
+    reset_schema(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let invalid_digest = client
+        .execute(
+            &format!(
+                "INSERT INTO result_snapshot ({SNAPSHOT_COLUMNS}) VALUES ({})",
+                VALID_SNAPSHOT_VALUES.replace(VALID_ENGINE_DIGEST, "sha256:not-a-digest")
+            ),
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(
+        constraint_name(&invalid_digest),
+        "result_snapshot_engine_digest_format_check"
+    );
+
+    client
+        .execute(
+            &format!(
+                "INSERT INTO result_snapshot ({SNAPSHOT_COLUMNS}) VALUES ({VALID_SNAPSHOT_VALUES})"
+            ),
+            &[],
+        )
+        .unwrap();
+
+    let nan_score = client
+        .execute(
+            "INSERT INTO result_snapshot_observation (\
+                 result_snapshot_ref, observation_order, construct_ref, \
+                 observation_disposition, score, standard_error\
+             ) VALUES (\
+                 'result_snapshot_valid', 0, 'construct_nan_score', 'scored', \
+                 'NaN'::double precision, NULL\
+             )",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(
+        constraint_name(&nan_score),
+        "result_snapshot_observation_score_finite_check"
+    );
+
+    let infinite_standard_error = client
+        .execute(
+            "INSERT INTO result_snapshot_observation (\
+                 result_snapshot_ref, observation_order, construct_ref, \
+                 observation_disposition, score, standard_error\
+             ) VALUES (\
+                 'result_snapshot_valid', 1, 'construct_infinite_error', 'scored', \
+                 0.5, 'Infinity'::double precision\
+             )",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(
+        constraint_name(&infinite_standard_error),
+        "result_snapshot_observation_standard_error_shape_check"
     );
 }
 
