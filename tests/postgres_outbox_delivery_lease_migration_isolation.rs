@@ -4,12 +4,14 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4C53;
-const LEASE_COLUMN_CONSTRAINTS: [&str; 5] = [
+const LEASE_COLUMN_CONSTRAINTS: [&str; 7] = [
     "integration_outbox_lease_worker_ref_format_check",
     "integration_outbox_lease_ref_format_check",
     "integration_outbox_lease_fencing_token_positive_check",
     "integration_outbox_lease_expiry_positive_check",
     "integration_outbox_delivery_lease_generation_nonnegative_check",
+    "integration_outbox_lease_presence_check",
+    "integration_outbox_fencing_generation_check",
 ];
 
 fn test_client() -> Client {
@@ -42,6 +44,28 @@ fn constraint_count(client: &mut Client, schema_name: &str, constraint_name: &st
         )
         .unwrap()
         .get(0)
+}
+
+fn constraint_definition(
+    client: &mut Client,
+    schema_name: &str,
+    constraint_name: &str,
+) -> Option<String> {
+    client
+        .query_opt(
+            "SELECT pg_get_constraintdef(constraint_row.oid)
+             FROM pg_constraint AS constraint_row
+             JOIN pg_class AS relation_row
+               ON relation_row.oid = constraint_row.conrelid
+             JOIN pg_namespace AS namespace_row
+               ON namespace_row.oid = relation_row.relnamespace
+             WHERE constraint_row.conname = $2
+               AND relation_row.relname = 'integration_outbox'
+               AND namespace_row.nspname = $1",
+            &[&schema_name, &constraint_name],
+        )
+        .unwrap()
+        .map(|row| row.get(0))
 }
 
 #[test]
@@ -92,7 +116,7 @@ fn lease_presence_constraint_is_installed_independently_in_each_schema() {
 }
 
 #[test]
-fn reapplication_repairs_missing_lease_column_constraints() {
+fn reapplication_repairs_missing_lease_constraints_with_exact_definitions() {
     let _database_guard = database_test_guard();
     let mut client = test_client();
     client
@@ -104,6 +128,19 @@ fn reapplication_repairs_missing_lease_column_constraints() {
         .unwrap();
     apply_integration_migration(&mut client).unwrap();
 
+    let expected_definitions = LEASE_COLUMN_CONSTRAINTS
+        .iter()
+        .map(|constraint_name| {
+            let definition = constraint_definition(
+                &mut client,
+                "outbox_lease_migration_repair",
+                constraint_name,
+            )
+            .unwrap_or_else(|| panic!("migration 0013 must install {constraint_name}"));
+            ((*constraint_name).to_owned(), definition)
+        })
+        .collect::<Vec<_>>();
+
     for constraint_name in LEASE_COLUMN_CONSTRAINTS {
         client
             .batch_execute(&format!(
@@ -114,15 +151,25 @@ fn reapplication_repairs_missing_lease_column_constraints() {
 
     apply_integration_migration(&mut client).unwrap();
 
-    for constraint_name in LEASE_COLUMN_CONSTRAINTS {
+    for (constraint_name, expected_definition) in expected_definitions {
         assert_eq!(
             constraint_count(
                 &mut client,
                 "outbox_lease_migration_repair",
-                constraint_name,
+                &constraint_name,
             ),
             1,
             "reapplying migration 0013 must repair missing constraint {constraint_name}"
+        );
+        assert_eq!(
+            constraint_definition(
+                &mut client,
+                "outbox_lease_migration_repair",
+                &constraint_name,
+            )
+            .as_deref(),
+            Some(expected_definition.as_str()),
+            "reapplying migration 0013 must restore the exact definition for {constraint_name}"
         );
     }
 
