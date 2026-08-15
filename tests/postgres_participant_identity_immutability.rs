@@ -13,7 +13,11 @@ fn isolated_client() -> (Client, String) {
         .duration_since(UNIX_EPOCH)
         .expect("system clock must be after the Unix epoch")
         .as_nanos();
-    let schema_name = format!("participant_identity_immutable_{}_{}", std::process::id(), nonce);
+    let schema_name = format!(
+        "participant_identity_immutable_{}_{}",
+        std::process::id(),
+        nonce
+    );
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
