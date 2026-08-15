@@ -118,7 +118,8 @@ fn prepare_claim(client: &mut Client, event_ref: &str, consumption_ref: &str) ->
 fn assert_processing_with_expiry(client: &mut Client, consumption_ref: &str, expected_expiry: i64) {
     let row = client
         .query_one(
-            "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms \
+            "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms, \
+                    claim_deadline_at IS NOT NULL \
              FROM integration_consumption WHERE consumption_ref = $1",
             &[&consumption_ref],
         )
@@ -126,6 +127,7 @@ fn assert_processing_with_expiry(client: &mut Client, consumption_ref: &str, exp
     assert_eq!(row.get::<_, String>(0), "processing");
     assert_eq!(row.get::<_, i64>(1), 1);
     assert_eq!(row.get::<_, Option<i64>>(2), Some(expected_expiry));
+    assert!(row.get::<_, bool>(3));
 }
 
 fn assert_processing(client: &mut Client, consumption_ref: &str) {
