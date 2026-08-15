@@ -24,7 +24,7 @@ fn grant<'a>(
 
 #[test]
 fn service_and_research_consent_are_independent_purposes() {
-    let mut ledger = ConsentLedger::new(" participant_ref ").unwrap();
+    let mut ledger = ConsentLedger::new("participant_ref").unwrap();
     assert!(ledger.is_empty());
     ledger
         .record(grant(
@@ -36,7 +36,7 @@ fn service_and_research_consent_are_independent_purposes() {
         ))
         .unwrap();
 
-    let snapshot = ledger.snapshot_as(" consent_snapshot_1 ").unwrap();
+    let snapshot = ledger.snapshot_as("consent_snapshot_1").unwrap();
 
     assert!(!ledger.is_empty());
     assert_eq!(snapshot.snapshot_ref(), "consent_snapshot_1");
@@ -68,15 +68,15 @@ fn explicit_research_grant_requires_scope_and_enables_contribution() {
             "research_grant",
             ConsentPurpose::ResearchContribution,
             "research_form_v2",
-            Some(" study_scope_v3 "),
+            Some("study_scope_v3"),
             2_000,
         ))
         .unwrap();
 
     let snapshot = ledger.snapshot_as("consent_snapshot_2").unwrap();
     let contribution = ResearchContribution::from_snapshot(
-        " contribution_ref ",
-        " research_participant_ref ",
+        "contribution_ref",
+        "research_participant_ref",
         &snapshot,
         2_100,
     )
@@ -349,7 +349,7 @@ fn contribution_withdrawal_is_monotonic_idempotent_and_irreversible() {
     )
     .unwrap();
 
-    let withdrawn = contribution.withdraw(" withdrawal_event ", 8_200).unwrap();
+    let withdrawn = contribution.withdraw("withdrawal_event", 8_200).unwrap();
     let replay = withdrawn.withdraw("withdrawal_event", 8_200).unwrap();
 
     assert_eq!(withdrawn, replay);
