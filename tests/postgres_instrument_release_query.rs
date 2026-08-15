@@ -253,7 +253,10 @@ fn query_errors_are_safe_and_database_failures_keep_their_source() {
         "en-US",
     )
     .unwrap_err();
-    assert!(matches!(error, InstrumentReleaseQueryError::Database(_)));
+    assert!(matches!(
+        &error,
+        InstrumentReleaseQueryError::Database(_)
+    ));
     assert_eq!(error.to_string(), "PostgreSQL instrument-release query failed");
     assert!(error.source().is_some());
 }
