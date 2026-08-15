@@ -253,6 +253,38 @@ fn future_data_rights_evidence_is_unknown_instead_of_healthy() {
 }
 
 #[test]
+fn data_rights_probe_rejects_invalid_propagation_time_without_invalid_request_time() {
+    let mut client = test_client();
+    let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);
+    let schema = format!(
+        "data_rights_backlog_invalid_propagation_{}_{}",
+        std::process::id(),
+        nonce
+    );
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};\
+             CREATE TABLE data_rights_request_state (\
+                 current_state TEXT, requested_at_unix_ms BIGINT);\
+             CREATE TABLE data_rights_propagation_state (\
+                 current_state TEXT, latest_event_at_unix_ms BIGINT);\
+             INSERT INTO data_rights_request_state VALUES ('requested', 2_000);\
+             INSERT INTO data_rights_propagation_state VALUES ('pending', 0);"
+        ))
+        .unwrap();
+    let error = probe_postgres_data_rights_backlog(&mut client).unwrap_err();
+    assert!(matches!(
+        error,
+        PostgresBacklogProbeError::InvalidStoredValue
+    ));
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
 fn data_rights_probe_rejects_invalid_stored_time_and_surfaces_database_failure() {
     let mut client = test_client();
     let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);

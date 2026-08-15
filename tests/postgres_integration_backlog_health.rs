@@ -317,6 +317,38 @@ fn active_consumption_age_can_independently_stall_readiness() {
 }
 
 #[test]
+fn probe_rejects_invalid_oldest_consumption_time_without_invalid_outbox_time() {
+    let mut client = test_client();
+    let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);
+    let schema = format!(
+        "integration_backlog_invalid_consumption_{}_{}",
+        std::process::id(),
+        nonce
+    );
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};\
+             CREATE TABLE integration_outbox (current_state TEXT, latest_event_at_unix_ms BIGINT);\
+             CREATE TABLE integration_consumption (consumption_state TEXT, latest_event_at_unix_ms BIGINT);\
+             INSERT INTO integration_outbox VALUES ('pending', 4_000);\
+             INSERT INTO integration_consumption VALUES ('pending', 0);"
+        ))
+        .unwrap();
+
+    let error = probe_postgres_integration_backlog(&mut client).unwrap_err();
+    assert!(matches!(
+        error,
+        PostgresBacklogProbeError::InvalidStoredValue
+    ));
+
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
 fn probe_rejects_invalid_stored_timestamps_and_keeps_database_errors_typed() {
     let mut client = test_client();
     let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);
