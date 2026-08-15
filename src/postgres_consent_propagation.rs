@@ -2,8 +2,8 @@
 //!
 //! Consent remains purpose-specific, append-only product evidence. This module composes the
 //! existing consent adapter with the existing transactional outbox and verifies that the emitted
-//! event is bound to the same participant and latest accepted consent event before any durable
-//! write.
+//! event is bound to the authorized tenant, same participant, and latest accepted consent event
+//! before any durable write.
 
 use crate::consent::ConsentLedger;
 use crate::integration::IntegrationEvent;
@@ -11,6 +11,7 @@ use crate::postgres_consent::{
     persist_consent_ledger, ConsentPersistenceDisposition, ConsentPersistenceError,
 };
 use crate::postgres_integration::{enqueue_outbox_event, PersistenceDisposition, PersistenceError};
+use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -42,7 +43,7 @@ impl ConsentOutboxPersistence {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ConsentOutboxPersistenceError {
-    /// The propagation envelope does not identify this participant and latest ledger event.
+    /// The propagation envelope does not identify this tenant, participant, and latest ledger event.
     InvalidPropagationEnvelope,
     /// Durable consent evidence failed validation or persistence.
     Consent(ConsentPersistenceError),
@@ -54,7 +55,7 @@ impl Display for ConsentOutboxPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidPropagationEnvelope => {
-                "consent propagation event must bind the participant's latest consent event"
+                "consent propagation event must bind the authorized tenant, participant, and latest consent event"
             }
             Self::Consent(_) => "consent propagation consent persistence failed",
             Self::Outbox(_) => "consent propagation outbox persistence failed",
@@ -74,13 +75,15 @@ impl Error for ConsentOutboxPersistenceError {
 
 /// Persist one consent ledger and its latest causally bound outbox event in the same transaction.
 ///
-/// The integration event must be emitted by `psychometrics_commons`, use the consent ledger's
-/// participant as its subject, identify the latest accepted consent event through `causation_ref`,
-/// and use that consent event's server-authoritative occurrence time. Binding propagation to the
-/// ledger tail prevents a later revocation or grant from being durably paired with stale historical
-/// propagation evidence. These checks run before persistence, preventing a valid consent decision
-/// from being durably paired with unrelated or superseded propagation evidence. The event type,
-/// tenant, correlation reference, schema version, and payload digest remain owned by the caller's
+/// `authorized_tenant_ref` is the product authorization context resolved by the caller. The
+/// integration event must use that exact tenant, be emitted by `psychometrics_commons`, use the
+/// consent ledger's participant as its subject, identify the latest accepted consent event through
+/// `causation_ref`, and use that consent event's server-authoritative occurrence time. Binding
+/// propagation to tenant, participant, and ledger tail prevents cross-tenant dispatch and prevents
+/// a later revocation or grant from being durably paired with stale historical propagation evidence.
+/// These checks run before persistence, preventing a valid consent decision from being durably
+/// paired with unrelated, cross-tenant, or superseded propagation evidence. Event type,
+/// correlation reference, schema version, and payload digest remain owned by the caller's
 /// versioned integration contract.
 ///
 /// The caller owns the `READ COMMITTED` transaction and final commit/rollback decision. If either
@@ -90,15 +93,17 @@ impl Error for ConsentOutboxPersistenceError {
 /// # Errors
 ///
 /// Returns [`ConsentOutboxPersistenceError::InvalidPropagationEnvelope`] before writes for an
-/// unrelated source, participant, stale or missing causation reference, or timestamp. Consent and
-/// outbox failures are preserved in typed error variants.
+/// invalid or mismatched authorized tenant, unrelated source or participant, stale or missing
+/// causation reference, or timestamp. Consent and outbox failures are preserved in typed error
+/// variants.
 pub fn persist_consent_ledger_with_outbox(
     transaction: &mut Transaction<'_>,
+    authorized_tenant_ref: &str,
     ledger: &ConsentLedger,
     propagation_event: &IntegrationEvent,
     outbox_max_attempts: usize,
 ) -> Result<ConsentOutboxPersistence, ConsentOutboxPersistenceError> {
-    validate_propagation_envelope(ledger, propagation_event)?;
+    validate_propagation_envelope(authorized_tenant_ref, ledger, propagation_event)?;
     let consent = persist_consent_ledger(transaction, ledger)
         .map_err(ConsentOutboxPersistenceError::Consent)?;
     let outbox = enqueue_outbox_event(transaction, propagation_event, outbox_max_attempts)
@@ -107,10 +112,15 @@ pub fn persist_consent_ledger_with_outbox(
 }
 
 fn validate_propagation_envelope(
+    authorized_tenant_ref: &str,
     ledger: &ConsentLedger,
     propagation_event: &IntegrationEvent,
 ) -> Result<(), ConsentOutboxPersistenceError> {
-    if propagation_event.source() != SOURCE_REF
+    let Some(authorized_tenant_ref) = normalized_reference(authorized_tenant_ref) else {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    };
+    if propagation_event.tenant_ref() != authorized_tenant_ref
+        || propagation_event.source() != SOURCE_REF
         || propagation_event.subject_ref() != ledger.participant_ref()
     {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
@@ -138,6 +148,7 @@ mod envelope_tests {
     use crate::integration::IntegrationEvent;
 
     const DIGEST: &str = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    const TENANT_REF: &str = "tenant_consent_envelope_unit";
 
     fn ledger() -> ConsentLedger {
         let mut ledger = ConsentLedger::new("participant_consent_envelope_unit").unwrap();
@@ -156,6 +167,7 @@ mod envelope_tests {
 
     fn event(
         source: &str,
+        tenant_ref: &str,
         subject: &str,
         causation: Option<&str>,
         occurred_at_unix_ms: u64,
@@ -165,7 +177,7 @@ mod envelope_tests {
             "consent.changed",
             "v1",
             source,
-            "tenant_consent_envelope_unit",
+            tenant_ref,
             subject,
             occurred_at_unix_ms,
             "correlation_consent_envelope_unit",
@@ -180,47 +192,74 @@ mod envelope_tests {
         let ledger = ledger();
         let valid = event(
             "psychometrics_commons",
+            TENANT_REF,
             ledger.participant_ref(),
             Some("consent_event_envelope_unit"),
             10_000,
         );
-        assert!(validate_propagation_envelope(&ledger, &valid).is_ok());
+        assert!(validate_propagation_envelope(TENANT_REF, &ledger, &valid).is_ok());
 
         let invalid = [
-            event(
-                "other_source",
+            ("tenant_consent_envelope_other", event(
+                "psychometrics_commons",
+                TENANT_REF,
                 ledger.participant_ref(),
                 Some("consent_event_envelope_unit"),
                 10_000,
-            ),
-            event(
+            )),
+            (TENANT_REF, event(
                 "psychometrics_commons",
+                "tenant_consent_envelope_other",
+                ledger.participant_ref(),
+                Some("consent_event_envelope_unit"),
+                10_000,
+            )),
+            (TENANT_REF, event(
+                "other_source",
+                TENANT_REF,
+                ledger.participant_ref(),
+                Some("consent_event_envelope_unit"),
+                10_000,
+            )),
+            (TENANT_REF, event(
+                "psychometrics_commons",
+                TENANT_REF,
                 "participant_other",
                 Some("consent_event_envelope_unit"),
                 10_000,
-            ),
-            event(
+            )),
+            (TENANT_REF, event(
                 "psychometrics_commons",
+                TENANT_REF,
                 ledger.participant_ref(),
                 None,
                 10_000,
-            ),
-            event(
+            )),
+            (TENANT_REF, event(
                 "psychometrics_commons",
+                TENANT_REF,
                 ledger.participant_ref(),
                 Some("consent_event_unknown"),
                 10_000,
-            ),
-            event(
+            )),
+            (TENANT_REF, event(
                 "psychometrics_commons",
+                TENANT_REF,
                 ledger.participant_ref(),
                 Some("consent_event_envelope_unit"),
                 10_001,
-            ),
+            )),
         ];
-        for candidate in invalid {
+        for (authorized_tenant_ref, candidate) in invalid {
             assert!(matches!(
-                validate_propagation_envelope(&ledger, &candidate),
+                validate_propagation_envelope(authorized_tenant_ref, &ledger, &candidate),
+                Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+            ));
+        }
+
+        for invalid_tenant_ref in [" ", "42"] {
+            assert!(matches!(
+                validate_propagation_envelope(invalid_tenant_ref, &ledger, &valid),
                 Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
             ));
         }
