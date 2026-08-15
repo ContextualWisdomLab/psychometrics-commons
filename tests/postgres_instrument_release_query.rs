@@ -82,12 +82,9 @@ fn published_release_query_returns_exact_session_provenance() {
     let mut database = TestDatabase::new();
     database.insert_release("release_big_five_en_v1", "en-US", "published");
 
-    let loaded = load_published_instrument_release(
-        &mut database.client,
-        "release_big_five_en_v1",
-        "en-US",
-    )
-    .unwrap();
+    let loaded =
+        load_published_instrument_release(&mut database.client, "release_big_five_en_v1", "en-US")
+            .unwrap();
 
     assert_eq!(loaded.manifest().release_ref(), "release_big_five_en_v1");
     assert_eq!(loaded.manifest().locale(), "en-US");
@@ -106,11 +103,7 @@ fn release_query_fails_closed_for_locale_state_identity_and_missing_release() {
     database.insert_release("release_big_five_review_v1", "en-US", "review");
 
     assert!(matches!(
-        load_published_instrument_release(
-            &mut database.client,
-            "release_big_five_ko_v1",
-            "en-US"
-        ),
+        load_published_instrument_release(&mut database.client, "release_big_five_ko_v1", "en-US"),
         Err(InstrumentReleaseQueryError::LocaleMismatch)
     ));
     assert!(matches!(
@@ -122,11 +115,7 @@ fn release_query_fails_closed_for_locale_state_identity_and_missing_release() {
         Err(InstrumentReleaseQueryError::NotPublished)
     ));
     assert!(matches!(
-        load_published_instrument_release(
-            &mut database.client,
-            " release_big_five_ko_v1",
-            "ko-KR"
-        ),
+        load_published_instrument_release(&mut database.client, " release_big_five_ko_v1", "ko-KR"),
         Err(InstrumentReleaseQueryError::InvalidReference)
     ));
     assert!(matches!(
@@ -223,6 +212,25 @@ fn release_query_revalidates_stored_manifest_instead_of_trusting_rows() {
         .batch_execute(
             "UPDATE instrument_release SET instrument_ref = 'instrument_big_five'\
              WHERE release_ref = 'release_big_five_tampered_v1';\
+             ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_limitations_ref_format_check;\
+             UPDATE instrument_release SET limitations_ref = ' limitations_nonclinical_v1'\
+             WHERE release_ref = 'release_big_five_tampered_v1';",
+        )
+        .unwrap();
+    assert!(matches!(
+        load_published_instrument_release(
+            &mut database.client,
+            "release_big_five_tampered_v1",
+            "en-US"
+        ),
+        Err(InstrumentReleaseQueryError::InvalidStoredValue)
+    ));
+
+    database
+        .client
+        .batch_execute(
+            "UPDATE instrument_release SET limitations_ref = 'limitations_nonclinical_v1'\
+             WHERE release_ref = 'release_big_five_tampered_v1';\
              ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_created_at_unix_positive_check;\
              UPDATE instrument_release SET created_at_unix_ms = -1\
              WHERE release_ref = 'release_big_five_tampered_v1';",
@@ -275,16 +283,13 @@ fn query_errors_are_safe_and_database_failures_keep_their_source() {
         .client
         .batch_execute("DROP TABLE instrument_release")
         .unwrap();
-    let error = load_published_instrument_release(
-        &mut database.client,
-        "release_big_five_en_v1",
-        "en-US",
-    )
-    .unwrap_err();
-    assert!(matches!(
-        &error,
-        InstrumentReleaseQueryError::Database(_)
-    ));
-    assert_eq!(error.to_string(), "PostgreSQL instrument-release query failed");
+    let error =
+        load_published_instrument_release(&mut database.client, "release_big_five_en_v1", "en-US")
+            .unwrap_err();
+    assert!(matches!(&error, InstrumentReleaseQueryError::Database(_)));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL instrument-release query failed"
+    );
     assert!(error.source().is_some());
 }

@@ -128,9 +128,7 @@ impl Display for InstrumentReleaseQueryError {
             Self::InvalidReference => {
                 "instrument release query requires an exact opaque release reference"
             }
-            Self::InvalidLocale => {
-                "instrument release query requires an exact BCP 47-style locale"
-            }
+            Self::InvalidLocale => "instrument release query requires an exact BCP 47-style locale",
             Self::NotFound => "requested instrument release does not exist",
             Self::LocaleMismatch => "requested locale does not match the persisted release locale",
             Self::NotPublished => "requested instrument release cannot start new sessions",
@@ -191,8 +189,8 @@ pub fn load_published_instrument_release(
     release_ref: &str,
     locale: &str,
 ) -> Result<PublishedInstrumentReleaseSnapshot, InstrumentReleaseQueryError> {
-    let canonical_release_ref = normalized_reference(release_ref)
-        .ok_or(InstrumentReleaseQueryError::InvalidReference)?;
+    let canonical_release_ref =
+        normalized_reference(release_ref).ok_or(InstrumentReleaseQueryError::InvalidReference)?;
     if canonical_release_ref != release_ref {
         return Err(InstrumentReleaseQueryError::InvalidReference);
     }
@@ -242,7 +240,10 @@ pub fn load_published_instrument_release(
         .filter(|timestamp| *timestamp > 0)
         .ok_or(InstrumentReleaseQueryError::InvalidStoredValue)?;
 
-    let item_refs = item_version_refs.iter().map(String::as_str).collect::<Vec<_>>();
+    let item_refs = item_version_refs
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
     let consent_refs = consent_requirement_refs
         .iter()
         .map(String::as_str)
@@ -266,12 +267,16 @@ pub fn load_published_instrument_release(
     )
     .map_err(|_| InstrumentReleaseQueryError::InvalidStoredValue)?;
 
-    if (manifest.item_version_refs(), manifest.consent_requirement_refs())
-        != (item_version_refs.as_slice(), consent_requirement_refs.as_slice())
-    {
+    if (
+        manifest.item_version_refs(),
+        manifest.consent_requirement_refs(),
+    ) != (
+        item_version_refs.as_slice(),
+        consent_requirement_refs.as_slice(),
+    ) {
         return Err(InstrumentReleaseQueryError::InvalidStoredValue);
     }
-    let manifest_scalar_identity = (
+    let manifest_core_identity = (
         manifest.release_ref(),
         manifest.instrument_ref(),
         manifest.instrument_version_ref(),
@@ -280,13 +285,8 @@ pub fn load_published_instrument_release(
         manifest.assessment_spec_ref(),
         manifest.scoring_version_ref(),
         manifest.calibration_reference(),
-        manifest.norm_version_ref(),
-        manifest.narrative_version_ref(),
-        manifest.intended_use_ref(),
-        manifest.limitations_ref(),
-        manifest.content_digest(),
     );
-    let stored_scalar_identity = (
+    let stored_core_identity = (
         stored_release_ref.as_str(),
         instrument_ref.as_str(),
         instrument_version_ref.as_str(),
@@ -295,13 +295,24 @@ pub fn load_published_instrument_release(
         assessment_spec_ref.as_str(),
         scoring_version_ref.as_str(),
         calibration_reference.as_str(),
+    );
+    let manifest_presentation_identity = (
+        manifest.norm_version_ref(),
+        manifest.narrative_version_ref(),
+        manifest.intended_use_ref(),
+        manifest.limitations_ref(),
+        manifest.content_digest(),
+    );
+    let stored_presentation_identity = (
         norm_version_ref.as_deref(),
         narrative_version_ref.as_str(),
         intended_use_ref.as_str(),
         limitations_ref.as_str(),
         content_digest.as_str(),
     );
-    if manifest_scalar_identity != stored_scalar_identity {
+    if manifest_core_identity != stored_core_identity
+        || manifest_presentation_identity != stored_presentation_identity
+    {
         return Err(InstrumentReleaseQueryError::InvalidStoredValue);
     }
 
