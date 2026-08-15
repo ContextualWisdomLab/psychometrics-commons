@@ -42,6 +42,22 @@ fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
     }
 }
 
+fn scoring_result_fixture() -> (ScoringRequest, ScoringResult) {
+    let snapshot = ledger_with_one_response()
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
+        .unwrap();
+    let request =
+        ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
+    let result = ScoringResult::new(
+        "scoring_result_ref",
+        &request,
+        ENGINE_DIGEST,
+        vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
+    )
+    .unwrap();
+    (request, result)
+}
+
 #[test]
 fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
     let unbound = ledger_with_one_response()
@@ -144,19 +160,8 @@ fn scoring_dispatch_rejects_whitespace_aliases_before_identity_comparison() {
 }
 
 #[test]
-fn result_identity_and_consent_comparisons_require_canonical_references() {
-    let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
-    let request =
-        ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
-    let result = ScoringResult::new(
-        "scoring_result_ref",
-        &request,
-        ENGINE_DIGEST,
-        vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
-    )
-    .unwrap();
+fn scoring_result_references_require_canonical_spelling() {
+    let (request, result) = scoring_result_fixture();
 
     assert_eq!(result.scoring_result_ref(), "scoring_result_ref");
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
@@ -175,6 +180,11 @@ fn result_identity_and_consent_comparisons_require_canonical_references() {
         ScoreObservation::scored(" construct_ref ", 1.0, None),
         Err(ScoringContractError::EmptyReference)
     );
+}
+
+#[test]
+fn result_identity_and_consent_comparisons_require_canonical_references() {
+    let (request, result) = scoring_result_fixture();
 
     for input in [
         ResultSnapshotInput {
