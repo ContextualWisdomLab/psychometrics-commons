@@ -3,9 +3,7 @@
 use psychometrics_commons_runtime::anonymous_session::{
     AnonymousSessionContext, AnonymousSessionContextError,
 };
-use psychometrics_commons_runtime::authorization::{
-    AuthorizationContext, AuthorizationError,
-};
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, AuthorizationError};
 use psychometrics_commons_runtime::data_rights::{
     DataRightsError, DataRightsRequest, DataRightsRequestKind,
 };
@@ -98,13 +96,9 @@ fn canonical_opaque_public_references_remain_accepted() {
     .unwrap();
     assert_eq!(request.tenant_ref(), "tenant_ref");
 
-    let authorization = AuthorizationContext::new(
-        "tenant_ref",
-        "subject_ref",
-        Some("participant_ref"),
-        &[],
-    )
-    .unwrap();
+    let authorization =
+        AuthorizationContext::new("tenant_ref", "subject_ref", Some("participant_ref"), &[])
+            .unwrap();
     assert_eq!(authorization.tenant_ref(), "tenant_ref");
     assert_eq!(authorization.subject_ref(), "subject_ref");
     assert_eq!(authorization.participant_ref(), Some("participant_ref"));
