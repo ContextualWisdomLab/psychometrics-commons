@@ -75,7 +75,8 @@ impl Error for ConsentOutboxPersistenceError {
 
 /// Persist one consent ledger and its latest causally bound outbox event in the same transaction.
 ///
-/// `authorized_tenant_ref` is the product authorization context resolved by the caller. The
+/// `authorized_tenant_ref` is the product authorization context resolved by the caller. It must
+/// already be in canonical opaque-reference spelling; this boundary never normalizes aliases. The
 /// integration event must use that exact tenant, be emitted by `psychometrics_commons`, use the
 /// consent ledger's participant as its subject, identify the latest accepted consent event through
 /// `causation_ref`, and use that consent event's server-authoritative occurrence time. Binding
@@ -93,9 +94,9 @@ impl Error for ConsentOutboxPersistenceError {
 /// # Errors
 ///
 /// Returns [`ConsentOutboxPersistenceError::InvalidPropagationEnvelope`] before writes for an
-/// invalid or mismatched authorized tenant, unrelated source or participant, stale or missing
-/// causation reference, or timestamp. Consent and outbox failures are preserved in typed error
-/// variants.
+/// invalid, non-canonical, or mismatched authorized tenant, unrelated source or participant, stale
+/// or missing causation reference, or timestamp. Consent and outbox failures are preserved in typed
+/// error variants.
 pub fn persist_consent_ledger_with_outbox(
     transaction: &mut Transaction<'_>,
     authorized_tenant_ref: &str,
@@ -116,10 +117,11 @@ fn validate_propagation_envelope(
     ledger: &ConsentLedger,
     propagation_event: &IntegrationEvent,
 ) -> Result<(), ConsentOutboxPersistenceError> {
-    let Some(authorized_tenant_ref) = normalized_reference(authorized_tenant_ref) else {
+    let Some(normalized_tenant_ref) = normalized_reference(authorized_tenant_ref) else {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     };
-    if propagation_event.tenant_ref() != authorized_tenant_ref
+    if normalized_tenant_ref != authorized_tenant_ref
+        || propagation_event.tenant_ref() != authorized_tenant_ref
         || propagation_event.source() != SOURCE_REF
         || propagation_event.subject_ref() != ledger.participant_ref()
     {
@@ -200,55 +202,76 @@ mod envelope_tests {
         assert!(validate_propagation_envelope(TENANT_REF, &ledger, &valid).is_ok());
 
         let invalid = [
-            ("tenant_consent_envelope_other", event(
-                "psychometrics_commons",
-                TENANT_REF,
-                ledger.participant_ref(),
-                Some("consent_event_envelope_unit"),
-                10_000,
-            )),
-            (TENANT_REF, event(
-                "psychometrics_commons",
+            (
                 "tenant_consent_envelope_other",
-                ledger.participant_ref(),
-                Some("consent_event_envelope_unit"),
-                10_000,
-            )),
-            (TENANT_REF, event(
-                "other_source",
+                event(
+                    "psychometrics_commons",
+                    TENANT_REF,
+                    ledger.participant_ref(),
+                    Some("consent_event_envelope_unit"),
+                    10_000,
+                ),
+            ),
+            (
                 TENANT_REF,
-                ledger.participant_ref(),
-                Some("consent_event_envelope_unit"),
-                10_000,
-            )),
-            (TENANT_REF, event(
-                "psychometrics_commons",
+                event(
+                    "psychometrics_commons",
+                    "tenant_consent_envelope_other",
+                    ledger.participant_ref(),
+                    Some("consent_event_envelope_unit"),
+                    10_000,
+                ),
+            ),
+            (
                 TENANT_REF,
-                "participant_other",
-                Some("consent_event_envelope_unit"),
-                10_000,
-            )),
-            (TENANT_REF, event(
-                "psychometrics_commons",
+                event(
+                    "other_source",
+                    TENANT_REF,
+                    ledger.participant_ref(),
+                    Some("consent_event_envelope_unit"),
+                    10_000,
+                ),
+            ),
+            (
                 TENANT_REF,
-                ledger.participant_ref(),
-                None,
-                10_000,
-            )),
-            (TENANT_REF, event(
-                "psychometrics_commons",
+                event(
+                    "psychometrics_commons",
+                    TENANT_REF,
+                    "participant_other",
+                    Some("consent_event_envelope_unit"),
+                    10_000,
+                ),
+            ),
+            (
                 TENANT_REF,
-                ledger.participant_ref(),
-                Some("consent_event_unknown"),
-                10_000,
-            )),
-            (TENANT_REF, event(
-                "psychometrics_commons",
+                event(
+                    "psychometrics_commons",
+                    TENANT_REF,
+                    ledger.participant_ref(),
+                    None,
+                    10_000,
+                ),
+            ),
+            (
                 TENANT_REF,
-                ledger.participant_ref(),
-                Some("consent_event_envelope_unit"),
-                10_001,
-            )),
+                event(
+                    "psychometrics_commons",
+                    TENANT_REF,
+                    ledger.participant_ref(),
+                    Some("consent_event_unknown"),
+                    10_000,
+                ),
+            ),
+            (
+                TENANT_REF,
+                event(
+                    "psychometrics_commons",
+                    TENANT_REF,
+                    ledger.participant_ref(),
+                    Some("consent_event_envelope_unit"),
+                    10_001,
+                ),
+            ),
         ];
         for (authorized_tenant_ref, candidate) in invalid {
             assert!(matches!(
@@ -257,7 +280,12 @@ mod envelope_tests {
             ));
         }
 
-        for invalid_tenant_ref in [" ", "42"] {
+        for invalid_tenant_ref in [
+            " ",
+            "42",
+            " tenant_consent_envelope_unit",
+            "tenant_consent_envelope_unit ",
+        ] {
             assert!(matches!(
                 validate_propagation_envelope(invalid_tenant_ref, &ledger, &valid),
                 Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
