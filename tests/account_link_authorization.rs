@@ -64,9 +64,18 @@ fn current_independent_control_evidence_links_without_rewriting_participant_iden
 
     assert_eq!(participant.participant_ref(), "participant_alpha");
     assert_eq!(participant.tenant_ref(), "tenant_alpha");
-    assert_eq!(participant.linked_issuer_ref(), Some("issuer_keyverse_prod"));
-    assert_eq!(participant.linked_subject_ref(), Some("subject_account_alpha"));
-    assert_eq!(participant.anonymous_proof_ref(), Some("anonymous_proof_alpha"));
+    assert_eq!(
+        participant.linked_issuer_ref(),
+        Some("issuer_keyverse_prod")
+    );
+    assert_eq!(
+        participant.linked_subject_ref(),
+        Some("subject_account_alpha")
+    );
+    assert_eq!(
+        participant.anonymous_proof_ref(),
+        Some("anonymous_proof_alpha")
+    );
     assert_eq!(
         participant.authenticated_proof_ref(),
         Some("authenticated_proof_alpha")
