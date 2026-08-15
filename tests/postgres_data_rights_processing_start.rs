@@ -185,6 +185,78 @@ fn export_processing_start_persists_request_kind_branch() {
 }
 
 #[test]
+fn processing_start_rejects_each_identity_field_mismatch_independently() {
+    let mut client = ready_client("data_rights_process_identity_fields");
+    persist_verified(&mut client, "data_rights_request_process");
+
+    let mut mismatched_participant = DataRightsRequest::new(
+        "data_rights_request_process",
+        "tenant_alpha",
+        "participant_beta",
+        DataRightsRequestKind::Deletion,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap();
+    mismatched_participant
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    mismatched_participant
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &mismatched_participant),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut mismatched_kind = DataRightsRequest::new(
+        "data_rights_request_process",
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Export,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap();
+    mismatched_kind
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    mismatched_kind
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &mismatched_kind),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut mismatched_scope = DataRightsRequest::new(
+        "data_rights_request_process",
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Deletion,
+        "scope_beta",
+        10_000,
+    )
+    .unwrap();
+    mismatched_scope
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    mismatched_scope
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &mismatched_scope),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn processing_start_rejects_same_operation_with_a_later_start_time() {
     let mut client = ready_client("data_rights_process_start_time");
     let mut request = persist_verified(&mut client, "data_rights_request_process");

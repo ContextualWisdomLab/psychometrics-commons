@@ -94,7 +94,7 @@ pub fn persist_data_rights_processing_start(
         return Ok(DataRightsProcessingDisposition::Started);
     }
 
-    let row = query_optional_row(
+    let row = match query_optional_row(
         transaction,
         "SELECT participant_ref, request_kind, scope_ref, current_state,
                 verification_evidence_ref, verified_at_unix_ms,
@@ -103,7 +103,10 @@ pub fn persist_data_rights_processing_start(
          WHERE request_ref = $1 AND tenant_ref = $2
          FOR UPDATE",
         &[&request.request_ref(), &request.tenant_ref()],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(error),
+    };
     let Some(row) = row else {
         return Err(DataRightsPersistenceError::RequestNotFound);
     };
