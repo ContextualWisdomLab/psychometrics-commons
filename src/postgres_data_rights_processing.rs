@@ -55,35 +55,8 @@ pub fn persist_data_rights_processing_start(
     transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
 ) -> Result<DataRightsProcessingDisposition, DataRightsPersistenceError> {
-    let (operation_ref, started_at, verification_evidence_ref, verified_at) = match (
-        request.state(),
-        request.operation_ref().and_then(normalized_reference),
-        request.processing_started_at_unix_ms(),
-        request
-            .verification_evidence_ref()
-            .and_then(normalized_reference),
-        request.verified_at_unix_ms(),
-    ) {
-        (
-            DataRightsState::Processing,
-            Some(operation_ref),
-            Some(started_at_ms),
-            Some(verification_evidence_ref),
-            Some(verified_at_ms),
-        ) => {
-            let started_at = i64::try_from(started_at_ms)
-                .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
-            let verified_at = i64::try_from(verified_at_ms)
-                .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
-            (
-                operation_ref,
-                started_at,
-                verification_evidence_ref,
-                verified_at,
-            )
-        }
-        _ => return Err(DataRightsPersistenceError::InvalidRequestState),
-    };
+    let (operation_ref, started_at, verification_evidence_ref, verified_at) =
+        processing_evidence(request)?;
 
     require_read_committed(transaction)?;
     let request_kind = request_kind_name(request.kind());
@@ -163,6 +136,40 @@ pub fn persist_data_rights_processing_start(
     }
 }
 
+fn processing_evidence(
+    request: &DataRightsRequest,
+) -> Result<(&str, i64, &str, i64), DataRightsPersistenceError> {
+    match (
+        request.state(),
+        request.operation_ref().and_then(normalized_reference),
+        request.processing_started_at_unix_ms(),
+        request
+            .verification_evidence_ref()
+            .and_then(normalized_reference),
+        request.verified_at_unix_ms(),
+    ) {
+        (
+            DataRightsState::Processing,
+            Some(operation_ref),
+            Some(started_at_ms),
+            Some(verification_evidence_ref),
+            Some(verified_at_ms),
+        ) => {
+            let started_at = i64::try_from(started_at_ms)
+                .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
+            let verified_at = i64::try_from(verified_at_ms)
+                .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
+            Ok((
+                operation_ref,
+                started_at,
+                verification_evidence_ref,
+                verified_at,
+            ))
+        }
+        _ => Err(DataRightsPersistenceError::InvalidRequestState),
+    }
+}
+
 fn query_optional_row(
     transaction: &mut Transaction<'_>,
     statement: &str,
@@ -190,5 +197,26 @@ fn require_read_committed(
         Ok(())
     } else {
         Err(DataRightsPersistenceError::UnsupportedIsolationLevel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_row_query_maps_database_errors() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, postgres::NoTls).expect("CI PostgreSQL must be reachable");
+        let mut transaction = client.transaction().unwrap();
+
+        assert!(matches!(
+            query_optional_row(
+                &mut transaction,
+                "SELECT * FROM data_rights_processing_missing_relation",
+                &[],
+            ),
+            Err(DataRightsPersistenceError::Database(_))
+        ));
     }
 }
