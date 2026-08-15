@@ -232,7 +232,7 @@ fn release_query_revalidates_stored_manifest_instead_of_trusting_rows() {
             "UPDATE instrument_release SET limitations_ref = 'limitations_nonclinical_v1'\
              WHERE release_ref = 'release_big_five_tampered_v1';\
              ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_created_at_unix_positive_check;\
-             UPDATE instrument_release SET created_at_unix_ms = -1\
+             UPDATE instrument_release SET created_at_unix_ms = -1 \
              WHERE release_ref = 'release_big_five_tampered_v1';",
         )
         .unwrap();
