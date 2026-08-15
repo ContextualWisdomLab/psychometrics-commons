@@ -141,7 +141,15 @@ fn release_query_fails_closed_for_locale_state_identity_and_missing_release() {
         ),
         Err(InstrumentReleaseQueryError::NotFound)
     ));
-    for invalid_locale in [" en-US", "1", "en-", "en-US!"] {
+    for invalid_locale in [
+        " en-US",
+        "1",
+        "e1-US",
+        "abcdefghi-US",
+        "en-",
+        "en-abcdefghi",
+        "en-US!",
+    ] {
         assert!(matches!(
             load_published_instrument_release(
                 &mut database.client,
@@ -194,7 +202,27 @@ fn release_query_revalidates_stored_manifest_instead_of_trusting_rows() {
     database
         .client
         .batch_execute(
-            "UPDATE instrument_release SET item_version_refs = ARRAY['item_version_001'];\
+            "UPDATE instrument_release SET item_version_refs = ARRAY['item_version_001']\
+             WHERE release_ref = 'release_big_five_tampered_v1';\
+             ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_instrument_ref_format_check;\
+             UPDATE instrument_release SET instrument_ref = ' instrument_big_five'\
+             WHERE release_ref = 'release_big_five_tampered_v1';",
+        )
+        .unwrap();
+    assert!(matches!(
+        load_published_instrument_release(
+            &mut database.client,
+            "release_big_five_tampered_v1",
+            "en-US"
+        ),
+        Err(InstrumentReleaseQueryError::InvalidStoredValue)
+    ));
+
+    database
+        .client
+        .batch_execute(
+            "UPDATE instrument_release SET instrument_ref = 'instrument_big_five'\
+             WHERE release_ref = 'release_big_five_tampered_v1';\
              ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_created_at_unix_positive_check;\
              UPDATE instrument_release SET created_at_unix_ms = -1\
              WHERE release_ref = 'release_big_five_tampered_v1';",
