@@ -93,13 +93,7 @@ fn stale_grant_cannot_be_propagated_after_a_later_revocation() {
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(
-            &mut transaction,
-            TENANT_REF,
-            &ledger,
-            &stale_event,
-            3,
-        ),
+        persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &stale_event, 3,),
         Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
     ));
     transaction.rollback().unwrap();
