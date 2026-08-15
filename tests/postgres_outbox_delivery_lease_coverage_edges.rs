@@ -129,6 +129,127 @@ fn exact_attempt_replay_with_live_matching_fence_is_idempotent() {
 }
 
 #[test]
+fn claim_rejects_claimed_at_overflow_without_relying_on_zero_expiry() {
+    let mut client = ready_client();
+    enqueue_outbox_event(
+        &mut client,
+        &IntegrationEvent::new(
+            "event_claimed_at_overflow",
+            "assessment.session.completed",
+            "v1",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "session_alpha",
+            10_000,
+            "correlation_alpha",
+            None,
+            DIGEST,
+        )
+        .unwrap(),
+        3,
+    )
+    .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        claim_outbox_delivery(
+            &mut transaction,
+            identity("event_claimed_at_overflow"),
+            "worker_coverage_edge",
+            "outbox_lease_coverage_edge",
+            u64::MAX,
+            u64::MAX,
+        ),
+        Err(PersistenceError::ValueOutOfRange)
+    ));
+    transaction.rollback().unwrap();
+    cleanup(&mut client);
+}
+
+#[test]
+fn claim_update_failure_and_negative_returned_fence_fail_closed() {
+    let mut client = ready_client();
+    enqueue_outbox_event(
+        &mut client,
+        &IntegrationEvent::new(
+            "event_claim_query_failure",
+            "assessment.session.completed",
+            "v1",
+            "psychometrics_commons",
+            "tenant_alpha",
+            "session_alpha",
+            10_000,
+            "correlation_alpha",
+            None,
+            DIGEST,
+        )
+        .unwrap(),
+        3,
+    )
+    .unwrap();
+
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION outbox_lease_reject_claim_update() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 RAISE EXCEPTION 'forced claim update failure'; \
+             END $$; \
+             CREATE TRIGGER outbox_lease_reject_claim_update \
+             BEFORE UPDATE ON integration_outbox \
+             FOR EACH STATEMENT EXECUTE FUNCTION outbox_lease_reject_claim_update();",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        claim_outbox_delivery(
+            &mut transaction,
+            identity("event_claim_query_failure"),
+            "worker_coverage_edge",
+            "outbox_lease_coverage_edge",
+            10_000,
+            11_000,
+        ),
+        Err(PersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "DROP TRIGGER outbox_lease_reject_claim_update ON integration_outbox; \
+             ALTER TABLE integration_outbox \
+                 DROP CONSTRAINT IF EXISTS integration_outbox_lease_fencing_token_positive_check, \
+                 DROP CONSTRAINT IF EXISTS integration_outbox_fencing_generation_check; \
+             CREATE OR REPLACE FUNCTION outbox_lease_negative_fence() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 NEW.lease_fencing_token := -1; \
+                 RETURN NEW; \
+             END $$; \
+             CREATE TRIGGER outbox_lease_negative_fence \
+             BEFORE UPDATE ON integration_outbox \
+             FOR EACH ROW EXECUTE FUNCTION outbox_lease_negative_fence();",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let error = claim_outbox_delivery(
+        &mut transaction,
+        identity("event_claim_query_failure"),
+        "worker_coverage_edge",
+        "outbox_lease_coverage_edge",
+        10_000,
+        11_000,
+    )
+    .expect_err("negative returned fence must fail closed");
+    assert!(
+        matches!(error, PersistenceError::ValueOutOfRange),
+        "unexpected claim error: {error:?}"
+    );
+    transaction.rollback().unwrap();
+    cleanup(&mut client);
+}
+
+#[test]
 fn database_clock_lookup_failure_is_exposed_fail_closed() {
     let mut client = ready_client();
     let (fence, event_time) = enqueue_and_claim(&mut client, "event_clock_failure");
