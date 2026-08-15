@@ -5,8 +5,12 @@
 //! can safely accept product-owned state changes. It does not own credentials,
 //! connection pooling, migrations, backup, or recovery.
 
-use crate::health::{CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError};
+use crate::health::{
+    BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError,
+};
 use postgres::GenericClient;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
@@ -78,6 +82,117 @@ impl PostgresRuntimeHealth {
     }
 }
 
+/// Operator-supplied bounds used to classify durable integration backlog evidence.
+///
+/// The repository deliberately provides no universal defaults. Hosted, community,
+/// and enterprise operators must derive these values from their measured workload,
+/// topology, alert policy, and recovery evidence rather than treating architecture
+/// prose as an SLO commitment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IntegrationBacklogPolicy {
+    /// Largest pending outbox population still accepted for new state-changing work.
+    pub max_pending_outbox_count: u64,
+    /// Largest age in milliseconds of the oldest pending outbox event.
+    pub max_pending_outbox_age_ms: u64,
+    /// Largest quarantined outbox population still accepted under this operator policy.
+    pub max_quarantined_outbox_count: u64,
+    /// Largest pending-or-processing inbox-consumption population still accepted.
+    pub max_active_consumption_count: u64,
+    /// Largest age in milliseconds of the oldest pending-or-processing consumption.
+    pub max_active_consumption_age_ms: u64,
+    /// Largest quarantined inbox-consumption population still accepted.
+    pub max_quarantined_consumption_count: u64,
+}
+
+/// Aggregate, content-free evidence read from the durable integration tables.
+///
+/// Only counts and server-authoritative event times are exposed. The probe never
+/// returns assessment responses, event payloads, tenant identities, subjects, or
+/// restricted research linkage values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresIntegrationBacklogEvidence {
+    pending_outbox_count: u64,
+    quarantined_outbox_count: u64,
+    active_consumption_count: u64,
+    quarantined_consumption_count: u64,
+    oldest_pending_outbox_event_at_unix_ms: Option<u64>,
+    oldest_active_consumption_event_at_unix_ms: Option<u64>,
+}
+
+impl PostgresIntegrationBacklogEvidence {
+    /// Return the number of durable outbox events still awaiting delivery.
+    #[must_use]
+    pub const fn pending_outbox_count(self) -> u64 {
+        self.pending_outbox_count
+    }
+
+    /// Return the number of outbox events quarantined for operator attention.
+    #[must_use]
+    pub const fn quarantined_outbox_count(self) -> u64 {
+        self.quarantined_outbox_count
+    }
+
+    /// Return pending plus processing inbox side-effect consumptions.
+    #[must_use]
+    pub const fn active_consumption_count(self) -> u64 {
+        self.active_consumption_count
+    }
+
+    /// Return the number of quarantined inbox side-effect consumptions.
+    #[must_use]
+    pub const fn quarantined_consumption_count(self) -> u64 {
+        self.quarantined_consumption_count
+    }
+
+    /// Return the oldest pending outbox event time, or `None` when no event is pending.
+    #[must_use]
+    pub const fn oldest_pending_outbox_event_at_unix_ms(self) -> Option<u64> {
+        self.oldest_pending_outbox_event_at_unix_ms
+    }
+
+    /// Return the oldest pending/processing inbox-consumption event time, if any.
+    #[must_use]
+    pub const fn oldest_active_consumption_event_at_unix_ms(self) -> Option<u64> {
+        self.oldest_active_consumption_event_at_unix_ms
+    }
+}
+
+/// Fail-closed error while reading durable integration-backlog evidence.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PostgresBacklogProbeError {
+    /// A stored event time violated the positive-millisecond persistence contract.
+    InvalidStoredValue,
+    /// `PostgreSQL` could not execute the aggregate backlog probe.
+    Database(postgres::Error),
+}
+
+impl Display for PostgresBacklogProbeError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidStoredValue => {
+                "stored integration backlog evidence violates the persistence contract"
+            }
+            Self::Database(_) => "PostgreSQL integration backlog probe failed",
+        })
+    }
+}
+
+impl Error for PostgresBacklogProbeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            Self::InvalidStoredValue => None,
+        }
+    }
+}
+
+impl From<postgres::Error> for PostgresBacklogProbeError {
+    fn from(error: postgres::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
 /// Classify server-version and transaction-read-only evidence without performing I/O.
 ///
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
@@ -126,6 +241,113 @@ pub fn probe_postgres_runtime(
         server_version_num,
         transaction_read_only,
     ))
+}
+
+/// Probe aggregate outbox and inbox-consumption backlog evidence in one database snapshot.
+///
+/// This function intentionally does not classify the result against a universal threshold.
+/// It reads only aggregate counts and the oldest server-authoritative event time from the
+/// existing product-owned integration tables. Missing tables or query failures are errors,
+/// and invalid non-positive stored event times fail closed instead of being normalized.
+///
+/// # Errors
+///
+/// Returns [`PostgresBacklogProbeError::InvalidStoredValue`] when a stored oldest-event
+/// timestamp violates the positive-millisecond contract, or
+/// [`PostgresBacklogProbeError::Database`] when the aggregate query cannot be executed.
+pub fn probe_postgres_integration_backlog(
+    client: &mut impl GenericClient,
+) -> Result<PostgresIntegrationBacklogEvidence, PostgresBacklogProbeError> {
+    let row = client.query_one(
+        "SELECT \
+             (SELECT COUNT(*)::BIGINT FROM integration_outbox WHERE current_state = 'pending'), \
+             (SELECT COUNT(*)::BIGINT FROM integration_outbox WHERE current_state = 'quarantined'), \
+             (SELECT MIN(latest_event_at_unix_ms) FROM integration_outbox WHERE current_state = 'pending'), \
+             (SELECT COUNT(*)::BIGINT FROM integration_consumption \
+                 WHERE consumption_state IN ('pending', 'processing')), \
+             (SELECT COUNT(*)::BIGINT FROM integration_consumption \
+                 WHERE consumption_state = 'quarantined'), \
+             (SELECT MIN(latest_event_at_unix_ms) FROM integration_consumption \
+                 WHERE consumption_state IN ('pending', 'processing'))",
+        &[],
+    )?;
+
+    let pending_outbox_count: i64 = row.get(0);
+    let quarantined_outbox_count: i64 = row.get(1);
+    let oldest_pending_outbox_event_at_unix_ms: Option<i64> = row.get(2);
+    let active_consumption_count: i64 = row.get(3);
+    let quarantined_consumption_count: i64 = row.get(4);
+    let oldest_active_consumption_event_at_unix_ms: Option<i64> = row.get(5);
+
+    Ok(PostgresIntegrationBacklogEvidence {
+        pending_outbox_count: pending_outbox_count as u64,
+        quarantined_outbox_count: quarantined_outbox_count as u64,
+        active_consumption_count: active_consumption_count as u64,
+        quarantined_consumption_count: quarantined_consumption_count as u64,
+        oldest_pending_outbox_event_at_unix_ms: positive_optional_millis(
+            oldest_pending_outbox_event_at_unix_ms,
+        )?,
+        oldest_active_consumption_event_at_unix_ms: positive_optional_millis(
+            oldest_active_consumption_event_at_unix_ms,
+        )?,
+    })
+}
+
+/// Classify aggregate integration backlog evidence against one explicit operator policy.
+///
+/// A zero observation time or a stored event apparently occurring after the observation
+/// is `Unknown`, not healthy. Otherwise any count or age beyond the supplied policy is
+/// `Stalled`. No default SLO, alert threshold, or recovery promise is inferred here.
+#[must_use]
+pub fn classify_postgres_integration_backlog(
+    evidence: &PostgresIntegrationBacklogEvidence,
+    observed_at_unix_ms: u64,
+    policy: &IntegrationBacklogPolicy,
+) -> BacklogHealth {
+    if observed_at_unix_ms == 0
+        || evidence
+            .oldest_pending_outbox_event_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+        || evidence
+            .oldest_active_consumption_event_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+    {
+        return BacklogHealth::Unknown;
+    }
+
+    if evidence.pending_outbox_count > policy.max_pending_outbox_count
+        || evidence.quarantined_outbox_count > policy.max_quarantined_outbox_count
+        || evidence.active_consumption_count > policy.max_active_consumption_count
+        || evidence.quarantined_consumption_count > policy.max_quarantined_consumption_count
+    {
+        return BacklogHealth::Stalled;
+    }
+
+    if age_exceeds(
+        evidence.oldest_pending_outbox_event_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_pending_outbox_age_ms,
+    ) || age_exceeds(
+        evidence.oldest_active_consumption_event_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_active_consumption_age_ms,
+    ) {
+        return BacklogHealth::Stalled;
+    }
+
+    BacklogHealth::WithinBounds
+}
+
+fn positive_optional_millis(value: Option<i64>) -> Result<Option<u64>, PostgresBacklogProbeError> {
+    match value {
+        Some(value) if value > 0 => Ok(Some(value as u64)),
+        Some(_) => Err(PostgresBacklogProbeError::InvalidStoredValue),
+        None => Ok(None),
+    }
+}
+
+fn age_exceeds(oldest_event_at: Option<u64>, observed_at: u64, maximum_age: u64) -> bool {
+    oldest_event_at.is_some_and(|timestamp| observed_at - timestamp > maximum_age)
 }
 
 /// Probe whether every caller-declared relation required by this application build exists.
