@@ -209,7 +209,10 @@ impl AnonymousCredential {
             && exact_reference_match(&self.participant_ref, participant_ref)
             && exact_reference_match(&self.session_ref, session_ref)
             && canonical_sha256_digest(presented_proof_digest) == Some(presented_proof_digest)
-            && constant_time_equal(self.proof_digest.as_bytes(), presented_proof_digest.as_bytes())
+            && constant_time_equal(
+                self.proof_digest.as_bytes(),
+                presented_proof_digest.as_bytes(),
+            )
     }
 
     /// Record append-only credential revocation evidence.
