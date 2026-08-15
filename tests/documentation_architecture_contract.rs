@@ -249,14 +249,18 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         );
     }
 
+    let active_heading = "## 5. Active-PR evidence is not shipped truth";
+    assert!(
+        traceability.contains(active_heading),
+        "traceability must explicitly mark active-PR evidence as non-shipped truth"
+    );
     let active_work = traceability
-        .split("## 5. Active-PR evidence is not shipped truth")
+        .split(active_heading)
         .nth(1)
         .and_then(|section| section.split("\n## ").next())
         .expect("traceability must define the active-PR evidence section");
     assert!(
         active_work.contains("**IMPLEMENTED_ON_ACTIVE_PR**")
-            && active_work.contains("not shipped truth")
             && !active_work.contains("**IMPLEMENTED_ON_PROTECTED_MAIN**"),
         "active-PR evidence must remain explicitly segregated from protected-main truth"
     );
