@@ -109,27 +109,17 @@ fn consent_and_outbox_commit_and_replay_together() {
     );
 
     let mut transaction = client.transaction().unwrap();
-    let inserted = persist_consent_ledger_with_outbox(
-        &mut transaction,
-        TENANT_REF,
-        &ledger,
-        &event,
-        3,
-    )
-    .unwrap();
+    let inserted =
+        persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &event, 3)
+            .unwrap();
     assert_eq!(inserted.consent(), ConsentPersistenceDisposition::Inserted);
     assert_eq!(inserted.outbox(), PersistenceDisposition::Inserted);
     transaction.commit().unwrap();
 
     let mut transaction = client.transaction().unwrap();
-    let duplicate = persist_consent_ledger_with_outbox(
-        &mut transaction,
-        TENANT_REF,
-        &ledger,
-        &event,
-        3,
-    )
-    .unwrap();
+    let duplicate =
+        persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &event, 3)
+            .unwrap();
     assert_eq!(
         duplicate.consent(),
         ConsentPersistenceDisposition::Duplicate
@@ -165,13 +155,7 @@ fn propagation_envelope_must_bind_tenant_participant_and_exact_consent_event() {
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(
-            &mut transaction,
-            TENANT_REF,
-            &ledger,
-            &wrong_tenant,
-            3,
-        ),
+        persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &wrong_tenant, 3,),
         Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
     ));
     transaction.rollback().unwrap();
