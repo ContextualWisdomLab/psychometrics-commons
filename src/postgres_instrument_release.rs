@@ -8,7 +8,7 @@
 
 use crate::instrument::{InstrumentRelease, InstrumentReleaseManifest, PublicationState};
 use crate::reference::normalized_reference;
-use postgres::Transaction;
+use postgres::{GenericClient, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -81,15 +81,199 @@ impl From<postgres::Error> for InstrumentReleasePersistenceError {
     }
 }
 
+/// Immutable, database-validated release evidence that may start a new assessment session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublishedInstrumentReleaseSnapshot {
+    manifest: InstrumentReleaseManifest,
+    created_at_unix_ms: u64,
+}
+
+impl PublishedInstrumentReleaseSnapshot {
+    /// Return the exact immutable manifest loaded from the operational store.
+    #[must_use]
+    pub const fn manifest(&self) -> &InstrumentReleaseManifest {
+        &self.manifest
+    }
+
+    /// Return the server-authoritative creation time stored with this release.
+    #[must_use]
+    pub const fn created_at_unix_ms(&self) -> u64 {
+        self.created_at_unix_ms
+    }
+}
+
+/// Fail-closed error for loading a release that is eligible to start a new session.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum InstrumentReleaseQueryError {
+    /// The requested release identity is blank, numeric-like, or not already canonical.
+    InvalidReference,
+    /// The requested locale is not an exact BCP 47-style locale tag.
+    InvalidLocale,
+    /// No persisted release exists for the requested release identity.
+    NotFound,
+    /// The persisted release exists but its exact locale differs from the requested locale.
+    LocaleMismatch,
+    /// The persisted release is not currently in the `Published` lifecycle state.
+    NotPublished,
+    /// Persisted release evidence violates the immutable domain contract.
+    InvalidStoredValue,
+    /// `PostgreSQL` rejected or could not execute the query.
+    Database(postgres::Error),
+}
+
+impl Display for InstrumentReleaseQueryError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidReference => {
+                "instrument release query requires an exact opaque release reference"
+            }
+            Self::InvalidLocale => {
+                "instrument release query requires an exact BCP 47-style locale"
+            }
+            Self::NotFound => "requested instrument release does not exist",
+            Self::LocaleMismatch => "requested locale does not match the persisted release locale",
+            Self::NotPublished => "requested instrument release cannot start new sessions",
+            Self::InvalidStoredValue => {
+                "persisted instrument release violates the immutable release contract"
+            }
+            Self::Database(_) => "PostgreSQL instrument-release query failed",
+        })
+    }
+}
+
+impl Error for InstrumentReleaseQueryError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<postgres::Error> for InstrumentReleaseQueryError {
+    fn from(error: postgres::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
 /// Apply the idempotent instrument-release migration to a `PostgreSQL` connection.
 ///
 /// # Errors
 ///
 /// Returns the `PostgreSQL` error if the migration cannot be applied.
 pub fn apply_instrument_release_migration(
-    client: &mut impl postgres::GenericClient,
+    client: &mut impl GenericClient,
 ) -> Result<(), postgres::Error> {
     client.batch_execute(INSTRUMENT_RELEASE_MIGRATION)
+}
+
+/// Load one exact published release for server-authoritative session creation.
+///
+/// The caller must provide the canonical release reference and the exact requested
+/// locale. A release in Draft, Review, Suspended, or Retired state is never returned
+/// as session-eligible. Stored columns are reconstructed through
+/// [`InstrumentReleaseManifest::new`] before they leave the persistence boundary, so
+/// malformed or non-canonical persisted evidence fails closed instead of being served.
+/// This function does not select a fallback locale and does not perform psychometric
+/// scoring or publication-evidence recomputation.
+///
+/// # Errors
+///
+/// Returns [`InstrumentReleaseQueryError`] when the caller supplies a malformed
+/// identity or locale, the release is missing, the exact locale does not match, the
+/// release is not Published, stored evidence violates the immutable manifest contract,
+/// or the database query fails.
+pub fn load_published_instrument_release(
+    client: &mut impl GenericClient,
+    release_ref: &str,
+    locale: &str,
+) -> Result<PublishedInstrumentReleaseSnapshot, InstrumentReleaseQueryError> {
+    let canonical_release_ref = normalized_reference(release_ref)
+        .ok_or(InstrumentReleaseQueryError::InvalidReference)?;
+    if canonical_release_ref != release_ref {
+        return Err(InstrumentReleaseQueryError::InvalidReference);
+    }
+    if !valid_exact_locale(locale) {
+        return Err(InstrumentReleaseQueryError::InvalidLocale);
+    }
+
+    let row = client
+        .query_opt(
+            "SELECT release_ref, instrument_ref, instrument_version_ref, construct_ref, \
+                    item_version_refs, locale, assessment_spec_ref, scoring_version_ref, \
+                    calibration_reference, norm_version_ref, narrative_version_ref, \
+                    consent_requirement_refs, intended_use_ref, limitations_ref, content_digest, \
+                    publication_state, created_at_unix_ms \
+             FROM instrument_release WHERE release_ref = $1",
+            &[&canonical_release_ref],
+        )?
+        .ok_or(InstrumentReleaseQueryError::NotFound)?;
+
+    let publication_state: String = row.get(15);
+    if publication_state != "published" {
+        return Err(InstrumentReleaseQueryError::NotPublished);
+    }
+
+    let stored_locale: String = row.get(5);
+    if stored_locale != locale {
+        return Err(InstrumentReleaseQueryError::LocaleMismatch);
+    }
+
+    let stored_release_ref: String = row.get(0);
+    let instrument_ref: String = row.get(1);
+    let instrument_version_ref: String = row.get(2);
+    let construct_ref: String = row.get(3);
+    let item_version_refs: Vec<String> = row.get(4);
+    let assessment_spec_ref: String = row.get(6);
+    let scoring_version_ref: String = row.get(7);
+    let calibration_reference: String = row.get(8);
+    let norm_version_ref: Option<String> = row.get(9);
+    let narrative_version_ref: String = row.get(10);
+    let consent_requirement_refs: Vec<String> = row.get(11);
+    let intended_use_ref: String = row.get(12);
+    let limitations_ref: String = row.get(13);
+    let content_digest: String = row.get(14);
+    let created_at_unix_ms: i64 = row.get(16);
+    let created_at_unix_ms = u64::try_from(created_at_unix_ms)
+        .ok()
+        .filter(|timestamp| *timestamp > 0)
+        .ok_or(InstrumentReleaseQueryError::InvalidStoredValue)?;
+
+    let item_refs = item_version_refs.iter().map(String::as_str).collect::<Vec<_>>();
+    let consent_refs = consent_requirement_refs
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let manifest = InstrumentReleaseManifest::new(
+        &stored_release_ref,
+        &instrument_ref,
+        &instrument_version_ref,
+        &construct_ref,
+        &item_refs,
+        &stored_locale,
+        &assessment_spec_ref,
+        &scoring_version_ref,
+        &calibration_reference,
+        norm_version_ref.as_deref(),
+        &narrative_version_ref,
+        &consent_refs,
+        &intended_use_ref,
+        &limitations_ref,
+        &content_digest,
+    )
+    .map_err(|_| InstrumentReleaseQueryError::InvalidStoredValue)?;
+
+    if (manifest.item_version_refs(), manifest.consent_requirement_refs())
+        != (item_version_refs.as_slice(), consent_requirement_refs.as_slice())
+    {
+        return Err(InstrumentReleaseQueryError::InvalidStoredValue);
+    }
+
+    Ok(PublishedInstrumentReleaseSnapshot {
+        manifest,
+        created_at_unix_ms,
+    })
 }
 
 /// Persist one immutable instrument-release manifest and its publication state.
@@ -248,6 +432,7 @@ fn publication_state_may_replace(stored: &str, next: &str) -> bool {
         ("draft", "review" | "published" | "suspended" | "retired")
             | ("review", "published" | "suspended" | "retired")
             | ("published", "suspended" | "retired")
+            | ("published", "retired")
             | ("suspended", "published" | "retired")
     )
 }
@@ -282,10 +467,25 @@ fn require_read_committed(
     }
 }
 
+fn valid_exact_locale(locale: &str) -> bool {
+    if locale != locale.trim() {
+        return false;
+    }
+    let mut subtags = locale.split('-');
+    let primary = subtags.next().unwrap_or_default();
+    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    subtags.all(|subtag| {
+        (1..=8).contains(&subtag.len()) && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    })
+}
+
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        postgres_timestamp, publication_state_may_replace, required_reference,
+        postgres_timestamp, publication_state_may_replace, required_reference, valid_exact_locale,
         InstrumentReleasePersistenceError,
     };
 
@@ -308,6 +508,16 @@ mod reference_guard_tests {
             Err(InstrumentReleasePersistenceError::InvalidTimestamp)
         ));
         assert_eq!(postgres_timestamp(40_000).unwrap(), 40_000);
+    }
+
+    #[test]
+    fn exact_locale_validation_matches_the_persisted_locale_contract() {
+        assert!(valid_exact_locale("en-US"));
+        assert!(valid_exact_locale("ko-KR"));
+        assert!(!valid_exact_locale(" en-US"));
+        assert!(!valid_exact_locale("1"));
+        assert!(!valid_exact_locale("en-"));
+        assert!(!valid_exact_locale("en-US!"));
     }
 
     #[test]
