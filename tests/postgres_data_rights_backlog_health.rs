@@ -75,7 +75,13 @@ fn insert_propagation(client: &mut Client, suffix: &str, state: &str, event_at: 
     let request_ref = format!("request_propagation_{suffix}");
     let event_ref = format!("event_propagation_{suffix}");
     let dependent_system_ref = format!("dependent_system_{suffix}");
-    insert_request(client, &format!("propagation_{suffix}"), "processing", 1_000, 1_500);
+    insert_request(
+        client,
+        &format!("propagation_{suffix}"),
+        "processing",
+        1_000,
+        1_500,
+    );
     client
         .execute(
             "INSERT INTO integration_outbox (\
@@ -138,12 +144,7 @@ fn probe_keeps_request_age_separate_from_propagation_age() {
     );
     insert_request(&mut client, "completed_alpha", "completed", 500, 6_000);
     insert_propagation(&mut client, "pending_alpha", "pending", 7_000);
-    insert_propagation(
-        &mut client,
-        "quarantined_alpha",
-        "quarantined",
-        8_000,
-    );
+    insert_propagation(&mut client, "quarantined_alpha", "quarantined", 8_000);
 
     let evidence = probe_postgres_data_rights_backlog(&mut client).unwrap();
     assert_eq!(evidence.active_request_count(), 4);
@@ -222,7 +223,13 @@ fn participant_rights_backlog_fails_closed_by_count_age_or_quarantine_policy() {
 #[test]
 fn future_data_rights_evidence_is_unknown_instead_of_healthy() {
     let (mut client, schema) = isolated_client();
-    insert_request(&mut client, "future_request_alpha", "requested", 10_000, 10_000);
+    insert_request(
+        &mut client,
+        "future_request_alpha",
+        "requested",
+        10_000,
+        10_000,
+    );
     let request_evidence = probe_postgres_data_rights_backlog(&mut client).unwrap();
     assert_eq!(
         classify_postgres_data_rights_backlog(&request_evidence, 9_999, &policy()),
@@ -249,7 +256,11 @@ fn future_data_rights_evidence_is_unknown_instead_of_healthy() {
 fn data_rights_probe_rejects_invalid_stored_time_and_surfaces_database_failure() {
     let mut client = test_client();
     let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);
-    let schema = format!("data_rights_backlog_invalid_{}_{}", std::process::id(), nonce);
+    let schema = format!(
+        "data_rights_backlog_invalid_{}_{}",
+        std::process::id(),
+        nonce
+    );
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema}; SET search_path TO {schema};\
@@ -261,7 +272,10 @@ fn data_rights_probe_rejects_invalid_stored_time_and_surfaces_database_failure()
         ))
         .unwrap();
     let error = probe_postgres_data_rights_backlog(&mut client).unwrap_err();
-    assert!(matches!(error, PostgresBacklogProbeError::InvalidStoredValue));
+    assert!(matches!(
+        error,
+        PostgresBacklogProbeError::InvalidStoredValue
+    ));
     assert!(error.source().is_none());
 
     client
