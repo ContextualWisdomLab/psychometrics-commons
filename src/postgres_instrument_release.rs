@@ -432,7 +432,6 @@ fn publication_state_may_replace(stored: &str, next: &str) -> bool {
         ("draft", "review" | "published" | "suspended" | "retired")
             | ("review", "published" | "suspended" | "retired")
             | ("published", "suspended" | "retired")
-            | ("published", "retired")
             | ("suspended", "published" | "retired")
     )
 }
