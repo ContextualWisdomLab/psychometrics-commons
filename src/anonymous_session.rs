@@ -16,7 +16,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AnonymousSessionContextError {
-    /// A tenant, participant, session, or evidence reference was blank or numeric-only.
+    /// A reference was blank, numeric-only, or contained leading/trailing whitespace.
     InvalidReference,
     /// The server-authoritative validity boundary was zero.
     InvalidValidityBoundary,
@@ -26,7 +26,7 @@ impl Display for AnonymousSessionContextError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "anonymous-session references must be opaque non-numeric values"
+                "anonymous-session references must be non-empty opaque non-numeric values without leading or trailing whitespace"
             }
             Self::InvalidValidityBoundary => {
                 "anonymous-session validity boundary must be greater than zero"
@@ -57,10 +57,14 @@ pub struct AnonymousSessionContext {
 impl AnonymousSessionContext {
     /// Create a canonical anonymous-session authorization context.
     ///
+    /// Canonical spelling means each reference is supplied exactly as stored: it is non-empty,
+    /// is not numeric-only, and has no leading or trailing whitespace. The constructor does not
+    /// trim aliases into a match because authorization and idempotency use exact reference bytes.
+    ///
     /// # Errors
     ///
     /// Returns [`AnonymousSessionContextError::InvalidReference`] when any reference
-    /// is not an opaque product reference in canonical spelling, or
+    /// is blank, numeric-only, or has leading/trailing whitespace, or
     /// [`AnonymousSessionContextError::InvalidValidityBoundary`] when
     /// `valid_until_unix_ms` is zero.
     pub fn new(
