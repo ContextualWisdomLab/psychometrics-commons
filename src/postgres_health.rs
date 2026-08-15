@@ -342,18 +342,12 @@ pub fn probe_postgres_integration_backlog(
         quarantined_outbox_count: quarantined_outbox_count.cast_unsigned(),
         active_consumption_count: active_consumption_count.cast_unsigned(),
         quarantined_consumption_count: quarantined_consumption_count.cast_unsigned(),
-        oldest_pending_outbox_event_at_unix_ms: match positive_optional_millis(
+        oldest_pending_outbox_event_at_unix_ms: positive_optional_millis(
             oldest_pending_outbox_event_at_unix_ms,
-        ) {
-            Ok(timestamp) => timestamp,
-            Err(error) => return Err(error),
-        },
-        oldest_active_consumption_event_at_unix_ms: match positive_optional_millis(
+        )?,
+        oldest_active_consumption_event_at_unix_ms: positive_optional_millis(
             oldest_active_consumption_event_at_unix_ms,
-        ) {
-            Ok(timestamp) => timestamp,
-            Err(error) => return Err(error),
-        },
+        )?,
     })
 }
 
@@ -441,18 +435,12 @@ pub fn probe_postgres_data_rights_backlog(
         active_request_count: active_request_count.cast_unsigned(),
         pending_propagation_count: pending_propagation_count.cast_unsigned(),
         quarantined_propagation_count: quarantined_propagation_count.cast_unsigned(),
-        oldest_active_request_at_unix_ms: match positive_optional_millis(
+        oldest_active_request_at_unix_ms: positive_optional_millis(
             oldest_active_request_at_unix_ms,
-        ) {
-            Ok(timestamp) => timestamp,
-            Err(error) => return Err(error),
-        },
-        oldest_pending_propagation_event_at_unix_ms: match positive_optional_millis(
+        )?,
+        oldest_pending_propagation_event_at_unix_ms: positive_optional_millis(
             oldest_pending_propagation_event_at_unix_ms,
-        ) {
-            Ok(timestamp) => timestamp,
-            Err(error) => return Err(error),
-        },
+        )?,
     })
 }
 
@@ -509,7 +497,7 @@ fn positive_optional_millis(value: Option<i64>) -> Result<Option<u64>, PostgresB
 }
 
 fn age_exceeds(oldest_event_at: Option<u64>, observed_at: u64, maximum_age: u64) -> bool {
-    oldest_event_at.is_some_and(|timestamp| observed_at - timestamp > maximum_age)
+    oldest_event_at.is_some_and(|timestamp| observed_at.saturating_sub(timestamp) > maximum_age)
 }
 
 /// Probe whether every caller-declared relation required by this application build exists.
