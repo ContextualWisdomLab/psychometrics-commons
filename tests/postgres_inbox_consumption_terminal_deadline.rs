@@ -83,14 +83,15 @@ fn assert_terminal_lease_evidence_cleared(
 ) {
     let row = client
         .query_one(
-            "SELECT consumption_state, claim_expires_at_unix_ms, claim_deadline_at \
+            "SELECT consumption_state, claim_expires_at_unix_ms IS NULL, \
+                    claim_deadline_at IS NULL \
              FROM integration_consumption WHERE consumption_ref = $1",
             &[&consumption_ref],
         )
         .unwrap();
     assert_eq!(row.get::<_, String>(0), expected_state);
-    assert_eq!(row.get::<_, Option<i64>>(1), None);
-    assert_eq!(row.get::<_, Option<postgres::types::TimestampTz>>(2), None);
+    assert!(row.get::<_, bool>(1));
+    assert!(row.get::<_, bool>(2));
 }
 
 #[test]
