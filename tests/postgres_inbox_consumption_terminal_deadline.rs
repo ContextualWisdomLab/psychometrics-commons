@@ -69,7 +69,7 @@ fn claimed_consumption(
     let mut transaction = client.transaction().unwrap();
     persist_inbox_consumption(&mut transaction, &consumption).unwrap();
     assert_eq!(
-        begin_inbox_consumption(&mut transaction, &consumption, 20_001, 21_000).unwrap(),
+        begin_inbox_consumption(&mut transaction, &consumption, 20_001, 80_001).unwrap(),
         1
     );
     transaction.commit().unwrap();
