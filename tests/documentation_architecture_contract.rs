@@ -222,11 +222,14 @@ fn traceability_distinguishes_current_implementation_from_targets() {
     let traceability = read_required(&repository_root().join("docs/TRACEABILITY.md"));
 
     for status in [
-        "Implemented",
-        "Partially implemented",
-        "Active PR",
-        "Target",
-        "External dependency",
+        "IMPLEMENTED_ON_PROTECTED_MAIN",
+        "IMPLEMENTED_ON_ACTIVE_PR",
+        "PARTIAL",
+        "ACCEPTED_ARCHITECTURE",
+        "PLANNED",
+        "RESEARCH_ONLY",
+        "SUPERSEDED",
+        "OUT_OF_SCOPE",
     ] {
         assert!(
             traceability.contains(status),
@@ -247,17 +250,15 @@ fn traceability_distinguishes_current_implementation_from_targets() {
     }
 
     let active_work = traceability
-        .split("### Active implementation work that is not protected-main truth")
+        .split("## 5. Active-PR evidence is not shipped truth")
         .nth(1)
         .and_then(|section| section.split("\n## ").next())
-        .expect("traceability must define the active implementation-work section");
-    let pr_entry = active_work
-        .lines()
-        .find(|line| line.contains("**Active PR**"))
-        .expect("active implementation work must contain an Active PR entry");
+        .expect("traceability must define the active-PR evidence section");
     assert!(
-        pr_entry.contains("not protected-main truth") && !pr_entry.contains("**Implemented**"),
-        "active work must remain explicitly segregated from protected-main truth"
+        active_work.contains("**IMPLEMENTED_ON_ACTIVE_PR**")
+            && active_work.contains("not shipped truth")
+            && !active_work.contains("**IMPLEMENTED_ON_PROTECTED_MAIN**"),
+        "active-PR evidence must remain explicitly segregated from protected-main truth"
     );
 
     let marker = "- Evaluated protected-main implementation baseline: `";
