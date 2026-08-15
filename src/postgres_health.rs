@@ -230,9 +230,7 @@ pub enum PostgresBacklogProbeError {
 impl Display for PostgresBacklogProbeError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidStoredValue => {
-                "stored backlog evidence violates the persistence contract"
-            }
+            Self::InvalidStoredValue => "stored backlog evidence violates the persistence contract",
             Self::Database(_) => "PostgreSQL backlog probe failed",
         })
     }
