@@ -113,30 +113,57 @@ fn integrity_and_backlog_failures_block_state_changing_readiness() {
 
 #[test]
 fn independent_backlog_signals_compose_without_masking_stalled_or_unknown_work() {
-    assert_eq!(
-        BacklogHealth::WithinBounds.combine(BacklogHealth::WithinBounds),
-        BacklogHealth::WithinBounds
-    );
-    assert_eq!(
-        BacklogHealth::WithinBounds.combine(BacklogHealth::Unknown),
-        BacklogHealth::Unknown
-    );
-    assert_eq!(
-        BacklogHealth::Unknown.combine(BacklogHealth::WithinBounds),
-        BacklogHealth::Unknown
-    );
-    assert_eq!(
-        BacklogHealth::Unknown.combine(BacklogHealth::Stalled),
-        BacklogHealth::Stalled
-    );
-    assert_eq!(
-        BacklogHealth::Stalled.combine(BacklogHealth::Unknown),
-        BacklogHealth::Stalled
-    );
-    assert_eq!(
-        BacklogHealth::Stalled.combine(BacklogHealth::WithinBounds),
-        BacklogHealth::Stalled
-    );
+    let cases = [
+        (
+            BacklogHealth::WithinBounds,
+            BacklogHealth::WithinBounds,
+            BacklogHealth::WithinBounds,
+        ),
+        (
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Unknown,
+            BacklogHealth::Unknown,
+        ),
+        (
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Unknown,
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Unknown,
+        ),
+        (
+            BacklogHealth::Unknown,
+            BacklogHealth::Unknown,
+            BacklogHealth::Unknown,
+        ),
+        (
+            BacklogHealth::Unknown,
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Stalled,
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Stalled,
+            BacklogHealth::Unknown,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+        ),
+    ];
+
+    for (left, right, expected) in cases {
+        assert_eq!(left.combine(right), expected);
+    }
 }
 
 #[test]
