@@ -8,7 +8,7 @@
 
 use crate::instrument::{InstrumentRelease, InstrumentReleaseManifest, PublicationState};
 use crate::reference::normalized_reference;
-use postgres::{GenericClient, Transaction};
+use postgres::{GenericClient, Row, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -166,6 +166,148 @@ pub fn apply_instrument_release_migration(
     client.batch_execute(INSTRUMENT_RELEASE_MIGRATION)
 }
 
+struct StoredInstrumentReleaseRow {
+    release_ref: String,
+    instrument_ref: String,
+    instrument_version_ref: String,
+    construct_ref: String,
+    item_version_refs: Vec<String>,
+    locale: String,
+    assessment_spec_ref: String,
+    scoring_version_ref: String,
+    calibration_reference: String,
+    norm_version_ref: Option<String>,
+    narrative_version_ref: String,
+    consent_requirement_refs: Vec<String>,
+    intended_use_ref: String,
+    limitations_ref: String,
+    content_digest: String,
+    publication_state: String,
+    created_at_unix_ms: i64,
+}
+
+impl StoredInstrumentReleaseRow {
+    fn from_row(row: &Row) -> Self {
+        Self {
+            release_ref: row.get("release_ref"),
+            instrument_ref: row.get("instrument_ref"),
+            instrument_version_ref: row.get("instrument_version_ref"),
+            construct_ref: row.get("construct_ref"),
+            item_version_refs: row.get("item_version_refs"),
+            locale: row.get("locale"),
+            assessment_spec_ref: row.get("assessment_spec_ref"),
+            scoring_version_ref: row.get("scoring_version_ref"),
+            calibration_reference: row.get("calibration_reference"),
+            norm_version_ref: row.get("norm_version_ref"),
+            narrative_version_ref: row.get("narrative_version_ref"),
+            consent_requirement_refs: row.get("consent_requirement_refs"),
+            intended_use_ref: row.get("intended_use_ref"),
+            limitations_ref: row.get("limitations_ref"),
+            content_digest: row.get("content_digest"),
+            publication_state: row.get("publication_state"),
+            created_at_unix_ms: row.get("created_at_unix_ms"),
+        }
+    }
+
+    fn into_published_snapshot(
+        self,
+        requested_locale: &str,
+    ) -> Result<PublishedInstrumentReleaseSnapshot, InstrumentReleaseQueryError> {
+        if self.publication_state != "published" {
+            return Err(InstrumentReleaseQueryError::NotPublished);
+        }
+        if self.locale != requested_locale {
+            return Err(InstrumentReleaseQueryError::LocaleMismatch);
+        }
+        let created_at_unix_ms = u64::try_from(self.created_at_unix_ms)
+            .ok()
+            .filter(|timestamp| *timestamp > 0)
+            .ok_or(InstrumentReleaseQueryError::InvalidStoredValue)?;
+        let item_refs = self
+            .item_version_refs
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let consent_refs = self
+            .consent_requirement_refs
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let manifest = InstrumentReleaseManifest::new(
+            &self.release_ref,
+            &self.instrument_ref,
+            &self.instrument_version_ref,
+            &self.construct_ref,
+            &item_refs,
+            &self.locale,
+            &self.assessment_spec_ref,
+            &self.scoring_version_ref,
+            &self.calibration_reference,
+            self.norm_version_ref.as_deref(),
+            &self.narrative_version_ref,
+            &consent_refs,
+            &self.intended_use_ref,
+            &self.limitations_ref,
+            &self.content_digest,
+        )
+        .map_err(|_| InstrumentReleaseQueryError::InvalidStoredValue)?;
+
+        if (
+            manifest.item_version_refs(),
+            manifest.consent_requirement_refs(),
+        ) != (
+            self.item_version_refs.as_slice(),
+            self.consent_requirement_refs.as_slice(),
+        ) {
+            return Err(InstrumentReleaseQueryError::InvalidStoredValue);
+        }
+        let manifest_core_identity = (
+            manifest.release_ref(),
+            manifest.instrument_ref(),
+            manifest.instrument_version_ref(),
+            manifest.construct_ref(),
+            manifest.locale(),
+            manifest.assessment_spec_ref(),
+            manifest.scoring_version_ref(),
+            manifest.calibration_reference(),
+        );
+        let stored_core_identity = (
+            self.release_ref.as_str(),
+            self.instrument_ref.as_str(),
+            self.instrument_version_ref.as_str(),
+            self.construct_ref.as_str(),
+            self.locale.as_str(),
+            self.assessment_spec_ref.as_str(),
+            self.scoring_version_ref.as_str(),
+            self.calibration_reference.as_str(),
+        );
+        let manifest_presentation_identity = (
+            manifest.norm_version_ref(),
+            manifest.narrative_version_ref(),
+            manifest.intended_use_ref(),
+            manifest.limitations_ref(),
+            manifest.content_digest(),
+        );
+        let stored_presentation_identity = (
+            self.norm_version_ref.as_deref(),
+            self.narrative_version_ref.as_str(),
+            self.intended_use_ref.as_str(),
+            self.limitations_ref.as_str(),
+            self.content_digest.as_str(),
+        );
+        if manifest_core_identity != stored_core_identity
+            || manifest_presentation_identity != stored_presentation_identity
+        {
+            return Err(InstrumentReleaseQueryError::InvalidStoredValue);
+        }
+
+        Ok(PublishedInstrumentReleaseSnapshot {
+            manifest,
+            created_at_unix_ms,
+        })
+    }
+}
+
 /// Load one exact published release for server-authoritative session creation.
 ///
 /// The caller must provide the canonical release reference and the exact requested
@@ -209,117 +351,7 @@ pub fn load_published_instrument_release(
             &[&canonical_release_ref],
         )?
         .ok_or(InstrumentReleaseQueryError::NotFound)?;
-
-    let publication_state: String = row.get("publication_state");
-    if publication_state != "published" {
-        return Err(InstrumentReleaseQueryError::NotPublished);
-    }
-
-    let stored_locale: String = row.get("locale");
-    if stored_locale != locale {
-        return Err(InstrumentReleaseQueryError::LocaleMismatch);
-    }
-
-    let stored_release_ref: String = row.get("release_ref");
-    let instrument_ref: String = row.get("instrument_ref");
-    let instrument_version_ref: String = row.get("instrument_version_ref");
-    let construct_ref: String = row.get("construct_ref");
-    let item_version_refs: Vec<String> = row.get("item_version_refs");
-    let assessment_spec_ref: String = row.get("assessment_spec_ref");
-    let scoring_version_ref: String = row.get("scoring_version_ref");
-    let calibration_reference: String = row.get("calibration_reference");
-    let norm_version_ref: Option<String> = row.get("norm_version_ref");
-    let narrative_version_ref: String = row.get("narrative_version_ref");
-    let consent_requirement_refs: Vec<String> = row.get("consent_requirement_refs");
-    let intended_use_ref: String = row.get("intended_use_ref");
-    let limitations_ref: String = row.get("limitations_ref");
-    let content_digest: String = row.get("content_digest");
-    let created_at_unix_ms: i64 = row.get("created_at_unix_ms");
-    let created_at_unix_ms = u64::try_from(created_at_unix_ms)
-        .ok()
-        .filter(|timestamp| *timestamp > 0)
-        .ok_or(InstrumentReleaseQueryError::InvalidStoredValue)?;
-
-    let item_refs = item_version_refs
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let consent_refs = consent_requirement_refs
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    let manifest = InstrumentReleaseManifest::new(
-        &stored_release_ref,
-        &instrument_ref,
-        &instrument_version_ref,
-        &construct_ref,
-        &item_refs,
-        &stored_locale,
-        &assessment_spec_ref,
-        &scoring_version_ref,
-        &calibration_reference,
-        norm_version_ref.as_deref(),
-        &narrative_version_ref,
-        &consent_refs,
-        &intended_use_ref,
-        &limitations_ref,
-        &content_digest,
-    )
-    .map_err(|_| InstrumentReleaseQueryError::InvalidStoredValue)?;
-
-    if (
-        manifest.item_version_refs(),
-        manifest.consent_requirement_refs(),
-    ) != (
-        item_version_refs.as_slice(),
-        consent_requirement_refs.as_slice(),
-    ) {
-        return Err(InstrumentReleaseQueryError::InvalidStoredValue);
-    }
-    let manifest_core_identity = (
-        manifest.release_ref(),
-        manifest.instrument_ref(),
-        manifest.instrument_version_ref(),
-        manifest.construct_ref(),
-        manifest.locale(),
-        manifest.assessment_spec_ref(),
-        manifest.scoring_version_ref(),
-        manifest.calibration_reference(),
-    );
-    let stored_core_identity = (
-        stored_release_ref.as_str(),
-        instrument_ref.as_str(),
-        instrument_version_ref.as_str(),
-        construct_ref.as_str(),
-        stored_locale.as_str(),
-        assessment_spec_ref.as_str(),
-        scoring_version_ref.as_str(),
-        calibration_reference.as_str(),
-    );
-    let manifest_presentation_identity = (
-        manifest.norm_version_ref(),
-        manifest.narrative_version_ref(),
-        manifest.intended_use_ref(),
-        manifest.limitations_ref(),
-        manifest.content_digest(),
-    );
-    let stored_presentation_identity = (
-        norm_version_ref.as_deref(),
-        narrative_version_ref.as_str(),
-        intended_use_ref.as_str(),
-        limitations_ref.as_str(),
-        content_digest.as_str(),
-    );
-    if manifest_core_identity != stored_core_identity
-        || manifest_presentation_identity != stored_presentation_identity
-    {
-        return Err(InstrumentReleaseQueryError::InvalidStoredValue);
-    }
-
-    Ok(PublishedInstrumentReleaseSnapshot {
-        manifest,
-        created_at_unix_ms,
-    })
+    StoredInstrumentReleaseRow::from_row(&row).into_published_snapshot(locale)
 }
 
 /// Persist one immutable instrument-release manifest and its publication state.
