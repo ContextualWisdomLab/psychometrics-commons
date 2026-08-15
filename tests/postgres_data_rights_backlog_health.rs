@@ -75,6 +75,9 @@ fn insert_propagation(client: &mut Client, suffix: &str, state: &str, event_at: 
     let request_ref = format!("request_propagation_{suffix}");
     let event_ref = format!("event_propagation_{suffix}");
     let dependent_system_ref = format!("dependent_system_{suffix}");
+    // The propagation row has a request foreign key, so this fixture also adds one active
+    // processing request at time 1_000. That row intentionally contributes to request count
+    // and oldest-request age assertions below; it is not hidden probe behavior.
     insert_request(
         client,
         &format!("propagation_{suffix}"),
