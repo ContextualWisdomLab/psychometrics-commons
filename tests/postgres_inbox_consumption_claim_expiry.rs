@@ -319,3 +319,37 @@ fn forward_migration_fails_closed_for_preexisting_processing_claim() {
         .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
         .unwrap();
 }
+
+#[test]
+fn forward_migrations_roll_back_together_when_hardening_cannot_apply() {
+    let (mut client, schema_name) = schema_client("inbox_claim_atomic_upgrade");
+    client
+        .batch_execute(
+            "CREATE FUNCTION maintain_inbox_claim_deadline() RETURNS text \
+             LANGUAGE sql IMMUTABLE AS $$ SELECT 'conflict'::text $$;",
+        )
+        .unwrap();
+
+    let error = apply_inbox_consumption_migration(&mut client)
+        .expect_err("a conflicting guard function signature must reject the migration batch");
+    assert!(
+        error.to_string().contains("return type") || error.to_string().contains("drop function"),
+        "the fixture must fail at the guard function replacement boundary: {error}"
+    );
+
+    let base_table_exists: bool = client
+        .query_one(
+            "SELECT to_regclass('integration_consumption') IS NOT NULL",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(
+        !base_table_exists,
+        "the shipped base migration must roll back when forward hardening fails"
+    );
+
+    client
+        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
+        .unwrap();
+}
