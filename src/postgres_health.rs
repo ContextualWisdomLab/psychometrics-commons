@@ -342,12 +342,18 @@ pub fn probe_postgres_integration_backlog(
         quarantined_outbox_count: quarantined_outbox_count.cast_unsigned(),
         active_consumption_count: active_consumption_count.cast_unsigned(),
         quarantined_consumption_count: quarantined_consumption_count.cast_unsigned(),
-        oldest_pending_outbox_event_at_unix_ms: positive_optional_millis(
+        oldest_pending_outbox_event_at_unix_ms: match positive_optional_millis(
             oldest_pending_outbox_event_at_unix_ms,
-        )?,
-        oldest_active_consumption_event_at_unix_ms: positive_optional_millis(
+        ) {
+            Ok(timestamp) => timestamp,
+            Err(error) => return Err(error),
+        },
+        oldest_active_consumption_event_at_unix_ms: match positive_optional_millis(
             oldest_active_consumption_event_at_unix_ms,
-        )?,
+        ) {
+            Ok(timestamp) => timestamp,
+            Err(error) => return Err(error),
+        },
     })
 }
 
@@ -435,12 +441,18 @@ pub fn probe_postgres_data_rights_backlog(
         active_request_count: active_request_count.cast_unsigned(),
         pending_propagation_count: pending_propagation_count.cast_unsigned(),
         quarantined_propagation_count: quarantined_propagation_count.cast_unsigned(),
-        oldest_active_request_at_unix_ms: positive_optional_millis(
+        oldest_active_request_at_unix_ms: match positive_optional_millis(
             oldest_active_request_at_unix_ms,
-        )?,
-        oldest_pending_propagation_event_at_unix_ms: positive_optional_millis(
+        ) {
+            Ok(timestamp) => timestamp,
+            Err(error) => return Err(error),
+        },
+        oldest_pending_propagation_event_at_unix_ms: match positive_optional_millis(
             oldest_pending_propagation_event_at_unix_ms,
-        )?,
+        ) {
+            Ok(timestamp) => timestamp,
+            Err(error) => return Err(error),
+        },
     })
 }
 
