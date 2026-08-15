@@ -175,8 +175,10 @@ pub fn apply_instrument_release_migration(
 /// as session-eligible. Stored columns are reconstructed through
 /// [`InstrumentReleaseManifest::new`] before they leave the persistence boundary, so
 /// malformed or non-canonical persisted evidence fails closed instead of being served.
-/// This function does not select a fallback locale and does not perform psychometric
-/// scoring or publication-evidence recomputation.
+/// This boundary intentionally requires the caller's locale spelling to already be
+/// canonical even though some in-memory constructors normalize locale text. It does
+/// not select a fallback locale and does not perform psychometric scoring or
+/// publication-evidence recomputation.
 ///
 /// # Errors
 ///
@@ -210,31 +212,31 @@ pub fn load_published_instrument_release(
         )?
         .ok_or(InstrumentReleaseQueryError::NotFound)?;
 
-    let publication_state: String = row.get(15);
+    let publication_state: String = row.get("publication_state");
     if publication_state != "published" {
         return Err(InstrumentReleaseQueryError::NotPublished);
     }
 
-    let stored_locale: String = row.get(5);
+    let stored_locale: String = row.get("locale");
     if stored_locale != locale {
         return Err(InstrumentReleaseQueryError::LocaleMismatch);
     }
 
-    let stored_release_ref: String = row.get(0);
-    let instrument_ref: String = row.get(1);
-    let instrument_version_ref: String = row.get(2);
-    let construct_ref: String = row.get(3);
-    let item_version_refs: Vec<String> = row.get(4);
-    let assessment_spec_ref: String = row.get(6);
-    let scoring_version_ref: String = row.get(7);
-    let calibration_reference: String = row.get(8);
-    let norm_version_ref: Option<String> = row.get(9);
-    let narrative_version_ref: String = row.get(10);
-    let consent_requirement_refs: Vec<String> = row.get(11);
-    let intended_use_ref: String = row.get(12);
-    let limitations_ref: String = row.get(13);
-    let content_digest: String = row.get(14);
-    let created_at_unix_ms: i64 = row.get(16);
+    let stored_release_ref: String = row.get("release_ref");
+    let instrument_ref: String = row.get("instrument_ref");
+    let instrument_version_ref: String = row.get("instrument_version_ref");
+    let construct_ref: String = row.get("construct_ref");
+    let item_version_refs: Vec<String> = row.get("item_version_refs");
+    let assessment_spec_ref: String = row.get("assessment_spec_ref");
+    let scoring_version_ref: String = row.get("scoring_version_ref");
+    let calibration_reference: String = row.get("calibration_reference");
+    let norm_version_ref: Option<String> = row.get("norm_version_ref");
+    let narrative_version_ref: String = row.get("narrative_version_ref");
+    let consent_requirement_refs: Vec<String> = row.get("consent_requirement_refs");
+    let intended_use_ref: String = row.get("intended_use_ref");
+    let limitations_ref: String = row.get("limitations_ref");
+    let content_digest: String = row.get("content_digest");
+    let created_at_unix_ms: i64 = row.get("created_at_unix_ms");
     let created_at_unix_ms = u64::try_from(created_at_unix_ms)
         .ok()
         .filter(|timestamp| *timestamp > 0)
@@ -267,6 +269,39 @@ pub fn load_published_instrument_release(
     if (manifest.item_version_refs(), manifest.consent_requirement_refs())
         != (item_version_refs.as_slice(), consent_requirement_refs.as_slice())
     {
+        return Err(InstrumentReleaseQueryError::InvalidStoredValue);
+    }
+    let manifest_scalar_identity = (
+        manifest.release_ref(),
+        manifest.instrument_ref(),
+        manifest.instrument_version_ref(),
+        manifest.construct_ref(),
+        manifest.locale(),
+        manifest.assessment_spec_ref(),
+        manifest.scoring_version_ref(),
+        manifest.calibration_reference(),
+        manifest.norm_version_ref(),
+        manifest.narrative_version_ref(),
+        manifest.intended_use_ref(),
+        manifest.limitations_ref(),
+        manifest.content_digest(),
+    );
+    let stored_scalar_identity = (
+        stored_release_ref.as_str(),
+        instrument_ref.as_str(),
+        instrument_version_ref.as_str(),
+        construct_ref.as_str(),
+        stored_locale.as_str(),
+        assessment_spec_ref.as_str(),
+        scoring_version_ref.as_str(),
+        calibration_reference.as_str(),
+        norm_version_ref.as_deref(),
+        narrative_version_ref.as_str(),
+        intended_use_ref.as_str(),
+        limitations_ref.as_str(),
+        content_digest.as_str(),
+    );
+    if manifest_scalar_identity != stored_scalar_identity {
         return Err(InstrumentReleaseQueryError::InvalidStoredValue);
     }
 
@@ -515,7 +550,10 @@ mod reference_guard_tests {
         assert!(valid_exact_locale("ko-KR"));
         assert!(!valid_exact_locale(" en-US"));
         assert!(!valid_exact_locale("1"));
+        assert!(!valid_exact_locale("e1-US"));
+        assert!(!valid_exact_locale("abcdefghi-US"));
         assert!(!valid_exact_locale("en-"));
+        assert!(!valid_exact_locale("en-abcdefghi"));
         assert!(!valid_exact_locale("en-US!"));
     }
 
