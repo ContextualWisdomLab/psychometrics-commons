@@ -338,10 +338,10 @@ pub fn probe_postgres_integration_backlog(
     let oldest_active_consumption_event_at_unix_ms: Option<i64> = row.get(5);
 
     Ok(PostgresIntegrationBacklogEvidence {
-        pending_outbox_count: pending_outbox_count as u64,
-        quarantined_outbox_count: quarantined_outbox_count as u64,
-        active_consumption_count: active_consumption_count as u64,
-        quarantined_consumption_count: quarantined_consumption_count as u64,
+        pending_outbox_count: pending_outbox_count.cast_unsigned(),
+        quarantined_outbox_count: quarantined_outbox_count.cast_unsigned(),
+        active_consumption_count: active_consumption_count.cast_unsigned(),
+        quarantined_consumption_count: quarantined_consumption_count.cast_unsigned(),
         oldest_pending_outbox_event_at_unix_ms: positive_optional_millis(
             oldest_pending_outbox_event_at_unix_ms,
         )?,
@@ -432,9 +432,9 @@ pub fn probe_postgres_data_rights_backlog(
     let oldest_pending_propagation_event_at_unix_ms: Option<i64> = row.get(4);
 
     Ok(PostgresDataRightsBacklogEvidence {
-        active_request_count: active_request_count as u64,
-        pending_propagation_count: pending_propagation_count as u64,
-        quarantined_propagation_count: quarantined_propagation_count as u64,
+        active_request_count: active_request_count.cast_unsigned(),
+        pending_propagation_count: pending_propagation_count.cast_unsigned(),
+        quarantined_propagation_count: quarantined_propagation_count.cast_unsigned(),
         oldest_active_request_at_unix_ms: positive_optional_millis(
             oldest_active_request_at_unix_ms,
         )?,
@@ -490,7 +490,7 @@ pub fn classify_postgres_data_rights_backlog(
 
 fn positive_optional_millis(value: Option<i64>) -> Result<Option<u64>, PostgresBacklogProbeError> {
     match value {
-        Some(value) if value > 0 => Ok(Some(value as u64)),
+        Some(value) if value > 0 => Ok(Some(value.cast_unsigned())),
         Some(_) => Err(PostgresBacklogProbeError::InvalidStoredValue),
         None => Ok(None),
     }
