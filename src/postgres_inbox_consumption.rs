@@ -142,8 +142,10 @@ impl From<postgres::Error> for InboxConsumptionPersistenceError {
 pub fn apply_inbox_consumption_migration(
     client: &mut impl GenericClient,
 ) -> Result<(), postgres::Error> {
-    client.batch_execute(INBOX_CONSUMPTION_MIGRATION)?;
-    client.batch_execute(INBOX_CLAIM_EXPIRY_GUARD_MIGRATION)
+    let migration_batch = format!(
+        "{INBOX_CONSUMPTION_MIGRATION}\n{INBOX_CLAIM_EXPIRY_GUARD_MIGRATION}"
+    );
+    client.batch_execute(&migration_batch)
 }
 
 /// Persist one pending consumption identity for an existing inbox receipt.
