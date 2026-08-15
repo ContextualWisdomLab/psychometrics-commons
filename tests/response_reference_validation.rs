@@ -21,7 +21,16 @@ fn write<'a>(
 
 #[test]
 fn response_ledger_session_reference_must_be_opaque() {
-    for session_ref in ["", "   ", "12345", "1.25e3", "１２３４５"] {
+    for session_ref in [
+        "",
+        "   ",
+        "12345",
+        "1.25e3",
+        "１２３４５",
+        " session_ref",
+        "session_ref ",
+        "session\nref",
+    ] {
         assert_eq!(
             ResponseLedger::new(session_ref),
             Err(WriteError::InvalidReference)
@@ -46,18 +55,26 @@ fn response_identity_references_reject_numeric_like_values() {
 }
 
 #[test]
-fn response_identity_references_are_canonicalized_before_idempotency_checks() {
-    let mut ledger = ResponseLedger::new(" session_ref ").unwrap();
+fn response_identity_references_reject_whitespace_aliases_before_idempotency_checks() {
+    let mut ledger = ResponseLedger::new("session_ref").unwrap();
     let original = ledger
         .record(
             SessionState::Active,
-            write(" server_event_a ", " client_event_a ", " item_version_a "),
+            write("server_event_a", "client_event_a", "item_version_a"),
         )
         .unwrap();
 
-    assert_eq!(original.server_event_ref(), "server_event_a");
-    assert_eq!(original.client_event_ref(), "client_event_a");
-    assert_eq!(original.item_version_ref(), "item_version_a");
+    for request in [
+        write(" server_event_b ", "client_event_b", "item_version_a"),
+        write("server_event_b", " client_event_a ", "item_version_a"),
+        write("server_event_b", "client_event_b", " item_version_a "),
+        write("server\nevent_b", "client_event_b", "item_version_a"),
+    ] {
+        assert_eq!(
+            ledger.record(SessionState::Active, request),
+            Err(WriteError::InvalidReference)
+        );
+    }
 
     let replay = ledger
         .record(
