@@ -74,6 +74,47 @@ fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() 
 }
 
 #[test]
+fn embedded_control_characters_are_rejected_at_public_reference_boundaries() {
+    for invalid_reference in [
+        "tenant\nref",
+        "tenant\rref",
+        "tenant\tref",
+        "tenant\u{0000}ref",
+        "tenant\u{001b}ref",
+        "tenant\u{007f}ref",
+    ] {
+        assert_eq!(
+            AnonymousSessionContext::new(
+                invalid_reference,
+                "participant_ref",
+                "session_ref",
+                "authorization_evidence_ref",
+                10_000,
+            ),
+            Err(AnonymousSessionContextError::InvalidReference),
+            "anonymous-session references must reject embedded control characters {invalid_reference:?}",
+        );
+        assert_eq!(
+            DataRightsRequest::new(
+                "request_ref",
+                invalid_reference,
+                "participant_ref",
+                DataRightsRequestKind::Export,
+                "account_data_scope",
+                1_000,
+            ),
+            Err(DataRightsError::InvalidReference),
+            "data-rights references must reject embedded control characters {invalid_reference:?}",
+        );
+        assert_eq!(
+            AuthorizationContext::new(invalid_reference, "subject_ref", Some("participant_ref"), &[]),
+            Err(AuthorizationError::InvalidReference),
+            "authorization references must reject embedded control characters {invalid_reference:?}",
+        );
+    }
+}
+
+#[test]
 fn canonical_opaque_public_references_remain_accepted() {
     let anonymous = AnonymousSessionContext::new(
         "tenant_ref",
