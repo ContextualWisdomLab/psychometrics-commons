@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS result_snapshot (
     engine_artifact_digest TEXT CONSTRAINT result_snapshot_engine_digest_not_null NOT NULL
         CONSTRAINT result_snapshot_engine_digest_format_check CHECK (
             engine_artifact_digest = btrim(engine_artifact_digest)
-            AND engine_artifact_digest <> ''
+            AND engine_artifact_digest ~ '^sha256:[0-9a-f]{64}$'
         ),
     created_at_unix_ms BIGINT CONSTRAINT result_snapshot_created_at_unix_not_null NOT NULL
         CONSTRAINT result_snapshot_created_at_unix_positive_check CHECK (created_at_unix_ms > 0),
@@ -154,10 +154,19 @@ CREATE TABLE IF NOT EXISTS result_snapshot_observation (
         CONSTRAINT result_snapshot_observation_disposition_value_check CHECK (
             observation_disposition IN ('scored', 'abstained', 'failed', 'excluded')
         ),
-    score DOUBLE PRECISION,
+    score DOUBLE PRECISION
+        CONSTRAINT result_snapshot_observation_score_finite_check CHECK (
+            score IS NULL OR (
+                score > '-Infinity'::double precision
+                AND score < 'Infinity'::double precision
+            )
+        ),
     standard_error DOUBLE PRECISION
         CONSTRAINT result_snapshot_observation_standard_error_shape_check CHECK (
-            standard_error IS NULL OR standard_error >= 0
+            standard_error IS NULL OR (
+                standard_error >= 0
+                AND standard_error < 'Infinity'::double precision
+            )
         ),
     CONSTRAINT result_snapshot_observation_pkey PRIMARY KEY (
         result_snapshot_ref,
@@ -181,6 +190,35 @@ CREATE TABLE IF NOT EXISTS result_snapshot_observation (
         )
     )
 );
+
+-- Reapplying this migration must also strengthen a schema created by an earlier
+-- revision of this not-yet-released migration. PostgreSQL's CREATE TABLE IF NOT
+-- EXISTS does not reconcile changed CHECK definitions on an existing table.
+ALTER TABLE result_snapshot
+    DROP CONSTRAINT IF EXISTS result_snapshot_engine_digest_format_check;
+ALTER TABLE result_snapshot
+    ADD CONSTRAINT result_snapshot_engine_digest_format_check CHECK (
+        engine_artifact_digest = btrim(engine_artifact_digest)
+        AND engine_artifact_digest ~ '^sha256:[0-9a-f]{64}$'
+    );
+ALTER TABLE result_snapshot_observation
+    DROP CONSTRAINT IF EXISTS result_snapshot_observation_score_finite_check;
+ALTER TABLE result_snapshot_observation
+    ADD CONSTRAINT result_snapshot_observation_score_finite_check CHECK (
+        score IS NULL OR (
+            score > '-Infinity'::double precision
+            AND score < 'Infinity'::double precision
+        )
+    );
+ALTER TABLE result_snapshot_observation
+    DROP CONSTRAINT IF EXISTS result_snapshot_observation_standard_error_shape_check;
+ALTER TABLE result_snapshot_observation
+    ADD CONSTRAINT result_snapshot_observation_standard_error_shape_check CHECK (
+        standard_error IS NULL OR (
+            standard_error >= 0
+            AND standard_error < 'Infinity'::double precision
+        )
+    );
 
 CREATE OR REPLACE FUNCTION reject_result_snapshot_evidence_mutation()
 RETURNS trigger
