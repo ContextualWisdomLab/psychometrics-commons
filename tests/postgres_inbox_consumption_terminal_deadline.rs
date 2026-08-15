@@ -1,4 +1,4 @@
-//! Real PostgreSQL contract that successful terminal inbox writes clear lease evidence.
+//! Real `PostgreSQL` contract that successful terminal inbox writes clear lease evidence.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::{InboxConsumption, IntegrationEvent};
