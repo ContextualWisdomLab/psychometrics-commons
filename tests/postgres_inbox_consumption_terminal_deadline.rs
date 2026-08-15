@@ -116,11 +116,7 @@ fn successful_claimed_terminal_writes_clear_both_lease_deadlines() {
         InboxConsumptionDisposition::Inserted
     );
     complete.commit().unwrap();
-    assert_terminal_lease_evidence_cleared(
-        &mut client,
-        completed.consumption_ref(),
-        "completed",
-    );
+    assert_terminal_lease_evidence_cleared(&mut client, completed.consumption_ref(), "completed");
 
     let quarantined = claimed_consumption(
         &mut client,
@@ -129,14 +125,8 @@ fn successful_claimed_terminal_writes_clear_both_lease_deadlines() {
     );
     let mut quarantine = client.transaction().unwrap();
     assert_eq!(
-        quarantine_inbox_consumption(
-            &mut quarantine,
-            &quarantined,
-            20_002,
-            "poison_payload",
-            1,
-        )
-        .unwrap(),
+        quarantine_inbox_consumption(&mut quarantine, &quarantined, 20_002, "poison_payload", 1,)
+            .unwrap(),
         InboxConsumptionDisposition::Inserted
     );
     quarantine.commit().unwrap();
@@ -147,6 +137,8 @@ fn successful_claimed_terminal_writes_clear_both_lease_deadlines() {
     );
 
     client
-        .batch_execute(&format!("SET search_path TO public; DROP SCHEMA {schema} CASCADE;"))
+        .batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
+        ))
         .unwrap();
 }
