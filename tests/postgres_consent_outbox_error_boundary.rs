@@ -15,6 +15,7 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 use std::sync::{Mutex, MutexGuard};
 
 const DIGEST: &str = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const TENANT_REF: &str = "tenant_consent_boundary_alpha";
 static CONSENT_BOUNDARY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn boundary_guard() -> MutexGuard<'static, ()> {
@@ -61,7 +62,7 @@ fn ledger_and_event() -> (ConsentLedger, IntegrationEvent) {
         "consent.research.changed",
         "v1",
         "psychometrics_commons",
-        "tenant_consent_boundary_alpha",
+        TENANT_REF,
         ledger.participant_ref(),
         30_000,
         "correlation_consent_boundary_alpha",
@@ -83,7 +84,7 @@ fn unsupported_consent_isolation_is_typed_and_enqueues_nothing() {
         .start()
         .unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &event, 3),
+        persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &event, 3),
         Err(ConsentOutboxPersistenceError::Consent(
             ConsentPersistenceError::UnsupportedIsolationLevel
         ))
