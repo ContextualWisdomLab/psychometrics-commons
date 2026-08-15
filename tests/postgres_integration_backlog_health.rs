@@ -101,7 +101,12 @@ fn insert_consumption(client: &mut Client, suffix: &str, state: &str, event_at: 
                          latest_event_at_unix_ms\
                      ) VALUES ('consumer_backlog_alpha','upstream_backlog_alpha',\
                                'tenant_backlog_alpha',$1,$2,$3,'pending',0,$4)",
-                    &[&source_event_ref, &consumption_ref, &side_effect_ref, &event_at],
+                    &[
+                        &source_event_ref,
+                        &consumption_ref,
+                        &side_effect_ref,
+                        &event_at,
+                    ],
                 )
                 .unwrap();
         }
@@ -240,12 +245,7 @@ fn quarantine_limits_are_independent_operator_policy_inputs() {
         "quarantined",
         2_000,
     );
-    insert_consumption(
-        &mut client,
-        "quarantined_policy",
-        "quarantined",
-        2_500,
-    );
+    insert_consumption(&mut client, "quarantined_policy", "quarantined", 2_500);
     let evidence = probe_postgres_integration_backlog(&mut client).unwrap();
 
     let strict_outbox_quarantine = IntegrationBacklogPolicy {
@@ -305,7 +305,11 @@ fn active_consumption_age_can_independently_stall_readiness() {
 fn probe_rejects_invalid_stored_timestamps_and_keeps_database_errors_typed() {
     let mut client = test_client();
     let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);
-    let schema = format!("integration_backlog_invalid_{}_{}", std::process::id(), nonce);
+    let schema = format!(
+        "integration_backlog_invalid_{}_{}",
+        std::process::id(),
+        nonce
+    );
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema}; SET search_path TO {schema};\
@@ -316,7 +320,10 @@ fn probe_rejects_invalid_stored_timestamps_and_keeps_database_errors_typed() {
         .unwrap();
 
     let error = probe_postgres_integration_backlog(&mut client).unwrap_err();
-    assert!(matches!(error, PostgresBacklogProbeError::InvalidStoredValue));
+    assert!(matches!(
+        error,
+        PostgresBacklogProbeError::InvalidStoredValue
+    ));
     assert!(error.source().is_none());
 
     client
