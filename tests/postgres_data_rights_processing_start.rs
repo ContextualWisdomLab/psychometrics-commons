@@ -126,6 +126,193 @@ fn processing_start_persists_and_replays_exactly() {
 }
 
 #[test]
+fn export_processing_start_persists_request_kind_branch() {
+    let mut client = ready_client("data_rights_process_export");
+    let request_ref = "data_rights_request_export";
+    let mut request = DataRightsRequest::new(
+        request_ref,
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Export,
+        "scope_export",
+        11_000,
+    )
+    .unwrap();
+    let event = IntegrationEvent::new(
+        "event_data_rights_request_export",
+        "data_rights.export.requested",
+        "v1",
+        "psychometrics_commons",
+        "tenant_alpha",
+        request_ref,
+        11_000,
+        request_ref,
+        None,
+        DIGEST,
+    )
+    .unwrap();
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(&mut client, &request, &targets, 3).unwrap();
+
+    request
+        .verify_identity("verification_evidence_export", 11_100)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_data_rights_identity_verification(&mut transaction, &request).unwrap();
+    transaction.commit().unwrap();
+
+    request
+        .start_processing("operation_export", 11_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap(),
+        DataRightsProcessingDisposition::Started
+    );
+    transaction.commit().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT request_kind, current_state FROM data_rights_request_state WHERE request_ref = $1",
+            &[&request_ref],
+        )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "export");
+    assert_eq!(row.get::<_, String>(1), "processing");
+}
+
+#[test]
+fn processing_start_rejects_each_identity_field_mismatch_independently() {
+    let mut client = ready_client("data_rights_process_identity_fields");
+    persist_verified(&mut client, "data_rights_request_process");
+
+    let mut mismatched_participant = DataRightsRequest::new(
+        "data_rights_request_process",
+        "tenant_alpha",
+        "participant_beta",
+        DataRightsRequestKind::Deletion,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap();
+    mismatched_participant
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    mismatched_participant
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &mismatched_participant),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut mismatched_kind = DataRightsRequest::new(
+        "data_rights_request_process",
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Export,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap();
+    mismatched_kind
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    mismatched_kind
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &mismatched_kind),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut mismatched_scope = DataRightsRequest::new(
+        "data_rights_request_process",
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Deletion,
+        "scope_beta",
+        10_000,
+    )
+    .unwrap();
+    mismatched_scope
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    mismatched_scope
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &mismatched_scope),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn processing_start_rejects_same_operation_with_a_later_start_time() {
+    let mut client = ready_client("data_rights_process_start_time");
+    let mut request = persist_verified(&mut client, "data_rights_request_process");
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_processing_start(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mut later_start = new_request("data_rights_request_process");
+    later_start
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    later_start
+        .start_processing("operation_alpha", 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &later_start),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn processing_start_classify_select_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_process_classify_select");
+    let mut request = persist_requested(&mut client, "data_rights_request_process");
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION data_rights_processing_drop_after_update() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 EXECUTE format('DROP TABLE %I.data_rights_request_state', TG_TABLE_SCHEMA); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER data_rights_processing_drop_after_update \
+             AFTER UPDATE ON data_rights_request_state \
+             FOR EACH STATEMENT EXECUTE FUNCTION data_rights_processing_drop_after_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_processing_start(&mut transaction, &request),
+        Err(DataRightsPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn processing_start_rejects_conflicting_and_later_lifecycle_evidence() {
     let mut client = ready_client("data_rights_process_conflict");
     let mut request = persist_verified(&mut client, "data_rights_request_process");
@@ -203,7 +390,9 @@ fn processing_start_rejects_invalid_state_missing_request_and_overflow() {
     transaction.rollback().unwrap();
 
     let mut overflow = verified;
-    overflow.start_processing("operation_overflow", u64::MAX).unwrap();
+    overflow
+        .start_processing("operation_overflow", u64::MAX)
+        .unwrap();
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist_data_rights_processing_start(&mut transaction, &overflow),
