@@ -14,6 +14,7 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 const SCHEMA: &str = "consent_outbox_latest_event_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x434F_4E53_4C41_5445;
 const DIGEST: &str = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+const TENANT_REF: &str = "tenant_consent_latest_alpha";
 
 fn ready_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -70,7 +71,7 @@ fn propagation_event(
         "consent.research.changed",
         "v1",
         "psychometrics_commons",
-        "tenant_consent_latest_alpha",
+        TENANT_REF,
         "participant_consent_latest_alpha",
         occurred_at_unix_ms,
         "correlation_consent_latest_alpha",
@@ -92,7 +93,13 @@ fn stale_grant_cannot_be_propagated_after_a_later_revocation() {
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        persist_consent_ledger_with_outbox(&mut transaction, &ledger, &stale_event, 3),
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger,
+            &stale_event,
+            3,
+        ),
         Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
     ));
     transaction.rollback().unwrap();
@@ -127,7 +134,7 @@ fn latest_revocation_can_be_persisted_with_its_propagation_event() {
     );
 
     let mut transaction = client.transaction().unwrap();
-    persist_consent_ledger_with_outbox(&mut transaction, &ledger, &latest_event, 3)
+    persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &latest_event, 3)
         .expect("latest consent change should persist with its bound outbox event");
     transaction.commit().unwrap();
 
