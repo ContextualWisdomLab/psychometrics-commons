@@ -332,9 +332,10 @@ fn forward_migrations_roll_back_together_when_hardening_cannot_apply() {
 
     let error = apply_inbox_consumption_migration(&mut client)
         .expect_err("a conflicting guard function signature must reject the migration batch");
-    assert!(
-        error.to_string().contains("return type") || error.to_string().contains("drop function"),
-        "the fixture must fail at the guard function replacement boundary: {error}"
+    assert_eq!(
+        error.code(),
+        Some(&postgres::error::SqlState::INVALID_FUNCTION_DEFINITION),
+        "the fixture must fail at the guard function replacement boundary"
     );
 
     let base_table_exists: bool = client
