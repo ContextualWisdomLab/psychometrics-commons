@@ -26,7 +26,7 @@ impl Display for AnonymousSessionContextError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "anonymous-session references must be non-empty opaque non-numeric values without leading or trailing whitespace"
+                "anonymous-session references must be opaque non-numeric values"
             }
             Self::InvalidValidityBoundary => {
                 "anonymous-session validity boundary must be greater than zero"
