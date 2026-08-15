@@ -288,6 +288,21 @@ fn future_or_missing_observation_time_is_unknown_not_falsely_healthy() {
 }
 
 #[test]
+fn future_active_consumption_evidence_is_unknown_without_pending_outbox_work() {
+    let (mut client, schema) = isolated_client();
+    insert_consumption(&mut client, "future_processing_alpha", "processing", 10_000);
+    let evidence = probe_postgres_integration_backlog(&mut client).unwrap();
+
+    assert_eq!(evidence.oldest_pending_outbox_event_at_unix_ms(), None);
+    assert_eq!(
+        classify_postgres_integration_backlog(&evidence, 9_999, &policy()),
+        BacklogHealth::Unknown
+    );
+
+    cleanup(client, &schema);
+}
+
+#[test]
 fn active_consumption_age_can_independently_stall_readiness() {
     let (mut client, schema) = isolated_client();
     insert_consumption(&mut client, "old_processing_alpha", "processing", 2_000);
@@ -324,6 +339,10 @@ fn probe_rejects_invalid_stored_timestamps_and_keeps_database_errors_typed() {
         error,
         PostgresBacklogProbeError::InvalidStoredValue
     ));
+    assert_eq!(
+        error.to_string(),
+        "stored backlog evidence violates the persistence contract"
+    );
     assert!(error.source().is_none());
 
     client
@@ -336,5 +355,6 @@ fn probe_rejects_invalid_stored_timestamps_and_keeps_database_errors_typed() {
     transaction.batch_execute("SELECT 1 / 0").unwrap_err();
     let error = probe_postgres_integration_backlog(&mut transaction).unwrap_err();
     assert!(matches!(error, PostgresBacklogProbeError::Database(_)));
+    assert_eq!(error.to_string(), "PostgreSQL backlog probe failed");
     assert!(error.source().is_some());
 }
