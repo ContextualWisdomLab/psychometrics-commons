@@ -9,8 +9,8 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, ScoringJobPersistenceDisposition,
 };
 use psychometrics_commons_runtime::postgres_scoring_request::{
-    apply_scoring_request_migration, persist_scoring_dispatch,
-    ScoringDispatchPersistenceError, ScoringRequestPersistenceDisposition,
+    apply_scoring_request_migration, persist_scoring_dispatch, ScoringDispatchPersistenceError,
+    ScoringRequestPersistenceDisposition,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
@@ -63,7 +63,11 @@ fn apply_migrations(client: &mut Client) {
     apply_scoring_request_migration(client).unwrap();
 }
 
-fn request_named(session_ref: &str, scoring_request_ref: &str, snapshot_ref: &str) -> ScoringRequest {
+fn request_named(
+    session_ref: &str,
+    scoring_request_ref: &str,
+    snapshot_ref: &str,
+) -> ScoringRequest {
     let mut ledger = ResponseLedger::new(session_ref).unwrap();
     ledger
         .record(
@@ -95,17 +99,22 @@ fn request_named(session_ref: &str, scoring_request_ref: &str, snapshot_ref: &st
     .unwrap()
 }
 
-fn dispatch_event(event_ref: &str, digest: &str) -> IntegrationEvent {
+fn dispatch_event(
+    event_ref: &str,
+    digest: &str,
+    scoring_job_ref: &str,
+    response_snapshot_ref: &str,
+) -> IntegrationEvent {
     IntegrationEvent::new(
         event_ref,
         "scoring.dispatch.requested",
         "v1",
         "psychometrics_commons",
         "tenant_dispatch_alpha",
-        "scoring_job_dispatch_alpha",
+        scoring_job_ref,
         10_000,
         "correlation_dispatch_alpha",
-        Some("response_snapshot_dispatch_alpha"),
+        Some(response_snapshot_ref),
         digest,
     )
     .unwrap()
@@ -129,7 +138,12 @@ fn request_job_and_outbox_are_committed_and_replayed_as_one_dispatch() {
         3,
     )
     .unwrap();
-    let event = dispatch_event("event_scoring_dispatch_alpha", PAYLOAD_DIGEST_A);
+    let event = dispatch_event(
+        "event_scoring_dispatch_alpha",
+        PAYLOAD_DIGEST_A,
+        job.scoring_job_ref(),
+        request.response_snapshot_ref(),
+    );
 
     let mut transaction = client.transaction().unwrap();
     let inserted = persist_scoring_dispatch(&mut transaction, &request, &job, &event, 3).unwrap();
@@ -179,7 +193,12 @@ fn mismatched_job_request_fails_before_any_write() {
         "response_snapshot_dispatch_mismatch",
     );
     let job = ScoringJob::new("scoring_job_dispatch_alpha", "other_scoring_request", 3).unwrap();
-    let event = dispatch_event("event_scoring_dispatch_mismatch", PAYLOAD_DIGEST_A);
+    let event = dispatch_event(
+        "event_scoring_dispatch_mismatch",
+        PAYLOAD_DIGEST_A,
+        job.scoring_job_ref(),
+        request.response_snapshot_ref(),
+    );
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
@@ -193,7 +212,10 @@ fn mismatched_job_request_fails_before_any_write() {
             .query_one(&format!("SELECT count(*) FROM {table}"), &[])
             .unwrap()
             .get(0);
-        assert_eq!(count, 0, "{table} must remain empty after rejected dispatch");
+        assert_eq!(
+            count, 0,
+            "{table} must remain empty after rejected dispatch"
+        );
     }
 }
 
@@ -203,12 +225,6 @@ fn outbox_conflict_rolls_back_request_and_job_insertions() {
     let mut client = test_client();
     reset_tables(&mut client);
     apply_migrations(&mut client);
-
-    let existing_event = dispatch_event("event_scoring_dispatch_conflict", PAYLOAD_DIGEST_A);
-    assert_eq!(
-        enqueue_outbox_event(&mut client, &existing_event, 3).unwrap(),
-        PersistenceDisposition::Inserted
-    );
 
     let request = request_named(
         "session_dispatch_conflict",
@@ -221,7 +237,22 @@ fn outbox_conflict_rolls_back_request_and_job_insertions() {
         3,
     )
     .unwrap();
-    let conflicting_event = dispatch_event("event_scoring_dispatch_conflict", PAYLOAD_DIGEST_B);
+    let existing_event = dispatch_event(
+        "event_scoring_dispatch_conflict",
+        PAYLOAD_DIGEST_A,
+        job.scoring_job_ref(),
+        request.response_snapshot_ref(),
+    );
+    assert_eq!(
+        enqueue_outbox_event(&mut client, &existing_event, 3).unwrap(),
+        PersistenceDisposition::Inserted
+    );
+    let conflicting_event = dispatch_event(
+        "event_scoring_dispatch_conflict",
+        PAYLOAD_DIGEST_B,
+        job.scoring_job_ref(),
+        request.response_snapshot_ref(),
+    );
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
@@ -253,5 +284,8 @@ fn outbox_conflict_rolls_back_request_and_job_insertions() {
         .get(0);
     assert_eq!(request_count, 0);
     assert_eq!(job_count, 0);
-    assert_eq!(outbox_count, 1, "pre-existing outbox evidence must remain intact");
+    assert_eq!(
+        outbox_count, 1,
+        "pre-existing outbox evidence must remain intact"
+    );
 }

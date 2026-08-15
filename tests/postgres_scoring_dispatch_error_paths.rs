@@ -104,7 +104,7 @@ fn dispatch_event() -> IntegrationEvent {
         "scoring_job_dispatch_error_path",
         20_000,
         "correlation_dispatch_error_path",
-        None,
+        Some("response_snapshot_dispatch_error_path"),
         PAYLOAD_DIGEST,
     )
     .unwrap()
@@ -184,14 +184,32 @@ fn nonfresh_job_failure_rolls_back_request_insert() {
 #[test]
 fn dispatch_error_display_and_sources_are_typed() {
     let cases = [
-        ScoringDispatchPersistenceError::MismatchedScoringRequest,
-        ScoringDispatchPersistenceError::Request(ScoringRequestPersistenceError::InvalidReference),
-        ScoringDispatchPersistenceError::Job(ScoringJobPersistenceError::InvalidReference),
-        ScoringDispatchPersistenceError::Outbox(PersistenceError::InvalidReference),
+        (
+            ScoringDispatchPersistenceError::MismatchedScoringRequest,
+            false,
+        ),
+        (
+            ScoringDispatchPersistenceError::InvalidDispatchEnvelope,
+            false,
+        ),
+        (
+            ScoringDispatchPersistenceError::Request(
+                ScoringRequestPersistenceError::InvalidReference,
+            ),
+            true,
+        ),
+        (
+            ScoringDispatchPersistenceError::Job(ScoringJobPersistenceError::InvalidReference),
+            true,
+        ),
+        (
+            ScoringDispatchPersistenceError::Outbox(PersistenceError::InvalidReference),
+            true,
+        ),
     ];
 
-    for (index, error) in cases.into_iter().enumerate() {
+    for (error, has_source) in cases {
         assert!(!error.to_string().is_empty());
-        assert_eq!(error.source().is_some(), index != 0);
+        assert_eq!(error.source().is_some(), has_source);
     }
 }
