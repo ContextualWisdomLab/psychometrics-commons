@@ -73,7 +73,7 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
     assert_eq!(
         enqueue_outbox_event(&mut primary, &event(), 3)
             .expect("pending event should be enqueued"),
-        PersistenceDisposition::Inserted
+        PersistenceDisposition::Inserted,
     );
 
     let mut first_transaction = primary
@@ -145,7 +145,7 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
     }
     assert!(
         observed_blocking_lock,
-        "the second worker must contend on the first uncommitted claim instead of bypassing exclusivity"
+        "the second worker must contend on the first uncommitted claim instead of bypassing exclusivity",
     );
 
     first_transaction
@@ -155,7 +155,7 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
         second_worker
             .join()
             .expect("competing claim worker should not panic"),
-        "after the winner commits, the competing worker must observe NotLeaseable"
+        "after the winner commits, the competing worker must observe NotLeaseable",
     );
 
     let mut expiry_transaction = primary
