@@ -3,6 +3,9 @@
 use psychometrics_commons_runtime::anonymous_session::{
     AnonymousSessionContext, AnonymousSessionContextError,
 };
+use psychometrics_commons_runtime::authorization::{
+    AuthorizationContext, AuthorizationError,
+};
 use psychometrics_commons_runtime::data_rights::{
     DataRightsError, DataRightsRequest, DataRightsRequestKind,
 };
@@ -59,6 +62,21 @@ fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() 
                 "data-rights field {field_index} must reject non-canonical reference spelling {invalid_reference:?}",
             );
         }
+
+        for field_index in 0..3 {
+            let mut references = ["tenant_ref", "subject_ref", "participant_ref"];
+            references[field_index] = invalid_reference;
+            assert_eq!(
+                AuthorizationContext::new(
+                    references[0],
+                    references[1],
+                    Some(references[2]),
+                    &[],
+                ),
+                Err(AuthorizationError::InvalidReference),
+                "authorization field {field_index} must reject non-canonical reference spelling {invalid_reference:?}",
+            );
+        }
     }
 }
 
@@ -84,4 +102,15 @@ fn canonical_opaque_public_references_remain_accepted() {
     )
     .unwrap();
     assert_eq!(request.tenant_ref(), "tenant_ref");
+
+    let authorization = AuthorizationContext::new(
+        "tenant_ref",
+        "subject_ref",
+        Some("participant_ref"),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(authorization.tenant_ref(), "tenant_ref");
+    assert_eq!(authorization.subject_ref(), "subject_ref");
+    assert_eq!(authorization.participant_ref(), Some("participant_ref"));
 }
