@@ -87,7 +87,8 @@ pub fn persist_data_rights_processing_start(
 
     require_read_committed(transaction)?;
     let request_kind = request_kind_name(request.kind());
-    let updated = transaction.query_opt(
+    let updated = query_optional_row(
+        transaction,
         "UPDATE data_rights_request_state
          SET current_state = 'processing',
              operation_ref = $3,
@@ -120,7 +121,8 @@ pub fn persist_data_rights_processing_start(
         return Ok(DataRightsProcessingDisposition::Started);
     }
 
-    let row = transaction.query_opt(
+    let row = query_optional_row(
+        transaction,
         "SELECT participant_ref, request_kind, scope_ref, current_state,
                 verification_evidence_ref, verified_at_unix_ms,
                 operation_ref, processing_started_at_unix_ms
@@ -158,6 +160,17 @@ pub fn persist_data_rights_processing_start(
         Err(DataRightsPersistenceError::ConflictingReplay)
     } else {
         Err(DataRightsPersistenceError::InvalidRequestState)
+    }
+}
+
+fn query_optional_row(
+    transaction: &mut Transaction<'_>,
+    statement: &str,
+    params: &[&(dyn postgres::types::ToSql + Sync)],
+) -> Result<Option<postgres::Row>, DataRightsPersistenceError> {
+    match transaction.query_opt(statement, params) {
+        Ok(row) => Ok(row),
+        Err(error) => Err(DataRightsPersistenceError::from(error)),
     }
 }
 
