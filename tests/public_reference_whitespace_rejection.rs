@@ -67,12 +67,7 @@ fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() 
             let mut references = ["tenant_ref", "subject_ref", "participant_ref"];
             references[field_index] = invalid_reference;
             assert_eq!(
-                AuthorizationContext::new(
-                    references[0],
-                    references[1],
-                    Some(references[2]),
-                    &[],
-                ),
+                AuthorizationContext::new(references[0], references[1], Some(references[2]), &[]),
                 Err(AuthorizationError::InvalidReference),
                 "authorization field {field_index} must reject non-canonical reference spelling {invalid_reference:?}",
             );
