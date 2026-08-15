@@ -5,10 +5,8 @@ use psychometrics_commons_runtime::anonymous_credential::{
 };
 use std::error::Error;
 
-const DIGEST_A: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const DIGEST_B: &str =
-    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn credential() -> AnonymousCredential {
     AnonymousCredential::new(
@@ -156,13 +154,7 @@ fn construction_rejects_malformed_identity_digest_and_lifetime_evidence() {
     ] {
         assert_eq!(
             AnonymousCredential::new(
-                valid[0],
-                valid[1],
-                valid[2],
-                valid[3],
-                DIGEST_A,
-                issued_at,
-                expires_at,
+                valid[0], valid[1], valid[2], valid[3], DIGEST_A, issued_at, expires_at,
             )
             .unwrap_err(),
             expected
