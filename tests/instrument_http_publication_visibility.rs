@@ -75,7 +75,8 @@ fn published_release(
     instrument_ref: &str,
     evidence_ref: &str,
 ) -> InstrumentRelease {
-    let mut release = InstrumentRelease::new(manifest(release_ref, instrument_ref), 10_000).unwrap();
+    let mut release =
+        InstrumentRelease::new(manifest(release_ref, instrument_ref), 10_000).unwrap();
     release
         .apply_command(
             &format!("publication_review_{release_ref}"),
