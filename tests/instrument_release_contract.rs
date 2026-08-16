@@ -152,7 +152,7 @@ fn optional_norm_and_consent_requirements_remain_explicitly_absent() {
     let manifest = custom_manifest(
         "release_big_five_en_v1",
         &["item_version_001"],
-        " en ",
+        "en",
         None,
         &[],
         VALID_DIGEST,
@@ -550,7 +550,7 @@ fn instrument_release_errors_have_stable_safe_display_text() {
         ),
         (
             InstrumentReleaseError::InvalidLocale,
-            "instrument release locale must be a valid BCP 47-style tag",
+            "instrument release locale must be an exact whitespace-free BCP 47-style tag",
         ),
         (
             InstrumentReleaseError::InvalidDigest,
