@@ -17,6 +17,8 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
+| `response_snapshot` | response | Implemented persist subset |
+| `response_snapshot_entry` | response | Implemented persist subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
@@ -57,6 +59,10 @@ The protected-main slice persists:
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
+
+## Active PR #151 response-snapshot reload
+
+`migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs` already persist one immutable completed prefix per session on protected main. Active PR #151 adds `load_response_snapshot` and `load_response_snapshot_for_session` and no new physical objects. After restart, a caller reconstructs the frozen prefix under `READ COMMITTED` by `snapshot_sequence`. A missing snapshot is absent. Header/entry mismatches, gapped sequences, and noncanonical stored digests fail closed. HTTP scoring transport remains outside this slice.
 
 ## Logical-to-physical mapping rule
 

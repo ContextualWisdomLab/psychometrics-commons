@@ -28,6 +28,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ResponseSnapshotPersistenceError::UnsupportedIsolationLevel,
             "response snapshot persistence requires read committed isolation",
         ),
+        (
+            ResponseSnapshotPersistenceError::CorruptHistory,
+            "stored response snapshot rows cannot reconstruct a valid frozen prefix",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());

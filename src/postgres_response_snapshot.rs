@@ -1,13 +1,14 @@
 //! `PostgreSQL` 18 persistence for immutable response snapshots.
 //!
-//! This adapter stores the frozen accepted-response prefix after collection
-//! completes. It does not store response bodies and does not recompute scores.
-//! The caller owns the connection, credentials, and transaction boundary.
-//! Replay requires `READ COMMITTED` so a concurrent insert that wins a unique-key
-//! race is visible to the exact-replay classifier.
+//! This adapter stores and reloads the frozen accepted-response prefix after
+//! collection completes. It does not store response bodies and does not
+//! recompute scores. The caller owns the connection, credentials, and
+//! transaction boundary. Persist replay and restart reload require
+//! `READ COMMITTED` so a concurrent insert that wins a unique-key race is
+//! visible to the classifier and so a later load sees the committed prefix.
 
 use crate::reference::normalized_reference;
-use crate::response::ResponseSnapshot;
+use crate::response::{ResponseSnapshot, ResponseSnapshotEntryInput, WriteError};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -36,6 +37,8 @@ pub enum ResponseSnapshotPersistenceError {
     InvalidSequence,
     /// Response-snapshot persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
+    /// Stored header and entry rows cannot reconstruct a valid frozen snapshot.
+    CorruptHistory,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -54,6 +57,9 @@ impl Display for ResponseSnapshotPersistenceError {
             }
             Self::UnsupportedIsolationLevel => {
                 "response snapshot persistence requires read committed isolation"
+            }
+            Self::CorruptHistory => {
+                "stored response snapshot rows cannot reconstruct a valid frozen prefix"
             }
             Self::Database(_) => "PostgreSQL response-snapshot persistence failed",
         })
@@ -84,6 +90,127 @@ pub fn apply_response_snapshot_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
     client.batch_execute(RESPONSE_SNAPSHOT_MIGRATION)
+}
+
+/// Reload one immutable response snapshot after process restart.
+///
+/// The caller owns the `READ COMMITTED` transaction. The load takes `FOR SHARE`
+/// on the snapshot header so a concurrent writer holding that row waits until
+/// reconstruction finishes. Entries are reconstructed in `snapshot_sequence`
+/// order, not by opaque event identity. A missing snapshot is absent. Header
+/// counts, gapped sequences, or stored labels that cannot rebuild the freeze
+/// fail closed. Historical snapshots are not rewritten.
+///
+/// # Errors
+///
+/// Returns [`ResponseSnapshotPersistenceError`] for an invalid reference,
+/// unsupported isolation, stored evidence that cannot reconstruct a valid
+/// snapshot, a sequence outside the `PostgreSQL` range, or a database failure.
+pub fn load_response_snapshot(
+    transaction: &mut Transaction<'_>,
+    snapshot_ref: &str,
+) -> Result<Option<ResponseSnapshot>, ResponseSnapshotPersistenceError> {
+    require_read_committed(transaction)?;
+    let snapshot_ref = required_reference(snapshot_ref)?;
+    load_snapshot_from_header(
+        transaction,
+        "SELECT snapshot_ref, session_ref, event_count, last_sequence \
+         FROM response_snapshot WHERE snapshot_ref = $1 FOR SHARE",
+        snapshot_ref,
+    )
+}
+
+/// Reload the unique frozen snapshot bound to one completed session.
+///
+/// `response_snapshot.session_ref` is unique. Scoring after restart can
+/// therefore recover the completed prefix from the session identity without
+/// inventing a second snapshot.
+///
+/// # Errors
+///
+/// Returns the same fail-closed errors as [`load_response_snapshot`].
+pub fn load_response_snapshot_for_session(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Option<ResponseSnapshot>, ResponseSnapshotPersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = required_reference(session_ref)?;
+    load_snapshot_from_header(
+        transaction,
+        "SELECT snapshot_ref, session_ref, event_count, last_sequence \
+         FROM response_snapshot WHERE session_ref = $1 FOR SHARE",
+        session_ref,
+    )
+}
+
+fn load_snapshot_from_header(
+    transaction: &mut Transaction<'_>,
+    header_sql: &str,
+    identity_ref: &str,
+) -> Result<Option<ResponseSnapshot>, ResponseSnapshotPersistenceError> {
+    let Some(header) = transaction.query_opt(header_sql, &[&identity_ref])? else {
+        return Ok(None);
+    };
+    let snapshot_ref: String = header.get(0);
+    let session_ref: String = header.get(1);
+    let event_count = stored_sequence(header.get(2))?;
+    let last_sequence = header
+        .get::<_, Option<i64>>(3)
+        .map(stored_sequence)
+        .transpose()?;
+    let rows = transaction.query(
+        "SELECT snapshot_sequence, event_ref, item_version_ref, payload_digest \
+         FROM response_snapshot_entry \
+         WHERE snapshot_ref = $1 \
+         ORDER BY snapshot_sequence ASC",
+        &[&snapshot_ref],
+    )?;
+    if rows.len() != event_count {
+        return Err(ResponseSnapshotPersistenceError::CorruptHistory);
+    }
+    let mut owned_entries = Vec::with_capacity(rows.len());
+    for (index, row) in rows.iter().enumerate() {
+        let snapshot_sequence = stored_sequence(row.get(0))?;
+        if snapshot_sequence != index + 1 {
+            return Err(ResponseSnapshotPersistenceError::CorruptHistory);
+        }
+        let event_ref: String = row.get(1);
+        let item_version_ref: String = row.get(2);
+        let payload_digest: String = row.get(3);
+        owned_entries.push((event_ref, item_version_ref, payload_digest));
+    }
+    let entries: Vec<ResponseSnapshotEntryInput<'_>> = owned_entries
+        .iter()
+        .map(
+            |(event_ref, item_version_ref, payload_digest)| ResponseSnapshotEntryInput {
+                event_ref,
+                item_version_ref,
+                payload_digest,
+            },
+        )
+        .collect();
+    ResponseSnapshot::from_persisted(&snapshot_ref, &session_ref, &entries, last_sequence)
+        .map(Some)
+        .map_err(map_reconstruct_error)
+}
+
+fn stored_sequence(value: i64) -> Result<usize, ResponseSnapshotPersistenceError> {
+    usize::try_from(value).map_err(|_| ResponseSnapshotPersistenceError::InvalidSequence)
+}
+
+fn map_reconstruct_error(error: WriteError) -> ResponseSnapshotPersistenceError {
+    match error {
+        WriteError::InvalidReference => ResponseSnapshotPersistenceError::InvalidReference,
+        WriteError::EmptyReference
+        | WriteError::InvalidPayloadDigest
+        | WriteError::CorruptSnapshotEvidence => ResponseSnapshotPersistenceError::CorruptHistory,
+        WriteError::SessionNotActive(_)
+        | WriteError::IdempotencyConflict
+        | WriteError::ServerReferenceConflict
+        | WriteError::SnapshotRequiresCompleted(_) => {
+            ResponseSnapshotPersistenceError::CorruptHistory
+        }
+    }
 }
 
 /// Persist one immutable response snapshot frozen after collection completes.
@@ -234,7 +361,12 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{postgres_sequence, required_reference, ResponseSnapshotPersistenceError};
+    use super::{
+        map_reconstruct_error, postgres_sequence, required_reference, stored_sequence,
+        ResponseSnapshotPersistenceError,
+    };
+    use crate::response::WriteError;
+    use crate::session::SessionState;
 
     #[test]
     fn blank_numeric_and_overflow_sequences_fail_closed() {
@@ -256,5 +388,36 @@ mod reference_guard_tests {
             postgres_sequence(usize::MAX),
             Err(ResponseSnapshotPersistenceError::InvalidSequence)
         ));
+        assert_eq!(stored_sequence(0).unwrap(), 0);
+        assert_eq!(stored_sequence(3).unwrap(), 3);
+        assert!(matches!(
+            stored_sequence(-1),
+            Err(ResponseSnapshotPersistenceError::InvalidSequence)
+        ));
+    }
+
+    #[test]
+    fn reconstruct_errors_map_to_fail_closed_persistence_errors() {
+        assert!(matches!(
+            map_reconstruct_error(WriteError::InvalidReference),
+            ResponseSnapshotPersistenceError::InvalidReference
+        ));
+        for error in [
+            WriteError::EmptyReference,
+            WriteError::InvalidPayloadDigest,
+            WriteError::CorruptSnapshotEvidence,
+            WriteError::SessionNotActive(SessionState::Paused),
+            WriteError::IdempotencyConflict,
+            WriteError::ServerReferenceConflict,
+            WriteError::SnapshotRequiresCompleted(SessionState::Active),
+        ] {
+            assert!(
+                matches!(
+                    map_reconstruct_error(error),
+                    ResponseSnapshotPersistenceError::CorruptHistory
+                ),
+                "{error} must fail closed as corrupt stored history"
+            );
+        }
     }
 }
