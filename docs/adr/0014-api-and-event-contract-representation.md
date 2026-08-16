@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin product HTTP transport and durable external event transport are not yet implemented on protected main; operator GET `/live` and GET `/ready` probes exist only on the Active PR successor to #122 with `openapi/health-probes.yaml`; that same PR binds a process from `HEALTH_LISTEN_ADDR` or `PORT`, keeps serving after a dropped probe, answers `/live` without store I/O even when `DATABASE_URL` is down, and observes `observe_postgres_operational_snapshot` only for `/ready` without exposing driver errors
+- Current/as-built status: public/admin product HTTP transport and durable external event transport are not yet implemented on protected main; operator GET `/live` and GET `/ready` probes exist only on Active PR #132 (successor to #122) with `openapi/health-probes.yaml`; that same PR binds a process from `HEALTH_LISTEN_ADDR` or `PORT`, keeps serving after a dropped probe, answers `/live` without store I/O even when `DATABASE_URL` is down, and observes `observe_postgres_operational_snapshot` only for `/ready` without exposing driver errors
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 
