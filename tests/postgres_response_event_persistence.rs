@@ -143,6 +143,13 @@ fn load_err(client: &mut Client, session_ref: &str) -> ResponseEventPersistenceE
     error
 }
 
+fn load_receipts_err(client: &mut Client, session_ref: &str) -> ResponseEventPersistenceError {
+    let mut transaction = client.transaction().unwrap();
+    let error = load_response_event_receipts(&mut transaction, session_ref).unwrap_err();
+    transaction.rollback().unwrap();
+    error
+}
+
 fn rebound_event(
     client_event_ref: &str,
     item_version_ref: &str,
@@ -194,8 +201,19 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
     assert_eq!(first_receipts[0].event(), &first);
     assert_eq!(first_receipts[0].observed_at_unix_ms(), OBSERVED_AT_MS);
     assert_eq!(first_receipts[0].received_at_unix_ms(), RECEIVED_AT_MS);
+    assert_eq!(
+        persist_ok_at(
+            &mut client,
+            "session_ipip_ko_quick",
+            first_receipts[0].event(),
+            first_receipts[0].observed_at_unix_ms(),
+            first_receipts[0].received_at_unix_ms(),
+        ),
+        ResponseEventPersistenceDisposition::Duplicate
+    );
 
-    let second = live
+    let mut restarted = after_first;
+    let second = restarted
         .record(
             SessionState::Active,
             write(
@@ -212,6 +230,19 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
     );
 
     let rebuilt = load_ok(&mut client, "session_ipip_ko_quick");
+    assert_eq!(rebuilt, restarted);
+    let live_second = live
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_02",
+                "client_event_item_02",
+                "item_version_n2_ko",
+                DIGEST_N2,
+            ),
+        )
+        .unwrap();
+    assert_eq!(live_second, second);
     assert_eq!(rebuilt, live);
     let snapshot = rebuilt
         .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
@@ -398,6 +429,10 @@ fn missing_relation_and_gapped_history_fail_closed() {
         .unwrap();
     assert!(matches!(
         load_err(&mut client, "session_ipip_ko_gap"),
+        ResponseEventPersistenceError::InvalidSequence
+    ));
+    assert!(matches!(
+        load_receipts_err(&mut client, "session_ipip_ko_gap"),
         ResponseEventPersistenceError::InvalidSequence
     ));
 }
