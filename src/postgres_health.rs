@@ -220,6 +220,48 @@ impl PostgresDataRightsBacklogEvidence {
     }
 }
 
+/// Operator-supplied bounds for asynchronous scoring-job backlog evidence.
+///
+/// Scoring timeliness is a deployment-profile policy. The product does not invent a
+/// universal queue-depth or age SLO; callers supply evidence-backed limits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScoringJobBacklogPolicy {
+    /// Largest queued, leased, or retry-scheduled job population still accepted.
+    pub max_active_job_count: u64,
+    /// Largest age in milliseconds of the oldest active scoring job.
+    pub max_active_job_age_ms: u64,
+    /// Largest quarantined scoring-job population still accepted.
+    pub max_quarantined_job_count: u64,
+}
+
+/// Aggregate scoring-job backlog evidence without request, worker, or result identities.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresScoringJobBacklogEvidence {
+    active_job_count: u64,
+    quarantined_job_count: u64,
+    oldest_active_job_at_unix_ms: Option<u64>,
+}
+
+impl PostgresScoringJobBacklogEvidence {
+    /// Return queued plus leased plus retry-scheduled scoring jobs.
+    #[must_use]
+    pub const fn active_job_count(self) -> u64 {
+        self.active_job_count
+    }
+
+    /// Return the number of scoring jobs quarantined for operator attention.
+    #[must_use]
+    pub const fn quarantined_job_count(self) -> u64 {
+        self.quarantined_job_count
+    }
+
+    /// Return the oldest `created_at` among active scoring jobs, if any.
+    #[must_use]
+    pub const fn oldest_active_job_at_unix_ms(self) -> Option<u64> {
+        self.oldest_active_job_at_unix_ms
+    }
+}
+
 /// Fail-closed error while reading durable backlog evidence.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -502,6 +544,80 @@ pub fn classify_postgres_data_rights_backlog(
         evidence.oldest_pending_propagation_event_at_unix_ms,
         observed_at_unix_ms,
         policy.max_pending_propagation_age_ms,
+    ) {
+        return BacklogHealth::Stalled;
+    }
+
+    BacklogHealth::WithinBounds
+}
+
+/// Probe aggregate scoring-job backlog evidence without identities or payloads.
+///
+/// Active work is queued, leased, or retry-scheduled. Completed and cancelled jobs are
+/// terminal and do not participate. Age is measured from `created_at` so a later lease
+/// or retry transition cannot hide a job that has waited too long. The query returns
+/// only counts and one oldest timestamp.
+///
+/// # Errors
+///
+/// Returns [`PostgresBacklogProbeError::InvalidStoredValue`] when the oldest created
+/// time is not a positive unix-millisecond value, or
+/// [`PostgresBacklogProbeError::Database`] when the query cannot execute.
+pub fn probe_postgres_scoring_job_backlog(
+    client: &mut impl GenericClient,
+) -> Result<PostgresScoringJobBacklogEvidence, PostgresBacklogProbeError> {
+    let row = client.query_one(
+        "SELECT \
+             (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
+                 WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled')), \
+             (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
+                 WHERE scoring_state = 'quarantined'), \
+             (SELECT (EXTRACT(EPOCH FROM MIN(created_at)) * 1000)::BIGINT \
+                 FROM scoring_job_state \
+                 WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled'))",
+        &[],
+    )?;
+
+    let active_job_count: i64 = row.get(0);
+    let quarantined_job_count: i64 = row.get(1);
+    let oldest_active_job_at_unix_ms: Option<i64> = row.get(2);
+
+    Ok(PostgresScoringJobBacklogEvidence {
+        active_job_count: active_job_count.cast_unsigned(),
+        quarantined_job_count: quarantined_job_count.cast_unsigned(),
+        oldest_active_job_at_unix_ms: positive_optional_millis(oldest_active_job_at_unix_ms)?,
+    })
+}
+
+/// Classify scoring-job backlog evidence against an explicit operator policy.
+///
+/// Missing observation time or future-dated created-at evidence produces `Unknown`.
+/// Excess active or quarantined counts, or an active job older than the supplied
+/// age bound, produce `Stalled`.
+#[must_use]
+pub fn classify_postgres_scoring_job_backlog(
+    evidence: &PostgresScoringJobBacklogEvidence,
+    observed_at_unix_ms: u64,
+    policy: &ScoringJobBacklogPolicy,
+) -> BacklogHealth {
+    if observed_at_unix_ms == 0
+        || evidence
+            .oldest_active_job_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+    {
+        return BacklogHealth::Unknown;
+    }
+
+    if evidence.active_job_count > policy.max_active_job_count
+        || evidence.quarantined_job_count > policy.max_quarantined_job_count
+    {
+        return BacklogHealth::Stalled;
+    }
+
+    if age_exceeds(
+        evidence.oldest_active_job_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_active_job_age_ms,
     ) {
         return BacklogHealth::Stalled;
     }
