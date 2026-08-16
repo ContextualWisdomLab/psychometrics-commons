@@ -1,4 +1,4 @@
-//! Hosted dual-proof account-link write and returning-account recovery.
+//! Hosted dual-proof account-link write, unlink, and returning-account recovery.
 //!
 //! HTTP and messaging adapters validate anonymous-session and Keyverse proofs,
 //! then call these commands. This module does not parse tokens or open a socket.
@@ -6,10 +6,13 @@
 //! a stale unique enforcer cannot accept a new account link. It then authorizes
 //! both proofs, persists append-only identity-link history, and recovers the
 //! same product-owned participant from a still-valid authenticated account
-//! proof.
+//! proof. A returning account may unlink from unterminated history even while
+//! restore inspect still reports drift; persist then clears that participant's
+//! derived current projection.
 
 use crate::account_link::{
-    link_authenticated_account, AccountLinkAuthorizationError, AuthenticatedAccountControl,
+    link_authenticated_account, unlink_authenticated_account, AccountLinkAuthorizationError,
+    AuthenticatedAccountControl,
 };
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::participant::ParticipantRecord;
@@ -128,6 +131,44 @@ pub fn persist_authorized_account_link(
         authenticated_control,
         link_event_ref,
         linked_at_unix_ms,
+    )?;
+    Ok(persist_participant_identity_history(
+        transaction,
+        participant,
+    )?)
+}
+
+/// Authorize an account unlink and persist the append-only link-end evidence.
+///
+/// A returning login may disconnect after the anonymous session expired. The
+/// authenticated proof must still be valid and must match the current
+/// issuer-scoped subject. Store-wide restore drift does not block unlink:
+/// history remains the source of truth, and persist clears this participant's
+/// derived current projection. Exact replay of the same link-end evidence is
+/// idempotent.
+///
+/// If persist fails after authorization, the caller must drop the in-memory
+/// participant. The transaction remains caller-owned.
+///
+/// # Errors
+///
+/// Returns [`AccountLinkWriteError::Authorization`] when the account proof is
+/// expired, belongs to another tenant, or does not match the current link, and
+/// [`AccountLinkWriteError::Persistence`] when durable write or uniqueness
+/// checks fail.
+pub fn persist_authorized_account_unlink(
+    transaction: &mut Transaction<'_>,
+    participant: &mut ParticipantRecord,
+    authenticated_control: &AuthenticatedAccountControl,
+    link_end_event_ref: &str,
+    ended_at_unix_ms: u64,
+) -> Result<IdentityLinkPersistenceDisposition, AccountLinkWriteError> {
+    inspect_identity_link_current_projection_drift(transaction)?;
+    unlink_authenticated_account(
+        participant,
+        authenticated_control,
+        link_end_event_ref,
+        ended_at_unix_ms,
     )?;
     Ok(persist_participant_identity_history(
         transaction,

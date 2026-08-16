@@ -1,10 +1,12 @@
-//! Dual-proof authorization for optional anonymous-to-account linking.
+//! Dual-proof authorization for optional anonymous-to-account linking and unlink.
 //!
 //! ADR-0003 requires proof of control of both the anonymous assessment session and the
 //! authenticated account before a stable Psychometrics Commons participant can be linked to a
-//! Keyverse-owned identity. This application boundary composes already-validated evidence from
-//! those two independent trust domains. It does not parse identity tokens, accept credentials, or
-//! rewrite participant history.
+//! Keyverse-owned identity. Unlink is append-only and requires a still-valid authenticated
+//! account proof that matches the current issuer-scoped subject, so a returning login can
+//! disconnect after the anonymous session has expired. This application boundary composes
+//! already-validated evidence from those two independent trust domains. It does not parse
+//! identity tokens, accept credentials, or rewrite participant history.
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::participant::{AccountLinkError, ParticipantRecord};
@@ -28,6 +30,8 @@ pub enum AccountLinkAuthorizationError {
     AnonymousBindingMismatch,
     /// The authenticated account-control proof was no longer valid at the link boundary.
     AuthenticatedProofExpired,
+    /// The authenticated account-control proof did not match the current identity link.
+    AuthenticatedBindingMismatch,
     /// Authenticated account control belonged to another tenant.
     CrossTenantDenied,
     /// Participant lifecycle validation rejected the proposed immutable link event.
@@ -53,6 +57,9 @@ impl Display for AccountLinkAuthorizationError {
             Self::AuthenticatedProofExpired => {
                 "authenticated account-control proof is not valid at the account-link time"
             }
+            Self::AuthenticatedBindingMismatch => {
+                "authenticated account-control proof does not match this participant's current identity link"
+            }
             Self::CrossTenantDenied => {
                 "authenticated account control does not belong to the participant tenant"
             }
@@ -71,6 +78,7 @@ impl Error for AccountLinkAuthorizationError {
             | Self::AnonymousSessionExpired
             | Self::AnonymousBindingMismatch
             | Self::AuthenticatedProofExpired
+            | Self::AuthenticatedBindingMismatch
             | Self::CrossTenantDenied => None,
         }
     }
@@ -208,6 +216,53 @@ pub fn link_authenticated_account(
             anonymous_control.authorization_evidence_ref(),
             authenticated_control.proof_evidence_ref(),
             linked_at_unix_ms,
+        )
+        .map_err(AccountLinkAuthorizationError::Participant)
+}
+
+/// End the current account link using a still-valid authenticated account proof.
+///
+/// A returning Keyverse login may unlink after the anonymous session expired.
+/// The proof must still be valid at `ended_at_unix_ms`, belong to the same
+/// tenant, and match the current issuer-scoped subject. Exact replay of the
+/// same link-end event is idempotent. The product-owned `participant_ref` is
+/// never rewritten.
+///
+/// # Errors
+///
+/// Returns [`AccountLinkAuthorizationError`] for zero server time, an expired
+/// proof, a tenant mismatch, a proof that does not match the current link, or
+/// participant lifecycle rejection.
+pub fn unlink_authenticated_account(
+    participant: &mut ParticipantRecord,
+    authenticated_control: &AuthenticatedAccountControl,
+    link_end_event_ref: &str,
+    ended_at_unix_ms: u64,
+) -> Result<(), AccountLinkAuthorizationError> {
+    if ended_at_unix_ms == 0 {
+        return Err(AccountLinkAuthorizationError::InvalidTimestamp);
+    }
+    if !authenticated_control.is_valid_at(ended_at_unix_ms) {
+        return Err(AccountLinkAuthorizationError::AuthenticatedProofExpired);
+    }
+    if authenticated_control.tenant_ref() != participant.tenant_ref() {
+        return Err(AccountLinkAuthorizationError::CrossTenantDenied);
+    }
+    if let (Some(issuer_ref), Some(subject_ref)) = (
+        participant.linked_issuer_ref(),
+        participant.linked_subject_ref(),
+    ) {
+        if issuer_ref != authenticated_control.issuer_ref()
+            || subject_ref != authenticated_control.subject_ref()
+        {
+            return Err(AccountLinkAuthorizationError::AuthenticatedBindingMismatch);
+        }
+    }
+    participant
+        .record_link_end(
+            link_end_event_ref,
+            authenticated_control.proof_evidence_ref(),
+            ended_at_unix_ms,
         )
         .map_err(AccountLinkAuthorizationError::Participant)
 }

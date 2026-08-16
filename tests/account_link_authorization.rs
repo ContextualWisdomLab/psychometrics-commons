@@ -1,7 +1,8 @@
 //! Account linking requires independent current proof of anonymous-session and account control.
 
 use psychometrics_commons_runtime::account_link::{
-    link_authenticated_account, AccountLinkAuthorizationError, AuthenticatedAccountControl,
+    link_authenticated_account, unlink_authenticated_account, AccountLinkAuthorizationError,
+    AuthenticatedAccountControl,
 };
 use psychometrics_commons_runtime::anonymous_session::AnonymousSessionContext;
 use psychometrics_commons_runtime::participant::{AccountLinkError, ParticipantRecord};
@@ -319,6 +320,135 @@ fn identical_proof_references_are_rejected_by_the_participant_lifecycle() {
 }
 
 #[test]
+fn current_account_proof_unlinks_without_rewriting_participant_identity() {
+    let mut participant = participant();
+    let anonymous = anonymous_for(
+        "tenant_alpha",
+        "participant_alpha",
+        "anonymous_proof_alpha",
+        3_000,
+    );
+    let authenticated = authenticated_for("tenant_alpha", "authenticated_proof_alpha", 3_000);
+    link_authenticated_account(
+        &mut participant,
+        &anonymous,
+        &authenticated,
+        "link_event_alpha",
+        2_000,
+    )
+    .unwrap();
+
+    unlink_authenticated_account(
+        &mut participant,
+        &authenticated,
+        "link_end_event_alpha",
+        2_500,
+    )
+    .unwrap();
+
+    assert_eq!(participant.participant_ref(), "participant_alpha");
+    assert!(participant.linked_subject_ref().is_none());
+    assert_eq!(participant.link_history().len(), 1);
+    assert_eq!(participant.link_end_history().len(), 1);
+
+    unlink_authenticated_account(
+        &mut participant,
+        &authenticated,
+        "link_end_event_alpha",
+        2_500,
+    )
+    .unwrap();
+    assert_eq!(participant.link_end_history().len(), 1);
+}
+
+#[test]
+fn expired_or_foreign_account_proof_cannot_unlink() {
+    let mut participant = participant();
+    let anonymous = anonymous_for(
+        "tenant_alpha",
+        "participant_alpha",
+        "anonymous_proof_alpha",
+        3_000,
+    );
+    let authenticated = authenticated_for("tenant_alpha", "authenticated_proof_alpha", 3_000);
+    link_authenticated_account(
+        &mut participant,
+        &anonymous,
+        &authenticated,
+        "link_event_alpha",
+        2_000,
+    )
+    .unwrap();
+
+    let expired = authenticated_for("tenant_alpha", "authenticated_proof_alpha", 2_400);
+    assert_eq!(
+        unlink_authenticated_account(&mut participant, &expired, "link_end_event_alpha", 2_500)
+            .unwrap_err(),
+        AccountLinkAuthorizationError::AuthenticatedProofExpired
+    );
+
+    let foreign = AuthenticatedAccountControl::new(
+        "tenant_alpha",
+        "issuer_keyverse_prod",
+        "subject_account_beta",
+        "authenticated_proof_beta",
+        3_000,
+    )
+    .unwrap();
+    assert_eq!(
+        unlink_authenticated_account(&mut participant, &foreign, "link_end_event_alpha", 2_500)
+            .unwrap_err(),
+        AccountLinkAuthorizationError::AuthenticatedBindingMismatch
+    );
+
+    let other_tenant = authenticated_for("tenant_beta", "authenticated_proof_gamma", 3_000);
+    assert_eq!(
+        unlink_authenticated_account(
+            &mut participant,
+            &other_tenant,
+            "link_end_event_alpha",
+            2_500,
+        )
+        .unwrap_err(),
+        AccountLinkAuthorizationError::CrossTenantDenied
+    );
+    assert_eq!(
+        participant.linked_subject_ref(),
+        Some("subject_account_alpha")
+    );
+}
+
+#[test]
+fn unknown_unlink_time_fails_before_identity_mutation() {
+    let mut participant = participant();
+    let anonymous = anonymous_for(
+        "tenant_alpha",
+        "participant_alpha",
+        "anonymous_proof_alpha",
+        3_000,
+    );
+    let authenticated = authenticated_for("tenant_alpha", "authenticated_proof_alpha", 3_000);
+    link_authenticated_account(
+        &mut participant,
+        &anonymous,
+        &authenticated,
+        "link_event_alpha",
+        2_000,
+    )
+    .unwrap();
+
+    assert_eq!(
+        unlink_authenticated_account(&mut participant, &authenticated, "link_end_event_alpha", 0)
+            .unwrap_err(),
+        AccountLinkAuthorizationError::InvalidTimestamp
+    );
+    assert_eq!(
+        participant.linked_subject_ref(),
+        Some("subject_account_alpha")
+    );
+}
+
+#[test]
 fn authorization_errors_have_stable_sources() {
     let direct = [
         AccountLinkAuthorizationError::InvalidReference,
@@ -327,6 +457,7 @@ fn authorization_errors_have_stable_sources() {
         AccountLinkAuthorizationError::AnonymousSessionExpired,
         AccountLinkAuthorizationError::AnonymousBindingMismatch,
         AccountLinkAuthorizationError::AuthenticatedProofExpired,
+        AccountLinkAuthorizationError::AuthenticatedBindingMismatch,
         AccountLinkAuthorizationError::CrossTenantDenied,
     ];
     for error in direct {

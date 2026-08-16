@@ -8,8 +8,8 @@
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::account_link::AuthenticatedAccountControl;
 use psychometrics_commons_runtime::account_link_write::{
-    persist_authorized_account_link, recover_participant_for_authenticated_account,
-    AccountLinkWriteError,
+    persist_authorized_account_link, persist_authorized_account_unlink,
+    recover_participant_for_authenticated_account, AccountLinkWriteError,
 };
 use psychometrics_commons_runtime::anonymous_session::AnonymousSessionContext;
 use psychometrics_commons_runtime::participant::ParticipantRecord;
@@ -382,6 +382,157 @@ fn restore_drift_refuses_dual_proof_write_until_operator_reconciles() {
         recovered.linked_subject_ref(),
         Some("keyverse_subject_write")
     );
+}
+
+#[test]
+fn authorized_unlink_clears_recovery_and_allows_the_same_account_to_relink() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let unlinked = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .expect("a still-valid account proof must persist the unlink");
+    transaction.commit().unwrap();
+    assert_eq!(unlinked, IdentityLinkPersistenceDisposition::Inserted);
+    assert!(participant.linked_subject_ref().is_none());
+
+    let mut replay = anonymous_participant();
+    replay
+        .link_account(
+            "link_event_identity_write",
+            "keyverse_issuer_write",
+            "keyverse_subject_write",
+            "anonymous_proof_write",
+            "authenticated_proof_write",
+            10_400,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let replayed = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut replay,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .expect("exact unlink replay must stay idempotent");
+    transaction.commit().unwrap();
+    assert_eq!(replayed, IdentityLinkPersistenceDisposition::Duplicate);
+
+    let mut transaction = client.transaction().unwrap();
+    let missing = recover_participant_for_authenticated_account(
+        &mut transaction,
+        &authenticated_control(),
+        10_600,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert!(
+        missing.is_none(),
+        "an unlinked account must not recover the previous participant"
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    let relinked = persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write_relink",
+        10_700,
+    )
+    .expect("the same participant may relink the freed subject");
+    transaction.commit().unwrap();
+    assert_eq!(relinked, IdentityLinkPersistenceDisposition::Inserted);
+
+    let mut transaction = client.transaction().unwrap();
+    let recovered = recover_participant_for_authenticated_account(
+        &mut transaction,
+        &authenticated_control(),
+        10_800,
+    )
+    .unwrap()
+    .expect("relink must restore returning-account recovery");
+    transaction.commit().unwrap();
+    assert_eq!(recovered.participant_ref(), "participant_identity_write");
+    assert_eq!(
+        recovered.linked_subject_ref(),
+        Some("keyverse_subject_write")
+    );
+    assert_eq!(
+        recovered.link_event_ref(),
+        Some("link_event_identity_write_relink")
+    );
+}
+
+#[test]
+fn restore_drift_still_lets_the_current_account_unlink() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    client
+        .batch_execute("DELETE FROM account_link_write_test.current_participant_identity_link;")
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let unlinked = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .expect(
+        "a returning account must unlink from history while restore inspect still reports drift",
+    );
+    transaction.commit().unwrap();
+    assert_eq!(unlinked, IdentityLinkPersistenceDisposition::Inserted);
+    assert!(participant.linked_subject_ref().is_none());
+
+    let mut transaction = client.transaction().unwrap();
+    let missing = recover_participant_for_authenticated_account(
+        &mut transaction,
+        &authenticated_control(),
+        10_600,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert!(missing.is_none());
 }
 
 #[test]

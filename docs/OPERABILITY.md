@@ -108,7 +108,7 @@ For persistence owned by Psychometrics Commons, a GA profile must establish and 
 3. migration/schema compatibility and expected indexes/constraints;
 4. exact digest/provenance consistency for immutable snapshots/artifacts;
 5. tenant authorization and restricted-linkage protections after restore;
-6. identity-link unique enforcer inspected with `inspect_identity_link_current_projection_drift` and rebuilt from unterminated history via `reconcile_identity_link_current_projections` before `persist_authorized_account_link` accepts a new dual-proof write, including a later participant binding an ended issuer-scoped subject;
+6. identity-link unique enforcer inspected with `inspect_identity_link_current_projection_drift` and rebuilt from unterminated history via `reconcile_identity_link_current_projections` before `persist_authorized_account_link` accepts a new dual-proof write, including a later participant binding an ended issuer-scoped subject; `persist_authorized_account_unlink` may still disconnect a returning account from that history while inspect reports drift;
 7. outbox/inbox/job recovery without duplicate domain effects;
 8. data-rights and research withdrawal/eligibility state preservation;
 9. key/secret dependency recovery without embedding secrets in backup artifacts improperly;
