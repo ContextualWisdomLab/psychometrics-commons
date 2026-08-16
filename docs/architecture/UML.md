@@ -349,7 +349,7 @@ sequenceDiagram
     W->>DB: persist scoring evidence with the same stable job-plus-result event identity; result finalization proceeds only after required presentation provenance is resolved
 ```
 
-No fallback score may be fabricated merely because the scoring dependency is unavailable.
+No fallback score may be fabricated merely because the scoring dependency is unavailable. If the retry budget is exhausted, the job becomes `quarantined` with the typed outage cause, zero `result_snapshot` rows, and zero terminal outbox events so an operator can reconcile without a fabricated score.
 
 ## 8. Optional account-linking sequence
 

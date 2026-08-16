@@ -5,8 +5,9 @@ use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::scoring_worker::{
-    plan_scoring_worker_result_attempt, ScoringWorkerEnvelope, ScoringWorkerError,
-    ScoringWorkerResultEngine, ScoringWorkerResultOutcome, ScoringWorkerResultPlan,
+    plan_scoring_worker_result_attempt, ScoringWorkerEngineOutcome, ScoringWorkerEnvelope,
+    ScoringWorkerError, ScoringWorkerResultEngine, ScoringWorkerResultOutcome,
+    ScoringWorkerResultPlan,
 };
 use std::cell::Cell;
 
@@ -304,4 +305,70 @@ fn planner_rejects_a_blank_retryable_cause_without_binding_an_event() {
         ScoringWorkerError::InvalidReference
     );
     assert_eq!(engine.calls.get(), 1);
+}
+
+#[test]
+fn planner_rejects_a_numeric_retryable_cause_without_binding_an_event() {
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        expected_job: "scoring_job_reload_score",
+        expected_request: request.scoring_request_ref().to_owned(),
+        result: Ok(ScoringWorkerResultOutcome::Retryable {
+            cause_code: "503".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        plan_scoring_worker_result_attempt(
+            "scoring_job_reload_score",
+            &request,
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+    assert_eq!(engine.calls.get(), 1);
+}
+
+#[test]
+fn planner_binds_a_permanent_scientific_failure_without_a_snapshot() {
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        expected_job: "scoring_job_reload_score",
+        expected_request: request.scoring_request_ref().to_owned(),
+        result: Ok(ScoringWorkerResultOutcome::Failed {
+            cause_code: "invalid_scientific_evidence".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+    let mut envelope = worker_envelope();
+    envelope.event_type = "scoring.result.failed";
+
+    let ScoringWorkerResultPlan::Terminal(attempt) = plan_scoring_worker_result_attempt(
+        "scoring_job_reload_score",
+        &request,
+        &engine,
+        snapshot_input(),
+        envelope,
+    )
+    .unwrap() else {
+        panic!("permanent scientific failure must plan a terminal cause write");
+    };
+
+    assert_eq!(engine.calls.get(), 1);
+    assert_eq!(attempt.snapshot(), None);
+    assert_eq!(
+        attempt.outcome(),
+        &ScoringWorkerEngineOutcome::Failed {
+            cause_code: "invalid_scientific_evidence".to_owned(),
+        }
+    );
+    assert_eq!(
+        attempt.event().event_ref(),
+        "scoring_terminal:cause:24:scoring_job_reload_score:27:invalid_scientific_evidence"
+    );
+    assert_eq!(attempt.event().event_type(), "scoring.result.failed");
 }

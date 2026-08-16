@@ -276,9 +276,11 @@ fn commit_planned_scoring_worker_attempt(
 /// commit in the same caller-owned transaction as the fenced job and outbox
 /// evidence. A retryable engine or transport outage records the existing job
 /// retry schedule, writes no terminal outbox row, and does not invent a score.
-/// A missing request, planner failure, or snapshot conflict leaves the leased
-/// job untouched when the caller rolls back. Live `fast-mlsirm` execution
-/// remains a later adapter behind [`ScoringWorkerResultEngine`].
+/// A later due claim can then persist the real snapshot. Exhausted retry budget
+/// quarantines without an outbox row. A missing request, planner failure, or
+/// snapshot conflict leaves the leased job untouched when the caller rolls back.
+/// Live `fast-mlsirm` execution remains a later adapter behind
+/// [`ScoringWorkerResultEngine`].
 ///
 /// # Errors
 ///

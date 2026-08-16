@@ -114,7 +114,12 @@ Product consequences:
   later retrieves;
 - a retryable engine or transport outage schedules the next attempt and writes
   no terminal outbox row, so a later success still uses one stable `event_ref`
-  (Hohpe & Woolf, 2003; Richardson, 2018).
+  (Hohpe & Woolf, 2003; Richardson, 2018);
+- a later due claim after that outage persists the real result snapshot rather
+  than inventing a score while the engine is down (American Educational Research
+  Association et al., 2014; Hohpe & Woolf, 2003);
+- a permanent scientific failure writes a terminal cause without a snapshot, and
+  exhausted retry budget quarantines with zero outbox rows (Richardson, 2018).
 
 ## Evidence maintenance rules
 
