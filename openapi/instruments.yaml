@@ -1,0 +1,139 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public instrument catalog API
+  version: 0.1.0
+  description: >
+    As-built public catalog of startable published instrument releases. A
+    purchaser lists exact locale-specific releases, then uses release_ref and
+    locale with POST /v1/sessions. Draft, suspended, and retired releases are
+    not listed. This family does not create sessions or persist catalog rows.
+paths:
+  /v1/instruments:
+    get:
+      operationId: listStartableInstruments
+      summary: List startable published releases
+      description: >
+        Returns published locale-specific releases that currently accept new
+        sessions, ordered by instrument_ref, locale, then release_ref. Use a
+        listed release_ref and locale when calling POST /v1/sessions.
+      responses:
+        "200":
+          description: Startable published releases in this process catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstrumentReleaseList"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+  /v1/instruments/{instrument_ref}:
+    get:
+      operationId: getStartableInstrumentFamily
+      summary: List startable releases for one instrument family
+      description: >
+        Returns published releases for one opaque instrument family. Families
+        that exist only as draft, suspended, or retired rows return 404 so
+        unpublished work stays hidden. Use a listed release_ref and locale
+        with POST /v1/sessions.
+      parameters:
+        - name: instrument_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque instrument family reference.
+      responses:
+        "200":
+          description: Published releases for this family.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstrumentFamily"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    InstrumentReleaseList:
+      type: object
+      additionalProperties: false
+      required:
+        - releases
+      properties:
+        releases:
+          type: array
+          items:
+            $ref: "#/components/schemas/StartableRelease"
+    InstrumentFamily:
+      type: object
+      additionalProperties: false
+      required:
+        - instrument_ref
+        - releases
+      properties:
+        instrument_ref:
+          type: string
+        releases:
+          type: array
+          items:
+            $ref: "#/components/schemas/StartableRelease"
+    StartableRelease:
+      type: object
+      additionalProperties: false
+      required:
+        - instrument_ref
+        - release_ref
+        - instrument_version_ref
+        - locale
+        - construct_ref
+        - content_digest
+        - intended_use_ref
+        - limitations_ref
+        - state
+      properties:
+        instrument_ref:
+          type: string
+        release_ref:
+          type: string
+        instrument_version_ref:
+          type: string
+        locale:
+          type: string
+        construct_ref:
+          type: string
+        content_digest:
+          type: string
+        intended_use_ref:
+          type: string
+        limitations_ref:
+          type: string
+        state:
+          type: string
+          enum:
+            - published
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

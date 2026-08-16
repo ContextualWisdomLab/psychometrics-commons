@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral
+- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral. Active PR instrument catalog HTTP adds as-built OpenAPI 3.2.0 for `GET /v1/instruments` and `GET /v1/instruments/{instrument_ref}` only; that slice is not protected-main truth until an unchanged reviewed/check-clean head is integrated.
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 
@@ -165,7 +165,7 @@ Rollback must restore an application version that still understands any messages
 - `docs/architecture/UML.md` must not model receipt as equivalent to externally visible side-effect completion.
 - `docs/architecture/SECURITY_AND_DATA.md` must preserve tenant/purpose boundaries for event payloads and quarantine.
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` must include replay/quarantine/recovery evidence when event transport is implemented.
-- `docs/TRACEABILITY.md` remains target until as-built OpenAPI/AsyncAPI and transport tests exist.
+- `docs/TRACEABILITY.md` remains target for remaining families until as-built OpenAPI/AsyncAPI and transport tests exist. Active PR instrument catalog HTTP names `openapi/instruments.yaml` as the as-built contract for the two GET operations only.
 
 ## Validation and release evidence
 

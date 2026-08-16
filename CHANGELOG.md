@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Public in-process instrument catalog HTTP: `GET /v1/instruments` and `GET /v1/instruments/{instrument_ref}` return only published locale-specific releases so a purchaser can copy `release_ref` and `locale` into `POST /v1/sessions`. Draft, suspended, and retired rows stay hidden. OpenAPI 3.2 is limited to those two operations.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
