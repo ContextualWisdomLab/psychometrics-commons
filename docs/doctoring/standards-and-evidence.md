@@ -80,9 +80,10 @@ Implemented public HTTP families use HTTP Semantics (RFC 9110) for method, targe
 
 Product consequences:
 
-- state-changing item-delivery records require an opaque `Idempotency-Key` that matches `delivery_ref`;
-- unknown methods, numeric public identifiers, unpublished item versions, and inactive sessions fail closed with `application/problem+json`;
-- problem details never echo raw request bodies, SQL, or provider text;
+- state-changing item-delivery records require an opaque `Idempotency-Key` that matches `delivery_ref` under the same `normalized_reference` predicate;
+- GET ledger responses include `allowed_item_version_refs`, `release_content_digest`, `session_state`, and an imperative next action so a client can resume without another HTTP family;
+- unknown methods, numeric public identifiers, unpublished item versions, inactive sessions, colliding seeds, missing `application/json`, and incomplete `Content-Length` bodies fail closed with `application/problem+json`;
+- problem details name the next call and never echo raw request bodies, SQL, or provider text;
 - `openapi/item-deliveries.yaml` is the as-built contract for this family and must not advertise session create, response, scoring, or result operations.
 
 ## Temporal and provenance evidence

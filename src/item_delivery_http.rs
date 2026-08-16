@@ -11,7 +11,8 @@ use crate::item_delivery::{ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRe
 use crate::reference::normalized_reference;
 use crate::session::SessionState;
 use std::collections::HashMap;
-use std::fmt::Write;
+use std::error::Error;
+use std::fmt::{Display, Formatter, Write};
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
@@ -23,12 +24,38 @@ pub const ITEM_DELIVERY_HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 /// Maximum accepted item-delivery HTTP request size, including headers and body.
 pub const ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES: usize = 8_192;
 
+#[derive(Debug)]
 struct DeliverySession {
     state: SessionState,
     ledger: ItemDeliveryLedger,
 }
 
+/// Fail-closed error while seeding the in-process item-delivery HTTP runtime.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemDeliveryHttpRuntimeError {
+    /// Two seeded ledgers used the same `session_ref`; the last ledger must not win.
+    DuplicateSessionRef,
+}
+
+impl Display for ItemDeliveryHttpRuntimeError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::DuplicateSessionRef => {
+                "item-delivery HTTP runtime rejects colliding session_ref seeds"
+            }
+        })
+    }
+}
+
+impl Error for ItemDeliveryHttpRuntimeError {}
+
 /// In-process Active-or-later session ledgers the handler may record against.
+///
+/// This family is a process-local capability-URL: whoever can reach the bound
+/// listener and guess a seeded `session_ref` can record or reload deliveries.
+/// There is no tenant header and no Keyverse check on this slice. Operators
+/// must bind only to a trusted address and seed unique session references.
+#[derive(Debug)]
 pub struct ItemDeliveryHttpRuntime {
     sessions: HashMap<String, DeliverySession>,
 }
@@ -38,24 +65,40 @@ impl ItemDeliveryHttpRuntime {
     ///
     /// Callers seed the process with already-created sessions and their bound
     /// release manifests. Session HTTP create/start remains a different family.
-    #[must_use]
-    pub fn new(sessions: Vec<(SessionState, ItemDeliveryLedger)>) -> Self {
-        let sessions = sessions
-            .into_iter()
-            .map(|(state, ledger)| {
-                (
+    /// Colliding `session_ref` values fail closed instead of keeping the last ledger.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ItemDeliveryHttpRuntimeError::DuplicateSessionRef`] when two
+    /// seeds share one session identity.
+    pub fn new(
+        sessions: Vec<(SessionState, ItemDeliveryLedger)>,
+    ) -> Result<Self, ItemDeliveryHttpRuntimeError> {
+        let mut mapped = HashMap::new();
+        for (state, ledger) in sessions {
+            if mapped
+                .insert(
                     ledger.session_ref().to_owned(),
                     DeliverySession { state, ledger },
                 )
-            })
-            .collect();
-        Self { sessions }
+                .is_some()
+            {
+                return Err(ItemDeliveryHttpRuntimeError::DuplicateSessionRef);
+            }
+        }
+        Ok(Self { sessions: mapped })
     }
 
     /// Replace the server-authoritative lifecycle state for one seeded session.
-    pub fn set_session_state(&mut self, session_ref: &str, state: SessionState) {
+    ///
+    /// Returns `false` when the session was never seeded, so callers cannot
+    /// treat a missing identity as a successful pause or resume.
+    pub fn set_session_state(&mut self, session_ref: &str, state: SessionState) -> bool {
         if let Some(session) = self.sessions.get_mut(session_ref) {
             session.state = state;
+            true
+        } else {
+            false
         }
     }
 
@@ -211,14 +254,22 @@ fn handle_record(
     session_ref: &str,
     runtime: &mut ItemDeliveryHttpRuntime,
 ) -> ItemDeliveryHttpResponse {
+    if !has_json_content_type(request) {
+        return ItemDeliveryHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:unsupported-media-type",
+            "Unsupported Media Type",
+            "POST item delivery requires Content-Type application/json. Set Content-Type to application/json, then retry",
+        );
+    }
     let Some(idempotency_key) =
-        header_value(request, "idempotency-key").and_then(valid_idempotency_key)
+        header_value(request, "idempotency-key").and_then(normalized_reference)
     else {
         return ItemDeliveryHttpResponse::problem(
             400,
             "urn:psychometrics-commons:problem:missing-idempotency-key",
             "Missing Idempotency Key",
-            "POST /v1/sessions/{session_ref}/item-deliveries requires an opaque Idempotency-Key header",
+            "POST /v1/sessions/{session_ref}/item-deliveries requires an opaque Idempotency-Key header. Set Idempotency-Key to the exact delivery_ref value",
         );
     };
     let Some(body) = request_body(request) else {
@@ -226,7 +277,7 @@ fn handle_record(
             400,
             "urn:psychometrics-commons:problem:bad-request",
             "Bad Request",
-            "item delivery record requires a JSON object body",
+            "item delivery record requires a JSON object body. Send a complete application/json object whose Content-Length covers the body, then retry",
         );
     };
     let Some(record) = parse_record_body(body) else {
@@ -242,7 +293,7 @@ fn handle_record(
             400,
             "urn:psychometrics-commons:problem:idempotency-mismatch",
             "Idempotency Mismatch",
-            "Idempotency-Key must exactly match delivery_ref",
+            "Idempotency-Key must exactly match delivery_ref. Set Idempotency-Key to the exact delivery_ref value",
         );
     }
     let Some(session) = runtime.sessions.get_mut(session_ref) else {
@@ -257,12 +308,12 @@ fn handle_record(
     };
     match session.ledger.deliver(session.state, request) {
         Ok(event) => {
-            let status = if session.ledger.len() == previous_len {
-                200
-            } else {
-                201
-            };
-            ItemDeliveryHttpResponse::json(status, event_body(&session.ledger, &event))
+            let replay = session.ledger.len() == previous_len;
+            let status = if replay { 200 } else { 201 };
+            ItemDeliveryHttpResponse::json(
+                status,
+                event_body(&session.ledger, &event, session.state, replay),
+            )
         }
         Err(error) => delivery_problem(error),
     }
@@ -270,7 +321,7 @@ fn handle_record(
 
 fn handle_list(session_ref: &str, runtime: &ItemDeliveryHttpRuntime) -> ItemDeliveryHttpResponse {
     match runtime.sessions.get(session_ref) {
-        Some(session) => ItemDeliveryHttpResponse::json(200, ledger_body(&session.ledger)),
+        Some(session) => ItemDeliveryHttpResponse::json(200, ledger_body(session)),
         None => session_not_found(),
     }
 }
@@ -280,7 +331,7 @@ fn session_not_found() -> ItemDeliveryHttpResponse {
         404,
         "urn:psychometrics-commons:problem:session-not-found",
         "Session Not Found",
-        "item delivery requires a session seeded in this process",
+        "item delivery requires a session seeded in this process. Create or start this session_ref in this process, then retry",
     )
 }
 
@@ -290,35 +341,36 @@ fn delivery_problem(error: ItemDeliveryError) -> ItemDeliveryHttpResponse {
             400,
             "urn:psychometrics-commons:problem:invalid-reference",
             "Invalid Reference",
-            "item delivery references must be opaque non-numeric values",
+            "item delivery references must be opaque non-numeric values. Replace numeric or blank identifiers with opaque refs, then retry",
         ),
         ItemDeliveryError::SessionNotActive(_) => ItemDeliveryHttpResponse::problem(
             409,
             "urn:psychometrics-commons:problem:session-not-active",
             "Session Not Active",
-            "new item deliveries require an Active assessment session; exact replay of an accepted delivery still returns the original event",
+            "new item deliveries require an Active assessment session. Return the session to Active, then POST the new delivery. Replay the original Idempotency-Key and body only to recover the accepted event",
         ),
         ItemDeliveryError::IdempotencyConflict => ItemDeliveryHttpResponse::problem(
             409,
             "urn:psychometrics-commons:problem:idempotency-conflict",
             "Idempotency Conflict",
-            "delivery_ref was already used for different item-delivery evidence",
+            "delivery_ref was already used for different item-delivery evidence. Replay the original evidence or mint a new delivery_ref that exactly matches Idempotency-Key",
         ),
         ItemDeliveryError::ItemNotInRelease => ItemDeliveryHttpResponse::problem(
             409,
             "urn:psychometrics-commons:problem:item-not-in-release",
             "Item Not In Release",
-            "item version is not part of the bound published instrument release",
+            "item version is not part of the bound published instrument release. POST an item_version_ref from the bound release allowed set",
         ),
         ItemDeliveryError::DuplicateItemDelivery => ItemDeliveryHttpResponse::problem(
             409,
             "urn:psychometrics-commons:problem:duplicate-item-delivery",
             "Duplicate Item Delivery",
-            "this item version was already delivered in the session under another delivery_ref",
+            "this item version was already delivered in the session under another delivery_ref. GET the ledger and continue with a different undelivered item",
         ),
     }
 }
 
+#[allow(clippy::struct_field_names)]
 struct DeliveryRecordBody {
     delivery_ref: String,
     item_version_ref: String,
@@ -394,54 +446,93 @@ fn parse_json_string(input: &str) -> Option<(String, &str)> {
 fn event_body(
     ledger: &ItemDeliveryLedger,
     event: &crate::item_delivery::ItemDeliveryEvent,
+    state: SessionState,
+    replay: bool,
 ) -> String {
     let selection = match event.selection_evidence_ref() {
         Some(value) => format!(",\"selection_evidence_ref\":{}", json_string(value)),
         None => String::new(),
     };
     format!(
-        "{{\"session_ref\":{},\"instrument_release_ref\":{},\"locale\":{},\"delivery_ref\":{},\"item_version_ref\":{},\"presentation_context_ref\":{}{selection},\"sequence\":{}}}",
+        "{{\"session_ref\":{},\"instrument_release_ref\":{},\"release_content_digest\":{},\"locale\":{},\"session_state\":{},\"delivery_ref\":{},\"item_version_ref\":{},\"presentation_context_ref\":{}{selection},\"sequence\":{},\"next_action\":{}}}",
         json_string(ledger.session_ref()),
         json_string(ledger.instrument_release_ref()),
+        json_string(ledger.release_content_digest()),
         json_string(ledger.locale()),
+        json_string(session_state_name(state)),
         json_string(event.delivery_ref()),
         json_string(event.item_version_ref()),
         json_string(event.presentation_context_ref()),
-        event.sequence()
+        event.sequence(),
+        json_string(event_next_action(replay))
     )
 }
 
-fn ledger_body(ledger: &ItemDeliveryLedger) -> String {
+fn ledger_body(session: &DeliverySession) -> String {
     let mut events = String::from("[");
-    for (index, event) in ledger.events().iter().enumerate() {
+    for (index, event) in session.ledger.events().iter().enumerate() {
         if index > 0 {
             events.push(',');
         }
-        events.push_str(&event_body(ledger, event));
+        events.push_str(&event_body(&session.ledger, event, session.state, true));
     }
     events.push(']');
     format!(
-        "{{\"session_ref\":{},\"instrument_release_ref\":{},\"locale\":{},\"events\":{events}}}",
-        json_string(ledger.session_ref()),
-        json_string(ledger.instrument_release_ref()),
-        json_string(ledger.locale())
+        "{{\"session_ref\":{},\"instrument_release_ref\":{},\"release_content_digest\":{},\"locale\":{},\"session_state\":{},\"allowed_item_version_refs\":{},\"events\":{events},\"next_action\":{}}}",
+        json_string(session.ledger.session_ref()),
+        json_string(session.ledger.instrument_release_ref()),
+        json_string(session.ledger.release_content_digest()),
+        json_string(session.ledger.locale()),
+        json_string(session_state_name(session.state)),
+        json_string_array(session.ledger.allowed_item_version_refs()),
+        json_string(ledger_next_action())
     )
 }
 
-fn valid_idempotency_key(value: &str) -> Option<&str> {
-    let normalized = value.trim();
-    if normalized.is_empty() || normalized.chars().any(char::is_whitespace) {
-        return None;
-    }
-    let numeric_like = normalized.chars().any(char::is_numeric)
-        && normalized
-            .chars()
-            .all(|character| character.is_numeric() || matches!(character, '+' | '-' | '.' | ','));
-    if numeric_like {
-        None
+fn event_next_action(replay: bool) -> &'static str {
+    if replay {
+        "Reuse this original event; do not insert another row. Continue from sequence by GET /v1/sessions/{session_ref}/item-deliveries or POST the next undelivered allowed item_version_ref."
     } else {
-        Some(normalized)
+        "Present item_version_ref from the bound published release using presentation_context_ref. This response is delivery evidence, not item text and not the next selected item. Then POST the next undelivered allowed item or record a response on that family."
     }
+}
+
+fn ledger_next_action() -> &'static str {
+    "Compare events to allowed_item_version_refs. If session_state is not active, return the session to Active before a new POST. Confirm release_content_digest still matches the published release. Then POST the next undelivered allowed item_version_ref with Idempotency-Key exactly equal to a new delivery_ref."
+}
+
+const fn session_state_name(state: SessionState) -> &'static str {
+    match state {
+        SessionState::Created => "created",
+        SessionState::Active => "active",
+        SessionState::Paused => "paused",
+        SessionState::Completed => "completed",
+        SessionState::Scoring => "scoring",
+        SessionState::Scored => "scored",
+        SessionState::Released => "released",
+        SessionState::Expired => "expired",
+        SessionState::Cancelled => "cancelled",
+        SessionState::Invalidated => "invalidated",
+    }
+}
+
+fn json_string_array(values: &[String]) -> String {
+    let mut encoded = String::from("[");
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            encoded.push(',');
+        }
+        encoded.push_str(&json_string(value));
+    }
+    encoded.push(']');
+    encoded
+}
+
+fn has_json_content_type(request: &str) -> bool {
+    header_value(request, "content-type").is_some_and(|value| {
+        let media_type = value.split(';').next().unwrap_or(value).trim();
+        media_type.eq_ignore_ascii_case("application/json")
+    })
 }
 
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
@@ -459,10 +550,34 @@ fn request_body(request: &str) -> Option<&str> {
     let content_length = header_value(headers, "content-length")?
         .parse::<usize>()
         .ok()?;
-    if body.len() < content_length {
+    if body.len() < content_length || !body.is_char_boundary(content_length) {
         return None;
     }
     Some(&body[..content_length])
+}
+
+fn header_terminator_index(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn declared_content_length(headers: &str) -> Option<usize> {
+    header_value(headers, "content-length")?.parse().ok()
+}
+
+fn http_request_complete(buffer: &[u8]) -> bool {
+    if buffer.len() > ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES {
+        return true;
+    }
+    let Some(header_end) = header_terminator_index(buffer) else {
+        return false;
+    };
+    let Ok(headers) = std::str::from_utf8(&buffer[..header_end]) else {
+        return true;
+    };
+    match declared_content_length(headers) {
+        Some(content_length) => buffer.len() >= header_end + 4 + content_length,
+        None => true,
+    }
 }
 
 fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
@@ -498,9 +613,7 @@ fn apply_request_read(
         Ok(0) => Ok(RequestReadProgress::Complete),
         Ok(read) => {
             buffer.extend_from_slice(&chunk[..read]);
-            if buffer.windows(4).any(|window| window == b"\r\n\r\n")
-                || buffer.len() > ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES
-            {
+            if http_request_complete(buffer) {
                 Ok(RequestReadProgress::Complete)
             } else {
                 Ok(RequestReadProgress::Continue)
@@ -590,10 +703,11 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_request_read, collection_session_ref, handle_item_delivery_http_request, json_string,
-        parse_json_string, parse_record_body, parse_string_object, reason_phrase,
-        valid_idempotency_key, ItemDeliveryHttpRuntime, RequestReadProgress,
-        ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES,
+        apply_request_read, collection_session_ref, handle_item_delivery_http_request,
+        has_json_content_type, http_request_complete, json_string, json_string_array,
+        parse_json_string, parse_record_body, parse_string_object, reason_phrase, request_body,
+        session_state_name, ItemDeliveryHttpRuntime, ItemDeliveryHttpRuntimeError,
+        RequestReadProgress, ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES,
     };
     use crate::instrument::InstrumentReleaseManifest;
     use crate::item_delivery::ItemDeliveryLedger;
@@ -627,12 +741,12 @@ mod tests {
     }
 
     fn runtime() -> ItemDeliveryHttpRuntime {
-        ItemDeliveryHttpRuntime::new(vec![(SessionState::Active, ledger())])
+        ItemDeliveryHttpRuntime::new(vec![(SessionState::Active, ledger())]).unwrap()
     }
 
     fn post(body: &str, key: &str) -> String {
         format!(
-            "POST /v1/sessions/{SESSION_REF}/item-deliveries HTTP/1.1\r\nIdempotency-Key: {key}\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /v1/sessions/{SESSION_REF}/item-deliveries HTTP/1.1\r\nIdempotency-Key: {key}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         )
     }
@@ -646,10 +760,47 @@ mod tests {
         assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(json_string("a\n\r\t"), "\"a\\n\\r\\t\"");
         assert_eq!(json_string("\u{0001}"), "\"\\u0001\"");
-        assert_eq!(valid_idempotency_key("  "), None);
-        assert_eq!(valid_idempotency_key("has space"), None);
-        assert_eq!(valid_idempotency_key("12345"), None);
-        assert_eq!(valid_idempotency_key("dlv_ok"), Some("dlv_ok"));
+        assert_eq!(json_string_array(&[]), "[]");
+        assert_eq!(
+            json_string_array(&["item_version_001".to_owned()]),
+            "[\"item_version_001\"]"
+        );
+        assert_eq!(session_state_name(SessionState::Created), "created");
+        assert_eq!(session_state_name(SessionState::Active), "active");
+        assert_eq!(session_state_name(SessionState::Paused), "paused");
+        assert_eq!(session_state_name(SessionState::Completed), "completed");
+        assert_eq!(session_state_name(SessionState::Scoring), "scoring");
+        assert_eq!(session_state_name(SessionState::Scored), "scored");
+        assert_eq!(session_state_name(SessionState::Released), "released");
+        assert_eq!(session_state_name(SessionState::Expired), "expired");
+        assert_eq!(session_state_name(SessionState::Cancelled), "cancelled");
+        assert_eq!(session_state_name(SessionState::Invalidated), "invalidated");
+        assert!(!has_json_content_type("POST / HTTP/1.1\r\n\r\n"));
+        assert!(has_json_content_type(
+            "POST / HTTP/1.1\r\nContent-Type: application/json; charset=utf-8\r\n\r\n"
+        ));
+        assert_eq!(
+            request_body("POST / HTTP/1.1\r\nContent-Length: 1\r\n\r\n한"),
+            None
+        );
+        assert!(!http_request_complete(b"GET / HTTP/1.1\r\n"));
+        assert!(http_request_complete(b"GET / HTTP/1.1\r\n\r\n"));
+        assert!(!http_request_complete(
+            b"POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\nab"
+        ));
+        assert!(http_request_complete(
+            b"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nab"
+        ));
+        assert!(http_request_complete(&[
+            0xff, 0xfe, b'\r', b'\n', b'\r', b'\n'
+        ]));
+        assert_eq!(
+            ItemDeliveryHttpRuntimeError::DuplicateSessionRef.to_string(),
+            "item-delivery HTTP runtime rejects colliding session_ref seeds"
+        );
+        let mut runtime = runtime();
+        assert!(!runtime.set_session_state("ses_missing", SessionState::Paused));
+        assert!(runtime.set_session_state(SESSION_REF, SessionState::Paused));
         assert!(parse_string_object("{").is_none());
         assert!(parse_string_object("{\"a\":\"1\",\"a\":\"2\"}").is_none());
         assert!(parse_string_object("{\"a\":\"1\",}").is_none());
@@ -678,6 +829,12 @@ mod tests {
         ));
         assert!(matches!(
             apply_request_read(&mut Vec::new(), b"GET", Ok(3)).unwrap(),
+            RequestReadProgress::Continue
+        ));
+        let mut headers_only = Vec::new();
+        let header_chunk = b"POST / HTTP/1.1\r\nContent-Length: 4\r\n\r\n";
+        assert!(matches!(
+            apply_request_read(&mut headers_only, header_chunk, Ok(header_chunk.len())).unwrap(),
             RequestReadProgress::Continue
         ));
         let mut oversized = vec![b'x'; ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES];
@@ -745,7 +902,7 @@ mod tests {
         );
         assert_eq!(
             handle_item_delivery_http_request(
-                "POST /v1/sessions/ses_unit_item_delivery/item-deliveries HTTP/1.1\r\nIdempotency-Key: 99\r\nContent-Length: 2\r\n\r\n{}",
+                "POST /v1/sessions/ses_unit_item_delivery/item-deliveries HTTP/1.1\r\nIdempotency-Key: 99\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
                 &mut runtime
             )
             .status(),
@@ -753,7 +910,7 @@ mod tests {
         );
         assert_eq!(
             handle_item_delivery_http_request(
-                "POST /v1/sessions/ses_unit_item_delivery/item-deliveries HTTP/1.1\r\nIdempotency-Key: dlv_ok\r\nContent-Length: 8\r\n\r\nshort",
+                "POST /v1/sessions/ses_unit_item_delivery/item-deliveries HTTP/1.1\r\nIdempotency-Key: dlv_ok\r\nContent-Type: application/json\r\nContent-Length: 8\r\n\r\nshort",
                 &mut runtime
             )
             .status(),

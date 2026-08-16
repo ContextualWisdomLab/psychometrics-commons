@@ -300,6 +300,13 @@ fn item_delivery_openapi_lists_only_implemented_item_delivery_operations() {
         "/v1/sessions/{session_ref}/item-deliveries",
         "operationId: recordItemDelivery",
         "operationId: listItemDeliveries",
+        "allowed_item_version_refs",
+        "release_content_digest",
+        "session_state",
+        "next_action",
+        "security: []",
+        "urn:psychometrics-commons:problem:item-not-in-release",
+        "capability-URL",
     ] {
         assert!(
             openapi.contains(implemented),

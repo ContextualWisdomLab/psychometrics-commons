@@ -7,6 +7,11 @@ info:
     operations record that one published item version was shown to an Active
     in-process session. They do not select or calibrate items, persist ledgers
     across process restart, or expose response, scoring, or result families.
+    Authority is a process-local capability-URL: the listener serves whatever
+    sessions were seeded in this process. There is no tenant header and no
+    Keyverse check on this family. Bind only a trusted address, seed unique
+    opaque session_ref values, and do not guess references.
+security: []
 paths:
   /v1/sessions/{session_ref}/item-deliveries:
     post:
@@ -15,20 +20,25 @@ paths:
       description: >
         Records that one item version from the session's bound published release
         was shown. The server assigns a monotonic sequence. Exact Idempotency-Key
-        replay that matches delivery_ref returns the original event.
+        replay that matches delivery_ref returns the original event. The success
+        body is delivery evidence, not item text. Present the returned
+        item_version_ref using presentation_context_ref, then POST the next
+        undelivered allowed item or record a response on that family.
       parameters:
         - name: session_ref
           in: path
           required: true
           schema:
             type: string
-          description: Opaque in-process session reference.
+          description: Opaque in-process session reference. Do not use numeric IDs.
         - name: Idempotency-Key
           in: header
           required: true
           schema:
             type: string
-          description: Opaque replay key; must exactly match delivery_ref.
+          description: >
+            Opaque replay key that must exactly match delivery_ref under the same
+            normalized_reference predicate used for other public IDs.
       requestBody:
         required: true
         content:
@@ -37,49 +47,111 @@ paths:
               $ref: "#/components/schemas/ItemDeliveryRecordRequest"
       responses:
         "201":
-          description: Delivery was accepted.
+          description: >
+            Delivery was accepted. Present item_version_ref from the bound
+            published release using presentation_context_ref, then POST the next
+            undelivered allowed item or record a response on that family.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemDeliveryEvent"
         "200":
-          description: Exact idempotent replay of a previous delivery.
+          description: >
+            Exact idempotent replay of a previous delivery. Reuse the original
+            event; do not insert another row; continue from sequence.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemDeliveryEvent"
         "400":
-          $ref: "#/components/responses/Problem"
+          description: >
+            Missing or numeric Idempotency-Key, Content-Type other than
+            application/json, incomplete JSON body, or Idempotency-Key that does
+            not match delivery_ref.
+            Types:
+            urn:psychometrics-commons:problem:bad-request,
+            urn:psychometrics-commons:problem:missing-idempotency-key,
+            urn:psychometrics-commons:problem:idempotency-mismatch,
+            urn:psychometrics-commons:problem:invalid-reference,
+            urn:psychometrics-commons:problem:unsupported-media-type.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
-          $ref: "#/components/responses/Problem"
+          description: >
+            session_ref is not seeded in this process
+            (urn:psychometrics-commons:problem:session-not-found). Create or
+            start this session_ref in this process, then retry.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "405":
-          $ref: "#/components/responses/Problem"
+          description: >
+            Method is not POST or GET on this collection
+            (urn:psychometrics-commons:problem:method-not-allowed).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "409":
-          $ref: "#/components/responses/Problem"
+          description: >
+            New delivery against a non-Active session, item outside the bound
+            release, conflicting replay, or duplicate item under another
+            delivery_ref.
+            Types:
+            urn:psychometrics-commons:problem:session-not-active,
+            urn:psychometrics-commons:problem:item-not-in-release,
+            urn:psychometrics-commons:problem:idempotency-conflict,
+            urn:psychometrics-commons:problem:duplicate-item-delivery.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
     get:
       operationId: listItemDeliveries
       summary: Reload delivered items for one session
       description: >
         Returns the in-process server-ordered item-delivery ledger so a client
-        can resume the same Active session.
+        can resume the same session. The body includes allowed_item_version_refs,
+        release_content_digest, and session_state. Compare events to the allowed
+        set, confirm the digest still matches the published release, and return
+        the session to Active before a new POST when session_state is not active.
       parameters:
         - name: session_ref
           in: path
           required: true
           schema:
             type: string
-          description: Opaque in-process session reference.
+          description: Opaque in-process session reference. Do not use numeric IDs.
       responses:
         "200":
-          description: Ledger exists in this process.
+          description: >
+            Ledger exists in this process. Use allowed_item_version_refs,
+            release_content_digest, and session_state to choose the next
+            undelivered item or to return the session to Active.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ItemDeliveryLedger"
         "404":
-          $ref: "#/components/responses/Problem"
+          description: >
+            session_ref is not seeded in this process
+            (urn:psychometrics-commons:problem:session-not-found). Create or
+            start this session_ref in this process, then retry.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "405":
-          $ref: "#/components/responses/Problem"
+          description: >
+            Method is not POST or GET on this collection
+            (urn:psychometrics-commons:problem:method-not-allowed).
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   schemas:
     ItemDeliveryRecordRequest:
@@ -104,17 +176,24 @@ components:
       required:
         - session_ref
         - instrument_release_ref
+        - release_content_digest
         - locale
+        - session_state
         - delivery_ref
         - item_version_ref
         - presentation_context_ref
         - sequence
+        - next_action
       properties:
         session_ref:
           type: string
         instrument_release_ref:
           type: string
+        release_content_digest:
+          type: string
         locale:
+          type: string
+        session_state:
           type: string
         delivery_ref:
           type: string
@@ -127,25 +206,45 @@ components:
         sequence:
           type: integer
           minimum: 1
+        next_action:
+          type: string
+          description: Imperative next call for the integrator.
     ItemDeliveryLedger:
       type: object
       additionalProperties: false
       required:
         - session_ref
         - instrument_release_ref
+        - release_content_digest
         - locale
+        - session_state
+        - allowed_item_version_refs
         - events
+        - next_action
       properties:
         session_ref:
           type: string
         instrument_release_ref:
           type: string
+        release_content_digest:
+          type: string
         locale:
           type: string
+        session_state:
+          type: string
+        allowed_item_version_refs:
+          type: array
+          items:
+            type: string
         events:
           type: array
           items:
             $ref: "#/components/schemas/ItemDeliveryEvent"
+        next_action:
+          type: string
+          description: >
+            Compare events to allowed_item_version_refs, confirm the digest, and
+            POST the next undelivered item or return the session to Active.
     Problem:
       type: object
       additionalProperties: false
@@ -159,6 +258,7 @@ components:
           type: integer
         detail:
           type: string
+          description: Defect plus the exact next call that remediates it.
   responses:
     Problem:
       description: Safe RFC 9457 problem details without raw request or store errors.

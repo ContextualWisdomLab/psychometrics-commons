@@ -57,10 +57,9 @@ fn bound_listener_records_and_reloads_item_delivery_over_tcp() {
     let listener =
         bind_item_delivery_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
     let addr = listener.local_addr().unwrap();
-    let runtime = Arc::new(Mutex::new(ItemDeliveryHttpRuntime::new(vec![(
-        SessionState::Active,
-        ledger(),
-    )])));
+    let runtime = Arc::new(Mutex::new(
+        ItemDeliveryHttpRuntime::new(vec![(SessionState::Active, ledger())]).unwrap(),
+    ));
     let server_runtime = Arc::clone(&runtime);
     let server = thread::spawn(move || {
         let mut locked = server_runtime.lock().unwrap();
@@ -74,7 +73,7 @@ fn bound_listener_records_and_reloads_item_delivery_over_tcp() {
     let created = exchange(
         addr,
         &format!(
-            "POST /v1/sessions/{SESSION_REF}{ITEM_DELIVERY_COLLECTION_SUFFIX} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /v1/sessions/{SESSION_REF}{ITEM_DELIVERY_COLLECTION_SUFFIX} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         ),
     );
@@ -95,5 +94,47 @@ fn bound_listener_records_and_reloads_item_delivery_over_tcp() {
     assert!(loaded.contains("\"item_version_001\""));
     assert!(loaded.contains("\"sequence\":1"));
 
+    server.join().unwrap();
+}
+
+#[test]
+fn bound_listener_reads_content_length_after_split_headers_and_body() {
+    let listener =
+        bind_item_delivery_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let runtime = Arc::new(Mutex::new(
+        ItemDeliveryHttpRuntime::new(vec![(SessionState::Active, ledger())]).unwrap(),
+    ));
+    let server_runtime = Arc::clone(&runtime);
+    let server = thread::spawn(move || {
+        let mut locked = server_runtime.lock().unwrap();
+        accept_one_item_delivery_http(&listener, &mut locked).unwrap();
+    });
+
+    let body = format!(
+        "{{\"delivery_ref\":\"{DELIVERY_REF}\",\"item_version_ref\":\"item_version_001\",\"presentation_context_ref\":\"presentation_web_self_report_v1\"}}"
+    );
+    let headers = format!(
+        "POST /v1/sessions/{SESSION_REF}{ITEM_DELIVERY_COLLECTION_SUFFIX} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    );
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream.write_all(headers.as_bytes()).unwrap();
+    stream.flush().unwrap();
+    thread::sleep(Duration::from_millis(50));
+    stream.write_all(body.as_bytes()).unwrap();
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut created = String::new();
+    stream.read_to_string(&mut created).unwrap();
+
+    assert!(
+        created.starts_with("HTTP/1.1 201 Created\r\n"),
+        "split POST must wait for Content-Length bytes, got {created}"
+    );
+    assert!(created.contains(&format!("\"delivery_ref\":\"{DELIVERY_REF}\"")));
+    assert_eq!(runtime.lock().unwrap().event_count(SESSION_REF), 1);
     server.join().unwrap();
 }
