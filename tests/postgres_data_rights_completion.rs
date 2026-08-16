@@ -367,6 +367,184 @@ fn completion_classify_select_failure_is_a_database_failure() {
 }
 
 #[test]
+fn completion_update_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_completion_update");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    let sink = format!("data_rights_completion_update_sink_{}", std::process::id());
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {sink} CASCADE; CREATE SCHEMA {sink};"
+        ))
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    transaction
+        .batch_execute(&format!("SET LOCAL search_path TO {sink}"))
+        .unwrap();
+    let error = persist_data_rights_completion(&mut transaction, &request)
+        .expect_err("completion update must return the database error");
+    transaction.rollback().unwrap();
+    assert!(matches!(error, DataRightsPersistenceError::Database(_)));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL data-rights persistence operation failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn completion_retained_scope_insert_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_completion_retain_insert");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    let sink = format!(
+        "data_rights_completion_retain_insert_sink_{}",
+        std::process::id()
+    );
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {sink} CASCADE;
+             CREATE SCHEMA {sink};
+             CREATE OR REPLACE FUNCTION data_rights_completion_redirect_after_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM set_config('search_path', '{sink}', false);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER data_rights_completion_redirect_after_update
+             AFTER UPDATE ON data_rights_request_state
+             FOR EACH STATEMENT
+             EXECUTE FUNCTION data_rights_completion_redirect_after_update();"
+        ))
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_data_rights_completion(&mut transaction, &request)
+        .expect_err("retained-scope insert must return the database error");
+    transaction.rollback().unwrap();
+    assert!(matches!(error, DataRightsPersistenceError::Database(_)));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL data-rights persistence operation failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn completion_replay_rejects_terminal_state_and_completion_evidence_rebinding() {
+    let mut client = ready_client("data_rights_completion_terminal_replay");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_completion(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mut completed_without_retention = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    completed_without_retention
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    completed_without_retention
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    completed_without_retention
+        .complete("completion_evidence_alpha", &[], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &completed_without_retention),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut rebound_completion = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    rebound_completion
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    rebound_completion
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    rebound_completion
+        .complete("completion_evidence_beta", &["retention_legal"], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &rebound_completion),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn completion_retained_scope_classify_select_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_completion_retain_select");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_completion(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION data_rights_completion_drop_retained_after_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 DROP TABLE data_rights_retained_scope_evidence;
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER data_rights_completion_drop_retained_after_update
+             AFTER UPDATE ON data_rights_request_state
+             FOR EACH STATEMENT
+             EXECUTE FUNCTION data_rights_completion_drop_retained_after_update();",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_data_rights_completion(&mut transaction, &request)
+        .expect_err("retained-scope classify-select must return the database error");
+    transaction.rollback().unwrap();
+    assert!(matches!(error, DataRightsPersistenceError::Database(_)));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL data-rights persistence operation failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
 fn completion_schema_rejects_invalid_evidence_and_retention_scope() {
     let mut client = ready_client("data_rights_completion_constraints");
     let request = persist_processing(
