@@ -390,3 +390,32 @@ fn classify_select_failure_after_conflict_is_a_database_failure() {
     );
     assert!(std::error::Error::source(&error).is_some());
 }
+
+#[test]
+fn isolation_query_failure_is_a_database_failure() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let session = created_session(
+        "ses_isolation_query_hidden",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(transaction
+        .batch_execute("SELECT * FROM assessment_session_isolation_query_missing")
+        .is_err());
+    let error = persist_assessment_session(&mut transaction, &session)
+        .expect_err("aborted isolation probe must return the database error");
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        AssessmentSessionPersistenceError::Database(_)
+    ));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL assessment-session persistence failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}
