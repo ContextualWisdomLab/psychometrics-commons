@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: The successor of PR #160 adds hosted dual-proof write/recover commands in `src/account_link_write.rs` on the append-only persist/reload path and keeps a recovered participant only when the current tenant/issuer/subject still match the proof. PR #158 adds store-wide restore reconcile of the derived current projection. Prefer the #160 successor for write/recover and #158 for restore reconcile. Do not merge #160, #147, #133, #124, or #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #176 adds hosted dual-proof write/recover commands in `src/account_link_write.rs` on the append-only persist/reload path and keeps a recovered participant only when the current tenant/issuer/subject still match the proof. PR #158 adds store-wide restore reconcile of the derived current projection. Prefer #176 for write/recover and #158 for restore reconcile. Do not merge #160, #147, #133, #124, or #114.
 - `PLANNED`: durable HTTP transport, unlink/relink HTTP commands, concurrency arbitration beyond the participant row lock, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
@@ -205,7 +205,7 @@ Until persistence/transport are implemented, protected main provides only the st
 ## Follow-up work
 
 - Psychometrics Commons: implement the physical append-only identity-link migration and repository transaction boundary.
-- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence. Dual-proof persist and returning-account recover commands exist on the Active PR successor of #160, including post-load current-binding rejection; HTTP unlink/relink transport remains open.
+- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence. Dual-proof persist and returning-account recover commands exist on Active PR #176, including post-load current-binding rejection; HTTP unlink/relink transport remains open.
 - Psychometrics Commons: add Keyverse adapter contract without direct database coupling.
 - Psychometrics Commons: integrate data-rights propagation and restricted research-linkage separation tests.
 - Psychometrics Commons: add transaction/concurrency/crash/backup/restore and public-release leakage tests.
@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: successor of PR #160 `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
+- Active-PR persistence evidence: PR #176 `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
