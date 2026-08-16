@@ -1,4 +1,4 @@
-//! Real PostgreSQL contract for short-lived anonymous credential evidence.
+//! Real `PostgreSQL` contract for short-lived anonymous credential evidence.
 //!
 //! A buyer can start an anonymous assessment only when the hashed proof survives
 //! process restart and still authorizes the exact tenant, participant, and session.
@@ -46,10 +46,7 @@ fn reset_credential_table(client: &mut Client) {
         .unwrap();
 }
 
-fn credential_named(
-    credential_ref: &str,
-    proof_digest: &str,
-) -> AnonymousCredential {
+fn credential_named(credential_ref: &str, proof_digest: &str) -> AnonymousCredential {
     AnonymousCredential::new(
         credential_ref,
         "tenant_alpha",
@@ -128,17 +125,15 @@ fn persisted_credential_reloads_and_authorizes_only_inside_the_server_window() {
     .unwrap()
     .expect("presented digest must recover the exact bound credential");
     assert_eq!(bound, credential);
-    assert!(
-        load_anonymous_credential_for_binding(
-            &mut client,
-            "tenant_other",
-            "participant_alpha",
-            "session_alpha",
-            DIGEST_A,
-        )
-        .unwrap()
-        .is_none()
-    );
+    assert!(load_anonymous_credential_for_binding(
+        &mut client,
+        "tenant_other",
+        "participant_alpha",
+        "session_alpha",
+        DIGEST_A,
+    )
+    .unwrap()
+    .is_none());
     assert!(
         load_anonymous_credential(&mut client, "anonymous_credential_missing")
             .unwrap()
@@ -212,6 +207,13 @@ fn revocation_is_append_only_across_restart() {
     assert!(matches!(
         persist_err(&mut client, &conflicting),
         AnonymousCredentialPersistenceError::ConflictingRevocation
+    ));
+    assert!(matches!(
+        persist_err(
+            &mut client,
+            &credential_named("anonymous_credential_alpha", DIGEST_A),
+        ),
+        AnonymousCredentialPersistenceError::ConflictingReplay
     ));
 }
 
