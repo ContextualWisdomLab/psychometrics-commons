@@ -59,6 +59,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Response recording and snapshot freeze now consult the authoritative assessment-session aggregate. A caller can no longer present a detached `Active` or `Completed` lifecycle value while the session is still `Created` or `Active`.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.

@@ -30,6 +30,12 @@ Terminal alternatives: `expired`, `cancelled`, `invalidated`.
 
 Only the runtime may transition session state. Clients request commands; they do not submit the target state directly.
 
+### Response and item-delivery authority (as-built on this change)
+
+`ResponseLedger::record`, `freeze`, and `freeze_as` take an authoritative [`AssessmentSession`](../../src/session.rs) rather than a detached `SessionState`. The ledger compares `session_ref` first and then reads lifecycle state from that aggregate. A caller cannot present `Active` while the session is `Created`, or `Completed` while the session is still `Active`. Exact client-event replay remains idempotent after collection closes because the same aggregate can be advanced and passed back in.
+
+Item-delivery construction on protected main still accepts a bare `session_ref` plus a caller-supplied manifest and a detached `SessionState`. That remaining hole is tracked on PRs #94/#99 and is outside this response-authority slice.
+
 ## Response-event contract
 
 Each response event contains:
@@ -91,3 +97,13 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 ## Reversal conditions
 
 Revisit the storage implementation if event volume demands a different backend, but retain state semantics, idempotency, immutable snapshots, and outbox guarantees.
+
+Reintroduce a detached `SessionState` argument on response write/freeze only if a persistence reconstruction path can prove it cannot forge lifecycle evidence. The current reversal trigger is a documented reconstruction API that still consults a durable session aggregate.
+
+## References
+
+International Organization for Standardization. (2022). *Information security, cybersecurity and privacy protection — Information security management systems — Requirements* (ISO/IEC 27001:2022).
+
+Temoshok, D., Fenton, J. L., Choong, Y.-Y., Lefkovitz, N., Regenscheid, A., Galluzzo, R., & Richer, J. P. (2025). *Digital identity guidelines: Authentication and authenticator management* (NIST Special Publication 800-63B-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63B-4
+
+Object Management Group. (2017). *OMG unified modeling language (OMG UML), Version 2.5.1*. https://www.omg.org/spec/UML/2.5.1/

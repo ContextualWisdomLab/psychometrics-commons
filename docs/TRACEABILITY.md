@@ -23,7 +23,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
-| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
+| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity and PostgreSQL snapshot persistence; **Active PR** binds `record`/`freeze` to `AssessmentSession` instead of a detached `SessionState` |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
@@ -53,7 +53,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
-| Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
+| Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests; **Active PR** consults `AssessmentSession::state()` so callers cannot pass a detached `Active` | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** response session-authority binding is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ResponseLedger::record`, `freeze`, and `freeze_as` consult an `AssessmentSession` for ownership and lifecycle state so a caller cannot forge `Active` or `Completed`. Public HTTP transport and the remaining item-delivery detached-`SessionState` hole (PRs #94/#99) remain outside this slice.
 
 ## 5. ADR traceability by concern
 

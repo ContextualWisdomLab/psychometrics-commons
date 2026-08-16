@@ -299,7 +299,7 @@ sequenceDiagram
         A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
         P->>C: answer presented item
         C->>A: submit response(client_event_ref)
-        A->>DB: validate active state + append response event
+        A->>DB: load AssessmentSession, reject unless Active, append response event
         DB-->>A: server sequence / idempotent replay outcome
         A-->>C: accepted sequence
     end
