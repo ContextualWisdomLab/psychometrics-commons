@@ -197,6 +197,7 @@ fn missing_scoring_request_leaves_the_job_and_snapshot_untouched() {
             snapshot_input(),
             worker_envelope(),
             3,
+            25_000,
         ),
         Err(ScoringWorkerCommitError::MissingRequest)
     ));
@@ -245,6 +246,7 @@ fn worker_persists_the_result_snapshot_with_the_terminal_job() {
         snapshot_input(),
         worker_envelope(),
         3,
+        25_000,
     )
     .unwrap();
     assert!(matches!(
@@ -269,6 +271,7 @@ fn worker_persists_the_result_snapshot_with_the_terminal_job() {
         snapshot_input(),
         worker_envelope(),
         3,
+        25_000,
     )
     .unwrap();
     assert!(matches!(
@@ -338,6 +341,20 @@ fn completed_engine(result_ref: &str, request: &ScoringRequest) -> ScriptedResul
             vec![ScoreObservation::scored("big_five_openness", 1.2, Some(0.15)).unwrap()],
         )
         .unwrap(),
+    }
+}
+
+struct RetryableResultEngine;
+
+impl ScoringWorkerResultEngine for RetryableResultEngine {
+    fn score_claimed_request(
+        &self,
+        _scoring_job_ref: &str,
+        _request: &ScoringRequest,
+    ) -> Result<ScoringWorkerResultOutcome, ScoringWorkerError> {
+        Ok(ScoringWorkerResultOutcome::Retryable {
+            cause_code: "engine_unavailable".to_owned(),
+        })
     }
 }
 
@@ -418,6 +435,7 @@ fn mismatched_job_request_leaves_the_job_and_snapshot_untouched() {
             snapshot_input(),
             worker_envelope(),
             3,
+            25_000,
         ),
         Err(ScoringWorkerCommitError::Planning(
             ScoringWorkerError::MismatchedScoringResult
@@ -455,6 +473,7 @@ fn planner_failure_leaves_the_job_and_snapshot_untouched() {
             input,
             worker_envelope(),
             3,
+            25_000,
         ),
         Err(ScoringWorkerCommitError::Planning(
             ScoringWorkerError::InvalidResultSnapshot
@@ -497,6 +516,7 @@ fn corrupt_stored_request_leaves_the_job_and_snapshot_untouched() {
             snapshot_input(),
             worker_envelope(),
             3,
+            25_000,
         ),
         Err(ScoringWorkerCommitError::Request(
             ScoringRequestPersistenceError::CorruptHistory
@@ -535,6 +555,7 @@ fn snapshot_conflict_leaves_the_job_leased_and_writes_no_outbox() {
             snapshot_input(),
             worker_envelope(),
             3,
+            25_000,
         ),
         Err(ScoringWorkerCommitError::Snapshot(
             ResultSnapshotPersistenceError::ConflictingReplay
@@ -576,6 +597,7 @@ fn engine_failure_quarantines_without_inventing_a_snapshot() {
         snapshot_input(),
         worker_envelope(),
         3,
+        25_000,
     )
     .unwrap();
     assert!(matches!(
@@ -593,4 +615,102 @@ fn engine_failure_quarantines_without_inventing_a_snapshot() {
     assert_eq!(cause.as_deref(), Some("invalid_scientific_evidence"));
     assert_eq!(snapshot_count(&mut client), 0);
     assert_eq!(outbox_count(&mut client), 1);
+}
+
+#[test]
+fn retryable_engine_outage_releases_the_lease_without_a_snapshot_or_outbox() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_retryable";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let request = loaded_request();
+
+    let mut transaction = client.transaction().unwrap();
+    let scheduled = run_scoring_worker_attempt_with_result_snapshot(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        request.scoring_request_ref(),
+        &RetryableResultEngine,
+        snapshot_input(),
+        worker_envelope(),
+        3,
+        25_000,
+    )
+    .unwrap();
+    assert_eq!(
+        scheduled.terminal(),
+        ScoringWorkerPersistence::RetryScheduled
+    );
+    assert_eq!(scheduled.snapshot(), None);
+    transaction.commit().unwrap();
+
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "retry_scheduled");
+    assert_eq!(result_ref, None);
+    assert_eq!(cause.as_deref(), Some("engine_unavailable"));
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
+    let next_attempt: i64 = client
+        .query_one(
+            "SELECT next_attempt_at_unix_ms FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(next_attempt, 25_000);
+}
+
+#[test]
+fn exhausted_retryable_outage_quarantines_without_a_snapshot_or_outbox() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_retry_exhausted";
+    let request = loaded_request();
+    let job = ScoringJob::new(job_ref, request.scoring_request_ref(), 1).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_request(&mut transaction, &request).unwrap();
+    persist_scoring_job(&mut transaction, &job).unwrap();
+    transaction.commit().unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let fencing_token = claim_scoring_job(
+        &mut transaction,
+        job_ref,
+        "worker_snapshot_retry_exhausted",
+        "lease_snapshot_retry_exhausted",
+        10_000,
+        30_000,
+    )
+    .unwrap()
+    .fencing_token();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let quarantined = run_scoring_worker_attempt_with_result_snapshot(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        request.scoring_request_ref(),
+        &RetryableResultEngine,
+        snapshot_input(),
+        worker_envelope(),
+        3,
+        25_000,
+    )
+    .unwrap();
+    assert_eq!(
+        quarantined.terminal(),
+        ScoringWorkerPersistence::Quarantined
+    );
+    assert_eq!(quarantined.snapshot(), None);
+    transaction.commit().unwrap();
+
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "quarantined");
+    assert_eq!(result_ref, None);
+    assert_eq!(cause.as_deref(), Some("engine_unavailable"));
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
 }

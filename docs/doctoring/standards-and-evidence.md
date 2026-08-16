@@ -107,11 +107,15 @@ Product consequences:
 
 - scoring-request reload reconstructs the version-pinned dispatch identity under
   `READ COMMITTED` after a share lock on the request row;
+- a job that names a different request fails closed before the engine runs;
 - a missing request is absent rather than an invented scoring pin;
 - unsupported stored schema versions fail closed instead of being coerced into
   the current output contract;
 - a completed job cannot commit without the immutable result snapshot a buyer
-  later retrieves.
+  later retrieves;
+- a retryable engine or transport outage keeps the work pending, writes no
+  terminal outbox row, and does not invent a score (Hohpe & Woolf, 2003;
+  Richardson, 2018).
 
 ## Evidence maintenance rules
 

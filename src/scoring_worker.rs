@@ -266,7 +266,7 @@ fn require_valid_worker_envelope(
     .map_err(|_| ScoringWorkerError::InvalidEnvelope)
 }
 
-/// Terminal outcome returned by one request-bound scoring-engine attempt.
+/// Terminal or retryable outcome returned by one request-bound scoring-engine attempt.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScoringWorkerResultOutcome {
     /// The engine accepted one immutable scoring result that can become a snapshot.
@@ -277,6 +277,14 @@ pub enum ScoringWorkerResultOutcome {
     /// The engine recorded one permanent scientific failure cause.
     Failed {
         /// Typed cause retained for quarantine and exact replay.
+        cause_code: String,
+    },
+    /// The engine could not finish; a later attempt may succeed.
+    ///
+    /// The worker must schedule a retry, write no terminal outbox row, and must
+    /// not invent a score.
+    Retryable {
+        /// Typed transport or engine-outage cause retained for the next attempt.
         cause_code: String,
     },
 }
@@ -290,12 +298,24 @@ pub trait ScoringWorkerResultEngine {
     /// # Errors
     ///
     /// Returns [`ScoringWorkerError`] when the engine cannot produce a typed
-    /// terminal outcome for this claimed job and request.
+    /// terminal or retryable outcome for this claimed job and request.
     fn score_claimed_request(
         &self,
         scoring_job_ref: &str,
         request: &ScoringRequest,
     ) -> Result<ScoringWorkerResultOutcome, ScoringWorkerError>;
+}
+
+/// Planned request-bound write: a terminal snapshot/outbox commit or a retry.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScoringWorkerResultPlan {
+    /// Persist the snapshot (when present), fenced job, and stable outbox event.
+    Terminal(Box<ScoringWorkerResultAttempt>),
+    /// Record a retryable outage without a terminal event or invented score.
+    Retryable {
+        /// Typed transport or engine-outage cause retained for the next attempt.
+        cause_code: String,
+    },
 }
 
 /// Planned terminal write that also carries the immutable product result snapshot.
@@ -340,14 +360,15 @@ impl ScoringWorkerResultAttempt {
 /// form an integration event, [`ScoringWorkerError::MismatchedScoringResult`]
 /// when the engine result is bound to another request,
 /// [`ScoringWorkerError::InvalidResultSnapshot`] when the snapshot cannot be
-/// built, or the engine's own identity error.
+/// built, or the engine's own identity error. A retryable engine outage returns
+/// [`ScoringWorkerResultPlan::Retryable`] without binding an `event_ref`.
 pub fn plan_scoring_worker_result_attempt(
     scoring_job_ref: &str,
     request: &ScoringRequest,
     engine: &impl ScoringWorkerResultEngine,
     snapshot_input: ResultSnapshotInput<'_>,
     envelope: ScoringWorkerEnvelope<'_>,
-) -> Result<ScoringWorkerResultAttempt, ScoringWorkerError> {
+) -> Result<ScoringWorkerResultPlan, ScoringWorkerError> {
     let scoring_job_ref = required_reference(scoring_job_ref)?;
     require_valid_worker_envelope(scoring_job_ref, envelope)?;
     let outcome = engine.score_claimed_request(scoring_job_ref, request)?;
@@ -366,13 +387,15 @@ pub fn plan_scoring_worker_result_attempt(
                 ScoringTerminalIdentity::Result(result.scoring_result_ref()),
             )?;
             let event = bind_worker_event(scoring_job_ref, &event_ref, envelope)?;
-            Ok(ScoringWorkerResultAttempt {
-                outcome: ScoringWorkerEngineOutcome::Completed {
-                    result_ref: result.scoring_result_ref().to_owned(),
+            Ok(ScoringWorkerResultPlan::Terminal(Box::new(
+                ScoringWorkerResultAttempt {
+                    outcome: ScoringWorkerEngineOutcome::Completed {
+                        result_ref: result.scoring_result_ref().to_owned(),
+                    },
+                    event,
+                    snapshot: Some(snapshot),
                 },
-                event,
-                snapshot: Some(snapshot),
-            })
+            )))
         }
         ScoringWorkerResultOutcome::Failed { cause_code } => {
             let event_ref = scoring_terminal_event_ref(
@@ -380,11 +403,17 @@ pub fn plan_scoring_worker_result_attempt(
                 ScoringTerminalIdentity::Cause(&cause_code),
             )?;
             let event = bind_worker_event(scoring_job_ref, &event_ref, envelope)?;
-            Ok(ScoringWorkerResultAttempt {
-                outcome: ScoringWorkerEngineOutcome::Failed { cause_code },
-                event,
-                snapshot: None,
-            })
+            Ok(ScoringWorkerResultPlan::Terminal(Box::new(
+                ScoringWorkerResultAttempt {
+                    outcome: ScoringWorkerEngineOutcome::Failed { cause_code },
+                    event,
+                    snapshot: None,
+                },
+            )))
+        }
+        ScoringWorkerResultOutcome::Retryable { cause_code } => {
+            let cause_code = required_reference(&cause_code)?.to_owned();
+            Ok(ScoringWorkerResultPlan::Retryable { cause_code })
         }
     }
 }
