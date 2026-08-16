@@ -96,7 +96,9 @@ pub fn apply_item_delivery_migration(
 /// Persist one tenant-bound item-delivery ledger and its accepted events.
 ///
 /// Exact replay under the same tenant is idempotent. Tenant, release, locale, digest,
-/// allowed-item, delivery, or event-evidence rebinding fails closed.
+/// allowed-item, delivery, or event-evidence rebinding fails closed. A whitespace-padded
+/// tenant or session alias fails closed before write instead of storing the trimmed
+/// identity.
 ///
 /// # Errors
 ///
@@ -352,7 +354,7 @@ fn classify_unique_violation(error: postgres::Error) -> ItemDeliveryPersistenceE
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceError> {
-    normalized_reference(reference).ok_or(ItemDeliveryPersistenceError::InvalidReference)
+    exact_reference(reference)
 }
 
 fn exact_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceError> {
@@ -414,6 +416,22 @@ mod reference_guard_tests {
         assert_eq!(
             required_reference("session_item_delivery_alpha").unwrap(),
             "session_item_delivery_alpha"
+        );
+    }
+
+    #[test]
+    fn persist_rejects_padded_tenant_aliases_instead_of_trimming() {
+        assert!(matches!(
+            required_reference(" tenant_item_delivery_alpha"),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert!(matches!(
+            required_reference("tenant_item_delivery_alpha "),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert_eq!(
+            required_reference("tenant_item_delivery_alpha").unwrap(),
+            "tenant_item_delivery_alpha"
         );
     }
 
