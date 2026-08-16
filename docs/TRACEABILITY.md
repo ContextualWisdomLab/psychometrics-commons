@@ -89,6 +89,10 @@ Corresponding protected-main adapters include `src/postgres_integration.rs`, `sr
 
 ## 5. Active-PR evidence is not shipped truth
 
+### Active implementation work that is not protected-main truth
+
+**Active PR** #80 documentation rebaseline is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It reconciles protected-main evidence vocabulary and architecture mappings after recent persistence merges; it does not promote open persistence or recovery slices to shipped implementation.
+
 At this documentation reconciliation, open work includes additional persistence/recovery/transaction-composition slices for item delivery, results, participant identity links, response events, sessions, research release/contribution evidence, scoring orchestration/completion, consent propagation, data-rights processing/completion, recovery acceptance, deterministic narrative rendering, and current fail-closed/idempotency hardening. Those changes are **IMPLEMENTED_ON_ACTIVE_PR** only after their exact current heads contain executable source/tests; their details must be re-fetched from GitHub rather than copied into protected-main claims.
 
 The previous documentation reconciliation PR #67 targeted an older protected-main baseline and is **SUPERSEDED** by this baseline reconciliation. Closing or superseding an obsolete documentation PR does not itself promote any product behavior.
