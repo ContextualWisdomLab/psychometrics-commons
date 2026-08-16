@@ -115,7 +115,12 @@ Product consequences:
   later retrieves;
 - a retryable engine or transport outage keeps the work pending, writes no
   terminal outbox row, and does not invent a score (Hohpe & Woolf, 2003;
-  Richardson, 2018).
+  Richardson, 2018);
+- a later due claim after that outage persists the real snapshot and one
+  stable terminal event so the buyer can retrieve the request-bound score
+  (International Organization for Standardization, 2023c; Hohpe & Woolf, 2003);
+- a retry instant earlier than the outage keeps the job leased instead of
+  inventing a schedule.
 
 ## Evidence maintenance rules
 
@@ -135,6 +140,8 @@ International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Info
 International Organization for Standardization. (2023a). *ISO/IEC 23894:2023 Information technology—Artificial intelligence—Guidance on risk management*. https://www.iso.org/standard/77304.html
 
 International Organization for Standardization. (2023b). *ISO/IEC 42001:2023 Information technology—Artificial intelligence—Management system*. https://www.iso.org/standard/42001
+
+International Organization for Standardization. (2023c). *ISO/IEC 25010:2023 Systems and software engineering—Systems and software Quality Requirements and Evaluation (SQuaRE)—Product quality model* (2nd ed.). https://www.iso.org/standard/78176.html
 
 International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 1:2024 Information security, cybersecurity and privacy protection—Information security management systems—Requirements—Amendment 1: Climate action changes*. https://www.iso.org/standard/27001
 
