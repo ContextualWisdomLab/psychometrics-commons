@@ -409,6 +409,7 @@ fn non_database_errors_have_operator_facing_display_without_sources() {
     let errors = [
         ResearchReleasePersistenceError::UnsupportedIsolationLevel,
         ResearchReleasePersistenceError::ConflictingReplay,
+        ResearchReleasePersistenceError::MissingStoredEvidence,
     ];
     for error in errors {
         assert!(!error.to_string().is_empty());

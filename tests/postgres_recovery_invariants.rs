@@ -98,6 +98,20 @@ fn seed_recovery_critical_state(client: &mut Client) {
              ) VALUES (
                 'snapshot_recovery_alpha', 1, 'response_recovery_alpha',
                 'item_version_recovery_alpha', '{DIGEST_A}'
+             );
+             INSERT INTO {SOURCE_SCHEMA}.research_release_approval (
+                research_release_ref, dataset_snapshot_ref, research_scope_ref, manifest_digest,
+                privacy_review_ref, scientific_review_ref, metadata_bundle_ref, license_record_ref,
+                measurement_provenance_ref, access_approval_ref, citation_metadata_ref,
+                release_approver_ref, ordinary_admin_ref, access_class
+             ) VALUES (
+                'research_release_recovery_alpha', 'dataset_snapshot_recovery_alpha',
+                'research_scope_recovery_alpha', '{DIGEST_A}',
+                'privacy_review_recovery_alpha', 'scientific_review_recovery_alpha',
+                'metadata_bundle_recovery_alpha', 'license_record_recovery_alpha',
+                'measurement_provenance_recovery_alpha', 'access_approval_recovery_alpha',
+                'citation_metadata_recovery_alpha', 'release_approver_recovery_alpha',
+                'ordinary_admin_recovery_alpha', 'controlled'
              );"
         ))
         .expect("recovery fixture should satisfy all protected-main persistence constraints");
@@ -188,6 +202,47 @@ fn assert_restored_evidence(client: &mut Client) {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+
+    let restored_release = client
+        .query_one(
+            &format!(
+                "SELECT dataset_snapshot_ref, manifest_digest, access_class,
+                        release_approver_ref, ordinary_admin_ref
+                 FROM {RESTORED_SCHEMA}.research_release_approval
+                 WHERE research_release_ref = 'research_release_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect("immutable research-release approval evidence should survive restore");
+    assert_eq!(
+        restored_release.get::<_, String>(0),
+        "dataset_snapshot_recovery_alpha"
+    );
+    assert_eq!(restored_release.get::<_, String>(1), DIGEST_A);
+    assert_eq!(restored_release.get::<_, String>(2), "controlled");
+    assert_eq!(
+        restored_release.get::<_, String>(3),
+        "release_approver_recovery_alpha"
+    );
+    assert_eq!(
+        restored_release.get::<_, String>(4),
+        "ordinary_admin_recovery_alpha"
+    );
+
+    let restored_mutation = client
+        .execute(
+            &format!(
+                "UPDATE {RESTORED_SCHEMA}.research_release_approval \
+                 SET scientific_review_ref = 'scientific_review_recovery_tampered' \
+                 WHERE research_release_ref = 'research_release_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect_err("restored research-release approval evidence must stay immutable");
+    let mutation_error = restored_mutation
+        .as_db_error()
+        .expect("restored immutability must fail at the database boundary");
+    assert_eq!(mutation_error.code().code(), "55000");
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
@@ -251,6 +306,7 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "integration_consumption",
         "response_snapshot",
         "response_snapshot_entry",
+        "research_release_approval",
     ];
     let backups: Vec<(&str, Vec<u8>)> = tables
         .iter()
