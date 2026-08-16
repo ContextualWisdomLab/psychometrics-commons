@@ -52,7 +52,7 @@ This document converts broad quality goals into **stimulus → environment → r
 
 - **Stimulus:** a buyer retries the exact start after the stored release is suspended or retired.
 - **Response:** the original created session is returned; a new `session_ref` or rebound participant fails closed and does not insert.
-- **Evidence:** `start_replays_exact_session_after_stored_release_is_suspended` against real PostgreSQL and `exact_start_identity_matches_stored_session_and_rejects_rebind`.
+- **Evidence:** `start_replays_exact_session_after_stored_release_is_suspended`, `start_replays_exact_session_after_stored_release_is_retired`, and `persist_rejects_reconstituted_first_insert_after_stored_release_is_suspended` against real PostgreSQL, plus `exact_start_identity_matches_stored_session_and_rejects_rebind`.
 
 ## 3. Availability and graceful degradation
 
