@@ -72,10 +72,7 @@ fn evidence() -> (
         )
         .unwrap();
     let snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_error_alpha",
-        )
+        .freeze_as(SessionState::Completed, "response_snapshot_error_alpha")
         .unwrap();
     let request = ScoringRequest::from_snapshot(
         &snapshot,
@@ -140,6 +137,79 @@ fn snapshot_isolation_failure_is_preserved_before_any_write() {
     ));
     assert!(error.source().is_some());
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn same_snapshot_reference_with_different_session_fails_before_any_write() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    let (snapshot, _, event) = evidence();
+
+    let mut other_ledger = ResponseLedger::new("session_snapshot_error_other").unwrap();
+    other_ledger
+        .record(
+            SessionState::Active,
+            ResponseWrite {
+                server_event_ref: "server_event_snapshot_error_other",
+                client_event_ref: "client_event_snapshot_error_other",
+                item_version_ref: "item_version_snapshot_error_other",
+                payload_digest: DIGEST,
+            },
+        )
+        .unwrap();
+    let other_snapshot = other_ledger
+        .freeze_as(SessionState::Completed, "response_snapshot_error_alpha")
+        .unwrap();
+    let other_request = ScoringRequest::from_snapshot(
+        &other_snapshot,
+        ScoringRequestInput {
+            scoring_request_ref: "scoring_request_snapshot_error_other",
+            response_snapshot_ref: "response_snapshot_error_alpha",
+            assessment_spec_ref: "assessment_spec_big_five_v1",
+            instrument_version_ref: "instrument_version_big_five_ko_v1",
+            scoring_version_ref: "scoring_version_big_five_v1",
+            calibration_reference: "calibration_big_five_ko_v1",
+            norm_version_ref: None,
+            requested_output_schema_version: 1,
+        },
+    )
+    .unwrap();
+    let job = ScoringJob::new(
+        "scoring_job_snapshot_error_other",
+        other_request.scoring_request_ref(),
+        3,
+    )
+    .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_response_snapshot_and_scoring_dispatch(
+        &mut transaction,
+        &snapshot,
+        &other_request,
+        &job,
+        &event,
+        3,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        SnapshotScoringPersistenceError::MismatchedSnapshotBinding
+    ));
+    assert!(error.source().is_none());
+    transaction.rollback().unwrap();
+
+    for table in [
+        "response_snapshot",
+        "scoring_request",
+        "scoring_job_state",
+        "integration_outbox",
+    ] {
+        let count: i64 = client
+            .query_one(&format!("SELECT count(*) FROM {table}"), &[])
+            .unwrap()
+            .get(0);
+        assert_eq!(count, 0, "{table} must remain empty");
+    }
 }
 
 #[test]
