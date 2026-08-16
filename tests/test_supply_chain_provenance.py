@@ -104,7 +104,7 @@ class SupplyChainProvenanceContract(unittest.TestCase):
         self.assertIn('cp "${first_packages[0]}" target/package/', package_job)
 
     def test_attestation_credentials_exist_only_on_protected_main_push(self) -> None:
-        """OIDC and attestation writes must be unreachable from pull requests."""
+        """OIDC and only the permissions required for binary attestation stay on protected main."""
         text = self.workflow_text()
         jobs = mapping_block(text, "jobs", 0)
         package_job = mapping_block(jobs, "package", 2)
@@ -126,9 +126,9 @@ class SupplyChainProvenanceContract(unittest.TestCase):
                 "contents: read",
                 "id-token: write",
                 "attestations: write",
-                "artifact-metadata: write",
             },
         )
+        self.assertNotIn("artifact-metadata:", attest_job)
         self.assertEqual(
             mapping_scalar(attest_job, "if", 4),
             "github.event_name == 'push' && github.ref == 'refs/heads/main'",
