@@ -9,6 +9,7 @@
 
 pub mod account_link;
 pub mod anonymous_authorization;
+pub mod anonymous_credential;
 pub mod anonymous_session;
 pub mod authorization;
 pub mod consent;
