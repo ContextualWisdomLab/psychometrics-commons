@@ -100,7 +100,7 @@ sharing_token_audience/expiry if used
 
 Rules:
 
-- Tenant context for state-changing requests is derived from authenticated authorization or, for an anonymous session command, from the supplied `ParticipantRecord` argument. The command gate does not prove those records were store-loaded. Active PR #147 persists the `assessment_participant` row and append-only identity-link history; prefer that head over #133, #114, or #124. Tenant is not taken from an untrusted body field, a caller-invented `ResourceScope`, or an implicit default.
+- Tenant context for state-changing requests is derived from authenticated authorization or, for an anonymous session command, from the supplied `ParticipantRecord` argument. The command gate does not prove those records were store-loaded. Active PR #158 persists the `assessment_participant` row and append-only identity-link history; prefer that head over #147, #133, #114, or #124. Tenant is not taken from an untrusted body field, a caller-invented `ResourceScope`, or an implicit default.
 - Public opaque identifiers are identifiers, not authorization capabilities.
 - Research steward, instrument publisher, participant result owner, and identity administrator are distinct authorities.
 - A sharing link, if introduced, must be revocable, scoped to an exact resource/audience, expire by default, and not reveal raw responses unless explicitly permitted by the participant and product policy.

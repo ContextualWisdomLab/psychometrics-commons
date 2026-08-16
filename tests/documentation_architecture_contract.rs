@@ -417,8 +417,12 @@ fn anonymous_command_docs_do_not_claim_store_load() {
             "{label} must not name superseded #133 as the current participant persist landing"
         );
         assert!(
-            document.contains("#147"),
-            "{label} must name Active PR #147 as the current participant persist landing"
+            !document.contains("remains Active PR #147"),
+            "{label} must not name superseded #147 as the current participant persist landing"
+        );
+        assert!(
+            document.contains("#158"),
+            "{label} must name Active PR #158 as the current participant persist landing"
         );
     }
 }
