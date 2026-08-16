@@ -88,6 +88,33 @@ impl Display for SessionCreationError {
 
 impl Error for SessionCreationError {}
 
+/// Create a session that may start now against a currently published release.
+///
+/// Call this when a buyer starts a new assessment. It uses
+/// [`AssessmentSession::new`] so unpublished, suspended, or retired releases
+/// and locale mismatches fail closed. Load after restart uses
+/// [`AssessmentSession::from_persisted_created`]; do not reconstitute a session
+/// that was never started just to persist it.
+///
+/// # Errors
+///
+/// Returns the same [`SessionCreationError`] values as [`AssessmentSession::new`].
+pub fn created_session_for_start(
+    session_ref: &str,
+    participant_ref: &str,
+    release: &InstrumentRelease,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<AssessmentSession, SessionCreationError> {
+    AssessmentSession::new(
+        session_ref,
+        participant_ref,
+        release,
+        requested_locale,
+        created_at_unix_ms,
+    )
+}
+
 /// Fail-closed error returned while restoring a created session from stored identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]

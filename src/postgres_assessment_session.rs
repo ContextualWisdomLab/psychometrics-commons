@@ -12,8 +12,12 @@
 //! restores created identity without re-checking publication eligibility,
 //! then replays stored commands. Replay requires `READ COMMITTED`.
 
+use crate::instrument::InstrumentRelease;
 use crate::reference::normalized_reference;
-use crate::session::{AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionState};
+use crate::session::{
+    created_session_for_start, AcceptedSessionCommand, AssessmentSession, SessionCommand,
+    SessionCreationError, SessionState,
+};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -109,6 +113,46 @@ impl From<postgres::Error> for AssessmentSessionPersistenceError {
     }
 }
 
+/// Fail-closed error for starting and persisting a created assessment session.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum AssessmentSessionStartError {
+    /// The release is unpublished, the locale does not match, or identity is invalid.
+    Creation(SessionCreationError),
+    /// Durable persist or load rejected the start attempt.
+    Persistence(AssessmentSessionPersistenceError),
+}
+
+impl Display for AssessmentSessionStartError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Creation(error) => Display::fmt(error, formatter),
+            Self::Persistence(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl Error for AssessmentSessionStartError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Creation(error) => Some(error),
+            Self::Persistence(error) => Some(error),
+        }
+    }
+}
+
+impl From<SessionCreationError> for AssessmentSessionStartError {
+    fn from(error: SessionCreationError) -> Self {
+        Self::Creation(error)
+    }
+}
+
+impl From<AssessmentSessionPersistenceError> for AssessmentSessionStartError {
+    fn from(error: AssessmentSessionPersistenceError) -> Self {
+        Self::Persistence(error)
+    }
+}
+
 /// Apply the idempotent assessment-session and command-history migrations.
 ///
 /// # Errors
@@ -168,6 +212,109 @@ pub fn persist_assessment_session(
         return Ok(AssessmentSessionPersistenceDisposition::Inserted);
     }
     classify_existing_session(transaction, session, session_ref, created_at_unix_ms)
+}
+
+/// Start a created session only while the release still accepts new sessions.
+///
+/// This is the persist boundary HTTP and other transports must call. It runs
+/// [`created_session_for_start`] so a suspended or retired release cannot mint a
+/// reconstituted identity and then persist it. Exact replay of an already stored
+/// start returns the original session even after a later suspend, so a buyer who
+/// already started can retry without losing the session.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionStartError::Creation`] when the release cannot
+/// accept a new session and no exact stored start exists, or
+/// [`AssessmentSessionStartError::Persistence`] for conflicting stored identity
+/// or a database failure.
+pub fn start_created_assessment_session(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    participant_ref: &str,
+    release: &InstrumentRelease,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
+{
+    match created_session_for_start(
+        session_ref,
+        participant_ref,
+        release,
+        requested_locale,
+        created_at_unix_ms,
+    ) {
+        Ok(session) => {
+            let disposition = persist_assessment_session(transaction, &session)?;
+            Ok((session, disposition))
+        }
+        Err(SessionCreationError::InstrumentReleaseUnavailable) => {
+            replay_started_session_after_publication_block(
+                transaction,
+                session_ref,
+                participant_ref,
+                release,
+                requested_locale,
+                created_at_unix_ms,
+            )
+        }
+        Err(error) => Err(AssessmentSessionStartError::Creation(error)),
+    }
+}
+
+/// Return an exact stored start after the release no longer accepts new sessions.
+fn replay_started_session_after_publication_block(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    participant_ref: &str,
+    release: &InstrumentRelease,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
+{
+    let Some(stored) = load_assessment_session(transaction, session_ref)? else {
+        return Err(AssessmentSessionStartError::Creation(
+            SessionCreationError::InstrumentReleaseUnavailable,
+        ));
+    };
+    if stored_start_identity_matches(
+        &stored,
+        session_ref,
+        participant_ref,
+        release,
+        requested_locale,
+        created_at_unix_ms,
+    ) {
+        Ok((stored, AssessmentSessionPersistenceDisposition::Duplicate))
+    } else {
+        Err(AssessmentSessionStartError::Persistence(
+            AssessmentSessionPersistenceError::ConflictingReplay,
+        ))
+    }
+}
+
+/// Compare a stored session with the start request without re-checking publication.
+fn stored_start_identity_matches(
+    stored: &AssessmentSession,
+    session_ref: &str,
+    participant_ref: &str,
+    release: &InstrumentRelease,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> bool {
+    let Some(session_ref) = normalized_reference(session_ref) else {
+        return false;
+    };
+    let Some(participant_ref) = normalized_reference(participant_ref) else {
+        return false;
+    };
+    stored.session_ref() == session_ref
+        && stored.participant_ref() == participant_ref
+        && stored.instrument_release_ref() == release.manifest().release_ref()
+        && stored.instrument_version_ref() == release.manifest().instrument_version_ref()
+        && stored.instrument_release_content_digest() == release.manifest().content_digest()
+        && stored.locale() == requested_locale
+        && stored.created_at_unix_ms() == created_at_unix_ms
 }
 
 /// Persist accepted command history and the current lifecycle-state projection.
@@ -467,8 +614,15 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod tests {
-    use super::{reject_stale_command_prefix, AssessmentSessionPersistenceError};
-    use crate::session::{SessionCommand, SessionState};
+    use super::{
+        reject_stale_command_prefix, stored_start_identity_matches,
+        AssessmentSessionPersistenceError, AssessmentSessionStartError,
+    };
+    use crate::instrument::{
+        InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
+        PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
+    };
+    use crate::session::{AssessmentSession, SessionCommand, SessionCreationError, SessionState};
 
     #[test]
     fn session_persistence_errors_are_safe_and_specific() {
@@ -544,6 +698,162 @@ mod tests {
             reject_stale_command_prefix(-1, 0),
             Err(AssessmentSessionPersistenceError::ValueOutOfRange)
         ));
+    }
+
+    #[test]
+    fn start_errors_tell_the_buyer_the_next_action() {
+        let unavailable = AssessmentSessionStartError::Creation(
+            SessionCreationError::InstrumentReleaseUnavailable,
+        );
+        assert_eq!(
+            unavailable.to_string(),
+            "assessment session requires an instrument release currently published for new sessions"
+        );
+        assert!(std::error::Error::source(&unavailable).is_some());
+        let locale = AssessmentSessionStartError::from(SessionCreationError::LocaleMismatch);
+        assert_eq!(
+            locale.to_string(),
+            "assessment session locale must exactly match the published instrument release locale"
+        );
+        let persist =
+            AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay);
+        assert_eq!(
+            persist.to_string(),
+            "assessment session identity was replayed with conflicting evidence"
+        );
+        assert!(std::error::Error::source(&persist).is_some());
+    }
+
+    #[test]
+    fn stored_start_identity_rejects_blank_refs_and_rebinding() {
+        const DIGEST: &str =
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let stored = AssessmentSession::from_persisted_created(
+            "ses_start_identity_alpha",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            DIGEST,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        let release = published_release_for_start_tests(DIGEST);
+        assert!(stored_start_identity_matches(
+            &stored,
+            "ses_start_identity_alpha",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &release,
+            "ko-KR",
+            20_000,
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            " ",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &release,
+            "ko-KR",
+            20_000,
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            "ses_start_identity_alpha",
+            "12",
+            &release,
+            "ko-KR",
+            20_000,
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            "ses_start_identity_alpha",
+            "ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &release,
+            "ko-KR",
+            20_000,
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            "ses_start_identity_alpha",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &release,
+            "en-US",
+            20_000,
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            "ses_start_identity_alpha",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &release,
+            "ko-KR",
+            21_000,
+        ));
+    }
+
+    fn published_release_for_start_tests(digest: &str) -> InstrumentRelease {
+        let manifest = InstrumentReleaseManifest::new(
+            "release_big_five_ko_v1",
+            "instrument_big_five",
+            "instrument_version_big_five_ko_v1",
+            "construct_big_five",
+            &["item_version_001", "item_version_002"],
+            "ko-KR",
+            "assessment_spec_big_five_v1",
+            "scoring_version_big_five_v1",
+            "calibration_big_five_ko_v1",
+            Some("norm_version_big_five_ko_v1"),
+            "narrative_version_big_five_v1",
+            &["consent_service_v1"],
+            "intended_use_self_reflection_v1",
+            "limitations_nonclinical_v1",
+            digest,
+        )
+        .unwrap();
+        let evidence = PublicationEvidenceRecord::new(
+            "publication_evidence_big_five_ko_v1",
+            "evidence_policy_self_reflection_v1",
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            &["item_version_001", "item_version_002"],
+            digest,
+            "ko-KR",
+            "intended_use_self_reflection_v1",
+            "assessment_spec_big_five_v1",
+            "scoring_version_big_five_v1",
+            "calibration_big_five_ko_v1",
+            Some("norm_version_big_five_ko_v1"),
+            "limitations_nonclinical_v1",
+            PublicationEvidenceProvenance::new(
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                "population_general_adult_v1",
+                "administration_web_self_report_v1",
+                "measurement_model_big_five_v1",
+                10_050,
+                None,
+            )
+            .unwrap(),
+            &["rights_ipip_big_five_v1"],
+            &["recovery_big_five_ko_v1"],
+            &["approval_psychometrics_big_five_ko_v1"],
+            PublicationEvidenceStatus::Approved,
+        )
+        .unwrap();
+        let mut release = InstrumentRelease::new(manifest, 10_000).unwrap();
+        release
+            .apply_command(
+                "publication_review_start_identity",
+                PublicationCommand::SubmitReview,
+                10_100,
+            )
+            .unwrap();
+        release.bind_publication_evidence(evidence).unwrap();
+        release
+            .apply_command(
+                "publication_publish_start_identity",
+                PublicationCommand::Publish,
+                10_200,
+            )
+            .unwrap();
+        release
     }
 
     #[test]

@@ -11,10 +11,13 @@ use psychometrics_commons_runtime::instrument::{
 };
 use psychometrics_commons_runtime::postgres_assessment_session::{
     apply_assessment_session_migration, load_assessment_session, persist_assessment_session,
-    persist_assessment_session_commands, AssessmentSessionPersistenceDisposition,
-    AssessmentSessionPersistenceError,
+    persist_assessment_session_commands, start_created_assessment_session,
+    AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
+    AssessmentSessionStartError,
 };
-use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
+use psychometrics_commons_runtime::session::{
+    AssessmentSession, SessionCommand, SessionCreationError, SessionState,
+};
 
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -1008,4 +1011,185 @@ fn load_replays_fail_closed_when_command_or_projection_evidence_is_corrupt() {
         "projection that does not match replayed Active must fail closed"
     );
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn start_created_session_persists_while_release_is_published() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let release = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    let mut transaction = client.transaction().unwrap();
+    let (session, disposition) = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_published_alpha",
+        PARTICIPANT_REF,
+        &release,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert_eq!(
+        disposition,
+        AssessmentSessionPersistenceDisposition::Inserted
+    );
+    assert_eq!(session.state(), SessionState::Created);
+    assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
+
+    let mut load_transaction = client.transaction().unwrap();
+    let loaded = load_assessment_session(&mut load_transaction, "ses_start_published_alpha")
+        .unwrap()
+        .expect("a started session must reload after commit");
+    load_transaction.commit().unwrap();
+    assert_eq!(loaded.session_ref(), "ses_start_published_alpha");
+    assert_eq!(loaded.state(), SessionState::Created);
+}
+
+#[test]
+fn start_created_session_fails_after_release_is_suspended() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut release = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    release
+        .apply_command(
+            "publication_suspend_start_persist",
+            PublicationCommand::Suspend,
+            10_300,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let error = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_suspended_alpha",
+        PARTICIPANT_REF,
+        &release,
+        "ko-KR",
+        20_000,
+    )
+    .expect_err("a buyer must not start after the release is suspended");
+    transaction.rollback().unwrap();
+    assert!(
+        matches!(
+            error,
+            AssessmentSessionStartError::Creation(
+                SessionCreationError::InstrumentReleaseUnavailable
+            )
+        ),
+        "start after suspend must fail closed, not persist a reconstituted identity: {error:?}"
+    );
+}
+
+#[test]
+fn start_created_session_replays_after_later_suspend() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut release = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    {
+        let mut transaction = client.transaction().unwrap();
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_replay_alpha",
+            PARTICIPANT_REF,
+            &release,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+    release
+        .apply_command(
+            "publication_suspend_after_start",
+            PublicationCommand::Suspend,
+            20_100,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let (session, disposition) = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_replay_alpha",
+        PARTICIPANT_REF,
+        &release,
+        "ko-KR",
+        20_000,
+    )
+    .expect("exact start replay must return the original session after later suspend");
+    transaction.commit().unwrap();
+    assert_eq!(
+        disposition,
+        AssessmentSessionPersistenceDisposition::Duplicate
+    );
+    assert_eq!(session.session_ref(), "ses_start_replay_alpha");
+    assert_eq!(session.state(), SessionState::Created);
+}
+
+#[test]
+fn start_created_session_rejects_rebound_identity_after_suspend() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut release = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    {
+        let mut transaction = client.transaction().unwrap();
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_rebind_alpha",
+            PARTICIPANT_REF,
+            &release,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+    release
+        .apply_command(
+            "publication_suspend_after_rebind",
+            PublicationCommand::Suspend,
+            20_100,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let error = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_rebind_alpha",
+        "ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        &release,
+        "ko-KR",
+        20_000,
+    )
+    .expect_err("a later start must not rebind the stored participant");
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        AssessmentSessionStartError::Persistence(
+            AssessmentSessionPersistenceError::ConflictingReplay
+        )
+    ));
+}
+
+#[test]
+fn start_created_session_rejects_locale_mismatch() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let release = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    let mut transaction = client.transaction().unwrap();
+    let error = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_locale_alpha",
+        PARTICIPANT_REF,
+        &release,
+        "en-US",
+        20_000,
+    )
+    .expect_err("start must keep the exact published locale");
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        AssessmentSessionStartError::Creation(SessionCreationError::LocaleMismatch)
+    ));
 }

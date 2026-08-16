@@ -5,7 +5,7 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::session::{
-    AssessmentSession, SessionCreationError, SessionState,
+    created_session_for_start, AssessmentSession, SessionCreationError, SessionState,
 };
 
 const VALID_DIGEST: &str =
@@ -274,6 +274,58 @@ fn session_creation_rejects_invalid_identity_and_timestamp() {
         ),
         Err(SessionCreationError::InvalidTimestamp)
     );
+}
+
+#[test]
+fn start_boundary_rejects_suspended_release_instead_of_reconstituting() {
+    let mut release = published_release();
+    release
+        .apply_command(
+            "publication_suspend_start_boundary",
+            PublicationCommand::Suspend,
+            10_300,
+        )
+        .unwrap();
+
+    let reconstituted = AssessmentSession::from_persisted_created(
+        "ses_start_boundary_reconstituted",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        VALID_DIGEST,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    assert_eq!(reconstituted.state(), SessionState::Created);
+
+    assert_eq!(
+        created_session_for_start(
+            "ses_start_boundary_after_suspend",
+            PARTICIPANT_REF,
+            &release,
+            "ko-KR",
+            20_000,
+        ),
+        Err(SessionCreationError::InstrumentReleaseUnavailable)
+    );
+}
+
+#[test]
+fn start_boundary_creates_from_currently_published_release() {
+    let session = created_session_for_start(
+        "ses_start_boundary_published",
+        PARTICIPANT_REF,
+        &published_release(),
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+
+    assert_eq!(session.session_ref(), "ses_start_boundary_published");
+    assert_eq!(session.participant_ref(), PARTICIPANT_REF);
+    assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(session.state(), SessionState::Created);
 }
 
 #[test]
