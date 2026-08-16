@@ -89,6 +89,10 @@ pub enum ScoringWorkerCommitError {
     /// The supplied event identity is not the stable job and outcome key.
     Identity(ScoringWorkerError),
     /// The engine or planner could not produce a typed terminal attempt.
+    ///
+    /// [`ScoringWorkerError::MismatchedScoringResult`] is a persisted
+    /// job/request integrity failure, not a retryable engine outage. Use
+    /// [`Self::is_stored_request_integrity_failure`] when selecting recovery.
     Planning(ScoringWorkerError),
     /// The persisted scoring request could not be reconstructed.
     Request(ScoringRequestPersistenceError),
@@ -108,11 +112,28 @@ pub enum ScoringWorkerCommitError {
     Retry(ScoringJobPersistenceError),
 }
 
+impl ScoringWorkerCommitError {
+    /// Return whether this error proves a persisted job/request identity mismatch.
+    ///
+    /// This class requires operator integrity investigation. It must not be
+    /// treated as a transient `fast-mlsirm`, transport, or planner outage.
+    #[must_use]
+    pub const fn is_stored_request_integrity_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::Planning(ScoringWorkerError::MismatchedScoringResult)
+        )
+    }
+}
+
 impl Display for ScoringWorkerCommitError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Identity(_) => {
                 "scoring worker must reuse the stable job and outcome event identity"
+            }
+            Self::Planning(ScoringWorkerError::MismatchedScoringResult) => {
+                "scoring worker stored job/request integrity mismatch; investigate persisted evidence before retrying"
             }
             Self::Planning(_) => {
                 "scoring worker could not plan a terminal attempt; keep the job leased and retry after a typed engine outcome"
@@ -304,8 +325,11 @@ fn commit_planned_scoring_worker_attempt(
 /// [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
 /// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
 /// [`ScoringWorkerCommitError::Planning`] when the job names a different
-/// request or the engine/planner cannot produce a typed attempt,
-/// [`ScoringWorkerCommitError::Retry`] when retry evidence cannot persist,
+/// request or the engine/planner cannot produce a typed attempt. A stored
+/// job/request mismatch is classified by
+/// [`ScoringWorkerCommitError::is_stored_request_integrity_failure`] and must be
+/// investigated as integrity evidence rather than retried as an engine outage.
+/// Returns [`ScoringWorkerCommitError::Retry`] when retry evidence cannot persist,
 /// [`ScoringWorkerCommitError::Snapshot`] when the immutable snapshot cannot
 /// persist, or the existing completion/failure error.
 #[allow(clippy::too_many_arguments)]
