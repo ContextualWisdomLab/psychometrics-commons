@@ -425,6 +425,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
+- `response_event` is the accepted mid-session ledger. Physical `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` persist/reload that prefix on this Active PR; HTTP response transport remains Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
@@ -453,6 +454,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `instrument_release` manifest columns after first persist (only `publication_state` may advance);
 - `item_version` after publication;
 - `item_delivery_event`;
+- accepted `response_event` rows;
 - `response_snapshot` and `response_snapshot_entry`;
 - `result_snapshot`;
 - `consent_snapshot`;

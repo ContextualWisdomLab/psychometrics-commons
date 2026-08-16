@@ -336,6 +336,7 @@ sequenceDiagram
     participant F as fast-mlsirm scoring path
 
     P->>A: complete assessment
+    Note over DB: Active PR persist/reload keeps accepted response_event rows so a mid-session restart can rebuild the same prefix before this freeze
     A->>DB: commit Completed + immutable response snapshot + outbox
     A-->>P: completion durable; scoring pending
 
