@@ -53,7 +53,7 @@ withdrawal state/evidence
 
 A broad “improve services and research” checkbox is insufficient to authorize arbitrary future public release. Scope must be machine-readable enough that snapshot construction can fail closed when a requested variable/use is outside the participant's grant.
 
-Withdrawal of research consent stops future contribution writes. A stored research-consent snapshot projection remains an immutable identity binding; it is not a standing write capability. New contribution starts re-check the latest matching consent-ledger grant. Exact replay and withdrawal of already stored contribution evidence stay allowed so revoke cannot erase history (European Parliament & Council of the European Union, 2016; International Organization for Standardization, 2024).
+Withdrawal of research consent stops future contribution writes. A stored research-consent snapshot projection remains an immutable identity binding; it is not a standing write capability. New contribution starts re-check the latest research-purpose consent-ledger event for that participant and require that event to still be granted for the contribution's exact scope. A later grant or revoke for another scope replaces the prior scope as the live write capability. Exact replay and withdrawal of already stored contribution evidence stay allowed so revoke cannot erase history (European Parliament & Council of the European Union, 2016; International Organization for Standardization, 2024).
 
 The consent user experience explains, as applicable:
 

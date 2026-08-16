@@ -9,10 +9,13 @@
 //! callers must first persist the exact active research-consent snapshot projection.
 //! Contribution persistence then resolves participant and scope from that durable
 //! binding rather than trusting a second in-memory snapshot. A new contribution
-//! start also re-checks the live `consent_event` grant for that participant and
-//! scope so a stored snapshot cannot remain an unlimited write capability after
-//! revoke. Exact replay and withdrawal of already stored evidence stay allowed.
-//! The caller owns credentials and the surrounding transaction boundary.
+//! start re-checks the latest research-purpose `consent_event` for that
+//! participant. That event must still be `granted` for the contribution's exact
+//! scope, matching [`ConsentSnapshot::is_granted`] and
+//! [`ConsentSnapshot::active_research_scope`]. A later grant or revoke for
+//! another scope therefore replaces the prior scope as the live write capability.
+//! Exact replay and withdrawal of already stored evidence stay allowed. The
+//! caller owns credentials and the surrounding transaction boundary.
 
 use crate::consent::{
     ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState,
@@ -187,8 +190,8 @@ pub fn persist_research_consent_snapshot(
 /// that durable binding, never from a write-time snapshot argument. The stored
 /// scope must equal the contribution's immutable scope and the bound operational
 /// participant must differ from the pseudonymous research participant. A new
-/// contribution start also requires the latest matching `consent_event` decision
-/// to still be `granted`.
+/// contribution start also requires the latest research-purpose `consent_event`
+/// for that participant to still be `granted` for the contribution's exact scope.
 ///
 /// The contribution start record is append-only. Withdrawal is stored as a separate
 /// event, so replaying original active evidence after withdrawal cannot reactivate
@@ -378,14 +381,11 @@ fn persist_withdrawal(
         return Ok(true);
     }
 
-    let row = transaction.query_opt(
+    let row = transaction.query_one(
         "SELECT withdrawal_event_ref, withdrawn_at_unix_ms \
          FROM research_withdrawal_event WHERE contribution_ref = $1",
         &[&contribution_ref],
     )?;
-    let Some(row) = row else {
-        return Err(ResearchContributionPersistenceError::ConflictingReplay);
-    };
     let stored_event_ref: String = row.get(0);
     let stored_withdrawn_at_unix_ms: i64 = row.get(1);
     if stored_event_ref == withdrawal.withdrawal_event_ref
@@ -403,20 +403,20 @@ fn require_live_research_grant(
     research_scope_ref: &str,
 ) -> Result<(), ResearchContributionPersistenceError> {
     let row = transaction.query_opt(
-        "SELECT consent_decision \
+        "SELECT consent_decision, research_scope_ref \
          FROM consent_event \
          WHERE participant_ref = $1 \
            AND consent_purpose = 'research_contribution' \
-           AND research_scope_ref = $2 \
          ORDER BY occurred_at_unix_ms DESC, event_ref DESC \
          LIMIT 1",
-        &[&participant_ref, &research_scope_ref],
+        &[&participant_ref],
     )?;
     let Some(row) = row else {
         return Err(ResearchContributionPersistenceError::ResearchConsentRequired);
     };
     let decision: String = row.get(0);
-    if decision == "granted" {
+    let live_scope_ref: String = row.get(1);
+    if decision == "granted" && live_scope_ref == research_scope_ref {
         Ok(())
     } else {
         Err(ResearchContributionPersistenceError::ResearchConsentRequired)
