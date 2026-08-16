@@ -309,6 +309,7 @@ sequenceDiagram
     A-->>C: completion accepted / scoring pending
 
     W->>DB: claim scoring work
+    Note over W,DB: Active PR claim_next_scoring_job takes the oldest due queued or retry-scheduled row with FOR UPDATE SKIP LOCKED
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance
     W->>DB: persist immutable scoring-result evidence
