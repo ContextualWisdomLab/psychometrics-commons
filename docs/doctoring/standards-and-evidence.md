@@ -121,6 +121,10 @@ Product consequences:
 - the recovered claim must reuse the job-row `scoring_request_ref`; a caller
   that names a different request fails closed before the engine runs
   (Hohpe & Woolf, 2003; Richardson, 2018);
+- claim-next selects the oldest due job with `FOR UPDATE SKIP LOCKED` and
+  supplies only that stored pin to the snapshot worker, so a restarted worker
+  does not keep a second request identity in memory (Hohpe & Woolf, 2003;
+  PostgreSQL Global Development Group, 2026a);
 - a permanent scientific failure writes a terminal cause without a snapshot, and
   exhausted retry budget quarantines with zero outbox rows (Richardson, 2018).
 
@@ -157,6 +161,8 @@ World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommend
 
 Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
 
-PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+PostgreSQL Global Development Group. (2026a). *Explicit locking*. https://www.postgresql.org/docs/18/explicit-locking.html
+
+PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Richardson, C. (2018). *Microservices patterns: With examples in Java*. Manning.
