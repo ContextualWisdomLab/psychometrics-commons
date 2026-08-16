@@ -49,7 +49,9 @@ erDiagram
     dataset_snapshot ||--o{ dataset_snapshot_member : contains
     dataset_snapshot ||--o{ research_release : released_as
 
+    tenant_account ||--o{ longitudinal_enrollment : scopes
     assessment_participant ||--o{ longitudinal_enrollment : enrolls
+    longitudinal_enrollment ||--o{ enrollment_membership_context : declares
     longitudinal_enrollment ||--o{ longitudinal_observation_record : ingests
     longitudinal_enrollment ||--o{ temporal_analysis_submission : submits
 
@@ -309,6 +311,7 @@ erDiagram
 
     longitudinal_enrollment {
       string enrollment_ref PK
+      string tenant_ref FK
       string participant_ref FK
       string program_ref
       string consent_snapshot_ref
@@ -316,6 +319,13 @@ erDiagram
       string enrollment_state
       timestamp enrolled_at
       timestamp latest_event_at
+    }
+
+    enrollment_membership_context {
+      string membership_assignment_ref PK
+      string enrollment_ref FK
+      string membership_context_ref
+      int declaration_order
     }
 
     longitudinal_observation_record {
@@ -427,7 +437,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
-- `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
+- `longitudinal_enrollment`, `enrollment_membership_context`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. Membership contexts stay in a child table so work and home are not flattened onto the enrollment row. No TEPP analytical kernel is duplicated here.
 - `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
 
 This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
@@ -507,7 +517,8 @@ Requirements:
 
 The Commons longitudinal tables are orchestration/evidence records only:
 
-- `longitudinal_enrollment` binds product participant, program, consent, and collection-system references;
+- `longitudinal_enrollment` binds tenant, product participant, program, consent, and collection-system references;
+- `enrollment_membership_context` stores each declared membership once, in declaration order, so later TEPP analysis is not forced into one primary group;
 - `longitudinal_observation_record` stores normalized observation identity/time/construct/version/context references required to reproduce a submission, not a duplicate Gyeot application database;
 - `temporal_analysis_submission` records exact observation-set digest, TEPP analysis specification, lifecycle, and returned artifact reference.
 

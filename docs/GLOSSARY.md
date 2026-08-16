@@ -28,7 +28,7 @@ Use these terms consistently across PRD, TRD, ADRs, APIs, diagrams, code, UI, an
 | **consent form** | Versioned content/policy defining a specific processing purpose and participant decision surface. |
 | **consent snapshot** | Immutable evidence of one participant's purpose-specific decision under an exact consent-form/scope version. |
 | **research contribution** | Explicit product-domain opt-in record that makes approved data potentially eligible for research processing under a defined scope. Service use alone does not create one. |
-| **longitudinal enrollment** | Product-owned record that a participant joined one versioned EMA/ESM program after granting longitudinal observation consent. It authorizes Gyeot collection; it is not a TEPP analysis job. |
+| **longitudinal enrollment** | Product-owned record that a participant joined one versioned EMA/ESM program after granting longitudinal observation consent. Gyeot collection still requires a current longitudinal-observation grant at observation time. It is not a TEPP analysis job. |
 | **collection system** | External EMA/ESM collection owner referenced by enrollment. Gyeot is the current collection system of record. |
 | **Gyeot** | CWL bounded context that owns participant-facing EMA/ESM collection, offline sync, and momentary observation capture. |
 | **TEPP** | CWL bounded context that owns temporal, event, multilevel, and multiple-membership analytical artifacts. It does not collect mobile observations. |

@@ -6,6 +6,7 @@
 //! enrollment evidence after withdrawal.
 
 use crate::consent::{ConsentPurpose, ConsentSnapshot};
+use crate::participant::ParticipantRecord;
 use crate::reference::normalized_reference;
 use std::collections::HashSet;
 use std::error::Error;
@@ -78,6 +79,8 @@ pub enum LongitudinalEnrollmentError {
     NonMonotonicTimestamp,
     /// The enrollment is already withdrawn and the new evidence does not match.
     AlreadyWithdrawn,
+    /// The caller tenant does not own the participant record.
+    CrossTenantDenied,
 }
 
 impl Display for LongitudinalEnrollmentError {
@@ -107,6 +110,9 @@ impl Display for LongitudinalEnrollmentError {
             Self::AlreadyWithdrawn => {
                 "this enrollment is already withdrawn; replay the same withdrawal evidence or start a new enrollment"
             }
+            Self::CrossTenantDenied => {
+                "enroll this participant only under the tenant that owns the participant record"
+            }
         })
     }
 }
@@ -123,11 +129,13 @@ impl LongitudinalEnrollment {
     /// # Errors
     ///
     /// Returns [`LongitudinalEnrollmentError`] when a reference is invalid, the
-    /// snapshot belongs to another participant, longitudinal consent is missing
-    /// or revoked, enrollment time is not after the grant, or a membership
-    /// context is duplicated.
+    /// participant record does not own the tenant or participant, the snapshot
+    /// belongs to another participant, longitudinal consent is missing or
+    /// revoked, enrollment time is not after the grant, or a membership context
+    /// is duplicated.
     pub fn enroll(
         input: LongitudinalEnrollmentInput<'_>,
+        participant: &ParticipantRecord,
         snapshot: &ConsentSnapshot,
     ) -> Result<Self, LongitudinalEnrollmentError> {
         let enrollment_ref = required_reference(input.enrollment_ref)?;
@@ -135,8 +143,13 @@ impl LongitudinalEnrollment {
         let participant_ref = required_reference(input.participant_ref)?;
         let program_ref = required_reference(input.program_ref)?;
         let collection_system_ref = required_reference(input.collection_system_ref)?;
-        if participant_ref != snapshot.participant_ref() {
+        if participant.participant_ref() != participant_ref
+            || snapshot.participant_ref() != participant_ref
+        {
             return Err(LongitudinalEnrollmentError::ParticipantMismatch);
+        }
+        if participant.tenant_ref() != tenant_ref {
+            return Err(LongitudinalEnrollmentError::CrossTenantDenied);
         }
         let granted_at = snapshot
             .active_granted_at(ConsentPurpose::LongitudinalObservation)
@@ -227,10 +240,31 @@ impl LongitudinalEnrollment {
         self.latest_event_at_unix_ms
     }
 
-    /// Return whether Gyeot may collect observations for this enrollment.
-    #[must_use]
-    pub const fn can_accept_observations(&self) -> bool {
-        matches!(self.state, EnrollmentState::Enrolled)
+    /// Authorize Gyeot collection from the current consent snapshot.
+    ///
+    /// Enrollment state alone is not enough. A later longitudinal revoke, a
+    /// snapshot for another participant, a pause, or a withdrawal fail closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LongitudinalEnrollmentError`] when the snapshot belongs to
+    /// another participant, the enrollment is paused or withdrawn, or
+    /// longitudinal observation consent is missing or revoked.
+    pub fn authorize_collection(
+        &self,
+        snapshot: &ConsentSnapshot,
+    ) -> Result<(), LongitudinalEnrollmentError> {
+        if snapshot.participant_ref() != self.participant_ref {
+            return Err(LongitudinalEnrollmentError::ParticipantMismatch);
+        }
+        match self.state {
+            EnrollmentState::Withdrawn => Err(LongitudinalEnrollmentError::AlreadyWithdrawn),
+            EnrollmentState::Paused => Err(LongitudinalEnrollmentError::InvalidTransition),
+            EnrollmentState::Enrolled => snapshot
+                .active_granted_at(ConsentPurpose::LongitudinalObservation)
+                .ok_or(LongitudinalEnrollmentError::LongitudinalConsentRequired)
+                .map(|_| ()),
+        }
     }
 
     /// Pause collection while keeping enrollment and membership evidence.
@@ -383,6 +417,7 @@ mod enrollment_error_source_tests {
             LongitudinalEnrollmentError::InvalidTransition,
             LongitudinalEnrollmentError::NonMonotonicTimestamp,
             LongitudinalEnrollmentError::AlreadyWithdrawn,
+            LongitudinalEnrollmentError::CrossTenantDenied,
         ] {
             assert!(error.source().is_none());
         }
