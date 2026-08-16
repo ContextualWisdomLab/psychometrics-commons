@@ -39,4 +39,5 @@ pub mod response;
 pub mod result;
 pub mod scoring;
 pub mod scoring_job;
+pub mod scoring_worker;
 pub mod session;
