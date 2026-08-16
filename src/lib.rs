@@ -12,6 +12,7 @@ pub mod authorization;
 pub mod consent;
 pub mod data_rights;
 pub mod health;
+pub mod health_http;
 pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
