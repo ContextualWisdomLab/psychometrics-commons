@@ -254,6 +254,47 @@ pub fn load_participant_by_current_identity_subject(
     load_participant_identity_history(transaction, &participant_ref, tenant_ref)
 }
 
+/// Rebuild every derived current identity-link projection from unterminated history.
+///
+/// After a backup restore or operator repair, the unique enforcer may be
+/// missing or stale even though append-only history is intact. A returning
+/// login already resolves from that history. Run this before accepting new
+/// account-link writes so concurrent first-inserts cannot bind a subject that
+/// already has an unterminated holder. Two unterminated holders of the same
+/// issuer-scoped subject, or two current links on one participant, fail closed.
+///
+/// # Errors
+///
+/// Returns [`IdentityLinkPersistenceError`] for unsupported isolation, corrupt
+/// unterminated history, or a database failure.
+pub fn reconcile_identity_link_current_projections(
+    transaction: &mut Transaction<'_>,
+) -> Result<u64, IdentityLinkPersistenceError> {
+    require_read_committed(transaction)?;
+    transaction.query(
+        "SELECT participant_ref FROM assessment_participant \
+         ORDER BY participant_ref FOR UPDATE",
+        &[],
+    )?;
+    reject_corrupt_unterminated_history(transaction)?;
+    transaction.execute("DELETE FROM current_participant_identity_link", &[])?;
+    let inserted = transaction.execute(
+        "INSERT INTO current_participant_identity_link (\
+             participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+             identity_subject_ref\
+         ) \
+         SELECT l.participant_ref, l.identity_link_ref, l.tenant_ref, \
+                l.identity_issuer, l.identity_subject_ref \
+         FROM participant_identity_link l \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM participant_identity_link_end e \
+             WHERE e.linked_event_ref = l.identity_link_ref \
+         )",
+        &[],
+    )?;
+    Ok(inserted)
+}
+
 fn persist_participant_header(
     transaction: &mut Transaction<'_>,
     participant_ref: &str,
@@ -582,6 +623,47 @@ fn current_subject_participant(
         [] => Ok(None),
         [row] => Ok(Some(row.get(0))),
         _ => Err(IdentityLinkPersistenceError::CorruptHistory),
+    }
+}
+
+fn reject_corrupt_unterminated_history(
+    transaction: &mut Transaction<'_>,
+) -> Result<(), IdentityLinkPersistenceError> {
+    let duplicate_subjects: bool = transaction
+        .query_one(
+            "SELECT EXISTS ( \
+                 SELECT 1 \
+                 FROM participant_identity_link current_link \
+                 WHERE NOT EXISTS ( \
+                     SELECT 1 FROM participant_identity_link_end link_end \
+                     WHERE link_end.linked_event_ref = current_link.identity_link_ref \
+                 ) \
+                 GROUP BY current_link.tenant_ref, current_link.identity_issuer, \
+                          current_link.identity_subject_ref \
+                 HAVING COUNT(*) > 1 \
+             )",
+            &[],
+        )?
+        .get(0);
+    let duplicate_participants: bool = transaction
+        .query_one(
+            "SELECT EXISTS ( \
+                 SELECT 1 \
+                 FROM participant_identity_link current_link \
+                 WHERE NOT EXISTS ( \
+                     SELECT 1 FROM participant_identity_link_end link_end \
+                     WHERE link_end.linked_event_ref = current_link.identity_link_ref \
+                 ) \
+                 GROUP BY current_link.participant_ref \
+                 HAVING COUNT(*) > 1 \
+             )",
+            &[],
+        )?
+        .get(0);
+    if duplicate_subjects || duplicate_participants {
+        Err(IdentityLinkPersistenceError::CorruptHistory)
+    } else {
+        Ok(())
     }
 }
 
