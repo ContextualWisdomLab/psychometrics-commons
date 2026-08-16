@@ -27,8 +27,20 @@ jobs:
         run: rustup toolchain install 1.97.1 --profile minimal
       - name: Verify provenance workflow contract
         run: python3 tests/test_supply_chain_provenance.py
-      - name: Package locked source
-        run: cargo package --locked
+      - name: Prove reproducible locked source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf target/repro-one target/repro-two target/package
+          cargo package --locked --target-dir target/repro-one
+          cargo package --locked --target-dir target/repro-two
+          mapfile -t first_packages < <(find target/repro-one/package -maxdepth 1 -type f -name '*.crate' -print | sort)
+          mapfile -t second_packages < <(find target/repro-two/package -maxdepth 1 -type f -name '*.crate' -print | sort)
+          test "${#first_packages[@]}" -eq 1
+          test "${#second_packages[@]}" -eq 1
+          cmp "${first_packages[0]}" "${second_packages[0]}"
+          mkdir -p target/package
+          cp "${first_packages[0]}" target/package/
       - name: Record package checksum
         shell: bash
         run: |
