@@ -269,11 +269,16 @@ fn permanent_failure_and_cancellation_are_terminal_and_fence_active_work() {
     assert_eq!(failed_job.state(), ScoringJobState::Quarantined);
     assert_eq!(failed_job.last_failure_code(), Some("invalid_contract"));
     assert!(failed_job.active_lease().is_none());
+    failed_job
+        .record_permanent_failure(lease.fencing_token(), "invalid_contract", 11_000)
+        .unwrap();
+    assert_eq!(failed_job.state(), ScoringJobState::Quarantined);
+    assert_eq!(failed_job.last_failure_code(), Some("invalid_contract"));
     assert_eq!(
         failed_job
-            .record_permanent_failure(lease.fencing_token(), "invalid_contract", 11_000)
+            .record_permanent_failure(lease.fencing_token(), "provider_rejected_payload", 11_000)
             .unwrap_err(),
-        ScoringJobError::NotLeased
+        ScoringJobError::ConflictingFailure
     );
 
     let mut cancelled_job = job(3);
@@ -350,6 +355,10 @@ fn error_messages_are_stable_for_operator_classification() {
         (
             ScoringJobError::ConflictingCompletion,
             "scoring job already completed with different result evidence",
+        ),
+        (
+            ScoringJobError::ConflictingFailure,
+            "scoring job already quarantined with different failure evidence",
         ),
         (
             ScoringJobError::TerminalState,

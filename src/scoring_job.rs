@@ -253,12 +253,16 @@ impl ScoringJob {
 
     /// Record a permanent failed attempt and quarantine the job.
     ///
-    /// The server-observed failure time must still fall within the worker lease.
+    /// The server-observed failure time must still fall within the worker lease
+    /// on the first transition. Exact replay of the same cause is idempotent so a
+    /// crashed worker can reconcile without inventing a score or rewriting the
+    /// typed failure. A different cause fails closed.
     ///
     /// # Errors
     ///
     /// Returns [`ScoringJobError`] for invalid cause/timestamp evidence, missing
-    /// lease ownership, a stale fencing token, or expired lease authority.
+    /// lease ownership, a stale fencing token, expired lease authority, or
+    /// conflicting quarantined failure evidence.
     pub fn record_permanent_failure(
         &mut self,
         fencing_token: u64,
@@ -266,6 +270,13 @@ impl ScoringJob {
         failed_at_unix_ms: u64,
     ) -> Result<(), ScoringJobError> {
         let cause_code = required_reference(cause_code)?;
+        require_timestamp(failed_at_unix_ms)?;
+        if self.state == ScoringJobState::Quarantined {
+            if self.last_failure_code.as_deref() == Some(cause_code) {
+                return Ok(());
+            }
+            return Err(ScoringJobError::ConflictingFailure);
+        }
         self.require_live_fencing_token(fencing_token, failed_at_unix_ms)?;
         self.last_failure_code = Some(cause_code.to_owned());
         self.active_lease = None;
@@ -419,6 +430,8 @@ pub enum ScoringJobError {
     LeaseStillActive,
     /// Completed immutable evidence was replayed with a different result or token.
     ConflictingCompletion,
+    /// Quarantined failure evidence was replayed with a different cause.
+    ConflictingFailure,
     /// Completed or quarantined evidence cannot be cancelled/re-written.
     TerminalState,
 }
@@ -439,6 +452,9 @@ impl Display for ScoringJobError {
             Self::LeaseStillActive => "scoring job lease has not expired",
             Self::ConflictingCompletion => {
                 "scoring job already completed with different result evidence"
+            }
+            Self::ConflictingFailure => {
+                "scoring job already quarantined with different failure evidence"
             }
             Self::TerminalState => "scoring job terminal state cannot accept this command",
         })
