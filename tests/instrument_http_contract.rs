@@ -332,3 +332,53 @@ fn listener_serves_one_published_catalog_request() {
     assert!(body.contains("release_big_five_ko_v1"));
     assert!(body.contains("application/json"));
 }
+
+#[test]
+fn listener_fails_closed_for_truncated_and_extra_token_requests() {
+    let runtime = InstrumentHttpRuntime::new(vec![published_korean()]);
+    let listener = bind_instrument_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn({
+        let runtime = InstrumentHttpRuntime::new(vec![published_korean()]);
+        move || {
+            accept_one_instrument_http(&listener, &runtime).unwrap();
+            accept_one_instrument_http(&listener, &runtime).unwrap();
+        }
+    });
+
+    let mut truncated = TcpStream::connect(address).unwrap();
+    truncated
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    truncated.write_all(b"GET /v1/instruments").unwrap();
+    truncated.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut truncated_body = String::new();
+    truncated.read_to_string(&mut truncated_body).unwrap();
+    assert!(
+        truncated_body.starts_with("HTTP/1.1 400 Bad Request"),
+        "{truncated_body}"
+    );
+
+    let extra = handle_instrument_http_request(
+        "GET /v1/instruments HTTP/1.1 leftover\r\nHost: localhost\r\n\r\n",
+        &runtime,
+    );
+    assert_eq!(extra.status(), 400);
+
+    let mut extra_wire = TcpStream::connect(address).unwrap();
+    extra_wire
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    extra_wire
+        .write_all(b"GET /v1/instruments HTTP/1.1 leftover\r\nHost: localhost\r\n\r\n")
+        .unwrap();
+    extra_wire.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut extra_body = String::new();
+    extra_wire.read_to_string(&mut extra_body).unwrap();
+    assert!(
+        extra_body.starts_with("HTTP/1.1 400 Bad Request"),
+        "{extra_body}"
+    );
+
+    server.join().unwrap();
+}

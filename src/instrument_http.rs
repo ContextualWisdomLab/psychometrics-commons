@@ -385,8 +385,8 @@ fn write_http_response(
 #[cfg(test)]
 mod unit_tests {
     use super::{
-        apply_request_read, json_string, reason_phrase, split_target, RequestReadProgress,
-        INSTRUMENT_HTTP_MAX_REQUEST_BYTES,
+        apply_request_read, json_string, parse_request_line, reason_phrase, split_target,
+        RequestReadProgress, INSTRUMENT_HTTP_MAX_REQUEST_BYTES,
     };
     use std::io::{self, ErrorKind};
 
@@ -438,5 +438,7 @@ mod unit_tests {
             RequestReadProgress::Complete
         ));
         assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
+        assert!(parse_request_line("GET /v1/instruments SMTP/1.0\r\n\r\n").is_none());
+        assert!(parse_request_line("GET /v1/instruments HTTP/1.1 leftover\r\n\r\n").is_none());
     }
 }
