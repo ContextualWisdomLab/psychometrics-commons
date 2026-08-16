@@ -276,3 +276,20 @@ fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     }
     difference == 0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{canonical_sha256_digest, constant_time_equal};
+
+    #[test]
+    fn digest_hex_accepts_digits_and_proof_comparison_rejects_length_mismatch() {
+        assert_eq!(
+            canonical_sha256_digest(
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ),
+            Some("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        );
+        assert!(!constant_time_equal(b"proof", b"p"));
+        assert!(constant_time_equal(b"proof", b"proof"));
+    }
+}
