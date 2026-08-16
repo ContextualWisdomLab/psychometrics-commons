@@ -27,7 +27,7 @@ PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integrat
 
 ## Active PR response-event physical schema
 
-Active PR #174 `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` persist the in-progress answer ledger so a two-item path can continue after process restart. The slice is **Active PR**, not protected-main truth. It stores opaque `response_event_ref` identity, session binding, client idempotency identity, item version, canonical SHA-256 payload digest, positive `server_sequence`, and distinct `observed_at` / `received_at` timestamps. Exact replay is idempotent and keeps the original times. Client, server, sequence, or session rebinding fails closed. Reload reconstructs `ResponseLedger` in `server_sequence` order under `READ COMMITTED` and exposes stored times as a persist-side projection. HTTP response transport remains outside this slice.
+Active PR #201 `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` persist the in-progress answer ledger so a two-item path can continue after process restart. The slice is **Active PR**, not protected-main truth. It stores opaque `response_event_ref` identity, session binding, client idempotency identity, item version, canonical SHA-256 payload digest, positive `server_sequence`, and distinct `observed_at` / `received_at` timestamps. Exact replay is idempotent and keeps the original times. Client, server, sequence, or session rebinding fails closed. Reload reconstructs `ResponseLedger` in `server_sequence` order under `READ COMMITTED` and exposes stored times as a persist-side projection. HTTP response transport remains outside this slice.
 
 ## Protected-main scoring-job physical schema
 
