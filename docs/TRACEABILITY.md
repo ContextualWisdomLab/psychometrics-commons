@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** public-release identifier leakage scan is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Operators call `scan_public_release_fixture` before packaging a public release. A Seoul-clinic fixture may publish `research_participant_ref` and `research_program_ref`. It cannot publish `participant_ref`, a Keyverse subject, a restricted `linkage_ref`, or a linkage-key version, including when those values appear inside an otherwise public column. Restricted-linkage persistence, portal registration, and the adversarial release pipeline stay outside this slice.
+**Active PR** #212 public-release identifier leakage scan is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Operators call `scan_public_release_fixture` before packaging a public release. A Seoul-clinic fixture may publish `research_participant_ref` and `research_program_ref`. It cannot publish `participant_ref`, a Keyverse subject, a restricted `linkage_ref`, or a linkage-key version, including when those values appear inside an otherwise public column. Restricted-linkage persistence (#187), portal registration, and the adversarial release pipeline stay outside this slice.
 
 ## 5. ADR traceability by concern
 

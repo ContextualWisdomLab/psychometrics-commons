@@ -465,7 +465,7 @@ sequenceDiagram
     S-->>A: idempotent registration outcome
 
     Note over S: No Keyverse subject, operational participant ref, or linkage key in public release bundle
-    Note over R: Active PR scan_public_release_fixture rejects those columns and cell values before packaging
+    Note over R: Active PR #212 scan_public_release_fixture rejects those columns and cell values before packaging
 ```
 
 ## 12. Durable event consumption sequence
