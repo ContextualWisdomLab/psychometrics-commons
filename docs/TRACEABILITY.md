@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** instrument catalog HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `GET /v1/instruments` and `GET /v1/instruments/{instrument_ref}` return only published locale-specific releases from an in-process catalog so a purchaser can copy `release_ref` and `locale` into `POST /v1/sessions`. Draft, suspended, and retired rows stay hidden. Session create/reload, persistence, and other public families remain outside this slice.
+**Active PR** #165 instrument catalog HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `GET /v1/instruments` and `GET /v1/instruments/{instrument_ref}` return only published locale-specific releases from an in-process catalog so a purchaser can copy `release_ref` and `locale` into `POST /v1/sessions`. Draft, suspended, and retired rows stay hidden. Do not mix onto #149 session HTTP, #150 research persistence, or #98 instrument load. Session create/reload, persistence, and other public families remain outside this slice.
 
 ## 5. ADR traceability by concern
 
