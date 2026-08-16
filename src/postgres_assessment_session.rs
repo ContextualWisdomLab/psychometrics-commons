@@ -296,10 +296,12 @@ pub fn created_session_for_start_from_published_snapshot(
 
 /// Start one created session from the stored published release and persist it.
 ///
-/// This loads the exact release and locale from the same transaction, then
-/// calls [`created_session_for_start_from_published_snapshot`] and
+/// This loads the exact release and locale from the same transaction with
+/// `SELECT … FOR UPDATE`, then calls
+/// [`created_session_for_start_from_published_snapshot`] and
 /// [`persist_assessment_session`]. A stored Draft, Review, Suspended, or
-/// Retired release fails before insert.
+/// Retired release fails before insert. A concurrent Suspend or Retire waits
+/// until this start commits or rolls back.
 ///
 /// # Errors
 ///

@@ -334,13 +334,15 @@ impl StoredInstrumentReleaseRow {
 /// Load one exact published release for server-authoritative session creation.
 ///
 /// The caller must provide the canonical release reference and the exact requested
-/// locale. A release in Draft, Review, Suspended, or Retired state is never returned
-/// as session-eligible. Stored columns are reconstructed through
-/// [`InstrumentReleaseManifest::new`] before they leave the persistence boundary, so
-/// malformed or non-canonical persisted evidence fails closed instead of being served.
-/// This boundary intentionally requires the caller's locale spelling to already be
-/// canonical even though some in-memory constructors normalize locale text. It does
-/// not select a fallback locale and does not perform psychometric scoring or
+/// locale. The row is locked with `SELECT … FOR UPDATE` so a concurrent persist
+/// Suspend or Retire cannot hide from this transaction. A release in Draft,
+/// Review, Suspended, or Retired state is never returned as session-eligible.
+/// Stored columns are reconstructed through [`InstrumentReleaseManifest::new`]
+/// before they leave the persistence boundary, so malformed or non-canonical
+/// persisted evidence fails closed instead of being served. This boundary
+/// intentionally requires the caller's locale spelling to already be canonical
+/// even though some in-memory constructors normalize locale text. It does not
+/// select a fallback locale and does not perform psychometric scoring or
 /// publication-evidence recomputation.
 ///
 /// # Errors
@@ -370,7 +372,8 @@ pub fn load_published_instrument_release(
                     calibration_reference, norm_version_ref, narrative_version_ref, \
                     consent_requirement_refs, intended_use_ref, limitations_ref, content_digest, \
                     publication_state, created_at_unix_ms \
-             FROM instrument_release WHERE release_ref = $1",
+             FROM instrument_release WHERE release_ref = $1 \
+             FOR UPDATE",
             &[&canonical_release_ref],
         )?
         .ok_or(InstrumentReleaseQueryError::NotFound)?;

@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Stored-release session start locks the published `instrument_release` row (`SELECT … FOR UPDATE`) so a concurrent Suspend or Retire cannot hide after the start has already classified the release as startable.
 - Instrument-release persist classification locks the stored publication row (`SELECT … FOR UPDATE`) so a Duplicate published result cannot lose the row to a concurrent Suspend or Retire before the caller transaction ends.
 - Session start can load the stored published release in the same transaction (`start_created_assessment_session_from_stored_release`), so a stale in-memory Published object cannot begin a session after the stored release is suspended or retired.
 - Session start composition calls `AssessmentSession::new` from a currently published release and then persists the created identity, so a suspended or retired release cannot begin a new session and reconstitution cannot be used as the start path.

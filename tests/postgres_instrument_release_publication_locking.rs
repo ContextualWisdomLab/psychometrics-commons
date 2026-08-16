@@ -11,6 +11,10 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::postgres_assessment_session::{
+    apply_assessment_session_migration, start_created_assessment_session_from_stored_release,
+    AssessmentSessionPersistenceDisposition,
+};
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release,
     InstrumentReleasePersistenceDisposition,
@@ -40,6 +44,7 @@ fn ready_client(prefix: &str) -> Client {
         ))
         .unwrap();
     apply_instrument_release_migration(&mut client).unwrap();
+    apply_assessment_session_migration(&mut client).unwrap();
     client
 }
 
@@ -169,4 +174,59 @@ fn duplicate_published_classification_holds_row_lock_until_transaction_end() {
     );
     contender_transaction.rollback().unwrap();
     classifier.rollback().unwrap();
+}
+
+#[test]
+fn stored_release_start_holds_publication_row_lock_until_transaction_end() {
+    let prefix = "instrument_release_start_lock";
+    let mut client = ready_client(prefix);
+    let published = published_release();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_instrument_release(&mut transaction, &published).unwrap(),
+            InstrumentReleasePersistenceDisposition::Inserted
+        );
+        transaction.commit().unwrap();
+    }
+
+    let mut starter = client.transaction().unwrap();
+    let (_, inserted) = start_created_assessment_session_from_stored_release(
+        &mut starter,
+        "ses_start_holds_publication_lock",
+        "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+        "release_big_five_ko_v1",
+        "ko-KR",
+        50_000,
+    )
+    .unwrap();
+    assert_eq!(inserted, AssessmentSessionPersistenceDisposition::Inserted);
+
+    let mut contender = connect();
+    let schema = schema_name(prefix);
+    contender
+        .batch_execute(&format!(
+            "SET search_path TO {schema}; SET lock_timeout TO '100ms';"
+        ))
+        .unwrap();
+    let mut contender_transaction = contender.transaction().unwrap();
+    let error = persist_instrument_release(&mut contender_transaction, &suspended_release())
+        .expect_err(
+            "stored-release start must keep the publication row locked so a concurrent suspend cannot hide from the open start",
+        );
+    assert!(
+        matches!(
+            error,
+            psychometrics_commons_runtime::postgres_instrument_release::InstrumentReleasePersistenceError::Database(_)
+        ),
+        "the waiter must fail as a database lock timeout, not as a successful suspend: {error:?}"
+    );
+    let source =
+        std::error::Error::source(&error).expect("database failure must keep the postgres source");
+    assert!(
+        source.to_string().contains("lock timeout"),
+        "the waiter must fail because the publication row is locked: {source}"
+    );
+    contender_transaction.rollback().unwrap();
+    starter.rollback().unwrap();
 }
