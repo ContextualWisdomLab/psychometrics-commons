@@ -339,9 +339,9 @@ fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersist
     if unix_ms == 0 {
         return Err(ResponseEventPersistenceError::InvalidTimestamp);
     }
-    UNIX_EPOCH
-        .checked_add(Duration::from_millis(unix_ms))
-        .ok_or(ResponseEventPersistenceError::InvalidTimestamp)
+    // Every `u64` millisecond offset fits in a Unix `SystemTime`. Keep the zero
+    // instant rejected so stored provenance cannot collapse to the epoch.
+    Ok(UNIX_EPOCH + Duration::from_millis(unix_ms))
 }
 
 fn unix_ms_from_system_time(value: SystemTime) -> Result<u64, ResponseEventPersistenceError> {
@@ -367,9 +367,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        postgres_sequence, postgres_timestamptz, required_reference, unix_ms_from_system_time,
-        ResponseEventPersistenceError,
+        postgres_loaded_sequence, postgres_sequence, postgres_timestamptz, required_reference,
+        unix_ms_from_system_time, ResponseEventPersistenceError,
     };
+    use std::error::Error;
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
@@ -391,6 +392,11 @@ mod reference_guard_tests {
             postgres_sequence(usize::MAX),
             Err(ResponseEventPersistenceError::InvalidSequence)
         ));
+        assert_eq!(postgres_loaded_sequence(1).unwrap(), 1);
+        assert!(matches!(
+            postgres_loaded_sequence(-1),
+            Err(ResponseEventPersistenceError::InvalidStoredIdentity)
+        ));
         assert!(matches!(
             postgres_timestamptz(0),
             Err(ResponseEventPersistenceError::InvalidTimestamp)
@@ -401,9 +407,47 @@ mod reference_guard_tests {
             unix_ms_from_system_time(UNIX_EPOCH - Duration::from_secs(1)),
             Err(ResponseEventPersistenceError::InvalidStoredIdentity)
         ));
-        assert_eq!(
-            ResponseEventPersistenceError::InvalidEventTimeArity.to_string(),
-            "response event times must align one-to-one with the persisted ledger"
-        );
+        let overflow_ms = UNIX_EPOCH + Duration::from_secs((u64::MAX / 1_000) + 10);
+        assert!(matches!(
+            unix_ms_from_system_time(overflow_ms),
+            Err(ResponseEventPersistenceError::InvalidStoredIdentity)
+        ));
+        for (error, expected_message) in [
+            (
+                ResponseEventPersistenceError::InvalidReference,
+                "response event persistence references must be opaque durable values",
+            ),
+            (
+                ResponseEventPersistenceError::ConflictingReplay,
+                "response event identity was replayed with conflicting evidence",
+            ),
+            (
+                ResponseEventPersistenceError::SequenceConflict,
+                "response event sequence was reused by a different event identity",
+            ),
+            (
+                ResponseEventPersistenceError::InvalidSequence,
+                "response event sequence exceeds the PostgreSQL bigint range",
+            ),
+            (
+                ResponseEventPersistenceError::InvalidTimestamp,
+                "response event observed time must be positive and not after received time",
+            ),
+            (
+                ResponseEventPersistenceError::InvalidEventTimeArity,
+                "response event times must align one-to-one with the persisted ledger",
+            ),
+            (
+                ResponseEventPersistenceError::UnsupportedIsolationLevel,
+                "response event persistence requires read committed isolation",
+            ),
+            (
+                ResponseEventPersistenceError::InvalidStoredIdentity,
+                "stored response events could not be rebuilt into a ledger",
+            ),
+        ] {
+            assert_eq!(error.to_string(), expected_message);
+            assert!(Error::source(&error).is_none());
+        }
     }
 }

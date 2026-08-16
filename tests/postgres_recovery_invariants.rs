@@ -9,6 +9,7 @@ use postgres::{error::SqlState, Client, NoTls};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const SOURCE_SCHEMA: &str = "recovery_backup_source_test";
 const RESTORED_SCHEMA: &str = "recovery_backup_restored_test";
@@ -197,7 +198,8 @@ fn assert_restored_evidence(client: &mut Client) {
     let restored_event = client
         .query_one(
             &format!(
-                "SELECT session_ref, client_event_ref, payload_digest, server_sequence
+                "SELECT session_ref, client_event_ref, payload_digest, server_sequence,
+                        observed_at, received_at
                  FROM {RESTORED_SCHEMA}.response_event
                  WHERE response_event_ref = 'response_event_recovery_alpha'"
             ),
@@ -211,6 +213,22 @@ fn assert_restored_evidence(client: &mut Client) {
     );
     assert_eq!(restored_event.get::<_, String>(2), DIGEST_A);
     assert_eq!(restored_event.get::<_, i64>(3), 1);
+    let observed_at: SystemTime = restored_event.get(4);
+    let received_at: SystemTime = restored_event.get(5);
+    assert_eq!(
+        observed_at
+            .duration_since(UNIX_EPOCH)
+            .expect("restored observed time must stay after the Unix epoch")
+            .as_millis(),
+        1_700_000_000_000
+    );
+    assert_eq!(
+        received_at
+            .duration_since(UNIX_EPOCH)
+            .expect("restored received time must stay after the Unix epoch")
+            .as_millis(),
+        1_700_000_000_250
+    );
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {

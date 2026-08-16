@@ -316,7 +316,55 @@ fn inverted_time_blank_session_and_repeatable_read_fail_closed() {
         load_response_ledger(&mut load_transaction, "12"),
         Err(ResponseEventPersistenceError::InvalidReference)
     ));
+    assert!(matches!(
+        load_response_event_times(&mut load_transaction, "12"),
+        Err(ResponseEventPersistenceError::InvalidReference)
+    ));
     load_transaction.rollback().unwrap();
+
+    let mut times_transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_response_event_times(&mut times_transaction, "session_big_five_ko"),
+        Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
+    ));
+    assert!(matches!(
+        load_response_ledger(&mut times_transaction, "session_big_five_ko"),
+        Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
+    ));
+    times_transaction.rollback().unwrap();
+}
+
+#[test]
+fn pre_epoch_stored_times_and_missing_relation_fail_closed() {
+    let _guard = response_event_test_guard();
+    let mut client = test_client();
+    reset_response_event_table(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+    persist_ok(&mut client, &two_item_korean_ledger(), &event_times());
+    client
+        .execute(
+            "UPDATE response_event
+             SET observed_at = TIMESTAMPTZ '1969-12-31 23:59:59+00'
+             WHERE response_event_ref = 'response_event_openness'",
+            &[],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_response_event_times(&mut transaction, "session_big_five_ko"),
+        Err(ResponseEventPersistenceError::InvalidStoredIdentity)
+    ));
+    transaction.rollback().unwrap();
+
+    reset_response_event_table(&mut client);
+    assert!(matches!(
+        persist_err(&mut client, &two_item_korean_ledger(), &event_times()),
+        ResponseEventPersistenceError::Database(_)
+    ));
 }
 
 #[test]
