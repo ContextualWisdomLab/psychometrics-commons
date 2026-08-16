@@ -118,6 +118,9 @@ Product consequences:
 - a later due claim after that outage persists the real result snapshot rather
   than inventing a score while the engine is down (American Educational Research
   Association et al., 2014; Hohpe & Woolf, 2003);
+- the recovered claim must reuse the job-row `scoring_request_ref`; a caller
+  that names a different request fails closed before the engine runs
+  (Hohpe & Woolf, 2003; Richardson, 2018);
 - a permanent scientific failure writes a terminal cause without a snapshot, and
   exhausted retry budget quarantines with zero outbox rows (Richardson, 2018).
 
