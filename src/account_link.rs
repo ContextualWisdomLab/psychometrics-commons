@@ -38,7 +38,7 @@ impl Display for AccountLinkAuthorizationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "authenticated account-control references must be opaque non-numeric values"
+                "authenticated account-control references must be canonical opaque non-numeric values"
             }
             Self::InvalidValidityBoundary => {
                 "authenticated account-control validity must end after Unix epoch zero"
@@ -93,10 +93,14 @@ pub struct AuthenticatedAccountControl {
 impl AuthenticatedAccountControl {
     /// Create authenticated-account control evidence from a trusted validation boundary.
     ///
+    /// References must already use their exact canonical spelling. Leading or trailing whitespace
+    /// is rejected rather than silently trimmed so byte-distinct aliases cannot collapse to the
+    /// same identity or audit evidence at this authorization boundary.
+    ///
     /// # Errors
     ///
     /// Returns [`AccountLinkAuthorizationError::InvalidReference`] when tenant, issuer, subject,
-    /// or proof evidence is not an opaque product reference, and
+    /// or proof evidence is blank, numeric-like, or not already in canonical spelling, and
     /// [`AccountLinkAuthorizationError::InvalidValidityBoundary`] when the validity boundary is
     /// zero.
     pub fn new(
@@ -209,5 +213,10 @@ pub fn link_authenticated_account(
 }
 
 fn required_reference(reference: &str) -> Result<&str, AccountLinkAuthorizationError> {
-    normalized_reference(reference).ok_or(AccountLinkAuthorizationError::InvalidReference)
+    let normalized =
+        normalized_reference(reference).ok_or(AccountLinkAuthorizationError::InvalidReference)?;
+    if normalized != reference {
+        return Err(AccountLinkAuthorizationError::InvalidReference);
+    }
+    Ok(normalized)
 }
