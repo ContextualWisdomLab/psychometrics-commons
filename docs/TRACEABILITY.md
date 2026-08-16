@@ -145,7 +145,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** remaining PostgreSQL persist and operator-health HTTP slices are not protected-main truth until unchanged reviewed/check-clean heads are integrated. This baseline records item-delivery ledger persistence (#48), immutable response snapshots (#55), immutable result snapshots (#51), deterministic narrative fallback (#73), dual-proof account linking (#85), data-rights processing-start (#76), atomic scoring-dispatch persist (#68), inbox claim-expiry fencing (#81), and recovery invariants (#72). Created assessment-session persistence on this branch, plus identity-link history, response-event, research-release, data-rights completion, and HTTP health-probe work, remain Active PR only.
+**Active PR** remaining PostgreSQL persist and operator-health HTTP slices are not protected-main truth until unchanged reviewed/check-clean heads are integrated. This baseline records item-delivery ledger persistence (#48), immutable response snapshots (#55), immutable result snapshots (#51), deterministic narrative fallback (#73), dual-proof account linking (#85), data-rights processing-start (#76), atomic scoring-dispatch persist (#68), inbox claim-expiry fencing (#81), and recovery invariants (#72). Created assessment-session persistence on this branch (`migrations/0022_assessment_session.sql`, after health-index `0020`/`0021`), plus identity-link history, response-event, research-release, data-rights completion, and HTTP health-probe work, remain Active PR only.
 
 ## 5. ADR traceability by concern
 
