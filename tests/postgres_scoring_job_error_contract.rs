@@ -49,6 +49,14 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             "scoring job identity was replayed with conflicting evidence",
         ),
         (
+            ScoringJobPersistenceError::ConflictingCompletion,
+            "scoring completion was replayed with conflicting immutable evidence",
+        ),
+        (
+            ScoringJobPersistenceError::ConflictingFailure,
+            "scoring failure was replayed with conflicting typed cause evidence",
+        ),
+        (
             ScoringJobPersistenceError::UnsupportedIsolationLevel,
             "scoring job persistence requires read committed isolation",
         ),

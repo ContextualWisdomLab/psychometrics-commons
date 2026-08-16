@@ -44,6 +44,16 @@ pub enum ScoringJobCompletionDisposition {
     Duplicate,
 }
 
+/// Outcome of persisting a permanent scoring failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ScoringJobFailureDisposition {
+    /// The live fenced attempt was quarantined for the first time.
+    Quarantined,
+    /// The same typed failure cause was replayed exactly.
+    Duplicate,
+}
+
 /// Durable ownership evidence returned by an atomic worker claim.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PersistedScoringLease {
@@ -103,6 +113,8 @@ pub enum ScoringJobPersistenceError {
     ConflictingReplay,
     /// Completed immutable evidence was replayed with a different result or fence.
     ConflictingCompletion,
+    /// Quarantined failure evidence was replayed with a different cause.
+    ConflictingFailure,
     /// Scoring-job persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// The requested scoring job does not exist.
@@ -141,6 +153,9 @@ impl Display for ScoringJobPersistenceError {
             }
             Self::ConflictingCompletion => {
                 "scoring completion was replayed with conflicting immutable evidence"
+            }
+            Self::ConflictingFailure => {
+                "scoring failure was replayed with conflicting typed cause evidence"
             }
             Self::UnsupportedIsolationLevel => {
                 "scoring job persistence requires read committed isolation"
@@ -554,25 +569,46 @@ pub fn record_retryable_scoring_failure(
 ///
 /// Permanent failure never schedules another automatic attempt. The job is quarantined,
 /// typed failure evidence is retained, no scoring result is fabricated, and all active
-/// lease evidence is cleared in the same row-locked transaction.
+/// lease evidence is cleared in the same row-locked transaction. Exact replay of the
+/// same cause is idempotent so a crashed worker can reconcile without rewriting the
+/// typed failure. A different cause fails closed.
 ///
 /// # Errors
 ///
 /// Returns [`ScoringJobPersistenceError`] for invalid evidence, unsupported isolation,
-/// a missing/non-leased job, stale or expired worker authority, a suppressed terminal
-/// transition, or a database failure.
+/// a missing/non-leased job, stale or expired worker authority, conflicting quarantined
+/// failure evidence, a suppressed terminal transition, or a database failure.
 pub fn record_permanent_scoring_failure(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
     fencing_token: u64,
     cause_code: &str,
     failed_at_unix_ms: u64,
-) -> Result<(), ScoringJobPersistenceError> {
+) -> Result<ScoringJobFailureDisposition, ScoringJobPersistenceError> {
     let scoring_job_ref = required_reference(scoring_job_ref)?;
     let cause_code = required_reference(cause_code)?;
     let fencing_token = postgres_fencing_token(fencing_token)?;
     let failed_at_unix_ms = postgres_timestamp(failed_at_unix_ms)?;
     require_read_committed(transaction)?;
+
+    let row = transaction.query_opt(
+        "SELECT scoring_state, last_failure_code \
+         FROM scoring_job_state WHERE scoring_job_ref = $1 \
+         FOR UPDATE",
+        &[&scoring_job_ref],
+    )?;
+    let Some(row) = row else {
+        return Err(ScoringJobPersistenceError::JobNotFound);
+    };
+    let scoring_state: String = row.get(0);
+    let stored_cause: Option<String> = row.get(1);
+    if scoring_state == "quarantined" {
+        if stored_cause.as_deref() == Some(cause_code) {
+            return Ok(ScoringJobFailureDisposition::Duplicate);
+        }
+        return Err(ScoringJobPersistenceError::ConflictingFailure);
+    }
+
     require_current_scoring_lease(
         transaction,
         scoring_job_ref,
@@ -606,7 +642,7 @@ pub fn record_permanent_scoring_failure(
     if updated != 1 {
         return Err(ScoringJobPersistenceError::TransitionNotApplied);
     }
-    Ok(())
+    Ok(ScoringJobFailureDisposition::Quarantined)
 }
 
 /// Persist one immutable successful scoring result for the current fenced attempt.

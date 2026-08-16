@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #69 scoring-completion outbox persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Successful scoring completion commits the job outcome with a bound outbox event atomically, and mixed exact dispositions reconcile legacy one-sided completion or outbox state without rewriting immutable history. Live fast-mlsirm execution remains outside this slice.
+**Active PR** scoring completion/failure outbox persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Successful scoring completion and permanent scientific failure each commit the job outcome with a bound outbox event atomically. Exact replay stays idempotent, mixed exact dispositions reconcile legacy one-sided state, a different failure cause fails closed, and a late outbox conflict rolls the in-transaction job write back. Live fast-mlsirm execution remains outside this slice.
 
 ## 5. ADR traceability by concern
 

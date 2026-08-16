@@ -30,6 +30,7 @@ pub mod postgres_item_delivery;
 pub mod postgres_response_snapshot;
 pub mod postgres_result_snapshot;
 pub mod postgres_scoring_completion;
+pub mod postgres_scoring_failure;
 pub mod postgres_scoring_job;
 pub mod postgres_scoring_request;
 mod reference;

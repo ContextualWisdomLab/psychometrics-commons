@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Atomic PostgreSQL scoring-job permanent-failure and integration-outbox composition: a fenced scientific quarantine and its bound outbox event commit together, exact replay of the same cause stays idempotent, a different cause fails closed, mixed exact dispositions reconcile legacy one-sided state, and a late outbox conflict rolls the quarantine back.
 - Atomic PostgreSQL scoring-job completion and integration-outbox composition: a fenced successful result and its bound outbox event commit together, exact replay stays idempotent, mixed exact dispositions reconcile legacy one-sided state, and a late outbox conflict rolls the completion back.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.

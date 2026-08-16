@@ -7,7 +7,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
     record_permanent_scoring_failure, record_successful_scoring_completion,
-    ScoringJobCompletionDisposition, ScoringJobPersistenceError,
+    ScoringJobCompletionDisposition, ScoringJobFailureDisposition, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
@@ -143,16 +143,50 @@ fn permanent_failure_quarantines_without_a_result() {
         "scoring_request_permanent_failure",
     );
 
-    let mut transaction = client.transaction().unwrap();
-    record_permanent_scoring_failure(
-        &mut transaction,
-        "scoring_job_permanent_failure",
-        1,
-        "invalid_scientific_evidence",
-        10_500,
-    )
-    .unwrap();
-    transaction.commit().unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            record_permanent_scoring_failure(
+                &mut transaction,
+                "scoring_job_permanent_failure",
+                1,
+                "invalid_scientific_evidence",
+                10_500,
+            )
+            .unwrap(),
+            ScoringJobFailureDisposition::Quarantined
+        );
+        transaction.commit().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            record_permanent_scoring_failure(
+                &mut transaction,
+                "scoring_job_permanent_failure",
+                1,
+                "invalid_scientific_evidence",
+                10_500,
+            )
+            .unwrap(),
+            ScoringJobFailureDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            record_permanent_scoring_failure(
+                &mut transaction,
+                "scoring_job_permanent_failure",
+                1,
+                "provider_rejected_payload",
+                10_500,
+            ),
+            Err(ScoringJobPersistenceError::ConflictingFailure)
+        ));
+        transaction.rollback().unwrap();
+    }
 
     let row = client
         .query_one(
@@ -357,5 +391,9 @@ fn conflicting_completion_error_is_operator_readable() {
     assert_eq!(
         ScoringJobPersistenceError::ConflictingCompletion.to_string(),
         "scoring completion was replayed with conflicting immutable evidence"
+    );
+    assert_eq!(
+        ScoringJobPersistenceError::ConflictingFailure.to_string(),
+        "scoring failure was replayed with conflicting typed cause evidence"
     );
 }
