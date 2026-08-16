@@ -972,3 +972,149 @@ fn later_purpose_level_grant_for_another_scope_blocks_stale_snapshot_start() {
         ResearchContributionPersistenceDisposition::Inserted
     );
 }
+
+#[test]
+fn same_millisecond_later_append_with_smaller_event_ref_replaces_live_scope() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let mut ledger = ConsentLedger::new("participant_research_tau").unwrap();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "zzz_research_grant_stale",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v1",
+            research_scope_ref: Some("research_scope_tau_stale"),
+            occurred_at_unix_ms: 18_000,
+        })
+        .unwrap();
+    let stale_snapshot = ledger
+        .snapshot_as("consent_snapshot_research_tau_stale")
+        .unwrap();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "aaa_research_grant_current",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v1",
+            research_scope_ref: Some("research_scope_tau_current"),
+            occurred_at_unix_ms: 18_000,
+        })
+        .unwrap();
+    persist_grant(&mut client, &ledger);
+    persist_snapshot_ok(&mut client, &stale_snapshot);
+    let current_snapshot = ledger
+        .snapshot_as("consent_snapshot_research_tau_current")
+        .unwrap();
+    persist_snapshot_ok(&mut client, &current_snapshot);
+
+    assert_eq!(
+        current_snapshot.active_research_scope(),
+        Some("research_scope_tau_current"),
+        "domain purpose-latest is the later-appended event even when event_ref sorts lower"
+    );
+    assert!(
+        matches!(
+            persist_err(
+                &mut client,
+                &contribution(
+                    "research_contribution_tau_stale",
+                    "research_participant_tau_stale",
+                    &stale_snapshot,
+                    18_100,
+                ),
+            ),
+            ResearchContributionPersistenceError::ResearchConsentRequired
+        ),
+        "a same-millisecond later append must replace the prior scope as the live write capability"
+    );
+    assert_eq!(
+        persist_ok(
+            &mut client,
+            &contribution(
+                "research_contribution_tau_current",
+                "research_participant_tau_current",
+                &current_snapshot,
+                18_200,
+            ),
+        ),
+        ResearchContributionPersistenceDisposition::Inserted
+    );
+}
+
+#[test]
+fn operational_participant_cannot_reuse_existing_research_participant_ref() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (first_ledger, first_snapshot) = granted_research(
+        "participant_research_upsilon",
+        "consent_snapshot_research_upsilon",
+        "research_scope_upsilon",
+        19_000,
+    );
+    persist_grant(&mut client, &first_ledger);
+    persist_snapshot_ok(&mut client, &first_snapshot);
+    persist_ok(
+        &mut client,
+        &contribution(
+            "research_contribution_upsilon",
+            "research_participant_shared_reverse",
+            &first_snapshot,
+            19_100,
+        ),
+    );
+
+    let (reverse_ledger, reverse_snapshot) = granted_research(
+        "research_participant_shared_reverse",
+        "consent_snapshot_research_phi",
+        "research_scope_phi",
+        19_200,
+    );
+    persist_grant(&mut client, &reverse_ledger);
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            persist_research_consent_snapshot(&mut transaction, &reverse_snapshot),
+            Err(ResearchContributionPersistenceError::OperationalIdentityReuse)
+        ),
+        "a stored research participant reference cannot later become an operational participant"
+    );
+    transaction.rollback().unwrap();
+
+    client
+        .execute(
+            "INSERT INTO research_consent_snapshot (\
+                 consent_snapshot_ref, participant_ref, research_scope_ref, consent_form_version_ref\
+             ) VALUES ($1, $2, $3, $4)",
+            &[
+                &"consent_snapshot_research_phi",
+                &"research_participant_shared_reverse",
+                &"research_scope_phi",
+                &"research_consent_form_v1",
+            ],
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            persist_err(
+                &mut client,
+                &contribution(
+                    "research_contribution_phi",
+                    "research_participant_phi",
+                    &reverse_snapshot,
+                    19_300,
+                ),
+            ),
+            ResearchContributionPersistenceError::OperationalIdentityReuse
+        ),
+        "contribution start must reject an operational participant that already exists as a research identity"
+    );
+}
