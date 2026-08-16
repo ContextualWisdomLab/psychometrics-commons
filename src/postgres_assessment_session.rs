@@ -9,9 +9,13 @@
 //! stored `instrument_release` row in the same transaction so a stale in-memory
 //! Published object cannot insert after persist Suspend or Retire. First insert
 //! through [`persist_assessment_session`] takes the same lock, so a reconstituted
-//! Created aggregate cannot insert after that later persist. Exact replay
-//! of an already stored start still returns the original session after a later
-//! persist Suspend or Retire, so a buyer who already started can retry. Created
+//! Created aggregate cannot insert after that later persist. When that lock
+//! finds a missing or unpublished release, persist still classifies an exact
+//! stored Created row as duplicate so a concurrent retry after the first insert
+//! commits cannot turn a later Suspend or Retire into a false unpublished
+//! failure. Exact replay of an already stored start still returns the original
+//! session after a later persist Suspend or Retire, so a buyer who already
+//! started can retry. Created
 //! identity is inserted only for
 //! [`SessionState::Created`]. Later lifecycle states persist as append-only
 //! command history plus a current-state projection. A shorter persist than
@@ -548,12 +552,51 @@ fn published_snapshot_matches_session(
         && snapshot.manifest().locale() == session.locale()
 }
 
+/// Exact persist replay stays legal after the first-insert publication seal fails.
+fn first_insert_seal_allows_exact_replay(error: &AssessmentSessionPersistenceError) -> bool {
+    match error {
+        AssessmentSessionPersistenceError::UnpublishedStart
+        | AssessmentSessionPersistenceError::InvalidStartRelease => true,
+        AssessmentSessionPersistenceError::ValueOutOfRange
+        | AssessmentSessionPersistenceError::UnsupportedInitialState
+        | AssessmentSessionPersistenceError::ConflictingReplay
+        | AssessmentSessionPersistenceError::UnsupportedIsolationLevel
+        | AssessmentSessionPersistenceError::InvalidReference
+        | AssessmentSessionPersistenceError::InvalidStoredIdentity
+        | AssessmentSessionPersistenceError::UnsupportedStoredState
+        | AssessmentSessionPersistenceError::MissingCreatedIdentity
+        | AssessmentSessionPersistenceError::SequenceConflict
+        | AssessmentSessionPersistenceError::Database(_) => false,
+    }
+}
+
+/// Classify an exact stored Created row after the publication seal fails closed.
+fn replay_existing_created_session_after_seal(
+    transaction: &mut Transaction<'_>,
+    session: &AssessmentSession,
+    session_ref: &str,
+    created_at_unix_ms: i64,
+    seal_error: AssessmentSessionPersistenceError,
+) -> Result<AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError> {
+    let existing = transaction.query_opt(
+        "SELECT 1 FROM assessment_session WHERE session_ref = $1 FOR UPDATE",
+        &[&session_ref],
+    )?;
+    if existing.is_some() {
+        classify_existing_session(transaction, session, session_ref, created_at_unix_ms)
+    } else {
+        Err(seal_error)
+    }
+}
+
 /// Persist one created assessment-session identity bound to a published release.
 ///
 /// A first insert locks the stored `instrument_release` row and fails closed
-/// when that row is missing, unpublished, or digest/version/locale-mismatched.
-/// Exact replay of an already stored Created row stays legal after a later
-/// persist Suspend or Retire. Rebinding any stored field fails closed.
+/// when that row is missing, unpublished, or digest/version/locale-mismatched
+/// and no exact stored Created row exists. Exact replay of an already stored
+/// Created row stays legal after a later persist Suspend or Retire, including
+/// when a concurrent first insert committed while this transaction waited on
+/// the release lock. Rebinding any stored field fails closed.
 /// [`AssessmentSession::new`] validates and normalizes session and participant
 /// references. This function stores those references without validating them
 /// again.
@@ -575,12 +618,18 @@ pub fn persist_assessment_session(
     let participant_ref = session.participant_ref();
     let created_at_unix_ms = postgres_bigint(session.created_at_unix_ms())?;
     let session_state = session.state().persist_name();
-    let existing = transaction.query_opt(
-        "SELECT 1 FROM assessment_session WHERE session_ref = $1",
-        &[&session_ref],
-    )?;
-    if existing.is_none() {
-        require_published_release_for_first_insert(transaction, session)?;
+    match require_published_release_for_first_insert(transaction, session) {
+        Ok(()) => {}
+        Err(error) if first_insert_seal_allows_exact_replay(&error) => {
+            return replay_existing_created_session_after_seal(
+                transaction,
+                session,
+                session_ref,
+                created_at_unix_ms,
+                error,
+            );
+        }
+        Err(error) => return Err(error),
     }
     let inserted = transaction.execute(
         "INSERT INTO assessment_session (
@@ -900,9 +949,9 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        reject_stale_command_prefix, stored_start_identity_matches,
-        AssessmentSessionPersistenceError, AssessmentSessionStartError,
-        StartedSessionReplayRequest,
+        first_insert_seal_allows_exact_replay, reject_stale_command_prefix,
+        stored_start_identity_matches, AssessmentSessionPersistenceError,
+        AssessmentSessionStartError, StartedSessionReplayRequest,
     };
     use crate::postgres_instrument_release::InstrumentReleaseQueryError;
     use crate::session::{AssessmentSession, SessionCommand, SessionCreationError, SessionState};
@@ -1222,5 +1271,31 @@ mod tests {
             persistence.to_string(),
             "session start could not persist the created session; retry the exact start or repair the store"
         );
+    }
+
+    #[test]
+    fn first_insert_seal_replays_only_publication_boundary_errors() {
+        assert!(first_insert_seal_allows_exact_replay(
+            &AssessmentSessionPersistenceError::UnpublishedStart
+        ));
+        assert!(first_insert_seal_allows_exact_replay(
+            &AssessmentSessionPersistenceError::InvalidStartRelease
+        ));
+        for error in [
+            AssessmentSessionPersistenceError::ValueOutOfRange,
+            AssessmentSessionPersistenceError::UnsupportedInitialState,
+            AssessmentSessionPersistenceError::ConflictingReplay,
+            AssessmentSessionPersistenceError::UnsupportedIsolationLevel,
+            AssessmentSessionPersistenceError::InvalidReference,
+            AssessmentSessionPersistenceError::InvalidStoredIdentity,
+            AssessmentSessionPersistenceError::UnsupportedStoredState,
+            AssessmentSessionPersistenceError::MissingCreatedIdentity,
+            AssessmentSessionPersistenceError::SequenceConflict,
+        ] {
+            assert!(
+                !first_insert_seal_allows_exact_replay(&error),
+                "non-publication persist errors must not be rewritten as exact replay: {error}"
+            );
+        }
     }
 }

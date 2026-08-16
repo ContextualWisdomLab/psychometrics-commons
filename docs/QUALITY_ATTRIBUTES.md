@@ -58,7 +58,7 @@ This document converts broad quality goals into **stimulus → environment → r
 
 - **Stimulus:** a caller persists a reconstituted or stale in-memory Created aggregate after the stored release is suspended or retired, and no session row exists yet.
 - **Response:** persist fails closed and inserts nothing; exact replay of an already stored Created row still returns duplicate.
-- **Evidence:** `persist_rejects_reconstituted_first_insert_after_stored_suspend`, `persist_replays_exact_created_row_after_stored_suspend`, and `persist_rejects_first_insert_when_stored_release_is_missing` against real PostgreSQL plus `persist_maps_unpublished_stored_release_to_first_insert_seal`.
+- **Evidence:** `persist_rejects_reconstituted_first_insert_after_stored_suspend`, `persist_replays_exact_created_row_after_stored_suspend`, and `persist_rejects_first_insert_when_stored_release_is_missing` against real PostgreSQL plus `persist_maps_unpublished_stored_release_to_first_insert_seal` and `first_insert_seal_replays_only_publication_boundary_errors`. Exact persist replay after the first-insert seal fails must classify a stored Created row before returning `UnpublishedStart`.
 
 ## 3. Availability and graceful degradation
 

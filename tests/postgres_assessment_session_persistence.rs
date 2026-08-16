@@ -517,6 +517,21 @@ fn persist_replays_exact_created_row_after_stored_suspend() {
         AssessmentSessionPersistenceDisposition::Duplicate
     );
     transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE instrument_release SET publication_state = 'retired' WHERE release_ref = $1",
+            &[&"release_big_five_ko_v1"],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_assessment_session(&mut transaction, &session).unwrap(),
+        AssessmentSessionPersistenceDisposition::Duplicate,
+        "exact persist replay must stay legal after later persist Retire"
+    );
+    transaction.commit().unwrap();
 }
 
 #[test]
