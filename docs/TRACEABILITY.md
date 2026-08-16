@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #66 scoring-job fallback classification locking is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Cancel and lease-expiry classify terminal or unleased rows under `FOR UPDATE` so a concurrent worker cannot rewrite that evidence. Live fast-mlsirm execution remains outside this slice.
+**Active PR** #69 scoring-completion outbox persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Successful scoring completion commits the job outcome with a bound outbox event atomically. Live fast-mlsirm execution remains outside this slice.
 
 ## 5. ADR traceability by concern
 
