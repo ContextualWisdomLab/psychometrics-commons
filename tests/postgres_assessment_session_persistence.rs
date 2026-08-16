@@ -2,6 +2,7 @@
 
 use std::sync::{Mutex, MutexGuard};
 
+use postgres::error::SqlState;
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -738,8 +739,11 @@ fn command_persist_locks_session_header_until_caller_commits() {
         .apply_command("cmd_activate_before_lock", 1, SessionCommand::Activate)
         .unwrap();
 
+    let mut setup = holder.transaction().unwrap();
+    persist_assessment_session(&mut setup, &created).unwrap();
+    setup.commit().unwrap();
+
     let mut hold_transaction = holder.transaction().unwrap();
-    persist_assessment_session(&mut hold_transaction, &created).unwrap();
     persist_assessment_session_commands(&mut hold_transaction, &paused).unwrap();
 
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -755,15 +759,15 @@ fn command_persist_locks_session_header_until_caller_commits() {
     let error = persist_assessment_session_commands(&mut wait_transaction, &stale)
         .expect_err("a second writer must wait on the locked session header");
     wait_transaction.rollback().unwrap();
-    assert!(
-        matches!(error, AssessmentSessionPersistenceError::Database(_)),
-        "lock timeout must surface as a database failure, not a successful rewind: {error:?}"
-    );
-    assert!(
-        error.to_string() == "PostgreSQL assessment-session persistence failed"
-            && std::error::Error::source(&error)
-                .is_some_and(|source| source.to_string().contains("lock timeout")),
-        "the waiter must fail because the header row is locked, not because the prefix check ran on stale committed state"
+    let AssessmentSessionPersistenceError::Database(database_error) = &error else {
+        panic!(
+            "lock timeout must surface as a database failure, not a successful rewind: {error:?}"
+        );
+    };
+    assert_eq!(
+        database_error.code(),
+        Some(&SqlState::LOCK_NOT_AVAILABLE),
+        "the waiter must fail because the header row is locked, not because the prefix check ran on stale committed state: {error:?}"
     );
 
     hold_transaction.commit().unwrap();
