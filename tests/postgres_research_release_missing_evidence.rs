@@ -67,20 +67,22 @@ fn vanished_conflict_is_a_distinct_fail_closed_error() {
 
     client
         .batch_execute(
-            "ALTER TABLE research_release_approval \
-                 DISABLE TRIGGER research_release_approval_immutable_guard;\
-             CREATE OR REPLACE FUNCTION delete_conflicting_research_release_after_insert()\
-             RETURNS trigger LANGUAGE plpgsql AS $$\
-             BEGIN\
-                 DELETE FROM research_release_approval\
-                 WHERE research_release_ref = 'research_release_missing_replay';\
-                 RETURN NULL;\
-             END;\
-             $$;\
-             CREATE TRIGGER research_release_missing_replay_probe\
-                 AFTER INSERT ON research_release_approval\
-                 FOR EACH STATEMENT\
-                 EXECUTE FUNCTION delete_conflicting_research_release_after_insert();",
+            r#"
+            ALTER TABLE research_release_approval
+                DISABLE TRIGGER research_release_approval_immutable_guard;
+            CREATE OR REPLACE FUNCTION delete_conflicting_research_release_after_insert()
+            RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                DELETE FROM research_release_approval
+                WHERE research_release_ref = 'research_release_missing_replay';
+                RETURN NULL;
+            END;
+            $$;
+            CREATE TRIGGER research_release_missing_replay_probe
+                AFTER INSERT ON research_release_approval
+                FOR EACH STATEMENT
+                EXECUTE FUNCTION delete_conflicting_research_release_after_insert();
+            "#,
         )
         .unwrap();
 
@@ -114,7 +116,10 @@ fn vanished_conflict_is_a_distinct_fail_closed_error() {
         )
         .unwrap()
         .get(0);
-    assert_eq!(row_count, 1, "rollback must preserve the original immutable evidence");
+    assert_eq!(
+        row_count, 1,
+        "rollback must preserve the original immutable evidence"
+    );
 
     client
         .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
