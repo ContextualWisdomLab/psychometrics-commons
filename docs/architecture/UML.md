@@ -453,7 +453,7 @@ sequenceDiagram
     P->>A: explicit research opt-in for versioned scope
     A->>A: ManageOwnConsent on the participant ledger
     A->>DB: append consent evidence + research contribution
-    Note over A,DB: Product writes authorize the owning participant before durable consent evidence. Prefer outbox landing head #134 over #123/#120/#112/#70.
+    Note over A,DB: Product writes authorize the owning participant before durable consent evidence. Prefer outbox landing head #142 over #134/#123/#120/#112/#70.
     DB-->>A: contribution_ref
     A->>L: create/reuse scoped research pseudonym
     L-->>A: research_participant_ref

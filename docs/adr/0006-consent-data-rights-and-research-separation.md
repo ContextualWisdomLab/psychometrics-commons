@@ -64,7 +64,8 @@ Construct-relevant personal data remains available to authorized workflows when 
 4. Public research data contains no Keyverse subject or operational participant reference.
 5. Service denial cannot be based on refusal of optional research contribution.
 6. Data-rights operations are tenant-scoped and identity-verified.
-7. A product consent write is authorized only when the authenticated tenant participant holds `ManageOwnConsent` on that participant's ledger.
+
+A product consent write is authorized only when the authenticated tenant participant holds `ManageOwnConsent` on that participant's ledger. This write-path gate is independent of durable-tail ordering.
 
 ## Failure behavior
 
