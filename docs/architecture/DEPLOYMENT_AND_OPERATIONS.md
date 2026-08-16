@@ -203,7 +203,7 @@ Restore acceptance must prove:
 
 1. tenant and authorization boundaries survive restore;
 2. immutable snapshot/release digests still verify;
-3. outbox/inbox deduplication and pending/processing state do not cause silent duplicate or missing side effects;
+3. outbox/inbox deduplication and pending/processing state, including the database-authoritative `claim_deadline_at` wall-clock, do not cause silent duplicate or missing side effects;
 4. result provenance and supersession chains remain intact;
 5. restricted research linkage remains restricted;
 6. deletion/retention evidence is not resurrected into an invalid user-visible state;

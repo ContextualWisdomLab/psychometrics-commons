@@ -84,6 +84,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
 | AI cannot mutate numeric scientific result | AI Governance; ADR-0009, ADR-0018 | architecture policy | product adapter/adversarial mutation tests |
 | Exact locale no silent assessment fallback | TRD §28; ADR-0013 | instrument locale pinning exists; client serving policy is Target | exact English/Korean published-form/client tests |
+| Schema-level binary restore preserves in-flight inbox claim deadlines | ADR-0017; QA-REC-01 | `tests/postgres_recovery_invariants.rs` seeds and restores exact `claim_deadline_at` after #81 | measured Hosted/Enterprise restore drill |
 | GA claims require measured profile recovery/availability evidence | ADR-0017; Deployment/Operations | architecture policy | deployed SLO/RPO/RTO/restore/incident evidence |
 | Architecture mitigation is not risk closure/certification | Compliance Readiness; Risk Register | documentation fitness only | control-specific implementation and scoped independent assessment where claimed |
 

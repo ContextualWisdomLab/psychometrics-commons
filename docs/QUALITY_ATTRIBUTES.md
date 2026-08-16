@@ -232,7 +232,8 @@ Performance goals are workload/profile-specific. The architecture nevertheless r
 
 - **Stimulus:** restore supported release data into a clean recovery environment.
 - **Response:** meets the profile's measured RPO/RTO, verifies immutable digests, tenant/linkage boundaries, deduplication and deletion reconciliation before service acceptance.
-- **Evidence:** real restore drill governed by ADR-0017.
+- **Current evidence:** `tests/postgres_recovery_invariants.rs` proves a schema-level `COPY ... FORMAT BINARY` restore of tenant-scoped outbox identity, in-flight inbox consumption fencing including `claim_deadline_at`, and immutable response-snapshot provenance. That test is not a measured Hosted/Enterprise RPO/RTO drill.
+- **Missing before GA:** profile-specific restore drill governed by ADR-0017.
 
 ## 14. Quality-attribute conflict policy
 

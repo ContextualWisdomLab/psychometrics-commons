@@ -48,7 +48,7 @@ This register tracks material product, scientific, privacy, security, operationa
 | OpenAPI/AsyncAPI target docs are published before implementation and mislead integrators | medium | medium | mitigated_by_architecture | ADR-0014 as-built-only contract rule; CI gate pending |
 | Logical ERD drifts from physical migrations | high | medium | evidence_required | ADR-0015 + planned schema fitness test when migrations exist |
 | Operational SLO/RPO/RTO is promised without measurements | high | medium | mitigated_by_architecture | ADR-0017 explicitly prohibits invented universal values |
-| Backup job succeeds but restore/provenance/tenant isolation fails | critical | medium | evidence_required | real restore drill and QA-REC scenarios pending |
+| Backup job succeeds but restore/provenance/tenant isolation fails | critical | medium | evidence_required | schema-level `COPY` restore now includes `claim_deadline_at`; measured Hosted/Enterprise restore drill and QA-REC RPO/RTO remain pending |
 | Routine logs expose raw responses, tokens or restricted linkage | critical | medium | mitigated_by_architecture | safe refs/digests and redaction rules; log/adversarial tests pending |
 | Security/compliance readiness language is mistaken for SOC 2/CSAP certification | high | medium | mitigated_by_architecture | explicit evidence-state model and non-claim; external assessment required |
 | Documentation becomes target-only and is mistaken for implemented product maturity | high | medium | implementation_in_progress | named-baseline TRACEABILITY + docs fitness tests; update after every protected-main feature merge |

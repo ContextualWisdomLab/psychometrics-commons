@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -94,6 +94,23 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## Physical recovery evidence
+
+Protected-main recovery acceptance uses PostgreSQL `COPY ... FORMAT BINARY` to move
+recovery-critical rows into a clean schema. Official PostgreSQL 18 `COPY` and
+backup/restore documentation define that binary format and the operator backup
+family. The product test is a schema-level invariant check, not a Hosted or
+Enterprise backup-service claim and not a measured RPO/RTO drill.
+
+Product consequences:
+
+- a `processing` inbox-consumption row must restore the same `claim_deadline_at`
+  wall-clock that the source stored, because that deadline is database-authoritative
+  after migration `0019`;
+- restore acceptance cannot invent a fresh lease by omitting or rewriting the
+  deadline during `COPY`;
+- GA recovery claims still require the profile-specific drill in ADR-0017.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -122,5 +139,9 @@ International Organization for Standardization. (2019). *ISO 8601-1:2019 Date an
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
+
+The PostgreSQL Global Development Group. (2026a). *PostgreSQL 18 documentation: Backup and restore*. https://www.postgresql.org/docs/18/backup.html
+
+The PostgreSQL Global Development Group. (2026b). *PostgreSQL 18 documentation: COPY*. https://www.postgresql.org/docs/18/sql-copy.html
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/

@@ -108,7 +108,7 @@ When each logical entity becomes persisted, test as applicable:
 - forward migration from each supported prior version;
 - rollback or documented roll-forward-only behavior;
 - backup taken on supported version and restored into the intended recovery profile;
-- restored digest/provenance equality;
+- restored digest/provenance equality, including exact `claim_deadline_at` equality for in-flight inbox processing claims;
 - tenant and restricted-linkage authorization after restore;
 - no mutation of published immutable scientific artifacts during schema migration.
 
