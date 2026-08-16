@@ -500,7 +500,7 @@ For effects fully owned by the same PostgreSQL transaction, the domain side effe
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
 - Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
 - `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land.
-- Session start from a stored published release (`created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`, locking `instrument_release`) exists on this Active PR; HTTP `POST /v1/sessions` remains target.
+- Session start from a stored published release (`created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`, locking `instrument_release`) exists on Active PR #180; HTTP `POST /v1/sessions` remains target.
 
 ## 14. Reference
 
