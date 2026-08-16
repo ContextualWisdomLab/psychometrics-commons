@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** succeeding #119 is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `load_result_snapshot` reconstructs stored identities, consent, provenance, and copied observations, and now fails closed when `observation_order` is not contiguous `0..n-1`. `load_current_result_snapshot_for_session` returns the unique non-superseded tip for the session a participant is viewing after restart. Exact persist replay stays Duplicate. Missing headers or sessions return `None`. Two current tips, gapped observation sets, and noncanonical provenance fail closed. Psychometric recomputation remains in `fast-mlsirm`. Result-serving HTTP transport remains Target.
+**Active PR** #137 result-snapshot session reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Prefer it over #119. `load_result_snapshot` reconstructs stored identities, consent, provenance, and copied observations, and fails closed when `observation_order` is not contiguous `0..n-1`. `load_current_result_snapshot_for_session` returns the unique non-superseded tip for the session a participant is viewing after restart. Exact persist replay stays Duplicate. Missing headers or sessions return `None`. Two current tips, gapped observation sets, and noncanonical provenance fail closed. Psychometric recomputation remains in `fast-mlsirm`. Result-serving HTTP transport remains Target.
 
 ## 5. ADR traceability by concern
 
