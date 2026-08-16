@@ -146,3 +146,11 @@ fn relation_integrity_probe_surfaces_a_database_failure() {
 
     assert!(probe_postgres_relation_integrity(&mut transaction, &["pg_catalog.pg_class"]).is_err());
 }
+
+#[test]
+fn relation_integrity_probe_surfaces_a_closed_connection_failure() {
+    let mut client = test_client();
+    let _ = client.batch_execute("SELECT pg_terminate_backend(pg_backend_pid())");
+
+    assert!(probe_postgres_relation_integrity(&mut client, &["pg_catalog.pg_class"]).is_err());
+}

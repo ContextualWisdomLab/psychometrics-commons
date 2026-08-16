@@ -11,6 +11,7 @@ use psychometrics_commons_runtime::postgres_health::{
 };
 use psychometrics_commons_runtime::postgres_inbox_consumption::apply_inbox_consumption_migration;
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
+use std::error::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static SCHEMA_NONCE: AtomicU64 = AtomicU64::new(1);
@@ -166,6 +167,37 @@ fn data_rights_probe_transaction_rejects_each_invalid_timestamp_independently() 
             probe_postgres_data_rights_backlog(&mut transaction),
             Err(PostgresBacklogProbeError::InvalidStoredValue)
         ));
+        transaction.rollback().unwrap();
+    }
+
+    cleanup_schema(client, &schema);
+}
+
+#[test]
+fn backlog_probes_surface_transaction_query_failures() {
+    let mut client = test_client();
+    let schema = create_isolated_schema(&mut client, "backlog_probe_txn_query");
+    apply_integration_migration(&mut client).expect("integration migration should apply");
+    apply_inbox_consumption_migration(&mut client)
+        .expect("inbox-consumption migration should apply");
+    apply_data_rights_migration(&mut client).expect("data-rights migration should apply");
+
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+        let error = probe_postgres_integration_backlog(&mut transaction).unwrap_err();
+        assert!(matches!(error, PostgresBacklogProbeError::Database(_)));
+        assert_eq!(error.to_string(), "PostgreSQL backlog probe failed");
+        assert!(error.source().is_some());
+        transaction.rollback().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+        let error = probe_postgres_data_rights_backlog(&mut transaction).unwrap_err();
+        assert!(matches!(error, PostgresBacklogProbeError::Database(_)));
+        assert_eq!(error.to_string(), "PostgreSQL backlog probe failed");
+        assert!(error.source().is_some());
         transaction.rollback().unwrap();
     }
 
