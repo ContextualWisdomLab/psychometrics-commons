@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR participant identity-link physical schema
 
-The identity-link successor of #133 adds `migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, and `src/postgres_participant_identity_link.rs`. Prefer this head over #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
+The identity-link successor of #133 adds `migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, and `src/postgres_participant_identity_link.rs`. Prefer this head over #147, #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
 
 - immutable `assessment_participant` identity (`participant_ref`, `tenant_ref`, `created_at_unix_ms`);
 - append-only `participant_identity_link` rows for accepted dual-proof account links;

@@ -44,3 +44,6 @@ CREATE TRIGGER participant_identity_link_unterminated_subject_guard
     BEFORE INSERT ON participant_identity_link
     FOR EACH ROW
     EXECUTE FUNCTION reject_second_unterminated_identity_subject();
+
+CREATE INDEX IF NOT EXISTS participant_identity_link_current_subject_lookup
+    ON participant_identity_link (tenant_ref, identity_issuer, identity_subject_ref);

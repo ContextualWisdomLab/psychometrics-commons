@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: the identity-link successor of #133 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay restoration of a missing current projection, and a database trigger that rejects a second unterminated issuer-scoped subject through `src/postgres_participant_identity_link.rs`. Prefer this successor over #133, #124, and #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: the identity-link successor of #133 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay restoration of a missing current projection, and a database trigger that rejects a second unterminated issuer-scoped subject through `src/postgres_participant_identity_link.rs`. Prefer this successor over #147, #133, #124, and #114.
 - `PLANNED`: durable HTTP transport, unlink/relink/recovery operator commands, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision

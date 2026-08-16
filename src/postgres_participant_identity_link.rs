@@ -115,8 +115,9 @@ pub fn apply_participant_identity_link_migration(
 /// and link-end evidence is idempotent. Reusing an event identity with
 /// different issuer, subject, proof, or time fails closed. An unterminated
 /// issuer-scoped subject cannot belong to two participants at once, even
-/// when the derived current projection is missing. Exact replay of an
-/// unterminated link restores that derived row so uniqueness stays enforced.
+/// when the derived current projection is missing. Exact replay reconciles
+/// the derived current row from unterminated history, or deletes a stale
+/// row after unlink, so uniqueness stays enforced.
 ///
 /// # Errors
 ///
@@ -156,6 +157,7 @@ pub fn persist_participant_identity_history(
             }
         }
     }
+    reconcile_current_projection(transaction, participant)?;
     if inserted_any {
         Ok(IdentityLinkPersistenceDisposition::Inserted)
     } else {
@@ -372,46 +374,46 @@ fn persist_one_link(
         && stored_authenticated == authenticated_proof_ref
         && stored_linked == linked_at_unix_ms
     {
-        restore_current_projection_if_unterminated(
-            transaction,
-            participant_ref,
-            identity_link_ref,
-            tenant_ref,
-            identity_issuer,
-            identity_subject_ref,
-        )?;
         Ok(false)
     } else {
         Err(IdentityLinkPersistenceError::ConflictingReplay)
     }
 }
 
-fn restore_current_projection_if_unterminated(
+fn reconcile_current_projection(
     transaction: &mut Transaction<'_>,
-    participant_ref: &str,
-    identity_link_ref: &str,
-    tenant_ref: &str,
-    identity_issuer: &str,
-    identity_subject_ref: &str,
+    participant: &ParticipantRecord,
 ) -> Result<(), IdentityLinkPersistenceError> {
-    let ended = transaction.query_opt(
-        "SELECT 1 FROM participant_identity_link_end WHERE linked_event_ref = $1",
-        &[&identity_link_ref],
-    )?;
-    if ended.is_some() {
+    let participant_ref = required_reference(participant.participant_ref())?;
+    let Some(identity_link_ref) = participant.link_event_ref() else {
+        transaction.execute(
+            "DELETE FROM current_participant_identity_link WHERE participant_ref = $1",
+            &[&participant_ref],
+        )?;
         return Ok(());
-    }
+    };
+    let tenant_ref = required_reference(participant.tenant_ref())?;
+    let identity_link_ref = required_reference(identity_link_ref)?;
+    let identity_issuer = required_reference(
+        participant
+            .linked_issuer_ref()
+            .ok_or(IdentityLinkPersistenceError::CorruptHistory)?,
+    )?;
+    let identity_subject_ref = required_reference(
+        participant
+            .linked_subject_ref()
+            .ok_or(IdentityLinkPersistenceError::CorruptHistory)?,
+    )?;
     match transaction.execute(
         "INSERT INTO current_participant_identity_link (\
              participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
              identity_subject_ref\
          ) VALUES ($1, $2, $3, $4, $5) \
-         ON CONFLICT (participant_ref) DO UPDATE \
-         SET identity_link_ref = EXCLUDED.identity_link_ref, \
+         ON CONFLICT (participant_ref) DO UPDATE SET \
+             identity_link_ref = EXCLUDED.identity_link_ref, \
              tenant_ref = EXCLUDED.tenant_ref, \
              identity_issuer = EXCLUDED.identity_issuer, \
-             identity_subject_ref = EXCLUDED.identity_subject_ref \
-         WHERE current_participant_identity_link.identity_link_ref = EXCLUDED.identity_link_ref",
+             identity_subject_ref = EXCLUDED.identity_subject_ref",
         &[
             &participant_ref,
             &identity_link_ref,

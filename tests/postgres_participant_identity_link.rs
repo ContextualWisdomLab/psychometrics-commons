@@ -591,6 +591,80 @@ fn exact_replay_restores_missing_current_projection() {
 }
 
 #[test]
+fn exact_replay_clears_stale_projection_after_unlink() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut unlinked = linked_participant();
+    unlinked
+        .record_link_end(
+            "link_end_event_identity_alpha",
+            "unlink_evidence_identity_alpha",
+            10_200,
+        )
+        .unwrap();
+    persist_ok(&mut client, &unlinked);
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.current_participant_identity_link (\
+                 participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref\
+             ) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &"participant_identity_alpha",
+                &"link_event_identity_alpha",
+                &"tenant_identity_alpha",
+                &"keyverse_issuer_alpha",
+                &"keyverse_subject_alpha",
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        persist_ok(&mut client, &unlinked),
+        IdentityLinkPersistenceDisposition::Duplicate
+    );
+    assert_eq!(
+        current_projection_rows(&mut client, "participant_identity_alpha"),
+        0,
+        "unlink replay must drop a stale current projection"
+    );
+    assert!(load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .is_none());
+}
+
+#[test]
+fn history_subject_lookup_is_indexed() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let indexed: bool = client
+        .query_one(
+            "SELECT EXISTS (\
+                 SELECT 1 FROM pg_indexes \
+                 WHERE schemaname = 'identity_link_persistence_test' \
+                   AND indexname = 'participant_identity_link_current_subject_lookup'\
+             )",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(
+        indexed,
+        "unterminated-subject lookup must use an indexed history path"
+    );
+}
+
+#[test]
 fn exact_replay_restores_current_projection_after_relink() {
     let _guard = identity_link_test_guard();
     let mut client = test_client();
