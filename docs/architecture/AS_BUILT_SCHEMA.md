@@ -67,7 +67,7 @@ PR #114 adds `migrations/0021_participant_identity_link.sql` and `src/postgres_p
 - append-only `participant_identity_link_end` rows that end a specific historical link without editing it;
 - derived `current_participant_identity_link` projection enforcing one current link per participant and one current issuer-scoped subject per tenant.
 
-Exact replay is idempotent. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. HTTP account-link transport and live Keyverse verification remain Target.
+Exact replay is idempotent. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from the current issuer-scoped subject. HTTP account-link transport and live Keyverse verification remain Target.
 
 ## Logical-to-physical mapping rule
 

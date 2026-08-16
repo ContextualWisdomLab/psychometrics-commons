@@ -7,9 +7,9 @@
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_participant_identity_link::{
-    apply_participant_identity_link_migration, load_participant_identity_history,
-    persist_participant_identity_history, IdentityLinkPersistenceDisposition,
-    IdentityLinkPersistenceError,
+    apply_participant_identity_link_migration, load_participant_by_current_identity_subject,
+    load_participant_identity_history, persist_participant_identity_history,
+    IdentityLinkPersistenceDisposition, IdentityLinkPersistenceError,
 };
 use std::sync::{Mutex, MutexGuard};
 
@@ -110,6 +110,24 @@ fn persist_err(
     let error = persist_participant_identity_history(&mut transaction, participant).unwrap_err();
     transaction.rollback().unwrap();
     error
+}
+
+fn load_by_subject_ok(
+    client: &mut Client,
+    tenant_ref: &str,
+    identity_issuer: &str,
+    identity_subject_ref: &str,
+) -> Option<ParticipantRecord> {
+    let mut transaction = client.transaction().unwrap();
+    let loaded = load_participant_by_current_identity_subject(
+        &mut transaction,
+        tenant_ref,
+        identity_issuer,
+        identity_subject_ref,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    loaded
 }
 
 fn load_ok(client: &mut Client, participant_ref: &str, tenant_ref: &str) -> ParticipantRecord {
@@ -317,6 +335,62 @@ fn unlinked_subject_can_become_current_on_another_participant() {
         "participant_identity_alpha"
     );
     assert_eq!(next_loaded.participant_ref(), "participant_identity_beta");
+}
+
+#[test]
+fn returning_account_finds_the_same_participant_by_current_subject() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+
+    let found = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .expect("a returning Keyverse login must find the stored participant");
+    assert_eq!(found.participant_ref(), "participant_identity_alpha");
+    assert_eq!(found.linked_subject_ref(), Some("keyverse_subject_alpha"));
+
+    assert!(load_by_subject_ok(
+        &mut client,
+        "tenant_identity_other",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .is_none());
+}
+
+#[test]
+fn ended_or_replaced_subject_is_not_findable_until_it_is_current_again() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &relinked_participant());
+
+    assert!(load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .is_none());
+
+    let found = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_gamma",
+        "keyverse_subject_gamma",
+    )
+    .expect("the current relinked account must resolve to the same participant");
+    assert_eq!(found.participant_ref(), "participant_identity_alpha");
+    assert_eq!(found.linked_subject_ref(), Some("keyverse_subject_gamma"));
 }
 
 #[test]

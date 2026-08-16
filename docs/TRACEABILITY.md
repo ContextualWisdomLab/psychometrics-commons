@@ -133,7 +133,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** successor of #114 participant identity-link persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `migrations/0021_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` persist `assessment_participant`, append-only `participant_identity_link` / `participant_identity_link_end` evidence, and a derived `current_participant_identity_link` projection. Persist applies each link and then its matching ends so a complete unlink+relink aggregate can be written in one transaction. Reload after restart replays the same history. HTTP account-link transport and live Keyverse token verification remain outside this slice.
+**Active PR** successor of #114 participant identity-link persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `migrations/0021_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` persist `assessment_participant`, append-only `participant_identity_link` / `participant_identity_link_end` evidence, and a derived `current_participant_identity_link` projection. Persist applies each link and then its matching ends so a complete unlink+relink aggregate can be written in one transaction. Reload after restart replays the same history, and a returning account recovers the stable `participant_ref` from the current issuer-scoped subject. HTTP account-link transport and live Keyverse token verification remain outside this slice.
 
 ## 5. ADR traceability by concern
 

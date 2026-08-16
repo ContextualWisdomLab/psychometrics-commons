@@ -216,6 +216,39 @@ pub fn load_participant_identity_history(
     Ok(Some(record))
 }
 
+/// Reload the participant that currently holds an issuer-scoped subject.
+///
+/// A returning Keyverse login uses this lookup to recover the stable
+/// product-owned `participant_ref` after the anonymous session token is gone.
+/// A missing current link or a tenant mismatch returns `None`.
+///
+/// # Errors
+///
+/// Returns [`IdentityLinkPersistenceError`] for an invalid reference, corrupt
+/// stored history, an unrepresentable timestamp, or a database failure.
+pub fn load_participant_by_current_identity_subject(
+    transaction: &mut Transaction<'_>,
+    tenant_ref: &str,
+    identity_issuer: &str,
+    identity_subject_ref: &str,
+) -> Result<Option<ParticipantRecord>, IdentityLinkPersistenceError> {
+    let tenant_ref = required_reference(tenant_ref)?;
+    let identity_issuer = required_reference(identity_issuer)?;
+    let identity_subject_ref = required_reference(identity_subject_ref)?;
+    let row = transaction.query_opt(
+        "SELECT participant_ref FROM current_participant_identity_link \
+         WHERE tenant_ref = $1 AND identity_issuer = $2 \
+               AND identity_subject_ref = $3 \
+         FOR SHARE",
+        &[&tenant_ref, &identity_issuer, &identity_subject_ref],
+    )?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let participant_ref: String = row.get(0);
+    load_participant_identity_history(transaction, &participant_ref, tenant_ref)
+}
+
 fn persist_participant_header(
     transaction: &mut Transaction<'_>,
     participant_ref: &str,
