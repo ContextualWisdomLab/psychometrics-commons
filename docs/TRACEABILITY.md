@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** response-event HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `POST /v1/sessions/{session_ref}/responses` records one answer on an injected Active session when the item belongs to that session's published release. Exact `Idempotency-Key` replay returns the original event. Created, paused, unknown, or conflicting writes fail closed. Do not mix onto #149 session HTTP, #165 instrument catalog HTTP, or response persist/reload (#151/#174/#182). Session create, commands, results, and durability remain outside this slice.
+**Active PR** #195 response-event HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `POST /v1/sessions/{session_ref}/responses` records one answer on an injected Active session when the item belongs to that session's published release. Exact `Idempotency-Key` replay returns the original event. Created, paused, unknown, or conflicting writes fail closed. Do not mix onto #149 session HTTP, #165 instrument catalog HTTP, or response persist/reload (#151/#174/#182). Session create, commands, results, and durability remain outside this slice.
 
 ## 5. ADR traceability by concern
 
@@ -190,7 +190,7 @@ Whenever a durable conversation decision changes one of those boundaries, the ap
 
 The prose API/event families in TRD are architecture requirements, not evidence of an implemented transport.
 
-When an HTTP API family is implemented, the same PR or a prerequisite PR must add and validate an OpenAPI 3.2.x document whose operations and problem responses match the actual implementation. HTTP errors use RFC 9457 problem details unless a documented domain representation is more appropriate. Active PR response-event HTTP adds as-built `openapi/responses.yaml` for `POST /v1/sessions/{session_ref}/responses` only.
+When an HTTP API family is implemented, the same PR or a prerequisite PR must add and validate an OpenAPI 3.2.x document whose operations and problem responses match the actual implementation. HTTP errors use RFC 9457 problem details unless a documented domain representation is more appropriate. Active PR #195 response-event HTTP adds as-built `openapi/responses.yaml` for `POST /v1/sessions/{session_ref}/responses` only.
 
 When durable message transport is implemented, the same PR or a prerequisite PR must add and validate an AsyncAPI 3.1.x document for actually produced/consumed event channels and message schemas. It must encode/reference ADR-0014 canonical UTF-8 payload hashing, SHA-256 payload digest semantics, tenant/resource binding, deduplication identity, pending/processing/completed consumption, replay retention, and quarantine behavior.
 
