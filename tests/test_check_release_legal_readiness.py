@@ -48,6 +48,25 @@ class ReleaseLegalReadinessTests(unittest.TestCase):
             self.assertTrue(evidence["cargo_license_expression_declared"])
             self.assertTrue(evidence["limitations"])
 
+    def test_empty_or_whitespace_license_files_are_not_terms_evidence(self) -> None:
+        """An empty conventional or declared file cannot satisfy the source-terms presence gate."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture_root(directory, ['license = "LicenseRef-Reviewed-Terms"'])
+            (root / "LICENSE").write_text(" \n\t", encoding="utf-8")
+            evidence = evaluate_repository(root)
+            self.assertFalse(evidence["ready"])
+            self.assertEqual(evidence["standard_license_files"], [])
+            self.assertIn("no discoverable license file", evidence["blockers"][0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture_root(directory, ['license-file = "legal/source-license.txt"'])
+            (root / "legal").mkdir()
+            (root / "legal/source-license.txt").write_bytes(b"")
+            evidence = evaluate_repository(root)
+            self.assertFalse(evidence["ready"])
+            self.assertIsNone(evidence["cargo_license_file_resolved"])
+            self.assertIn("license-file is missing", evidence["blockers"][-1])
+
     def test_declared_license_file_must_exist_inside_repository(self) -> None:
         """Missing or path-escaping license-file metadata fails closed."""
         with tempfile.TemporaryDirectory() as directory:
