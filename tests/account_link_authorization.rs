@@ -232,6 +232,34 @@ fn account_control_context_rejects_malformed_server_evidence() {
             "123",
             AccountLinkAuthorizationError::InvalidReference,
         ),
+        (
+            " tenant_alpha",
+            "issuer_keyverse_prod",
+            "subject_account_alpha",
+            "authenticated_proof_alpha",
+            AccountLinkAuthorizationError::InvalidReference,
+        ),
+        (
+            "tenant_alpha",
+            "issuer_keyverse_prod ",
+            "subject_account_alpha",
+            "authenticated_proof_alpha",
+            AccountLinkAuthorizationError::InvalidReference,
+        ),
+        (
+            "tenant_alpha",
+            "issuer_keyverse_prod",
+            "\tsubject_account_alpha",
+            "authenticated_proof_alpha",
+            AccountLinkAuthorizationError::InvalidReference,
+        ),
+        (
+            "tenant_alpha",
+            "issuer_keyverse_prod",
+            "subject_account_alpha",
+            "authenticated_proof_alpha\n",
+            AccountLinkAuthorizationError::InvalidReference,
+        ),
     ] {
         assert_eq!(
             AuthenticatedAccountControl::new(tenant, issuer, subject, proof, 3_000).unwrap_err(),
