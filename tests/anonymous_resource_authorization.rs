@@ -17,11 +17,7 @@ fn anonymous_context() -> AnonymousSessionContext {
     .unwrap()
 }
 
-fn session_resource(
-    tenant_ref: &str,
-    participant_ref: &str,
-    session_ref: &str,
-) -> ResourceScope {
+fn session_resource(tenant_ref: &str, participant_ref: &str, session_ref: &str) -> ResourceScope {
     ResourceScope::participant_owned(
         ResourceKind::AssessmentSession,
         tenant_ref,
@@ -36,7 +32,10 @@ fn current_anonymous_authority_may_manage_only_its_exact_session_resource() {
     let context = anonymous_context();
     let resource = session_resource("tenant_alpha", "participant_alpha", "session_alpha");
 
-    assert_eq!(authorize_anonymous_session(&context, &resource, 1_500), Ok(()));
+    assert_eq!(
+        authorize_anonymous_session(&context, &resource, 1_500),
+        Ok(())
+    );
 }
 
 #[test]
