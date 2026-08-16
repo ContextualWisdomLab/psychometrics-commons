@@ -33,6 +33,7 @@ class ReleaseLegalReadinessContract(unittest.TestCase):
         self.assertNotIn("contents: write", text)
         self.assertNotIn("id-token: write", text)
         self.assertIn("persist-credentials: false", text)
+        self.assertIn('test "$GITHUB_REF" = "refs/heads/main"', text)
         self.assertIn("python3 tests/test_release_legal_readiness.py", text)
         self.assertIn("python3 tests/test_check_release_legal_readiness.py", text)
         self.assertIn("python3 scripts/check_release_legal_readiness.py .", text)
