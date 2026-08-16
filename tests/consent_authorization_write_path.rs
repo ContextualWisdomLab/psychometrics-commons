@@ -6,6 +6,7 @@ use psychometrics_commons_runtime::authorization::{
 use psychometrics_commons_runtime::consent::{
     ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose,
 };
+use psychometrics_commons_runtime::postgres_consent::ConsentPersistenceError;
 use psychometrics_commons_runtime::postgres_consent_authorization::{
     authorize_consent_propagation, AuthorizedConsentPersistenceError,
 };
@@ -139,5 +140,15 @@ fn numeric_tenant_is_rejected_before_any_consent_write() {
     assert!(error
         .to_string()
         .contains("authenticated participant to manage their own ledger"));
+    assert!(error.source().is_some());
+}
+
+#[test]
+fn authorized_persist_maps_durable_failure_after_owner_check() {
+    let error =
+        AuthorizedConsentPersistenceError::Persistence(ConsentPersistenceError::InvalidReference);
+    assert!(error
+        .to_string()
+        .contains("failed after owner authorization"));
     assert!(error.source().is_some());
 }
