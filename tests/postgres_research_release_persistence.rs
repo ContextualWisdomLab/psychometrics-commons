@@ -57,12 +57,7 @@ fn reset_table(client: &mut Client) {
         .unwrap();
 }
 
-fn inject_stored_tamper(
-    client: &mut Client,
-    column: &str,
-    value: &str,
-    release_ref: &str,
-) {
+fn inject_stored_tamper(client: &mut Client, column: &str, value: &str, release_ref: &str) {
     assert!(
         TAMPERABLE_COLUMNS.contains(&column),
         "tamper injection must target a known immutable evidence column"
@@ -309,22 +304,12 @@ fn every_persisted_approval_field_is_part_of_the_immutable_replay_identity() {
     ];
 
     for (column, tampered_value, original_value) in cases {
-        inject_stored_tamper(
-            &mut client,
-            column,
-            tampered_value,
-            release.release_ref(),
-        );
+        inject_stored_tamper(&mut client, column, tampered_value, release.release_ref());
         assert!(matches!(
             persist_err(&mut client, &release),
             ResearchReleasePersistenceError::ConflictingReplay
         ));
-        inject_stored_tamper(
-            &mut client,
-            column,
-            original_value,
-            release.release_ref(),
-        );
+        inject_stored_tamper(&mut client, column, original_value, release.release_ref());
     }
 
     assert_eq!(
