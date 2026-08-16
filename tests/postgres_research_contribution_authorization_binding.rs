@@ -11,6 +11,9 @@ use psychometrics_commons_runtime::consent::{
     ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose, ConsentSnapshot,
     ResearchContribution,
 };
+use psychometrics_commons_runtime::postgres_consent::{
+    apply_consent_migration, persist_consent_ledger,
+};
 use psychometrics_commons_runtime::postgres_research_contribution::{
     apply_research_contribution_migration, persist_research_consent_snapshot,
     persist_research_contribution, ResearchContributionPersistenceDisposition,
@@ -37,17 +40,19 @@ fn test_client() -> Client {
              SET search_path TO research_authorization_binding_test;\
              DROP TABLE IF EXISTS research_withdrawal_event;\
              DROP TABLE IF EXISTS research_contribution;\
-             DROP TABLE IF EXISTS research_consent_snapshot;",
+             DROP TABLE IF EXISTS research_consent_snapshot;\
+             DROP TABLE IF EXISTS consent_event;\
+             DROP TABLE IF EXISTS consent_ledger;",
         )
         .unwrap();
     client
 }
 
-fn research_snapshot(
+fn research_grant(
     participant_ref: &str,
     snapshot_ref: &str,
     research_scope_ref: &str,
-) -> ConsentSnapshot {
+) -> (ConsentLedger, ConsentSnapshot) {
     let mut ledger = ConsentLedger::new(participant_ref).unwrap();
     ledger
         .record(ConsentEventInput {
@@ -59,25 +64,32 @@ fn research_snapshot(
             occurred_at_unix_ms: 1_000,
         })
         .unwrap();
-    ledger.snapshot_as(snapshot_ref).unwrap()
+    let snapshot = ledger.snapshot_as(snapshot_ref).unwrap();
+    (ledger, snapshot)
 }
 
 #[test]
 fn contribution_uses_previously_persisted_snapshot_binding_not_a_write_time_snapshot() {
     let _guard = test_guard();
     let mut client = test_client();
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let authoritative = research_snapshot(
+    let (authoritative_ledger, authoritative) = research_grant(
         "participant_authoritative_alpha",
         "consent_snapshot_collision_alpha",
         "research_scope_collision_alpha",
     );
-    let colliding = research_snapshot(
+    let (_colliding_ledger, colliding) = research_grant(
         "participant_wrong_alpha",
         "consent_snapshot_collision_alpha",
         "research_scope_collision_alpha",
     );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_consent_ledger(&mut transaction, &authoritative_ledger).unwrap();
+        transaction.commit().unwrap();
+    }
     let contribution = ResearchContribution::from_snapshot(
         "research_contribution_binding_alpha",
         "research_participant_binding_alpha",
@@ -125,13 +137,19 @@ fn contribution_uses_previously_persisted_snapshot_binding_not_a_write_time_snap
 fn contribution_fails_closed_until_authorizing_snapshot_projection_is_durable() {
     let _guard = test_guard();
     let mut client = test_client();
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let snapshot = research_snapshot(
+    let (ledger, snapshot) = research_grant(
         "participant_authoritative_beta",
         "consent_snapshot_binding_beta",
         "research_scope_binding_beta",
     );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_consent_ledger(&mut transaction, &ledger).unwrap();
+        transaction.commit().unwrap();
+    }
     let contribution = ResearchContribution::from_snapshot(
         "research_contribution_binding_beta",
         "research_participant_binding_beta",

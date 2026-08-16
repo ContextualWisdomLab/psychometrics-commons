@@ -77,7 +77,8 @@ CREATE TABLE IF NOT EXISTS research_contribution (
         )
         CONSTRAINT research_contribution_identity_separation_check CHECK (
             research_participant_ref <> participant_ref
-        ),
+        )
+        CONSTRAINT research_contribution_research_participant_ref_unique UNIQUE,
     consent_snapshot_ref TEXT
         CONSTRAINT research_contribution_consent_snapshot_ref_not_null NOT NULL
         CONSTRAINT research_contribution_consent_snapshot_ref_format_check CHECK (

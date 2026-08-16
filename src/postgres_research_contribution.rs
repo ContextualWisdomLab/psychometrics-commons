@@ -8,8 +8,11 @@
 //! identity. To prevent write-time snapshot substitution from rebinding identity,
 //! callers must first persist the exact active research-consent snapshot projection.
 //! Contribution persistence then resolves participant and scope from that durable
-//! binding rather than trusting a second in-memory snapshot. The caller owns
-//! credentials and the surrounding transaction boundary.
+//! binding rather than trusting a second in-memory snapshot. A new contribution
+//! start also re-checks the live `consent_event` grant for that participant and
+//! scope so a stored snapshot cannot remain an unlimited write capability after
+//! revoke. Exact replay and withdrawal of already stored evidence stay allowed.
+//! The caller owns credentials and the surrounding transaction boundary.
 
 use crate::consent::{
     ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState,
@@ -183,7 +186,9 @@ pub fn persist_research_consent_snapshot(
 /// `research_consent_snapshot`. Operational participant identity is read only from
 /// that durable binding, never from a write-time snapshot argument. The stored
 /// scope must equal the contribution's immutable scope and the bound operational
-/// participant must differ from the pseudonymous research participant.
+/// participant must differ from the pseudonymous research participant. A new
+/// contribution start also requires the latest matching `consent_event` decision
+/// to still be `granted`.
 ///
 /// The contribution start record is append-only. Withdrawal is stored as a separate
 /// event, so replaying original active evidence after withdrawal cannot reactivate
@@ -260,14 +265,15 @@ fn validated_contribution_evidence<'a>(
 
     let withdrawal = match contribution.state() {
         ResearchContributionState::Active => None,
-        ResearchContributionState::Withdrawn => Some(ValidatedWithdrawal {
-            withdrawal_event_ref: required_reference(
-                contribution.withdrawal_event_ref().unwrap_or(""),
-            )?,
-            withdrawn_at_unix_ms: bounded_timestamp(
-                contribution.withdrawn_at_unix_ms().unwrap_or(0),
-            )?,
-        }),
+        ResearchContributionState::Withdrawn => {
+            let (event_ref, withdrawn_at_unix_ms) = contribution
+                .withdrawal_evidence()
+                .ok_or(ResearchContributionPersistenceError::InvalidReference)?;
+            Some(ValidatedWithdrawal {
+                withdrawal_event_ref: required_reference(event_ref)?,
+                withdrawn_at_unix_ms: bounded_timestamp(withdrawn_at_unix_ms)?,
+            })
+        }
     };
 
     Ok(ValidatedEvidence {
@@ -285,6 +291,21 @@ fn persist_contribution_start(
     transaction: &mut Transaction<'_>,
     evidence: &ValidatedEvidence<'_>,
 ) -> Result<bool, ResearchContributionPersistenceError> {
+    let existing = transaction.query_opt(
+        "SELECT participant_ref, research_participant_ref, consent_snapshot_ref, \
+                research_scope_ref, started_at_unix_ms \
+         FROM research_contribution WHERE contribution_ref = $1",
+        &[&evidence.contribution_ref],
+    )?;
+    if existing.is_none() {
+        require_live_research_grant(
+            transaction,
+            &evidence.participant_ref,
+            evidence.research_scope_ref,
+        )?;
+        require_namespace_separation(transaction, evidence.research_participant_ref)?;
+    }
+
     let inserted = transaction.execute(
         "INSERT INTO research_contribution (\
              contribution_ref, participant_ref, research_participant_ref, \
@@ -333,11 +354,20 @@ fn persist_withdrawal(
     contribution_ref: &str,
     withdrawal: ValidatedWithdrawal<'_>,
 ) -> Result<bool, ResearchContributionPersistenceError> {
+    let reused_event = transaction.query_opt(
+        "SELECT 1 FROM research_withdrawal_event \
+         WHERE withdrawal_event_ref = $1 AND contribution_ref <> $2",
+        &[&withdrawal.withdrawal_event_ref, &contribution_ref],
+    )?;
+    if reused_event.is_some() {
+        return Err(ResearchContributionPersistenceError::ConflictingReplay);
+    }
+
     let inserted = transaction.execute(
         "INSERT INTO research_withdrawal_event (\
              contribution_ref, withdrawal_event_ref, withdrawn_at_unix_ms\
          ) VALUES ($1, $2, $3) \
-         ON CONFLICT DO NOTHING",
+         ON CONFLICT (contribution_ref) DO NOTHING",
         &[
             &contribution_ref,
             &withdrawal.withdrawal_event_ref,
@@ -365,6 +395,51 @@ fn persist_withdrawal(
     } else {
         Err(ResearchContributionPersistenceError::ConflictingReplay)
     }
+}
+
+fn require_live_research_grant(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+    research_scope_ref: &str,
+) -> Result<(), ResearchContributionPersistenceError> {
+    let row = transaction.query_opt(
+        "SELECT consent_decision \
+         FROM consent_event \
+         WHERE participant_ref = $1 \
+           AND consent_purpose = 'research_contribution' \
+           AND research_scope_ref = $2 \
+         ORDER BY occurred_at_unix_ms DESC, event_ref DESC \
+         LIMIT 1",
+        &[&participant_ref, &research_scope_ref],
+    )?;
+    let Some(row) = row else {
+        return Err(ResearchContributionPersistenceError::ResearchConsentRequired);
+    };
+    let decision: String = row.get(0);
+    if decision == "granted" {
+        Ok(())
+    } else {
+        Err(ResearchContributionPersistenceError::ResearchConsentRequired)
+    }
+}
+
+fn require_namespace_separation(
+    transaction: &mut Transaction<'_>,
+    research_participant_ref: &str,
+) -> Result<(), ResearchContributionPersistenceError> {
+    let collision = transaction.query_opt(
+        "SELECT 1 FROM research_consent_snapshot WHERE participant_ref = $1 \
+         UNION ALL \
+         SELECT 1 FROM research_contribution WHERE participant_ref = $1 \
+         UNION ALL \
+         SELECT 1 FROM research_contribution WHERE research_participant_ref = $1 \
+         LIMIT 1",
+        &[&research_participant_ref],
+    )?;
+    if collision.is_some() {
+        return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
+    }
+    Ok(())
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResearchContributionPersistenceError> {

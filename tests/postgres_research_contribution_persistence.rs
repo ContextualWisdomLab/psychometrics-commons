@@ -5,6 +5,9 @@ use psychometrics_commons_runtime::consent::{
     ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose, ConsentSnapshot,
     ResearchContribution,
 };
+use psychometrics_commons_runtime::postgres_consent::{
+    apply_consent_migration, persist_consent_ledger,
+};
 use psychometrics_commons_runtime::postgres_research_contribution::{
     apply_research_contribution_migration, persist_research_consent_snapshot,
     persist_research_contribution, ResearchContributionPersistenceDisposition,
@@ -40,9 +43,38 @@ fn reset_tables(client: &mut Client) {
         .batch_execute(
             "DROP TABLE IF EXISTS research_contribution_test.research_withdrawal_event;\
              DROP TABLE IF EXISTS research_contribution_test.research_contribution;\
-             DROP TABLE IF EXISTS research_contribution_test.research_consent_snapshot;",
+             DROP TABLE IF EXISTS research_contribution_test.research_consent_snapshot;\
+             DROP TABLE IF EXISTS research_contribution_test.consent_event;\
+             DROP TABLE IF EXISTS research_contribution_test.consent_ledger;",
         )
         .unwrap();
+}
+
+fn persist_grant(client: &mut Client, ledger: &ConsentLedger) {
+    let mut transaction = client.transaction().unwrap();
+    persist_consent_ledger(&mut transaction, ledger).unwrap();
+    transaction.commit().unwrap();
+}
+
+fn granted_research(
+    participant_ref: &str,
+    snapshot_ref: &str,
+    research_scope_ref: &str,
+    occurred_at_unix_ms: u64,
+) -> (ConsentLedger, ConsentSnapshot) {
+    let mut ledger = ConsentLedger::new(participant_ref).unwrap();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_grant",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v1",
+            research_scope_ref: Some(research_scope_ref),
+            occurred_at_unix_ms,
+        })
+        .unwrap();
+    let snapshot = ledger.snapshot_as(snapshot_ref).unwrap();
+    (ledger, snapshot)
 }
 
 fn research_snapshot(
@@ -130,15 +162,17 @@ fn active_contribution_and_withdrawal_are_append_only_and_idempotent() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let snapshot = research_snapshot(
+    let (ledger, snapshot) = granted_research(
         "participant_research_alpha",
         "consent_snapshot_research_alpha",
         "research_scope_alpha",
         1_000,
     );
+    persist_grant(&mut client, &ledger);
     assert_eq!(
         persist_snapshot_ok(&mut client, &snapshot),
         ResearchContributionPersistenceDisposition::Inserted
@@ -194,14 +228,16 @@ fn durable_consent_snapshot_reference_cannot_be_rebound() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let authoritative = research_snapshot(
+    let (ledger, authoritative) = granted_research(
         "participant_research_beta",
         "consent_snapshot_collision_beta",
         "research_scope_beta",
         3_000,
     );
+    persist_grant(&mut client, &ledger);
     let rebound_participant = research_snapshot(
         "participant_research_gamma",
         "consent_snapshot_collision_beta",
@@ -223,6 +259,7 @@ fn non_research_snapshot_is_rejected_before_any_binding_is_written() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
     let snapshot = non_research_snapshot(
@@ -252,14 +289,16 @@ fn contribution_requires_preexisting_snapshot_and_exact_scope_binding() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let missing_snapshot = research_snapshot(
+    let (missing_ledger, missing_snapshot) = granted_research(
         "participant_research_delta",
         "consent_snapshot_missing_delta",
         "research_scope_delta",
         4_000,
     );
+    persist_grant(&mut client, &missing_ledger);
     let missing_contribution = contribution(
         "research_contribution_missing_delta",
         "research_participant_delta",
@@ -271,12 +310,13 @@ fn contribution_requires_preexisting_snapshot_and_exact_scope_binding() {
         ResearchContributionPersistenceError::ConsentSnapshotMissing
     ));
 
-    let authoritative = research_snapshot(
+    let (authoritative_ledger, authoritative) = granted_research(
         "participant_research_epsilon",
         "consent_snapshot_scope_epsilon",
         "research_scope_epsilon",
         5_000,
     );
+    persist_grant(&mut client, &authoritative_ledger);
     persist_snapshot_ok(&mut client, &authoritative);
     let conflicting_scope_snapshot = research_snapshot(
         "participant_research_epsilon",
@@ -301,14 +341,16 @@ fn operational_and_research_identity_namespaces_cannot_collapse() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let authoritative = research_snapshot(
+    let (authoritative_ledger, authoritative) = granted_research(
         "research_participant_zeta",
         "consent_snapshot_identity_zeta",
         "research_scope_zeta",
         6_000,
     );
+    persist_grant(&mut client, &authoritative_ledger);
     persist_snapshot_ok(&mut client, &authoritative);
     let creation_snapshot = research_snapshot(
         "participant_creation_zeta",
@@ -349,14 +391,16 @@ fn immutable_contribution_and_withdrawal_rebinding_fail_closed() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let first_snapshot = research_snapshot(
+    let (first_ledger, first_snapshot) = granted_research(
         "participant_research_eta",
         "consent_snapshot_research_eta",
         "research_scope_eta",
         7_000,
     );
+    persist_grant(&mut client, &first_ledger);
     persist_snapshot_ok(&mut client, &first_snapshot);
     let first = contribution(
         "research_contribution_shared_eta",
@@ -377,12 +421,13 @@ fn immutable_contribution_and_withdrawal_rebinding_fail_closed() {
         ResearchContributionPersistenceError::ConflictingReplay
     ));
 
-    let second_snapshot = research_snapshot(
+    let (second_ledger, second_snapshot) = granted_research(
         "participant_research_theta",
         "consent_snapshot_research_theta",
         "research_scope_theta",
         8_000,
     );
+    persist_grant(&mut client, &second_ledger);
     persist_snapshot_ok(&mut client, &second_snapshot);
     let rebound = contribution(
         "research_contribution_shared_eta",
@@ -415,14 +460,16 @@ fn tampered_stored_contribution_is_detected_on_replay() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let snapshot = research_snapshot(
+    let (ledger, snapshot) = granted_research(
         "participant_research_iota",
         "consent_snapshot_research_iota",
         "research_scope_iota",
         9_000,
     );
+    persist_grant(&mut client, &ledger);
     persist_snapshot_ok(&mut client, &snapshot);
     let contribution = contribution(
         "research_contribution_iota",
@@ -456,14 +503,16 @@ fn oversized_timestamp_and_non_read_committed_isolation_fail_closed() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
 
-    let snapshot = research_snapshot(
+    let (ledger, snapshot) = granted_research(
         "participant_research_kappa",
         "consent_snapshot_research_kappa",
         "research_scope_kappa",
         10_000,
     );
+    persist_grant(&mut client, &ledger);
     persist_snapshot_ok(&mut client, &snapshot);
     let oversized = contribution(
         "research_contribution_kappa",
@@ -512,6 +561,10 @@ fn missing_relation_surfaces_typed_database_failure_with_source() {
         error,
         ResearchContributionPersistenceError::Database(_)
     ));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL research-contribution persistence failed"
+    );
     assert!(error.source().is_some());
     transaction.rollback().unwrap();
     assert!(ResearchContributionPersistenceError::InvalidReference
@@ -536,4 +589,292 @@ fn persistence_error_messages_are_stable_and_non_sensitive() {
         assert!(!message.is_empty());
         assert!(!message.contains("participant_research"));
     }
+}
+
+#[test]
+fn revoked_research_grant_blocks_new_contribution_but_preserves_prior_evidence() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (mut ledger, snapshot) = granted_research(
+        "participant_research_mu",
+        "consent_snapshot_research_mu",
+        "research_scope_mu",
+        12_000,
+    );
+    persist_grant(&mut client, &ledger);
+    persist_snapshot_ok(&mut client, &snapshot);
+    let first = contribution(
+        "research_contribution_mu_first",
+        "research_participant_mu_first",
+        &snapshot,
+        12_100,
+    );
+    assert_eq!(
+        persist_ok(&mut client, &first),
+        ResearchContributionPersistenceDisposition::Inserted
+    );
+
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_revoke",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Revoked,
+            consent_form_version_ref: "research_consent_form_v1",
+            research_scope_ref: Some("research_scope_mu"),
+            occurred_at_unix_ms: 12_200,
+        })
+        .unwrap();
+    persist_grant(&mut client, &ledger);
+
+    let stale = contribution(
+        "research_contribution_mu_stale",
+        "research_participant_mu_stale",
+        &snapshot,
+        12_300,
+    );
+    assert!(
+        matches!(
+            persist_err(&mut client, &stale),
+            ResearchContributionPersistenceError::ResearchConsentRequired
+        ),
+        "a durable snapshot must not remain an unlimited write capability after revoke"
+    );
+    assert_eq!(
+        persist_ok(&mut client, &first),
+        ResearchContributionPersistenceDisposition::Duplicate,
+        "revocation must not erase or reject exact replay of already stored evidence"
+    );
+    let withdrawn = first.withdraw("research_withdrawal_mu", 12_400).unwrap();
+    assert_eq!(
+        persist_ok(&mut client, &withdrawn),
+        ResearchContributionPersistenceDisposition::Inserted,
+        "withdrawal after revoke remains allowed because it stops future use"
+    );
+}
+
+#[test]
+fn snapshot_persist_rejects_non_read_committed_isolation() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let snapshot = research_snapshot(
+        "participant_research_nu",
+        "consent_snapshot_research_nu",
+        "research_scope_nu",
+        13_000,
+    );
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        persist_research_consent_snapshot(&mut transaction, &snapshot),
+        Err(ResearchContributionPersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn snapshot_and_contribution_replay_rejects_each_field_mismatch() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (ledger, snapshot) = granted_research(
+        "participant_research_xi",
+        "consent_snapshot_research_xi",
+        "research_scope_xi",
+        14_000,
+    );
+    persist_grant(&mut client, &ledger);
+    persist_snapshot_ok(&mut client, &snapshot);
+
+    let mut scope_mismatch_ledger = ConsentLedger::new("participant_research_xi").unwrap();
+    scope_mismatch_ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_grant",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v1",
+            research_scope_ref: Some("research_scope_xi_other"),
+            occurred_at_unix_ms: 14_000,
+        })
+        .unwrap();
+    let scope_mismatch = scope_mismatch_ledger
+        .snapshot_as("consent_snapshot_research_xi")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_research_consent_snapshot(&mut transaction, &scope_mismatch),
+        Err(ResearchContributionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut form_mismatch_ledger = ConsentLedger::new("participant_research_xi").unwrap();
+    form_mismatch_ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_grant",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v2",
+            research_scope_ref: Some("research_scope_xi"),
+            occurred_at_unix_ms: 14_000,
+        })
+        .unwrap();
+    let form_mismatch = form_mismatch_ledger
+        .snapshot_as("consent_snapshot_research_xi")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_research_consent_snapshot(&mut transaction, &form_mismatch),
+        Err(ResearchContributionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let stored = contribution(
+        "research_contribution_xi",
+        "research_participant_xi",
+        &snapshot,
+        14_100,
+    );
+    persist_ok(&mut client, &stored);
+
+    let research_identity_mismatch = contribution(
+        "research_contribution_xi",
+        "research_participant_xi_other",
+        &snapshot,
+        14_100,
+    );
+    assert!(matches!(
+        persist_err(&mut client, &research_identity_mismatch),
+        ResearchContributionPersistenceError::ConflictingReplay
+    ));
+
+    client
+        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE research_contribution SET consent_snapshot_ref = $1 \
+             WHERE contribution_ref = $2",
+            &[
+                &"consent_snapshot_research_xi_tampered",
+                &stored.contribution_ref(),
+            ],
+        )
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &stored),
+        ResearchContributionPersistenceError::ConflictingReplay
+    ));
+
+    client
+        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE research_contribution SET consent_snapshot_ref = $1, \
+                    research_scope_ref = $2 \
+             WHERE contribution_ref = $3",
+            &[
+                &snapshot.snapshot_ref(),
+                &"research_scope_xi_tampered",
+                &stored.contribution_ref(),
+            ],
+        )
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &stored),
+        ResearchContributionPersistenceError::ConflictingReplay
+    ));
+
+    let withdrawn = stored.withdraw("research_withdrawal_xi", 14_500).unwrap();
+    client
+        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE research_contribution SET consent_snapshot_ref = $1, \
+                    research_scope_ref = $2 \
+             WHERE contribution_ref = $3",
+            &[
+                &snapshot.snapshot_ref(),
+                &snapshot.active_research_scope().unwrap(),
+                &stored.contribution_ref(),
+            ],
+        )
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
+        .unwrap();
+    persist_ok(&mut client, &withdrawn);
+    let later_time = stored.withdraw("research_withdrawal_xi", 14_600).unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &later_time),
+        ResearchContributionPersistenceError::ConflictingReplay
+    ));
+}
+
+#[test]
+fn research_participant_ref_cannot_be_reused_across_operational_identities() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (first_ledger, first_snapshot) = granted_research(
+        "participant_research_omicron",
+        "consent_snapshot_research_omicron",
+        "research_scope_omicron",
+        15_000,
+    );
+    persist_grant(&mut client, &first_ledger);
+    persist_snapshot_ok(&mut client, &first_snapshot);
+    persist_ok(
+        &mut client,
+        &contribution(
+            "research_contribution_omicron",
+            "research_participant_shared",
+            &first_snapshot,
+            15_100,
+        ),
+    );
+
+    let (second_ledger, second_snapshot) = granted_research(
+        "participant_research_pi",
+        "consent_snapshot_research_pi",
+        "research_scope_pi",
+        15_200,
+    );
+    persist_grant(&mut client, &second_ledger);
+    persist_snapshot_ok(&mut client, &second_snapshot);
+    assert!(matches!(
+        persist_err(
+            &mut client,
+            &contribution(
+                "research_contribution_pi",
+                "research_participant_shared",
+                &second_snapshot,
+                15_300,
+            ),
+        ),
+        ResearchContributionPersistenceError::OperationalIdentityReuse
+    ));
 }

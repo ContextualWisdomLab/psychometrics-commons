@@ -448,6 +448,19 @@ impl ResearchContribution {
         self.withdrawn_at_unix_ms
     }
 
+    /// Return withdrawal identity and time together when both are present.
+    ///
+    /// Callers that persist or display withdrawal evidence should use this pair
+    /// so a withdrawn contribution cannot be treated as active by reading one
+    /// field without the other.
+    #[must_use]
+    pub fn withdrawal_evidence(&self) -> Option<(&str, u64)> {
+        Some((
+            self.withdrawal_event_ref.as_deref()?,
+            self.withdrawn_at_unix_ms?,
+        ))
+    }
+
     /// Return a new withdrawn state while preserving the original contribution.
     ///
     /// Replaying the exact same withdrawal is idempotent. Any different attempt
