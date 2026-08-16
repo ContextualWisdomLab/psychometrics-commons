@@ -1,5 +1,7 @@
 //! Coverage and fail-closed regressions for required immutable result references.
 
+mod common;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
@@ -67,11 +69,16 @@ fn result_input<'a>() -> ResultSnapshotInput<'a> {
 #[test]
 fn result_snapshot_rejects_blank_snapshot_identity() {
     let (request, result) = request_and_result();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let mut input = result_input();
     input.result_snapshot_ref = "   ";
 
     assert_eq!(
-        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshot::new(&session, &request, &result, input).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
 }
@@ -79,11 +86,16 @@ fn result_snapshot_rejects_blank_snapshot_identity() {
 #[test]
 fn result_snapshot_rejects_blank_narrative_version() {
     let (request, result) = request_and_result();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let mut input = result_input();
     input.narrative_version_ref = "\t";
 
     assert_eq!(
-        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshot::new(&session, &request, &result, input).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
 }

@@ -1,5 +1,7 @@
 //! Regression for conflicting provenance hidden behind one scoring request reference.
 
+mod common;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
@@ -73,6 +75,16 @@ fn result_input<'a>() -> ResultSnapshotInput<'a> {
     }
 }
 
+fn session_for(
+    request: &ScoringRequest,
+) -> psychometrics_commons_runtime::session::AssessmentSession {
+    common::assessment_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    )
+}
+
 #[test]
 fn result_snapshot_rejects_same_request_reference_with_different_assessment_spec() {
     let expected_request = request(
@@ -86,8 +98,10 @@ fn result_snapshot_rejects_same_request_reference_with_different_assessment_spec
         "scoring_version_ref",
     );
     let result = result_for(&conflicting_request);
+    let session = session_for(&expected_request);
 
-    let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
+    let error =
+        ResultSnapshot::new(&session, &expected_request, &result, result_input()).unwrap_err();
 
     assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
 }
@@ -101,8 +115,10 @@ fn result_snapshot_rejects_same_request_reference_with_different_optional_norm()
     );
     let conflicting_request = request("assessment_spec_ref", None, "scoring_version_ref");
     let result = result_for(&conflicting_request);
+    let session = session_for(&expected_request);
 
-    let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
+    let error =
+        ResultSnapshot::new(&session, &expected_request, &result, result_input()).unwrap_err();
 
     assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
 }
@@ -120,8 +136,10 @@ fn result_snapshot_rejects_same_request_reference_with_different_scoring_version
         "scoring_version_b",
     );
     let result = result_for(&conflicting_request);
+    let session = session_for(&expected_request);
 
-    let error = ResultSnapshot::new(&expected_request, &result, result_input()).unwrap_err();
+    let error =
+        ResultSnapshot::new(&session, &expected_request, &result, result_input()).unwrap_err();
 
     assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
 }
