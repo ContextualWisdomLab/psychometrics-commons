@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Require protected main
+        run: test "$GITHUB_REF" = "refs/heads/main"
       - name: Checkout exact protected revision
         uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
         with:
