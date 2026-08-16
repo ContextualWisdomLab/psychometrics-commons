@@ -373,7 +373,7 @@ sequenceDiagram
     A-->>C: link complete
 
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
-    Note over A,DB: After restore, inspect current-projection drift and rebuild the unique enforcer from unterminated history before new account-link writes
+    Note over A,DB: After restore, inspect current-projection drift and rebuild the unique enforcer from unterminated history before new account-link writes, including a later participant binding an ended subject
 ```
 
 ## 9. Longitudinal Gyeot-to-TEPP orchestration sequence

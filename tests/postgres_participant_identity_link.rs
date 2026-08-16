@@ -933,6 +933,90 @@ fn restore_inspect_reports_missing_and_stale_projections_before_reconcile() {
 }
 
 #[test]
+fn restore_inspect_then_reconcile_frees_ended_subject_for_a_new_participant() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &relinked_participant());
+    drop_current_projection(&mut client);
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.current_participant_identity_link (\
+                 participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref\
+             ) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &"participant_identity_alpha",
+                &"link_event_identity_alpha",
+                &"tenant_identity_alpha",
+                &"keyverse_issuer_alpha",
+                &"keyverse_subject_alpha",
+            ],
+        )
+        .unwrap();
+
+    let drifted = inspect_ok(&mut client);
+    assert!(drifted.has_drift());
+    assert!(
+        !drifted.accepts_new_account_link_writes(),
+        "operators must inspect drift and run restore reconcile before a later participant can bind an ended subject"
+    );
+
+    let mut rebound = ParticipantRecord::new_anonymous(
+        "participant_identity_epsilon",
+        "tenant_identity_alpha",
+        10_000,
+    )
+    .unwrap();
+    rebound
+        .link_account(
+            "link_event_identity_epsilon",
+            "keyverse_issuer_alpha",
+            "keyverse_subject_alpha",
+            "anonymous_proof_identity_epsilon",
+            "authenticated_proof_identity_epsilon",
+            10_500,
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            persist_err(&mut client, &rebound),
+            IdentityLinkPersistenceError::SubjectAlreadyBound
+        ),
+        "a stale current row for an ended subject must block a new account link until restore reconcile runs"
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    reconcile_identity_link_current_projections(&mut transaction)
+        .expect("restore reconcile must clear the stale ended-subject unique enforcer");
+    transaction.commit().unwrap();
+
+    let reconciled = inspect_ok(&mut client);
+    assert_eq!(reconciled.missing_current_rows(), 0);
+    assert_eq!(reconciled.stale_current_rows(), 0);
+    assert!(reconciled.accepts_new_account_link_writes());
+
+    assert_eq!(
+        persist_ok(&mut client, &rebound),
+        IdentityLinkPersistenceDisposition::Inserted
+    );
+    let recovered = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .expect("ended subject must resolve to the new participant after inspect and restore reconcile");
+    assert_eq!(recovered.participant_ref(), "participant_identity_epsilon");
+    assert_eq!(
+        recovered.linked_subject_ref(),
+        Some("keyverse_subject_alpha")
+    );
+}
+
+#[test]
 fn restore_inspect_fails_closed_on_two_unterminated_links_for_one_participant() {
     let _guard = identity_link_test_guard();
     let mut client = test_client();
