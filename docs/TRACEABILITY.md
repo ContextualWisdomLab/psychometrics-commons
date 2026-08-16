@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** item-delivery HTTP record/reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/item_delivery_http.rs` exposes in-process `POST` and `GET` `/v1/sessions/{session_ref}/item-deliveries` so a purchaser can record that one published item version was shown and reload the server-ordered ledger to resume. Exact `Idempotency-Key` replay that matches `delivery_ref` returns the original event. Items outside the bound release, inactive sessions, and conflicting replay fail closed. Session create/start, response capture, scoring, result access, live `fast-mlsirm` selection, and PostgreSQL ledger durability remain other slices. The as-built contract is `openapi/item-deliveries.yaml`.
+**Active PR** #197 item-delivery HTTP record/reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/item_delivery_http.rs` exposes in-process `POST` and `GET` `/v1/sessions/{session_ref}/item-deliveries` so a purchaser can record that one published item version was shown and reload the server-ordered ledger to resume. Exact `Idempotency-Key` replay that matches `delivery_ref` returns the original event. Items outside the bound release, inactive sessions, and conflicting replay fail closed. Session create/start, response capture, scoring, result access, live `fast-mlsirm` selection, and PostgreSQL ledger durability remain other slices. The as-built contract is `openapi/item-deliveries.yaml`.
 
 ## 5. ADR traceability by concern
 
