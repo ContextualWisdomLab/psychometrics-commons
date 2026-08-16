@@ -1,8 +1,9 @@
-//! Contract tests for anonymous command authorization against loaded aggregates.
+//! Contract tests for anonymous command authorization against supplied aggregates.
 //!
 //! A transport must load the participant and assessment session from the product store,
 //! then ask this boundary whether the already-verified anonymous session may command
-//! that exact loaded session. Callers do not invent the resource tenant or owner.
+//! that exact session. These tests pass supplied records; the type system does not
+//! prove they were loaded. Persist/reload remains Active PR #114.
 
 use psychometrics_commons_runtime::anonymous_authorization::{
     apply_anonymous_session_command, authorize_anonymous_session_command,
@@ -22,6 +23,12 @@ const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+/// Session starts after the Big Five Korean release is published at 10_200.
+const SESSION_CREATED_AT_UNIX_MS: u64 = 10_300;
+/// Trusted now sits after session creation and before exclusive proof expiry.
+const COMMAND_NOW_UNIX_MS: u64 = 11_000;
+/// Exclusive proof expiry: valid at 11_999, expired at 12_000.
+const PROOF_VALID_UNTIL_UNIX_MS: u64 = 12_000;
 
 fn published_release() -> InstrumentRelease {
     let manifest = InstrumentReleaseManifest::new(
@@ -100,7 +107,7 @@ fn session(participant_ref: &str, session_ref: &str) -> AssessmentSession {
         participant_ref,
         &published_release(),
         "ko-KR",
-        20_000,
+        SESSION_CREATED_AT_UNIX_MS,
     )
     .unwrap()
 }
@@ -115,7 +122,7 @@ fn anonymous_context(
         participant_ref,
         session_ref,
         "anonymous_command_evidence_alpha",
-        2_000,
+        PROOF_VALID_UNTIL_UNIX_MS,
     )
     .unwrap()
 }
@@ -127,7 +134,7 @@ fn current_anonymous_proof_may_command_only_its_loaded_session() {
     let loaded = session("participant_alpha", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &loaded, 1_500),
+        authorize_anonymous_session_command(&actor, &owner, &loaded, COMMAND_NOW_UNIX_MS),
         Ok(())
     );
 }
@@ -139,7 +146,7 @@ fn anonymous_command_authorization_uses_loaded_participant_tenant_not_caller_sco
     let loaded = session("participant_alpha", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &foreign_owner, &loaded, 1_500),
+        authorize_anonymous_session_command(&actor, &foreign_owner, &loaded, COMMAND_NOW_UNIX_MS),
         Err(AnonymousResourceAuthorizationError::CrossTenantDenied)
     );
 }
@@ -151,7 +158,12 @@ fn anonymous_command_authorization_rejects_a_session_owned_by_another_loaded_par
     let other_persons_session = session("participant_beta", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &other_persons_session, 1_500),
+        authorize_anonymous_session_command(
+            &actor,
+            &owner,
+            &other_persons_session,
+            COMMAND_NOW_UNIX_MS
+        ),
         Err(AnonymousResourceAuthorizationError::OwnerMismatch)
     );
 }
@@ -163,7 +175,7 @@ fn anonymous_command_authorization_rejects_a_different_loaded_session_for_the_sa
     let other_session = session("participant_alpha", "session_beta");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &other_session, 1_500),
+        authorize_anonymous_session_command(&actor, &owner, &other_session, COMMAND_NOW_UNIX_MS),
         Err(AnonymousResourceAuthorizationError::SessionMismatch)
     );
 }
@@ -179,7 +191,11 @@ fn anonymous_command_authorization_fails_closed_for_zero_or_expired_server_time(
         Err(AnonymousResourceAuthorizationError::InvalidTimestamp)
     );
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &loaded, 2_000),
+        authorize_anonymous_session_command(&actor, &owner, &loaded, PROOF_VALID_UNTIL_UNIX_MS),
+        Err(AnonymousResourceAuthorizationError::Expired)
+    );
+    assert_eq!(
+        authorize_anonymous_session_command(&actor, &owner, &loaded, PROOF_VALID_UNTIL_UNIX_MS + 1),
         Err(AnonymousResourceAuthorizationError::Expired)
     );
 }
@@ -195,7 +211,12 @@ fn anonymous_command_authorization_rejects_compound_failures_in_time_then_owner_
         Err(AnonymousResourceAuthorizationError::InvalidTimestamp)
     );
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &other_persons_session, 2_000),
+        authorize_anonymous_session_command(
+            &actor,
+            &owner,
+            &other_persons_session,
+            PROOF_VALID_UNTIL_UNIX_MS
+        ),
         Err(AnonymousResourceAuthorizationError::Expired)
     );
 }
@@ -207,7 +228,12 @@ fn anonymous_command_authorization_rejects_actor_when_loaded_participant_and_ses
     let other_persons_session = session("participant_beta", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &other_owner, &other_persons_session, 1_500),
+        authorize_anonymous_session_command(
+            &actor,
+            &other_owner,
+            &other_persons_session,
+            COMMAND_NOW_UNIX_MS
+        ),
         Err(AnonymousResourceAuthorizationError::OwnerMismatch)
     );
 }
@@ -220,7 +246,12 @@ fn anonymous_command_authorization_rejects_compound_foreign_tenant_and_inconsist
     let other_persons_session = session("participant_beta", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &foreign_owner, &other_persons_session, 1_500),
+        authorize_anonymous_session_command(
+            &actor,
+            &foreign_owner,
+            &other_persons_session,
+            COMMAND_NOW_UNIX_MS
+        ),
         Err(AnonymousResourceAuthorizationError::CrossTenantDenied)
     );
 }
@@ -239,7 +270,7 @@ fn authorized_anonymous_proof_may_activate_only_its_loaded_session() {
             "command_activate_alpha",
             1,
             SessionCommand::Activate,
-            1_500,
+            COMMAND_NOW_UNIX_MS,
         ),
         Ok(SessionState::Active)
     );
@@ -260,7 +291,7 @@ fn unauthorized_anonymous_command_does_not_mutate_the_loaded_session() {
             "command_activate_beta",
             1,
             SessionCommand::Activate,
-            1_500,
+            COMMAND_NOW_UNIX_MS,
         ),
         Err(AnonymousSessionCommandError::Authorization(
             AnonymousResourceAuthorizationError::SessionMismatch
@@ -283,7 +314,7 @@ fn cross_tenant_anonymous_command_does_not_mutate_the_loaded_session() {
             "command_activate_foreign_tenant",
             1,
             SessionCommand::Activate,
-            1_500,
+            COMMAND_NOW_UNIX_MS,
         ),
         Err(AnonymousSessionCommandError::Authorization(
             AnonymousResourceAuthorizationError::CrossTenantDenied
@@ -306,7 +337,7 @@ fn owner_mismatch_anonymous_command_does_not_mutate_the_loaded_session() {
             "command_activate_foreign_owner",
             1,
             SessionCommand::Activate,
-            1_500,
+            COMMAND_NOW_UNIX_MS,
         ),
         Err(AnonymousSessionCommandError::Authorization(
             AnonymousResourceAuthorizationError::OwnerMismatch
@@ -329,7 +360,7 @@ fn expired_anonymous_proof_cannot_apply_an_otherwise_legal_session_command() {
             "command_activate_expired",
             1,
             SessionCommand::Activate,
-            2_000,
+            PROOF_VALID_UNTIL_UNIX_MS,
         ),
         Err(AnonymousSessionCommandError::Authorization(
             AnonymousResourceAuthorizationError::Expired
@@ -351,7 +382,7 @@ fn authorized_anonymous_command_still_fails_closed_on_illegal_lifecycle_transiti
         "command_complete_too_early",
         1,
         SessionCommand::Complete,
-        1_500,
+        COMMAND_NOW_UNIX_MS,
     )
     .expect_err("Created sessions cannot complete");
     match error {
@@ -368,7 +399,7 @@ fn authorized_anonymous_command_still_fails_closed_on_illegal_lifecycle_transiti
 }
 
 #[test]
-fn anonymous_session_command_authorization_errors_display_and_source_all_variants() {
+fn anonymous_session_command_authorization_errors_display_and_source_authorization_variants() {
     let cases = [
         (
             AnonymousResourceAuthorizationError::InvalidTimestamp,

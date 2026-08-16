@@ -10,9 +10,9 @@
 //! rights, administer a tenant, or access another participant's session.
 //!
 //! Transports that already loaded a participant and session should call
-//! [`authorize_anonymous_session_command`]. That function compares the verified actor to those
-//! stored records so a caller cannot invent a matching tenant/owner/session triple and then
-//! command a different loaded session.
+//! [`authorize_anonymous_session_command`]. That function compares the verified actor to the
+//! supplied records so a matching invented [`ResourceScope`] cannot authorize a different
+//! loaded session. It does not prove the records came from the product store.
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::authorization::{ResourceKind, ResourceScope};
@@ -127,25 +127,26 @@ pub fn authorize_anonymous_session(
 /// - `session`: the [`AssessmentSession`] loaded from the product store for that command; and
 /// - `now_unix_ms`: the current time from the application's trusted server clock, not a client clock.
 ///
-/// The function compares the actor to those loaded records. It does **not** accept a
-/// caller-invented tenant, owner, or session reference, and it does not build a
-/// [`ResourceScope`] that a transport could invent. For example, a proof for
-/// `session_alpha` / `participant_alpha` in `tenant_alpha` is allowed only when the loaded
-/// participant is that same person in that same tenant and the loaded session is `session_alpha`
-/// owned by that person. A session owned by `participant_beta`, or `session_beta` owned by the
-/// same person, is denied.
+/// The function compares the actor to those supplied records. It does **not** accept a
+/// caller-built [`ResourceScope`]. It does not prove the records were loaded from the product
+/// store; a transport can still construct both aggregates from the proof. Persist/reload of
+/// `assessment_participant` remains Active PR #114. For example, a proof for `session_alpha` /
+/// `participant_alpha` in `tenant_alpha` is allowed only when the supplied participant is that
+/// same person in that same tenant and the supplied session is `session_alpha` owned by that
+/// person. A session owned by `participant_beta`, or `session_beta` owned by the same person,
+/// is denied.
 ///
-/// Checks run in a stable fail-closed order: trusted server time, expiry, loaded-participant
-/// tenant, loaded session/participant ownership, actor participant, then session identity.
-/// Tenant is classified before ownership so a foreign-tenant row that also disagrees on
+/// Checks run in a stable fail-closed order: trusted server time, expiry, supplied-participant
+/// tenant, session/participant ownership, actor participant, then session identity.
+/// Tenant is classified before ownership so a foreign-tenant record that also disagrees on
 /// participant identity is reported as [`AnonymousResourceAuthorizationError::CrossTenantDenied`].
 ///
 /// # Errors
 ///
 /// Returns [`AnonymousResourceAuthorizationError`] when trusted time is invalid, the verified
-/// anonymous session has expired, the loaded participant belongs to another tenant, the loaded
-/// session belongs to another participant, or the loaded session is not the session named by the
-/// proof.
+/// anonymous session has expired, the supplied participant belongs to another tenant, the
+/// supplied session belongs to another participant, or the supplied session is not the session
+/// named by the proof.
 pub fn authorize_anonymous_session_command(
     actor: &AnonymousSessionContext,
     participant: &ParticipantRecord,
