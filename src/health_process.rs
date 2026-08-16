@@ -175,7 +175,14 @@ where
     let config =
         parse_health_process_config(getenv).map_err(HealthProcessRunError::InvalidConfig)?;
     let listener = bind_health_process(&config).map_err(HealthProcessRunError::Listen)?;
-    serve_health_process(&listener, &config).map_err(HealthProcessRunError::Listen)
+    serve_bound_health_process(&listener, &config)
+}
+
+fn serve_bound_health_process(
+    listener: &std::net::TcpListener,
+    config: &HealthProcessConfig,
+) -> Result<(), HealthProcessRunError> {
+    serve_health_process(listener, config).map_err(HealthProcessRunError::Listen)
 }
 
 /// Runtime failure after configuration has been parsed.
@@ -336,9 +343,9 @@ fn unavailable_store_snapshot(backlog_health: BacklogHealth) -> RuntimeHealthSna
 #[cfg(test)]
 mod tests {
     use super::{
-        exact_env_value, parse_health_process_config, ready_required_capabilities,
-        run_health_process, HealthProcessConfigError, HealthProcessRunError,
-        HEALTH_LISTEN_ADDR_ENV,
+        bind_health_process, exact_env_value, parse_health_process_config,
+        ready_required_capabilities, run_health_process, serve_bound_health_process,
+        HealthProcessConfigError, HealthProcessRunError, HEALTH_LISTEN_ADDR_ENV,
     };
     use crate::postgres_health::POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF;
     use std::error::Error;
@@ -388,6 +395,24 @@ mod tests {
             error,
             HealthProcessRunError::InvalidConfig(HealthProcessConfigError::MissingListenAddress)
         ));
+        assert!(error.to_string().contains("HEALTH_LISTEN_ADDR"));
+        assert!(error.source().is_some());
+    }
+
+    #[test]
+    fn serve_bound_process_maps_accept_failure_to_a_listen_error() {
+        let config = parse_health_process_config(|key| match key {
+            HEALTH_LISTEN_ADDR_ENV => Some("127.0.0.1:0".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        let listener = bind_health_process(&config).unwrap();
+        listener
+            .set_nonblocking(true)
+            .expect("the test must force accept to return WouldBlock");
+        let error = serve_bound_health_process(&listener, &config)
+            .expect_err("a non-blocking accept must become a listen error");
+        assert!(matches!(error, HealthProcessRunError::Listen(_)));
         assert!(error.to_string().contains("HEALTH_LISTEN_ADDR"));
         assert!(error.source().is_some());
     }
