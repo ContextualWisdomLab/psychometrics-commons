@@ -19,6 +19,7 @@ pub mod narrative;
 pub mod participant;
 pub mod postgres_consent;
 pub mod postgres_data_rights;
+pub mod postgres_data_rights_processing;
 pub mod postgres_health;
 pub mod postgres_inbox_consumption;
 pub mod postgres_instrument_release;
