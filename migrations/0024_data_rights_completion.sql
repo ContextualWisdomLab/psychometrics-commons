@@ -157,3 +157,27 @@ CREATE TABLE IF NOT EXISTS data_rights_retained_scope_evidence (
         )
     )
 );
+
+CREATE OR REPLACE FUNCTION reject_data_rights_retained_scope_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'data-rights retained completion scope evidence is immutable'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS data_rights_retained_scope_immutable_guard
+    ON data_rights_retained_scope_evidence;
+CREATE TRIGGER data_rights_retained_scope_immutable_guard
+    BEFORE UPDATE OR DELETE ON data_rights_retained_scope_evidence
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_data_rights_retained_scope_mutation();
+
+DROP TRIGGER IF EXISTS data_rights_retained_scope_truncate_guard
+    ON data_rights_retained_scope_evidence;
+CREATE TRIGGER data_rights_retained_scope_truncate_guard
+    BEFORE TRUNCATE ON data_rights_retained_scope_evidence
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_data_rights_retained_scope_mutation();
