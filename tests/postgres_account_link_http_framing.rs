@@ -55,12 +55,15 @@ fn listener_waits_for_a_fragmented_content_length_body() {
 
     let mut runtime = AccountLinkHttpRuntime::new(10_400);
     let mut transaction = client.transaction().unwrap();
-    let response =
-        accept_one_account_link_http(&listener, &mut runtime, &mut transaction).unwrap();
+    let response = accept_one_account_link_http(&listener, &mut runtime, &mut transaction).unwrap();
     transaction.commit().unwrap();
     let wire = client_thread.join().unwrap();
 
-    assert_eq!(response.status(), 404, "complete recover body should classify before lookup");
+    assert_eq!(
+        response.status(),
+        404,
+        "complete recover body should classify before lookup"
+    );
     assert!(
         wire.starts_with("HTTP/1.1 404 Not Found\r\n"),
         "fragmented request body must be read before classification: {wire}"

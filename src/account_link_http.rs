@@ -1061,6 +1061,25 @@ enum RequestReadProgress {
     Complete,
 }
 
+fn request_bytes_are_complete(buffer: &[u8]) -> bool {
+    if buffer.len() > ACCOUNT_LINK_HTTP_MAX_REQUEST_BYTES {
+        return true;
+    }
+    let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return false;
+    };
+    let header_bytes = header_end + 4;
+    let Ok(headers) = std::str::from_utf8(&buffer[..header_bytes]) else {
+        return true;
+    };
+    let Some(content_length) =
+        header_value(headers, "content-length").and_then(|value| value.parse::<usize>().ok())
+    else {
+        return true;
+    };
+    buffer.len().saturating_sub(header_bytes) >= content_length
+}
+
 fn apply_request_read(
     buffer: &mut Vec<u8>,
     chunk: &[u8],
@@ -1070,9 +1089,7 @@ fn apply_request_read(
         Ok(0) => Ok(RequestReadProgress::Complete),
         Ok(read) => {
             buffer.extend_from_slice(&chunk[..read]);
-            if buffer.windows(4).any(|window| window == b"\r\n\r\n")
-                || buffer.len() > ACCOUNT_LINK_HTTP_MAX_REQUEST_BYTES
-            {
+            if request_bytes_are_complete(buffer) {
                 Ok(RequestReadProgress::Complete)
             } else {
                 Ok(RequestReadProgress::Continue)
@@ -1249,6 +1266,21 @@ mod tests {
             RequestReadProgress::Complete
         ));
         assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
+        let mut headers_only = Vec::new();
+        let header_chunk = b"POST /v1/account-links/recover HTTP/1.1\r\nContent-Length: 2\r\n\r\n";
+        assert!(matches!(
+            apply_request_read(&mut headers_only, header_chunk, Ok(header_chunk.len())).unwrap(),
+            RequestReadProgress::Continue
+        ));
+        assert!(matches!(
+            apply_request_read(&mut headers_only, b"{}", Ok(2)).unwrap(),
+            RequestReadProgress::Complete
+        ));
+        let get_chunk = b"GET /live HTTP/1.1\r\n\r\n";
+        assert!(matches!(
+            apply_request_read(&mut Vec::new(), get_chunk, Ok(get_chunk.len())).unwrap(),
+            RequestReadProgress::Complete
+        ));
     }
 
     #[test]
