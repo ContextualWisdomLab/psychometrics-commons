@@ -114,7 +114,7 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
 
-This Active PR reloads a persisted `consent_ledger` after process restart. The adapter requires `READ COMMITTED`, takes `FOR SHARE` on the participant ledger header, and reconstructs events by `occurred_at_unix_ms`, then physical `created_at`, then `event_ref`. Equal server timestamps therefore keep insertion order. Stored events that violate append-only domain rules, or that use unknown purpose/decision labels, fail closed instead of being reordered into a newer grant. HTTP consent transport and outbox composition remain outside this slice.
+Active PR #140 reloads a persisted `consent_ledger` after process restart. The adapter requires `READ COMMITTED`, takes `FOR SHARE` on the participant ledger header, and reconstructs events by `occurred_at_unix_ms`, then physical `created_at`, then `event_ref`. Equal server timestamps therefore keep insertion order. Stored events that violate append-only domain rules, or that use unknown purpose/decision labels, fail closed instead of being reordered into a newer grant. HTTP consent transport and outbox composition remain outside this slice.
 
 ## Concurrency and idempotency
 

@@ -60,9 +60,9 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
-## Active PR consent-ledger reload
+## Active PR #140 consent-ledger reload
 
-`migrations/0005_consent_lifecycle.sql` and `src/postgres_consent.rs` already persist purpose-specific `consent_ledger` / `consent_event` rows on protected main. This Active PR adds `load_consent_ledger` and no new physical objects. After restart, a caller reconstructs the append-only ledger under `READ COMMITTED` by occurrence time, then `created_at`, then event identity. A missing participant is absent rather than an empty grant. Out-of-order or unknown stored labels fail closed. HTTP consent transport and outbox composition remain outside this slice.
+`migrations/0005_consent_lifecycle.sql` and `src/postgres_consent.rs` already persist purpose-specific `consent_ledger` / `consent_event` rows on protected main. Active PR #140 adds `load_consent_ledger` and no new physical objects. After restart, a caller reconstructs the append-only ledger under `READ COMMITTED` by occurrence time, then `created_at`, then event identity. A missing participant is absent rather than an empty grant. Out-of-order or unknown stored labels fail closed. HTTP consent transport and outbox composition remain outside this slice.
 
 ## Logical-to-physical mapping rule
 
