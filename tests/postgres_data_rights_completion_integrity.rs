@@ -205,3 +205,50 @@ fn completion_evidence_cannot_exist_before_terminal_state() {
         "processing rows must not carry terminal completion evidence"
     );
 }
+
+#[test]
+fn retained_scope_evidence_is_immutable_after_completion() {
+    let mut client = client("data_rights_completion_retained_scope_immutable");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_retained_scope_immutable",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_immutable", &["retention_legal"], 10_300)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_completion(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    assert!(client
+        .execute(
+            "UPDATE data_rights_retained_scope_evidence
+             SET retained_scope_ref = 'retention_rewritten'
+             WHERE request_ref = $1 AND retained_scope_ref = 'retention_legal'",
+            &[&request.request_ref()],
+        )
+        .is_err());
+    assert!(client
+        .execute(
+            "DELETE FROM data_rights_retained_scope_evidence
+             WHERE request_ref = $1 AND retained_scope_ref = 'retention_legal'",
+            &[&request.request_ref()],
+        )
+        .is_err());
+    assert!(client
+        .batch_execute("TRUNCATE TABLE data_rights_retained_scope_evidence")
+        .is_err());
+
+    let retained: String = client
+        .query_one(
+            "SELECT retained_scope_ref FROM data_rights_retained_scope_evidence
+             WHERE request_ref = $1",
+            &[&request.request_ref()],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(retained, "retention_legal");
+}
