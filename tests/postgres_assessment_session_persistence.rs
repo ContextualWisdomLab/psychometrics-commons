@@ -8,7 +8,7 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::postgres_assessment_session::{
-    apply_assessment_session_migration, persist_assessment_session,
+    apply_assessment_session_migration, load_assessment_session, persist_assessment_session,
     AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
@@ -184,6 +184,32 @@ fn created_session_persists_release_binding_and_replays_exactly() {
     assert_eq!(locale, "ko-KR");
     assert_eq!(state, "created");
     assert_eq!(created_at, 20_000);
+
+    let mut load_transaction = client.transaction().unwrap();
+    let loaded = load_assessment_session(
+        &mut load_transaction,
+        "ses_02fe09e373504b7986ae78491116edbd",
+    )
+    .unwrap()
+    .expect("persisted created session must be loadable");
+    load_transaction.commit().unwrap();
+    assert_eq!(loaded.session_ref(), session.session_ref());
+    assert_eq!(loaded.participant_ref(), session.participant_ref());
+    assert_eq!(
+        loaded.instrument_release_ref(),
+        session.instrument_release_ref()
+    );
+    assert_eq!(
+        loaded.instrument_version_ref(),
+        session.instrument_version_ref()
+    );
+    assert_eq!(
+        loaded.instrument_release_content_digest(),
+        session.instrument_release_content_digest()
+    );
+    assert_eq!(loaded.locale(), session.locale());
+    assert_eq!(loaded.created_at_unix_ms(), session.created_at_unix_ms());
+    assert_eq!(loaded.state(), SessionState::Created);
 }
 
 #[test]
@@ -289,6 +315,51 @@ fn conflicting_session_identity_and_non_created_state_fail_closed() {
 }
 
 #[test]
+fn created_session_load_restores_identity_and_rejects_later_states() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let session = created_session(
+        "ses_load_created_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &session).unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        load_assessment_session(&mut transaction, "ses_missing_created_session")
+            .unwrap()
+            .is_none()
+    );
+    transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session SET session_state = $2 WHERE session_ref = $1",
+            &[&"ses_load_created_alpha", &"active"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_assessment_session(&mut transaction, "ses_load_created_alpha"),
+        Err(AssessmentSessionPersistenceError::UnsupportedStoredState)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_assessment_session(&mut transaction, "12345"),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn session_persist_requires_read_committed_and_surfaces_database_failure() {
     let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
@@ -307,6 +378,10 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
         .unwrap();
     assert!(matches!(
         persist_assessment_session(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::UnsupportedIsolationLevel)
+    ));
+    assert!(matches!(
+        load_assessment_session(&mut transaction, session.session_ref()),
         Err(AssessmentSessionPersistenceError::UnsupportedIsolationLevel)
     ));
     transaction.rollback().unwrap();

@@ -3,8 +3,11 @@
 //! This module stores the participant, published-release, version, content-digest,
 //! and locale identity copied at session creation. It does not rewrite provenance
 //! when the release is later suspended or retired. This first slice persists
-//! only [`SessionState::Created`] rows. Replay requires `READ COMMITTED`.
+//! only [`SessionState::Created`] rows. Load restores that created identity
+//! without re-checking current publication eligibility. Replay requires
+//! `READ COMMITTED`.
 
+use crate::reference::normalized_reference;
 use crate::session::{AssessmentSession, SessionState};
 use postgres::Transaction;
 use std::error::Error;
@@ -35,6 +38,12 @@ pub enum AssessmentSessionPersistenceError {
     ConflictingReplay,
     /// Assessment-session persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
+    /// A session reference used for load was blank or numeric-like.
+    InvalidReference,
+    /// Stored session identity could not be restored as a created session.
+    InvalidStoredIdentity,
+    /// Stored session state is not created; this slice cannot load later states.
+    UnsupportedStoredState,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -53,6 +62,15 @@ impl Display for AssessmentSessionPersistenceError {
             }
             Self::UnsupportedIsolationLevel => {
                 "assessment session persistence requires read committed isolation"
+            }
+            Self::InvalidReference => {
+                "use an opaque non-numeric session reference to load a stored session"
+            }
+            Self::InvalidStoredIdentity => {
+                "stored assessment-session identity could not be restored; repair the row or persist a valid created session"
+            }
+            Self::UnsupportedStoredState => {
+                "load a created assessment session; persist later lifecycle states before loading them"
             }
             Self::Database(_) => "PostgreSQL assessment-session persistence failed",
         })
@@ -132,6 +150,58 @@ pub fn persist_assessment_session(
         return Ok(AssessmentSessionPersistenceDisposition::Inserted);
     }
     classify_existing_session(transaction, session, session_ref, created_at_unix_ms)
+}
+
+/// Load one created assessment-session identity without a live published release.
+///
+/// Missing rows return [`None`]. A stored later lifecycle state fails closed. Exact
+/// stored identity is restored through [`AssessmentSession::from_persisted_created`],
+/// so a later suspend or retire cannot rewrite provenance. Command history is not
+/// stored in this slice.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionPersistenceError`] for unsupported isolation, a
+/// malformed session reference, a non-created stored state, invalid stored
+/// identity, or a database failure.
+pub fn load_assessment_session(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = normalized_reference(session_ref)
+        .ok_or(AssessmentSessionPersistenceError::InvalidReference)?;
+    let row = match transaction.query_opt(
+        "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
+                instrument_release_content_digest, locale, session_state,
+                created_at_unix_ms
+         FROM assessment_session WHERE session_ref = $1",
+        &[&session_ref],
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(AssessmentSessionPersistenceError::from(error)),
+    };
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let stored_state: String = row.get(5);
+    if stored_state != session_state_name(SessionState::Created) {
+        return Err(AssessmentSessionPersistenceError::UnsupportedStoredState);
+    }
+    let stored_created_at: i64 = row.get(6);
+    let created_at_unix_ms = u64::try_from(stored_created_at)
+        .map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)?;
+    AssessmentSession::from_persisted_created(
+        session_ref,
+        row.get::<_, String>(0).as_str(),
+        row.get::<_, String>(1).as_str(),
+        row.get::<_, String>(2).as_str(),
+        row.get::<_, String>(3).as_str(),
+        row.get::<_, String>(4).as_str(),
+        created_at_unix_ms,
+    )
+    .map(Some)
+    .map_err(|_| AssessmentSessionPersistenceError::InvalidStoredIdentity)
 }
 
 /// Compare an existing stored row with the requested immutable session identity.
@@ -233,6 +303,18 @@ mod tests {
             (
                 AssessmentSessionPersistenceError::UnsupportedIsolationLevel,
                 "assessment session persistence requires read committed isolation",
+            ),
+            (
+                AssessmentSessionPersistenceError::InvalidReference,
+                "use an opaque non-numeric session reference to load a stored session",
+            ),
+            (
+                AssessmentSessionPersistenceError::InvalidStoredIdentity,
+                "stored assessment-session identity could not be restored; repair the row or persist a valid created session",
+            ),
+            (
+                AssessmentSessionPersistenceError::UnsupportedStoredState,
+                "load a created assessment session; persist later lifecycle states before loading them",
             ),
         ] {
             assert_eq!(error.to_string(), expected);

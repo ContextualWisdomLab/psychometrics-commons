@@ -18,7 +18,7 @@ Psychometrics Commons implements an explicit hosted assessment runtime with appe
 draft -> review -> published -> suspended -> retired
 ```
 
-Published releases are immutable. Editing content creates a new `instrument_version_ref`. Suspension blocks new sessions but does not invalidate existing result provenance. Retirement blocks new sessions permanently unless a new release is published.
+Published releases are immutable. Editing content creates a new `instrument_version_ref`. Suspension blocks new sessions but does not invalidate existing result provenance. Retirement blocks new sessions permanently unless a new release is published. A created session loaded from durable storage must restore the copied release/version/digest/locale identity without re-checking whether the release currently accepts new sessions.
 
 ### Assessment session
 

@@ -7,7 +7,7 @@
 //! rewinding later state. Session creation pins the exact immutable published
 //! instrument release, content digest, and locale before lifecycle transitions begin.
 
-use crate::instrument::InstrumentRelease;
+use crate::instrument::{valid_locale, valid_sha256_digest, InstrumentRelease};
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -88,6 +88,37 @@ impl Display for SessionCreationError {
 
 impl Error for SessionCreationError {}
 
+/// Fail-closed error returned while restoring a created session from stored identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum SessionReconstitutionError {
+    /// A session, participant, release, or version reference was blank or numeric-like.
+    InvalidReference,
+    /// The stored session creation timestamp was zero.
+    InvalidTimestamp,
+    /// The stored release content digest was not a canonical SHA-256 digest.
+    InvalidContentDigest,
+    /// The stored locale was not an exact whitespace-free BCP 47-style tag.
+    InvalidLocale,
+}
+
+impl Display for SessionReconstitutionError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidReference => {
+                "use an opaque non-numeric session, participant, release, or version reference"
+            }
+            Self::InvalidTimestamp => "use a stored creation time greater than zero",
+            Self::InvalidContentDigest => {
+                "use a sha256 digest with 64 lowercase hexadecimal digits"
+            }
+            Self::InvalidLocale => "use an exact whitespace-free BCP 47-style locale tag",
+        })
+    }
+}
+
+impl Error for SessionReconstitutionError {}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AcceptedSessionCommand {
     command_ref: String,
@@ -157,6 +188,57 @@ impl AssessmentSession {
             instrument_version_ref: release.manifest().instrument_version_ref().to_owned(),
             instrument_release_content_digest: release.manifest().content_digest().to_owned(),
             locale: release.manifest().locale().to_owned(),
+            created_at_unix_ms,
+            state: SessionState::Created,
+            accepted_commands: Vec::new(),
+        })
+    }
+
+    /// Restore a created session from durable identity without a live published release.
+    ///
+    /// Use this after loading a stored created-session row. It does not re-check whether
+    /// the original release still accepts new sessions, so a later suspend or retire
+    /// cannot rewrite provenance. Command history is empty until a later persist slice
+    /// stores it. Call [`AssessmentSession::new`] when starting a new session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionReconstitutionError`] when a stored reference, digest, locale,
+    /// or creation timestamp is not a valid created-session identity.
+    pub fn from_persisted_created(
+        session_ref: &str,
+        participant_ref: &str,
+        instrument_release_ref: &str,
+        instrument_version_ref: &str,
+        instrument_release_content_digest: &str,
+        locale: &str,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, SessionReconstitutionError> {
+        let session_ref = normalized_reference(session_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        let participant_ref = normalized_reference(participant_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        let instrument_release_ref = normalized_reference(instrument_release_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        let instrument_version_ref = normalized_reference(instrument_version_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        if created_at_unix_ms == 0 {
+            return Err(SessionReconstitutionError::InvalidTimestamp);
+        }
+        if !valid_sha256_digest(instrument_release_content_digest) {
+            return Err(SessionReconstitutionError::InvalidContentDigest);
+        }
+        if !valid_locale(locale) {
+            return Err(SessionReconstitutionError::InvalidLocale);
+        }
+
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            participant_ref: participant_ref.to_owned(),
+            instrument_release_ref: instrument_release_ref.to_owned(),
+            instrument_version_ref: instrument_version_ref.to_owned(),
+            instrument_release_content_digest: instrument_release_content_digest.to_owned(),
+            locale: locale.to_owned(),
             created_at_unix_ms,
             state: SessionState::Created,
             accepted_commands: Vec::new(),
