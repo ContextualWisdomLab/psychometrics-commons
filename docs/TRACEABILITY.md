@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
 
-**Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, and this honesty successor that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` and append-only identity-link history remains Active PR #147. HTTP transport remains outside this slice.
+**Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, and honesty successor #159 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` and append-only identity-link history remains Active PR #147. HTTP transport remains outside this slice.
 
 ## 5. ADR traceability by concern
 
