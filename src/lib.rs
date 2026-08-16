@@ -7,11 +7,13 @@
 //! computation remains in `fast-mlsirm` and is consumed through versioned
 //! contracts rather than reimplemented here.
 
+pub mod account_link;
 pub mod anonymous_session;
 pub mod api_problem;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
+pub mod deterministic_narrative;
 pub mod health;
 pub mod instrument;
 pub mod integration;
