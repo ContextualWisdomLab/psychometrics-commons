@@ -918,3 +918,74 @@ fn load_replays_fail_closed_when_command_or_projection_evidence_is_corrupt() {
     );
     transaction.rollback().unwrap();
 }
+
+fn assert_session_database_error(error: &AssessmentSessionPersistenceError) {
+    assert!(matches!(
+        error,
+        AssessmentSessionPersistenceError::Database(_)
+    ));
+    assert!(std::error::Error::source(error).is_some());
+}
+
+#[test]
+fn command_persist_and_load_surface_database_failures() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let created = created_session(
+        "ses_command_db_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut activated = created.clone();
+    activated
+        .apply_command("cmd_activate_db_alpha", 1, SessionCommand::Activate)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_assessment_session(&mut transaction, &created).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute("DROP TABLE assessment_session_command")
+        .unwrap();
+    let mut count_transaction = client.transaction().unwrap();
+    assert_session_database_error(
+        &persist_assessment_session_commands(&mut count_transaction, &created).unwrap_err(),
+    );
+    count_transaction.rollback().unwrap();
+    let mut command_transaction = client.transaction().unwrap();
+    assert_session_database_error(
+        &persist_assessment_session_commands(&mut command_transaction, &activated).unwrap_err(),
+    );
+    command_transaction.rollback().unwrap();
+    let mut load_commands = client.transaction().unwrap();
+    assert_session_database_error(
+        &load_assessment_session(&mut load_commands, created.session_ref()).unwrap_err(),
+    );
+    load_commands.rollback().unwrap();
+
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let created = created_session(
+        "ses_load_db_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_assessment_session(&mut transaction, &created).unwrap();
+        transaction.commit().unwrap();
+    }
+    client
+        .batch_execute("DROP TABLE assessment_session CASCADE")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert_session_database_error(
+        &load_assessment_session(&mut transaction, created.session_ref()).unwrap_err(),
+    );
+    transaction.rollback().unwrap();
+}
