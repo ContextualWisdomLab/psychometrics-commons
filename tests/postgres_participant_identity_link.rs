@@ -1008,7 +1008,9 @@ fn restore_inspect_then_reconcile_frees_ended_subject_for_a_new_participant() {
         "keyverse_issuer_alpha",
         "keyverse_subject_alpha",
     )
-    .expect("ended subject must resolve to the new participant after inspect and restore reconcile");
+    .expect(
+        "ended subject must resolve to the new participant after inspect and restore reconcile",
+    );
     assert_eq!(recovered.participant_ref(), "participant_identity_epsilon");
     assert_eq!(
         recovered.linked_subject_ref(),
