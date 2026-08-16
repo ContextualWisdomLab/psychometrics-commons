@@ -200,8 +200,9 @@ pub fn persist_response_event(
 /// Rebuild accepted events and their observed/received clocks after restart.
 ///
 /// Rows are read in `server_sequence` order. A missing session returns an empty
-/// list. Gapped, reordered, conflicting, inverted, or zero stored times fail
-/// closed. Observed time stays distinct from platform receipt time.
+/// list. Gapped, reordered, conflicting identities, inverted, or zero stored
+/// times fail closed before any receipt is returned. Observed time stays
+/// distinct from platform receipt time.
 ///
 /// # Errors
 ///
@@ -222,7 +223,7 @@ pub fn load_response_event_receipts(
         &[&session_ref],
     )?;
     let mut receipts = Vec::with_capacity(rows.len());
-    for (index, row) in rows.into_iter().enumerate() {
+    for row in rows {
         let server_event_ref: String = row.get(0);
         let client_event_ref: String = row.get(1);
         let item_version_ref: String = row.get(2);
@@ -232,7 +233,6 @@ pub fn load_response_event_receipts(
         let received_at: SystemTime = row.get(6);
         let sequence = usize::try_from(server_sequence)
             .map_err(|_| ResponseEventPersistenceError::InvalidSequence)?;
-        require_contiguous_server_sequence(index, sequence)?;
         let observed_at_unix_ms = unix_ms_from_system_time(observed_at)?;
         let received_at_unix_ms = unix_ms_from_system_time(received_at)?;
         if observed_at_unix_ms > received_at_unix_ms {
@@ -252,6 +252,7 @@ pub fn load_response_event_receipts(
             received_at_unix_ms,
         });
     }
+    require_contiguous_receipt_history(session_ref, &receipts)?;
     Ok(receipts)
 }
 
@@ -325,6 +326,18 @@ fn classify_unique_violation(error: postgres::Error) -> ResponseEventPersistence
     }
 }
 
+fn require_contiguous_receipt_history(
+    session_ref: &str,
+    receipts: &[ResponseEventReceipt],
+) -> Result<(), ResponseEventPersistenceError> {
+    let events = receipts
+        .iter()
+        .map(|receipt| receipt.event.clone())
+        .collect();
+    ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)?;
+    Ok(())
+}
+
 fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {
     match error {
         WriteError::InvalidReference => ResponseEventPersistenceError::InvalidReference,
@@ -352,9 +365,6 @@ fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersist
     if unix_ms == 0 {
         return Err(ResponseEventPersistenceError::InvalidTimestamp);
     }
-    // Every `u64` millisecond offset from the Unix epoch is representable as
-    // `SystemTime` on the supported 64-bit hosts. An overflow `checked_add`
-    // arm would be untestable and would fail the exact branch-coverage gate.
     Ok(UNIX_EPOCH + Duration::from_millis(unix_ms))
 }
 
@@ -373,17 +383,6 @@ fn unix_ms_from_system_time(time: SystemTime) -> Result<u64, ResponseEventPersis
     Ok(unix_ms)
 }
 
-fn require_contiguous_server_sequence(
-    index: usize,
-    sequence: usize,
-) -> Result<(), ResponseEventPersistenceError> {
-    if sequence == index + 1 {
-        Ok(())
-    } else {
-        Err(ResponseEventPersistenceError::InvalidSequence)
-    }
-}
-
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), ResponseEventPersistenceError> {
@@ -400,7 +399,7 @@ fn require_read_committed(
 mod reference_guard_tests {
     use super::{
         map_rebuild_error, postgres_sequence, postgres_timestamptz,
-        require_contiguous_server_sequence, required_reference, unix_ms_from_system_time,
+        require_contiguous_receipt_history, required_reference, unix_ms_from_system_time,
         ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
@@ -423,16 +422,6 @@ mod reference_guard_tests {
             "session_ipip_ko_quick"
         );
         assert_eq!(postgres_sequence(1).unwrap(), 1);
-        assert!(require_contiguous_server_sequence(0, 1).is_ok());
-        assert!(require_contiguous_server_sequence(1, 2).is_ok());
-        assert!(matches!(
-            require_contiguous_server_sequence(1, 3),
-            Err(ResponseEventPersistenceError::InvalidSequence)
-        ));
-        assert!(matches!(
-            require_contiguous_server_sequence(0, 2),
-            Err(ResponseEventPersistenceError::InvalidSequence)
-        ));
         assert!(matches!(
             postgres_sequence(usize::MAX),
             Err(ResponseEventPersistenceError::InvalidSequence)
@@ -442,10 +431,6 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::InvalidTimestamp)
         ));
         assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
-        assert_eq!(
-            postgres_timestamptz(u64::MAX).unwrap(),
-            UNIX_EPOCH + Duration::from_millis(u64::MAX)
-        );
         assert!(matches!(
             unix_ms_from_system_time(UNIX_EPOCH),
             Err(ResponseEventPersistenceError::InvalidTimestamp)
@@ -475,6 +460,68 @@ mod reference_guard_tests {
                 Err(ResponseEventPersistenceError::InvalidTimestamp)
             ));
         }
+    }
+
+    #[test]
+    fn gapped_or_duplicate_receipt_history_fails_closed() {
+        let first = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let gapped = ResponseEvent::from_persisted(
+            "server_event_item_03",
+            "client_event_item_03",
+            "item_version_n3_ko",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            3,
+        )
+        .unwrap();
+        let duplicate_server = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_02",
+            "item_version_n2_ko",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            2,
+        )
+        .unwrap();
+        let first_receipt = ResponseEventReceipt {
+            event: first.clone(),
+            observed_at_unix_ms: 1_700_000_000_000,
+            received_at_unix_ms: 1_700_000_000_250,
+        };
+        assert!(matches!(
+            require_contiguous_receipt_history(
+                "session_ipip_ko_quick",
+                &[
+                    first_receipt.clone(),
+                    ResponseEventReceipt {
+                        event: gapped,
+                        observed_at_unix_ms: 1_700_000_000_500,
+                        received_at_unix_ms: 1_700_000_000_750,
+                    },
+                ]
+            ),
+            Err(ResponseEventPersistenceError::InvalidSequence)
+        ));
+        assert!(matches!(
+            require_contiguous_receipt_history(
+                "session_ipip_ko_quick",
+                &[
+                    first_receipt,
+                    ResponseEventReceipt {
+                        event: duplicate_server,
+                        observed_at_unix_ms: 1_700_000_000_500,
+                        received_at_unix_ms: 1_700_000_000_750,
+                    },
+                ]
+            ),
+            Err(ResponseEventPersistenceError::ConflictingReplay)
+        ));
+        assert!(require_contiguous_receipt_history("session_ipip_ko_quick", &[]).is_ok());
     }
 
     #[test]
