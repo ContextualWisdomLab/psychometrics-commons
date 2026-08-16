@@ -155,17 +155,31 @@ fn embedded_control_characters_are_rejected_at_public_reference_boundaries() {
 }
 
 #[test]
-fn invisible_and_bidirectional_format_characters_are_rejected() {
-    // Unicode UTS #39 classifies default-ignorable characters as restricted for security
-    // identifiers. These examples are not `char::is_control`, so they protect the distinct
-    // spoofing/log-reordering boundary that ordinary C0/C1 control tests cannot exercise.
+fn default_ignorable_and_bidirectional_format_characters_are_rejected() {
+    // Unicode UTS #39 version 17.0.0 marks Default_Ignorable identifiers as Restricted.
+    // Cover representatives beyond bidi controls so variation selectors, fillers, tags,
+    // shorthand/music controls, and joiners cannot create byte-distinct invisible aliases.
     for invalid_reference in [
-        "tenant\u{200b}ref", // ZERO WIDTH SPACE
-        "tenant\u{200e}ref", // LEFT-TO-RIGHT MARK
-        "tenant\u{202e}ref", // RIGHT-TO-LEFT OVERRIDE
-        "tenant\u{2066}ref", // LEFT-TO-RIGHT ISOLATE
-        "tenant\u{2060}ref", // WORD JOINER
-        "tenant\u{feff}ref", // ZERO WIDTH NO-BREAK SPACE / BOM
+        "tenant\u{00ad}ref",  // SOFT HYPHEN
+        "tenant\u{034f}ref",  // COMBINING GRAPHEME JOINER
+        "tenant\u{061c}ref",  // ARABIC LETTER MARK
+        "tenant\u{115f}ref",  // HANGUL CHOSEONG FILLER
+        "tenant\u{17b4}ref",  // KHMER VOWEL INHERENT AQ
+        "tenant\u{180b}ref",  // MONGOLIAN FREE VARIATION SELECTOR ONE
+        "tenant\u{200b}ref",  // ZERO WIDTH SPACE
+        "tenant\u{200e}ref",  // LEFT-TO-RIGHT MARK
+        "tenant\u{202e}ref",  // RIGHT-TO-LEFT OVERRIDE
+        "tenant\u{2066}ref",  // LEFT-TO-RIGHT ISOLATE
+        "tenant\u{2060}ref",  // WORD JOINER
+        "tenant\u{3164}ref",  // HANGUL FILLER
+        "tenant\u{fe0f}ref",  // VARIATION SELECTOR-16
+        "tenant\u{feff}ref",  // ZERO WIDTH NO-BREAK SPACE / BOM
+        "tenant\u{ffa0}ref",  // HALFWIDTH HANGUL FILLER
+        "tenant\u{1bca0}ref", // SHORTHAND FORMAT LETTER OVERLAP
+        "tenant\u{1d173}ref", // MUSICAL SYMBOL BEGIN BEAM
+        "tenant\u{e0001}ref", // LANGUAGE TAG
+        "tenant\u{e0020}ref", // TAG SPACE
+        "tenant\u{e0100}ref", // VARIATION SELECTOR-17
     ] {
         assert_eq!(
             AnonymousSessionContext::new(
@@ -176,7 +190,7 @@ fn invisible_and_bidirectional_format_characters_are_rejected() {
                 10_000,
             ),
             Err(AnonymousSessionContextError::InvalidReference),
-            "anonymous-session references must reject invisible or directional formatting {invalid_reference:?}",
+            "anonymous-session references must reject default-ignorable formatting {invalid_reference:?}",
         );
         assert_eq!(
             DataRightsRequest::new(
@@ -188,17 +202,17 @@ fn invisible_and_bidirectional_format_characters_are_rejected() {
                 1_000,
             ),
             Err(DataRightsError::InvalidReference),
-            "data-rights references must reject invisible or directional formatting {invalid_reference:?}",
+            "data-rights references must reject default-ignorable formatting {invalid_reference:?}",
         );
         assert_eq!(
             AuthorizationContext::new(invalid_reference, "subject_ref", Some("participant_ref"), &[]),
             Err(AuthorizationError::InvalidReference),
-            "authorization references must reject invisible or directional formatting {invalid_reference:?}",
+            "authorization references must reject default-ignorable formatting {invalid_reference:?}",
         );
         assert_eq!(
             ResponseLedger::new(invalid_reference),
             Err(WriteError::InvalidReference),
-            "response references must reject invisible or directional formatting {invalid_reference:?}",
+            "response references must reject default-ignorable formatting {invalid_reference:?}",
         );
     }
 }
