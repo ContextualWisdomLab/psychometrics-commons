@@ -780,6 +780,67 @@ fn startable_catalog_fails_closed_on_corrupt_published_row() {
 }
 
 #[test]
+fn startable_catalog_omits_the_same_release_after_it_is_suspended() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &published_release());
+    {
+        let mut transaction = client.transaction().unwrap();
+        let listed = list_startable_instrument_releases(&mut transaction).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].manifest().release_ref(), "release_big_five_ko_v1");
+        transaction.commit().unwrap();
+    }
+
+    persist_ok(
+        &mut client,
+        &suspended_release_named("release_big_five_ko_v1"),
+    );
+    assert_eq!(
+        stored_state(&mut client, "release_big_five_ko_v1"),
+        "suspended"
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(list_startable_instrument_releases(&mut transaction)
+        .unwrap()
+        .is_empty());
+    transaction.commit().unwrap();
+}
+
+#[test]
+fn startable_catalog_orders_same_instrument_and_locale_by_release_ref() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &published_release_for("release_big_five_ko_v2", "instrument_big_five", "ko-KR"),
+    );
+    persist_ok(
+        &mut client,
+        &published_release_for("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    let listed = list_startable_instrument_releases(&mut transaction).unwrap();
+    let release_refs: Vec<&str> = listed
+        .iter()
+        .map(|release| release.manifest().release_ref())
+        .collect();
+    assert_eq!(
+        release_refs,
+        ["release_big_five_ko_v1", "release_big_five_ko_v2"]
+    );
+    transaction.commit().unwrap();
+}
+
+#[test]
 fn startable_catalog_requires_read_committed_isolation() {
     let _guard = instrument_release_test_guard();
     let mut client = test_client();

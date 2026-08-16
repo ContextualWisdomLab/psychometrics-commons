@@ -15,6 +15,7 @@ Product consequences:
 - an instrument release states intended score interpretations and prohibited/unsupported uses;
 - a published form remains reconstructable after process restart from its stored locale, digest, item set, and publication state so administration uses the same versioned instrument the participant was assigned;
 - after restart, only currently Published stored forms are offered as startable catalog entries so withdrawn, draft, or damaged work cannot be administered as if it were the current form;
+- catalog and session-start locale matching uses the exact stored BCP 47 tag and never silently substitutes another language;
 - scoring and norms are versioned and reproducible;
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;
@@ -76,6 +77,16 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
+## Language tags
+
+BCP 47 / RFC 5646 remains the IETF Best Current Practice for language tags. Catalog listing and session start copy the exact stored locale (`ko-KR`, `en-US`) rather than a truncated primary language subtag. Silent fallback would change the administered form and therefore the intended score interpretation.
+
+Product consequences:
+
+- instrument-release locale is an exact whitespace-free BCP 47-style tag;
+- `list_startable_instrument_releases` orders by that stored tag and does not collapse `ko` and `ko-KR`;
+- session start (#180) requires the same locale the catalog returned.
+
 ## Temporal and provenance evidence
 
 Longitudinal observations distinguish validity time from source-recorded time,
@@ -108,6 +119,8 @@ Product consequences:
 ## References — APA 7th
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Phillips, A., & Davis, M. (Eds.). (2009). *Tags for identifying languages* (BCP 47, RFC 5646). Internet Engineering Task Force. https://www.rfc-editor.org/rfc/rfc5646
 
 International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 

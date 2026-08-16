@@ -56,7 +56,7 @@ The protected-main slice persists:
 - reachable publication-state advance without rewriting immutable manifest columns;
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
-Reload of the stored locale, digest, item set, and publication state after process restart is Active PR work and is not protected-main truth until an unchanged reviewed/check-clean head is integrated. After that lands, call `list_startable_instrument_releases` to offer only currently Published forms, then call `load_instrument_release` with the chosen release reference before starting a new session.
+Reload of the stored locale, digest, item set, and publication state after process restart is Active PR work and is not protected-main truth until an unchanged reviewed/check-clean head is integrated. After that lands, call `list_startable_instrument_releases` to offer only currently Published forms. Session start remains #180 `load_published_instrument_release` for a locale-matched Published reconstruction. `load_instrument_release` still rebuilds any stored publication state by `release_ref` and is not the session-start gate.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
