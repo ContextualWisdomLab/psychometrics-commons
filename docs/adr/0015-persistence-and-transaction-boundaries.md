@@ -114,7 +114,7 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
 
-A consent-change write that must propagate shares the caller-owned transaction with its bound outbox row. After the submitted ledger snapshot is persisted, the same transaction locks `consent_ledger` and requires the durable `consent_event` tail to equal the envelope `causation_ref` and occurrence time. Callers roll back when either adapter fails so newly accepted consent evidence cannot survive without its outbox record.
+A consent-change write that must propagate shares the caller-owned transaction with its bound outbox row. After the submitted ledger snapshot is persisted, the same transaction locks `consent_ledger` and requires the durable `consent_event` tail—ordered by `occurred_at_unix_ms`, then physical `created_at`, then `event_ref`—to equal the envelope `causation_ref` and occurrence time. Equal server timestamps therefore keep a later-inserted revocation ahead of an earlier grant whose opaque identity sorts later. Callers roll back when either adapter fails so newly accepted consent evidence cannot survive without its outbox record.
 
 ## Concurrency and idempotency
 
@@ -305,6 +305,12 @@ The physical database technology or decomposition may change if scale, residency
 
 ## References
 
+European Parliament & Council of the European Union. (2016). Regulation (EU) 2016/679 of the European Parliament and of the Council of 27 April 2016 on the protection of natural persons with regard to the processing of personal data and on the free movement of such data (General Data Protection Regulation). *Official Journal of the European Union, L 119*, 1–88. https://eur-lex.europa.eu/eli/reg/2016/679/oj
+
+Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
+
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
+
+PostgreSQL Global Development Group. (2026). *Date/time functions and operators*. https://www.postgresql.org/docs/18/functions-datetime.html
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.

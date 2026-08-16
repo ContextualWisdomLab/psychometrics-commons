@@ -172,6 +172,102 @@ fn durable_revoke_rejects_grant_only_snapshot_propagation() {
 }
 
 #[test]
+fn same_millisecond_revoke_beats_lexicographic_grant_tail() {
+    let mut client = ready_client();
+    let mut grant_ledger = ConsentLedger::new("participant_consent_latest_alpha").unwrap();
+    grant_ledger
+        .record(ConsentEventInput {
+            event_ref: "consent_event_zzz_same_ms_grant",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "consent_form_latest_v1",
+            research_scope_ref: Some("research_scope_latest_alpha"),
+            occurred_at_unix_ms: 32_000,
+        })
+        .unwrap();
+    let mut persist_grant = client.transaction().unwrap();
+    persist_consent_ledger(&mut persist_grant, &grant_ledger)
+        .expect("same-millisecond grant should persist first");
+    persist_grant.commit().unwrap();
+
+    let mut revoked_ledger = grant_ledger.clone();
+    revoked_ledger
+        .record(ConsentEventInput {
+            event_ref: "consent_event_aaa_same_ms_revoke",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Revoked,
+            consent_form_version_ref: "consent_form_latest_v1",
+            research_scope_ref: Some("research_scope_latest_alpha"),
+            occurred_at_unix_ms: 32_000,
+        })
+        .unwrap();
+    let mut persist_revoke = client.transaction().unwrap();
+    persist_consent_ledger(&mut persist_revoke, &revoked_ledger)
+        .expect("same-millisecond revoke should append after the grant");
+    persist_revoke.commit().unwrap();
+
+    let stale_grant = propagation_event(
+        "event_consent_stale_same_ms_grant",
+        "consent_event_zzz_same_ms_grant",
+        32_000,
+    );
+    let mut stale_transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger_with_outbox(
+            &mut stale_transaction,
+            TENANT_REF,
+            &grant_ledger,
+            &stale_grant,
+            3,
+        ),
+        Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+    ));
+    stale_transaction.rollback().unwrap();
+
+    let revoke_event = propagation_event(
+        "event_consent_same_ms_revoke",
+        "consent_event_aaa_same_ms_revoke",
+        32_000,
+    );
+    let mut revoke_transaction = client.transaction().unwrap();
+    persist_consent_ledger_with_outbox(
+        &mut revoke_transaction,
+        TENANT_REF,
+        &revoked_ledger,
+        &revoke_event,
+        3,
+    )
+    .expect("later-inserted same-millisecond revoke should bind the outbox");
+    revoke_transaction.commit().unwrap();
+
+    let consent_count: i64 = client
+        .query_one("SELECT count(*) FROM consent_event", &[])
+        .unwrap()
+        .get(0);
+    let outbox = client
+        .query_one(
+            "SELECT causation_ref, occurred_at_unix_ms FROM integration_outbox",
+            &[],
+        )
+        .unwrap();
+    let causation_ref: Option<String> = outbox.get(0);
+    let occurred_at_unix_ms: i64 = outbox.get(1);
+    assert_eq!(consent_count, 2);
+    assert_eq!(
+        causation_ref.as_deref(),
+        Some("consent_event_aaa_same_ms_revoke")
+    );
+    assert_eq!(occurred_at_unix_ms, 32_000);
+
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public;
+             DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
 fn latest_revocation_can_be_persisted_with_its_propagation_event() {
     let mut client = ready_client();
     let ledger = ledger_with_revocation();
