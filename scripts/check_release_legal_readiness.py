@@ -71,7 +71,9 @@ def evaluate_repository(root: Path) -> dict[str, object]:
 
     package = _read_manifest(root / "Cargo.toml")
     standard_license_files = [
-        candidate for candidate in LICENSE_CANDIDATES if (root / candidate).is_file()
+        candidate
+        for candidate in LICENSE_CANDIDATES
+        if _resolved_repo_file(root, candidate) is not None
     ]
     license_expression = _nonempty_string(package.get("license"))
     license_file_value = _nonempty_string(package.get("license-file"))
