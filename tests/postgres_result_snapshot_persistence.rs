@@ -109,7 +109,7 @@ fn snapshot_named(
         observations,
     )
     .unwrap();
-    let session = common::assessment_session(
+    let session = common::scoring_session(
         request.session_ref(),
         "participant_result_one",
         request.instrument_version_ref(),
@@ -300,7 +300,7 @@ fn overflow_snapshot() -> ResultSnapshot {
         vec![ScoreObservation::scored("construct_big_five", 0.25, None).unwrap()],
     )
     .unwrap();
-    let session = common::assessment_session(
+    let session = common::scoring_session(
         request.session_ref(),
         "participant_result_one",
         request.instrument_version_ref(),

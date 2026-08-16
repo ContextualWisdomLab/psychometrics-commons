@@ -7,7 +7,7 @@
 
 use crate::reference::normalized_reference;
 use crate::scoring::{ScoreObservation, ScoringRequest, ScoringResult};
-use crate::session::AssessmentSession;
+use crate::session::{AssessmentSession, SessionState};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -60,9 +60,11 @@ impl ResultSnapshot {
     ///
     /// Result ownership, session identity, and the published instrument version
     /// are checked against `session` before any immutable product result is
-    /// created. Scientific provenance is otherwise copied verbatim from the
-    /// already validated scoring request/result boundary; psychometric values
-    /// are never recomputed here.
+    /// created. The session must already be [`SessionState::Scoring`] or
+    /// [`SessionState::Scored`]; a `Created`, `Active`, `Completed`, `Released`,
+    /// or terminal session cannot receive a score. Scientific provenance is
+    /// otherwise copied verbatim from the already validated scoring
+    /// request/result boundary; psychometric values are never recomputed here.
     ///
     /// # Errors
     ///
@@ -73,6 +75,8 @@ impl ResultSnapshot {
     /// ownership disagrees with the session owner,
     /// [`ResultSnapshotError::InstrumentVersionMismatch`] when the scoring
     /// request is not pinned to the session's published instrument version,
+    /// [`ResultSnapshotError::SessionNotReadyForResult`] when the session has
+    /// not begun scoring or has already released or left the scoring path,
     /// [`ResultSnapshotError::EmptyReference`] for any blank required,
     /// supersession, or consent reference,
     /// [`ResultSnapshotError::MissingConsentSnapshot`] when no consent evidence
@@ -124,6 +128,12 @@ impl ResultSnapshot {
         let supersedes_ref = input.supersedes_ref.map(required_reference).transpose()?;
         if supersedes_ref == Some(snapshot_ref) {
             return Err(ResultSnapshotError::SelfSupersession);
+        }
+        if !matches!(
+            session.state(),
+            SessionState::Scoring | SessionState::Scored
+        ) {
+            return Err(ResultSnapshotError::SessionNotReadyForResult);
         }
 
         Ok(Self {

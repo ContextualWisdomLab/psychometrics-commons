@@ -4,7 +4,7 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::session::AssessmentSession;
+use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -92,4 +92,39 @@ pub fn assessment_session(
         20_000,
     )
     .unwrap()
+}
+
+/// Drive a created session through Activate, Complete, then `BeginScoring`.
+///
+/// Result publication is legal only after scoring has begun. Success-path
+/// fixtures must use this helper rather than a still-Created session.
+#[allow(dead_code)]
+pub fn scoring_session(
+    session_ref: &str,
+    participant_ref: &str,
+    instrument_version_ref: &str,
+) -> AssessmentSession {
+    let mut session = assessment_session(session_ref, participant_ref, instrument_version_ref);
+    session
+        .apply_command(
+            "command_activate_result_fixture",
+            1,
+            SessionCommand::Activate,
+        )
+        .unwrap();
+    session
+        .apply_command(
+            "command_complete_result_fixture",
+            2,
+            SessionCommand::Complete,
+        )
+        .unwrap();
+    session
+        .apply_command(
+            "command_begin_scoring_result_fixture",
+            3,
+            SessionCommand::BeginScoring,
+        )
+        .unwrap();
+    session
 }

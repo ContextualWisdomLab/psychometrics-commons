@@ -11,9 +11,7 @@ use psychometrics_commons_runtime::result::{
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::{
-    AssessmentSession, SessionCommand, SessionState,
-};
+use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -123,8 +121,13 @@ fn publish_error(session: &AssessmentSession) -> ResultSnapshotError {
     let response_snapshot = completed_snapshot(session.session_ref());
     let request = scoring_request(&response_snapshot, session.instrument_version_ref());
     let result = scoring_result(&request);
-    ResultSnapshot::new(session, &request, &result, result_input(session.participant_ref()))
-        .unwrap_err()
+    ResultSnapshot::new(
+        session,
+        &request,
+        &result,
+        result_input(session.participant_ref()),
+    )
+    .unwrap_err()
 }
 
 fn completed_snapshot(session_ref: &str) -> ResponseSnapshot {
@@ -293,8 +296,66 @@ fn result_snapshot_rejects_session_that_has_not_begun_scoring() {
 }
 
 #[test]
+fn result_snapshot_accepts_scoring_and_scored_sessions() {
+    let scoring = session_in(
+        "session_result_binding",
+        "participant_authoritative",
+        &[
+            SessionCommand::Activate,
+            SessionCommand::Complete,
+            SessionCommand::BeginScoring,
+        ],
+    );
+    assert_eq!(scoring.state(), SessionState::Scoring);
+    let response_snapshot = completed_snapshot(scoring.session_ref());
+    let request = scoring_request(&response_snapshot, scoring.instrument_version_ref());
+    let result = scoring_result(&request);
+    let snapshot = ResultSnapshot::new(
+        &scoring,
+        &request,
+        &result,
+        result_input(scoring.participant_ref()),
+    )
+    .unwrap();
+    assert_eq!(snapshot.participant_ref(), scoring.participant_ref());
+    assert_eq!(snapshot.session_ref(), scoring.session_ref());
+    assert_eq!(
+        snapshot.instrument_version_ref(),
+        scoring.instrument_version_ref()
+    );
+
+    let scored = session_in(
+        "session_result_binding",
+        "participant_authoritative",
+        &[
+            SessionCommand::Activate,
+            SessionCommand::Complete,
+            SessionCommand::BeginScoring,
+            SessionCommand::RecordScore,
+        ],
+    );
+    assert_eq!(scored.state(), SessionState::Scored);
+    let snapshot = ResultSnapshot::new(
+        &scored,
+        &request,
+        &result,
+        result_input(scored.participant_ref()),
+    )
+    .unwrap();
+    assert_eq!(snapshot.session_ref(), scored.session_ref());
+}
+
+#[test]
 fn result_snapshot_copies_authoritative_session_provenance() {
-    let session = session("session_result_binding", "participant_authoritative");
+    let session = session_in(
+        "session_result_binding",
+        "participant_authoritative",
+        &[
+            SessionCommand::Activate,
+            SessionCommand::Complete,
+            SessionCommand::BeginScoring,
+        ],
+    );
     let response_snapshot = completed_snapshot(session.session_ref());
     let request = scoring_request(&response_snapshot, session.instrument_version_ref());
     let result = scoring_result(&request);

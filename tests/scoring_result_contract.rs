@@ -68,7 +68,7 @@ fn scoring_result() -> ScoringResult {
 fn result_session(
     request: &ScoringRequest,
 ) -> psychometrics_commons_runtime::session::AssessmentSession {
-    common::assessment_session(
+    common::scoring_session(
         request.session_ref(),
         "participant_ref",
         request.instrument_version_ref(),

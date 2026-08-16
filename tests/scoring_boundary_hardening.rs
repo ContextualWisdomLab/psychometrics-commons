@@ -122,7 +122,7 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
         vec![ScoreObservation::scored(" construct_ref ", 1.0, None).unwrap()],
     )
     .unwrap();
-    let session = common::assessment_session(
+    let session = common::scoring_session(
         request.session_ref(),
         "participant_ref",
         request.instrument_version_ref(),

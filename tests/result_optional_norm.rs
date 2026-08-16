@@ -51,7 +51,7 @@ fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
         vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
     )
     .unwrap();
-    let session = common::assessment_session(
+    let session = common::scoring_session(
         request.session_ref(),
         "participant_ref",
         request.instrument_version_ref(),
