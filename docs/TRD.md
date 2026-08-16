@@ -365,7 +365,11 @@ POST   /v1/research-contributions
 POST   /v1/research-contributions/{contribution_ref}/withdrawals
 POST   /v1/data-rights/exports
 POST   /v1/data-rights/deletions
+POST   /v1/account-links
+POST   /v1/account-links/recover
 ```
+
+As-built on the Active PR successor of #183: `POST /v1/account-links` and `POST /v1/account-links/recover` persist and recover dual-proof account links with the server clock as link/recover time. The machine-readable contract is `openapi/account-links.yaml` (OpenAPI 3.2.0). Errors use RFC 9457 problem details. Live Keyverse token verification remains Target.
 
 All state-changing public requests require an idempotency key or a resource-specific equivalent.
 

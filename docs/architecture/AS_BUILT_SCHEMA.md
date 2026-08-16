@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR participant identity-link physical schema
 
-The identity-link successor of #166/#160 adds `migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs`. Prefer this head over #166, #160, #148, #147, #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
+The identity-link successor of #183 adds `migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, `src/postgres_participant_identity_link.rs`, `src/account_link_write.rs`, and `src/account_link_http.rs`. Prefer this head over #183, #166, #160, #148, #147, #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
 
 - immutable `assessment_participant` identity (`participant_ref`, `tenant_ref`, `created_at_unix_ms`);
 - append-only `participant_identity_link` rows for accepted dual-proof account links;
@@ -70,7 +70,7 @@ The identity-link successor of #166/#160 adds `migrations/0022_participant_ident
 - a `BEFORE INSERT` trigger on `participant_identity_link` that advisory-locks the issuer-scoped subject and rejects a second unterminated history row;
 - index `participant_identity_link_current_subject_lookup` on `(tenant_ref, identity_issuer, identity_subject_ref)`.
 
-Exact replay is idempotent. Reconcile is the only current-row writer: it deletes tenant-scoped current rows whose links have ended, then restores or clears this participant's derived row so a stale projection cannot block relink or a later bind. `persist_authorized_account_link` authorizes both current proofs before that persist. `recover_participant_for_authenticated_account` returns the same `participant_ref` from a still-valid account proof and does not invent a participant for an unused account. HTTP account-link transport and live Keyverse verification remain Target.
+Exact replay is idempotent. Reconcile is the only current-row writer: it deletes tenant-scoped current rows whose links have ended, then restores or clears this participant's derived row so a stale projection cannot block relink or a later bind. `persist_authorized_account_link` authorizes both current proofs before that persist. `recover_participant_for_authenticated_account` returns the same `participant_ref` from a still-valid account proof and does not invent a participant for an unused account. `POST /v1/account-links` and `POST /v1/account-links/recover` use the server clock and the as-built OpenAPI 3.2.0 contract in `openapi/account-links.yaml`. Live Keyverse verification remains Target.
 
 ## Logical-to-physical mapping rule
 

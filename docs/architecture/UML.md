@@ -368,12 +368,12 @@ sequenceDiagram
     C->>A: link request + anonymous-session proof + Keyverse assertion
     A->>K: validate issuer/audience/signature/expiry/anti-replay context
     K-->>A: validated subject claims
-    A->>A: persist_authorized_account_link (dual current proofs)
+    A->>A: persist_authorized_account_link (dual current proofs, server clock)
     A->>DB: append Active ParticipantIdentityLink + reconcile current projection
     DB-->>A: immutable link evidence / current-link projection
-    A-->>C: link complete
+    A-->>C: POST /v1/account-links complete
 
-    Note over A,DB: recover_participant_for_authenticated_account reloads the same participant_ref from a still-valid account proof
+    Note over A,DB: POST /v1/account-links/recover calls recover_participant_for_authenticated_account and reloads the same participant_ref from a still-valid account proof
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
 ```
 

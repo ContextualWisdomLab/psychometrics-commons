@@ -8,6 +8,7 @@
 //! contracts rather than reimplemented here.
 
 pub mod account_link;
+pub mod account_link_http;
 pub mod account_link_write;
 pub mod anonymous_session;
 pub mod authorization;

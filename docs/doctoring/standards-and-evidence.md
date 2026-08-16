@@ -94,6 +94,16 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## HTTP API contracts
+
+Implemented public HTTP families use OpenAPI 3.2.0 as the as-built machine-readable contract and RFC 9457 problem details for fail-closed errors. A contract may list only operations that the corresponding source actually serves. Problem bodies must not echo raw request bytes, SQL, provider text, tokens, or restricted linkage values.
+
+Product consequences:
+
+- `POST /v1/account-links` and `POST /v1/account-links/recover` are described by `openapi/account-links.yaml`;
+- the server clock is the account-link and recover time so a client cannot backdate an expired proof;
+- unknown JSON members, missing idempotency keys, and expired or cross-tenant proofs fail closed with stable problem type URIs.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -120,6 +130,10 @@ International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Info
 International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
+
+Nottingham, M., Wilde, E., & Miller, S. (2023). *Problem details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
+
+OpenAPI Initiative. (2025). *OpenAPI Specification* (Version 3.2.0). The Linux Foundation. https://spec.openapis.org/oas/v3.2.0.html
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 

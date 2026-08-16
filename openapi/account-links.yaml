@@ -1,0 +1,194 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public account-link API
+  version: 0.1.0
+  description: >
+    As-built public dual-proof account-link persist and recover. These
+    operations authorize already-validated anonymous-session and Keyverse
+    proofs, persist append-only identity-link history, and recover the same
+    product-owned participant from a still-valid account proof. They do not
+    parse live identity tokens.
+paths:
+  /v1/account-links:
+    post:
+      operationId: persistAccountLink
+      summary: Persist one dual-proof account link
+      description: >
+        Authorizes both current proofs, then persists identity-link history
+        through reconcile. The server clock is the link time. Exact
+        Idempotency-Key replay returns the original body.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque replay key for this persist request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLinkPersistRequest"
+      responses:
+        "201":
+          description: Account link was inserted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "200":
+          description: Exact idempotent replay or exact durable duplicate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/account-links/recover:
+    post:
+      operationId: recoverAccountLink
+      summary: Recover the participant for a still-valid account
+      description: >
+        Returns the participant currently bound to a still-valid authenticated
+        account proof. A valid unused account does not invent a participant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLinkRecoverRequest"
+      responses:
+        "200":
+          description: The account currently binds one participant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    AccountLinkPersistRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - participant_ref
+        - tenant_ref
+        - anonymous_session_ref
+        - anonymous_proof_ref
+        - anonymous_valid_until_unix_ms
+        - identity_issuer
+        - identity_subject_ref
+        - authenticated_proof_ref
+        - authenticated_valid_until_unix_ms
+        - link_event_ref
+      properties:
+        participant_ref:
+          type: string
+        tenant_ref:
+          type: string
+        anonymous_session_ref:
+          type: string
+        anonymous_proof_ref:
+          type: string
+        anonymous_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        authenticated_proof_ref:
+          type: string
+        authenticated_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+        link_event_ref:
+          type: string
+    AccountLinkRecoverRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - tenant_ref
+        - identity_issuer
+        - identity_subject_ref
+        - authenticated_proof_ref
+        - authenticated_valid_until_unix_ms
+      properties:
+        tenant_ref:
+          type: string
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        authenticated_proof_ref:
+          type: string
+        authenticated_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+    AccountLink:
+      type: object
+      additionalProperties: false
+      required:
+        - participant_ref
+        - tenant_ref
+        - identity_issuer
+        - identity_subject_ref
+        - link_event_ref
+        - disposition
+      properties:
+        participant_ref:
+          type: string
+        tenant_ref:
+          type: string
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        link_event_ref:
+          type: string
+        disposition:
+          type: string
+          enum:
+            - inserted
+            - duplicate
+            - current
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
