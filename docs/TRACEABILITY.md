@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** item-delivery ledger reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Tenant-bound item-delivery identity, exact release/locale/digest/item-set evidence, and monotonic delivery events persist under READ COMMITTED, reload after restart so a later `deliver` continues the stored prefix, and recovery COPY/restore covers `item_delivery_ledger` / `item_delivery_event`. Item-selection arithmetic remains in fast-mlsirm.
+**Active PR** #110 item-delivery ledger reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Tenant-bound item-delivery identity, exact release/locale/digest/item-set evidence, and monotonic delivery events persist under READ COMMITTED, reload after restart so a later `deliver` continues the stored prefix, and recovery COPY/restore covers `item_delivery_ledger` / `item_delivery_event`. Item-selection arithmetic remains in fast-mlsirm.
 
 ## 5. ADR traceability by concern
 
