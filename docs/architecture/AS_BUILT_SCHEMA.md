@@ -18,13 +18,13 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
-| `assessment_session` | session | **Active PR** #125 (not protected-main truth) |
+| `assessment_session` | session | **Active PR** #129 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
 ## Active PR assessment-session physical schema
 
-PR #125 `migrations/0014_assessment_session.sql`, `migrations/0016_assessment_session_command.sql`, and `src/postgres_assessment_session.rs` persist and load one assessment-session identity bound to a published locale-specific release, plus append-only command history. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, current state, and creation time. Exact replay is idempotent. Rebinding any stored field or command evidence, or persisting a shorter command history than already stored, fails closed so a stale Activate-only worker cannot rewind Pause/Resume. Load restores created identity without asking whether the release still accepts new sessions, then replays commands so Activate/Pause/Resume survive restart. Isolation is the global opaque `session_ref` primary key; this slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. HTTP session transport remains outside this slice. #109 is the persist-and-load predecessor.
+PR #129 `migrations/0014_assessment_session.sql`, `migrations/0016_assessment_session_command.sql`, and `src/postgres_assessment_session.rs` persist and load one assessment-session identity bound to a published locale-specific release, plus append-only command history. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, current state, and creation time. Exact replay is idempotent. Rebinding any stored field or command evidence, or persisting a shorter command history than already stored, fails closed so a stale Activate-only worker cannot rewind Pause/Resume. Load restores created identity without asking whether the release still accepts new sessions, then replays commands so Activate/Pause/Resume survive restart. Isolation is the global opaque `session_ref` primary key; this slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. HTTP session transport remains outside this slice. #125 is the command-history predecessor that still rewinds on a stale shorter persist; #109 is the persist-and-load predecessor.
 
 ## Active PR inbox-consumption physical schema
 
