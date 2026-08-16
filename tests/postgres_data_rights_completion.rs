@@ -499,6 +499,26 @@ fn completion_replay_rejects_terminal_state_and_completion_evidence_rebinding() 
         Err(DataRightsPersistenceError::ConflictingReplay)
     ));
     transaction.rollback().unwrap();
+
+    let mut rebound_completed_at = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    rebound_completed_at
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    rebound_completed_at
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    rebound_completed_at
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_301)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &rebound_completed_at),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
 }
 
 #[test]
@@ -624,4 +644,22 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
         transaction.rollback().unwrap();
         client.batch_execute(restore).unwrap();
     }
+
+    let mut export = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Export,
+    );
+    export
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    export.start_processing("operation_alpha", 10_200).unwrap();
+    export
+        .complete("completion_evidence_alpha", &[], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &export),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
 }
