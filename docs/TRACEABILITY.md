@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** #53 response-event persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Session-bound response identity and payload digests persist under READ COMMITTED with exact replay and fail-closed rebinding. Response bodies stay out of the product database.
 
 ## 5. ADR traceability by concern
 
