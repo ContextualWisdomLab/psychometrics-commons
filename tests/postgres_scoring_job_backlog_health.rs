@@ -44,6 +44,7 @@ fn policy() -> ScoringJobBacklogPolicy {
         max_active_job_count: 4,
         max_active_job_age_ms: 5_000,
         max_quarantined_job_count: 1,
+        max_expired_lease_count: 1,
     }
 }
 
@@ -65,7 +66,12 @@ fn insert_job(client: &mut Client, job_ref: &str, state: &str, created_at_unix_m
                 ))
                 .unwrap();
         }
-        "leased" => {
+        "leased" | "leased_live" => {
+            let expiry = if state == "leased_live" {
+                4_102_444_800_000i64
+            } else {
+                created_at_unix_ms + 1_000
+            };
             client
                 .batch_execute(&format!(
                     "INSERT INTO scoring_job_state (\
@@ -75,8 +81,7 @@ fn insert_job(client: &mut Client, job_ref: &str, state: &str, created_at_unix_m
                      ) VALUES (\
                          '{job_ref}', '{request_ref}', 'leased', 1, 3, 'worker_{job_ref}',\
                          'lease_{job_ref}', 1, {expiry}, {created_at}, {created_at}\
-                     )",
-                    expiry = created_at_unix_ms + 1_000
+                     )"
                 ))
                 .unwrap();
         }
@@ -155,6 +160,7 @@ fn empty_scoring_job_backlog_is_observable_without_inventing_service_levels() {
 
     assert_eq!(evidence.active_job_count(), 0);
     assert_eq!(evidence.quarantined_job_count(), 0);
+    assert_eq!(evidence.expired_lease_count(), 0);
     assert_eq!(evidence.oldest_active_job_at_unix_ms(), None);
     assert_eq!(
         classify_postgres_scoring_job_backlog(&evidence, 10_000, &policy()),
@@ -197,6 +203,7 @@ fn probe_counts_queued_leased_retry_and_quarantine_without_terminal_or_identity_
     let evidence = probe_postgres_scoring_job_backlog(&mut client).unwrap();
     assert_eq!(evidence.active_job_count(), 3);
     assert_eq!(evidence.quarantined_job_count(), 1);
+    assert_eq!(evidence.expired_lease_count(), 1);
     assert_eq!(evidence.oldest_active_job_at_unix_ms(), Some(2_000));
     assert_eq!(
         classify_postgres_scoring_job_backlog(&evidence, 5_000, &policy()),
@@ -253,6 +260,43 @@ fn quarantine_limit_is_an_independent_operator_policy_input() {
 }
 
 #[test]
+fn expired_lease_count_fails_closed_when_operator_refuses_dead_workers() {
+    let (mut client, schema) = isolated_client();
+    insert_job(
+        &mut client,
+        "scoring_job_expired_lease_alpha",
+        "leased",
+        8_000,
+    );
+    insert_job(
+        &mut client,
+        "scoring_job_live_lease_alpha",
+        "leased_live",
+        8_500,
+    );
+    let evidence = probe_postgres_scoring_job_backlog(&mut client).unwrap();
+
+    assert_eq!(evidence.active_job_count(), 2);
+    assert_eq!(evidence.expired_lease_count(), 1);
+    assert_eq!(evidence.oldest_active_job_at_unix_ms(), Some(8_000));
+
+    let refuse_expired = ScoringJobBacklogPolicy {
+        max_expired_lease_count: 0,
+        ..policy()
+    };
+    assert_eq!(
+        classify_postgres_scoring_job_backlog(&evidence, 10_000, &refuse_expired),
+        BacklogHealth::Stalled
+    );
+    assert_eq!(
+        classify_postgres_scoring_job_backlog(&evidence, 10_000, &policy()),
+        BacklogHealth::WithinBounds
+    );
+
+    cleanup(client, &schema);
+}
+
+#[test]
 fn future_or_missing_observation_time_is_unknown_not_falsely_healthy() {
     let (mut client, schema) = isolated_client();
     insert_job(&mut client, "scoring_job_future_alpha", "queued", 10_000);
@@ -300,15 +344,12 @@ fn scoring_job_apply_path_creates_partial_readiness_indexes_idempotently() {
     for index_name in [
         "scoring_job_state_active_health_idx",
         "scoring_job_state_quarantined_health_idx",
+        "scoring_job_state_leased_expiry_health_idx",
     ] {
         let definition = index_definition(&mut client, index_name).to_ascii_lowercase();
         assert!(
             definition.contains("scoring_job_state"),
             "{index_name} must index scoring_job_state: {definition}"
-        );
-        assert!(
-            definition.contains("created_at"),
-            "{index_name} must cover created_at: {definition}"
         );
         assert!(
             definition.contains(" where "),
@@ -317,6 +358,16 @@ fn scoring_job_apply_path_creates_partial_readiness_indexes_idempotently() {
         assert!(
             definition.contains("scoring_state"),
             "{index_name} predicate must constrain scoring_state: {definition}"
+        );
+    }
+    for index_name in [
+        "scoring_job_state_active_health_idx",
+        "scoring_job_state_quarantined_health_idx",
+    ] {
+        let definition = index_definition(&mut client, index_name).to_ascii_lowercase();
+        assert!(
+            definition.contains("created_at"),
+            "{index_name} must cover created_at: {definition}"
         );
     }
 
@@ -333,6 +384,16 @@ fn scoring_job_apply_path_creates_partial_readiness_indexes_idempotently() {
     assert!(
         quarantined.contains("quarantined"),
         "quarantine readiness index must include quarantined: {quarantined}"
+    );
+    let leased_expiry = index_definition(&mut client, "scoring_job_state_leased_expiry_health_idx")
+        .to_ascii_lowercase();
+    assert!(
+        leased_expiry.contains("active_lease_expires_at_unix_ms"),
+        "expired-lease readiness index must cover lease expiry: {leased_expiry}"
+    );
+    assert!(
+        leased_expiry.contains("leased"),
+        "expired-lease readiness index must constrain leased rows: {leased_expiry}"
     );
 
     apply_scoring_job_migration(&mut client)

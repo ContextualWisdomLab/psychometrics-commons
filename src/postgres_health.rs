@@ -232,6 +232,8 @@ pub struct ScoringJobBacklogPolicy {
     pub max_active_job_age_ms: u64,
     /// Largest quarantined scoring-job population still accepted.
     pub max_quarantined_job_count: u64,
+    /// Largest leased-but-expired job population still accepted.
+    pub max_expired_lease_count: u64,
 }
 
 /// Aggregate scoring-job backlog evidence without request, worker, or result identities.
@@ -239,6 +241,7 @@ pub struct ScoringJobBacklogPolicy {
 pub struct PostgresScoringJobBacklogEvidence {
     active_job_count: u64,
     quarantined_job_count: u64,
+    expired_lease_count: u64,
     oldest_active_job_at_unix_ms: Option<u64>,
 }
 
@@ -253,6 +256,12 @@ impl PostgresScoringJobBacklogEvidence {
     #[must_use]
     pub const fn quarantined_job_count(self) -> u64 {
         self.quarantined_job_count
+    }
+
+    /// Return leased jobs whose persisted lease expiry is already in the past.
+    #[must_use]
+    pub const fn expired_lease_count(self) -> u64 {
+        self.expired_lease_count
     }
 
     /// Return the oldest `created_at` among active scoring jobs, if any.
@@ -555,8 +564,9 @@ pub fn classify_postgres_data_rights_backlog(
 ///
 /// Active work is queued, leased, or retry-scheduled. Completed and cancelled jobs are
 /// terminal and do not participate. Age is measured from `created_at` so a later lease
-/// or retry transition cannot hide a job that has waited too long. The query returns
-/// only counts and one oldest timestamp.
+/// or retry transition cannot hide a job that has waited too long. Expired leases are
+/// counted separately against the database clock so a dead worker cannot hide behind a
+/// healthy enqueue-age bound. The query returns only counts and one oldest timestamp.
 ///
 /// # Errors
 ///
@@ -572,6 +582,12 @@ pub fn probe_postgres_scoring_job_backlog(
                  WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled')), \
              (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
                  WHERE scoring_state = 'quarantined'), \
+             (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
+                 WHERE scoring_state = 'leased' \
+                   AND active_lease_expires_at_unix_ms \
+                       < (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT), \
+             (SELECT MIN(active_lease_expires_at_unix_ms) FROM scoring_job_state \
+                 WHERE scoring_state = 'leased'), \
              (SELECT (EXTRACT(EPOCH FROM MIN(created_at)) * 1000)::BIGINT \
                  FROM scoring_job_state \
                  WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled'))",
@@ -580,11 +596,15 @@ pub fn probe_postgres_scoring_job_backlog(
 
     let active_job_count: i64 = row.get(0);
     let quarantined_job_count: i64 = row.get(1);
-    let oldest_active_job_at_unix_ms: Option<i64> = row.get(2);
+    let expired_lease_count: i64 = row.get(2);
+    let oldest_leased_expiry_at_unix_ms: Option<i64> = row.get(3);
+    let oldest_active_job_at_unix_ms: Option<i64> = row.get(4);
+    let _ = positive_optional_millis(oldest_leased_expiry_at_unix_ms)?;
 
     Ok(PostgresScoringJobBacklogEvidence {
         active_job_count: active_job_count.cast_unsigned(),
         quarantined_job_count: quarantined_job_count.cast_unsigned(),
+        expired_lease_count: expired_lease_count.cast_unsigned(),
         oldest_active_job_at_unix_ms: positive_optional_millis(oldest_active_job_at_unix_ms)?,
     })
 }
@@ -592,8 +612,8 @@ pub fn probe_postgres_scoring_job_backlog(
 /// Classify scoring-job backlog evidence against an explicit operator policy.
 ///
 /// Missing observation time or future-dated created-at evidence produces `Unknown`.
-/// Excess active or quarantined counts, or an active job older than the supplied
-/// age bound, produce `Stalled`.
+/// Excess active, quarantined, or expired-lease counts, or an active job older
+/// than the supplied age bound, produce `Stalled`.
 #[must_use]
 pub fn classify_postgres_scoring_job_backlog(
     evidence: &PostgresScoringJobBacklogEvidence,
@@ -610,6 +630,7 @@ pub fn classify_postgres_scoring_job_backlog(
 
     if evidence.active_job_count > policy.max_active_job_count
         || evidence.quarantined_job_count > policy.max_quarantined_job_count
+        || evidence.expired_lease_count > policy.max_expired_lease_count
     {
         return BacklogHealth::Stalled;
     }
@@ -731,6 +752,7 @@ mod operational_backlog_composition_tests {
             max_active_job_count: 4,
             max_active_job_age_ms: 5_000,
             max_quarantined_job_count: 1,
+            max_expired_lease_count: 1,
         }
     }
 
@@ -759,6 +781,7 @@ mod operational_backlog_composition_tests {
         PostgresScoringJobBacklogEvidence {
             active_job_count: 0,
             quarantined_job_count: 0,
+            expired_lease_count: 0,
             oldest_active_job_at_unix_ms: None,
         }
     }
@@ -784,6 +807,7 @@ mod operational_backlog_composition_tests {
         let stalled_scoring = PostgresScoringJobBacklogEvidence {
             active_job_count: 1,
             quarantined_job_count: 0,
+            expired_lease_count: 0,
             oldest_active_job_at_unix_ms: Some(1_000),
         };
         assert_eq!(
@@ -805,6 +829,7 @@ mod operational_backlog_composition_tests {
         let future_scoring = PostgresScoringJobBacklogEvidence {
             active_job_count: 1,
             quarantined_job_count: 0,
+            expired_lease_count: 0,
             oldest_active_job_at_unix_ms: Some(20_000),
         };
         assert_eq!(
@@ -818,6 +843,32 @@ mod operational_backlog_composition_tests {
                 &scoring_job_policy(),
             ),
             BacklogHealth::Unknown
+        );
+    }
+
+    #[test]
+    fn expired_scoring_lease_cannot_be_masked_by_healthy_count_or_created_at_age() {
+        let expired_lease = PostgresScoringJobBacklogEvidence {
+            active_job_count: 1,
+            quarantined_job_count: 0,
+            oldest_active_job_at_unix_ms: Some(8_000),
+            expired_lease_count: 1,
+        };
+        let refuse_expired = ScoringJobBacklogPolicy {
+            max_expired_lease_count: 0,
+            ..scoring_job_policy()
+        };
+        assert_eq!(
+            classify_postgres_operational_backlog(
+                &empty_integration(),
+                &empty_data_rights(),
+                &expired_lease,
+                10_000,
+                &integration_policy(),
+                &data_rights_policy(),
+                &refuse_expired,
+            ),
+            BacklogHealth::Stalled
         );
     }
 }

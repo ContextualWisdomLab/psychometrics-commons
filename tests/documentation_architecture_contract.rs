@@ -301,6 +301,34 @@ fn required_architecture_decisions_are_indexed() {
 }
 
 #[test]
+fn physical_migrations_use_unique_numeric_prefixes() {
+    let migration_directory = repository_root().join("migrations");
+    let mut prefixes = Vec::new();
+    for entry in fs::read_dir(&migration_directory).expect("migrations/ must be readable") {
+        let entry = entry.expect("migration directory entry must be readable");
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if !file_name.ends_with(".sql") || file_name.len() < 5 {
+            continue;
+        }
+        let prefix: String = file_name.chars().take(4).collect();
+        assert!(
+            prefix.bytes().all(|byte| byte.is_ascii_digit()),
+            "migration {file_name} must start with a four-digit version prefix"
+        );
+        assert!(
+            !prefixes.contains(&prefix),
+            "migration numeric prefix {prefix} is reused; directory-order recovery cannot apply two {prefix}_* files as one version"
+        );
+        prefixes.push(prefix);
+    }
+    assert!(
+        !prefixes.is_empty(),
+        "repository migrations directory must contain at least one versioned SQL file"
+    );
+}
+
+#[test]
 fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
     let erd = read_required(&repository_root().join("docs/architecture/ERD.md"));
 
