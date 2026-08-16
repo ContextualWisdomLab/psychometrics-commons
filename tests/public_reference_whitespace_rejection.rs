@@ -7,6 +7,11 @@ use psychometrics_commons_runtime::authorization::{AuthorizationContext, Authori
 use psychometrics_commons_runtime::data_rights::{
     DataRightsError, DataRightsRequest, DataRightsRequestKind,
 };
+use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
+use psychometrics_commons_runtime::session::SessionState;
+
+const VALID_PAYLOAD_DIGEST: &str =
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[test]
 fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() {
@@ -70,6 +75,36 @@ fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() 
                 "authorization field {field_index} must reject non-canonical reference spelling {invalid_reference:?}",
             );
         }
+
+        assert_eq!(
+            ResponseLedger::new(invalid_reference),
+            Err(WriteError::InvalidReference),
+            "response session reference must reject non-canonical spelling {invalid_reference:?}",
+        );
+
+        let mut response_ledger = ResponseLedger::new("session_ref").unwrap();
+        for field_index in 0..3 {
+            let mut references = ["server_event_ref", "client_event_ref", "item_version_ref"];
+            references[field_index] = invalid_reference;
+            assert_eq!(
+                response_ledger.record(
+                    SessionState::Active,
+                    ResponseWrite {
+                        server_event_ref: references[0],
+                        client_event_ref: references[1],
+                        item_version_ref: references[2],
+                        payload_digest: VALID_PAYLOAD_DIGEST,
+                    },
+                ),
+                Err(WriteError::InvalidReference),
+                "response event field {field_index} must reject non-canonical spelling {invalid_reference:?}",
+            );
+        }
+        assert_eq!(
+            response_ledger.freeze_as(SessionState::Completed, invalid_reference),
+            Err(WriteError::InvalidReference),
+            "response snapshot reference must reject non-canonical spelling {invalid_reference:?}",
+        );
     }
 }
 
@@ -110,6 +145,11 @@ fn embedded_control_characters_are_rejected_at_public_reference_boundaries() {
             AuthorizationContext::new(invalid_reference, "subject_ref", Some("participant_ref"), &[]),
             Err(AuthorizationError::InvalidReference),
             "authorization references must reject embedded control characters {invalid_reference:?}",
+        );
+        assert_eq!(
+            ResponseLedger::new(invalid_reference),
+            Err(WriteError::InvalidReference),
+            "response references must reject embedded control characters {invalid_reference:?}",
         );
     }
 }
@@ -155,6 +195,11 @@ fn invisible_and_bidirectional_format_characters_are_rejected() {
             Err(AuthorizationError::InvalidReference),
             "authorization references must reject invisible or directional formatting {invalid_reference:?}",
         );
+        assert_eq!(
+            ResponseLedger::new(invalid_reference),
+            Err(WriteError::InvalidReference),
+            "response references must reject invisible or directional formatting {invalid_reference:?}",
+        );
     }
 }
 
@@ -187,4 +232,22 @@ fn canonical_opaque_public_references_remain_accepted() {
     assert_eq!(authorization.tenant_ref(), "tenant_ref");
     assert_eq!(authorization.subject_ref(), "subject_ref");
     assert_eq!(authorization.participant_ref(), Some("participant_ref"));
+
+    let mut response_ledger = ResponseLedger::new("session_ref").unwrap();
+    let response = response_ledger
+        .record(
+            SessionState::Active,
+            ResponseWrite {
+                server_event_ref: "server_event_ref",
+                client_event_ref: "client_event_ref",
+                item_version_ref: "item_version_ref",
+                payload_digest: VALID_PAYLOAD_DIGEST,
+            },
+        )
+        .unwrap();
+    assert_eq!(response.server_event_ref(), "server_event_ref");
+    let snapshot = response_ledger
+        .freeze_as(SessionState::Completed, "snapshot_ref")
+        .unwrap();
+    assert_eq!(snapshot.snapshot_ref(), Some("snapshot_ref"));
 }
