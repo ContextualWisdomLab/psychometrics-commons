@@ -36,7 +36,7 @@ impl Display for AnonymousCredentialError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "anonymous credential references must be opaque non-numeric values"
+                "anonymous credential references must be exact canonical opaque non-numeric values"
             }
             Self::InvalidDigest => {
                 "anonymous credential proof digest must be canonical lowercase SHA-256 evidence"
@@ -75,18 +75,20 @@ pub struct AnonymousCredential {
 }
 
 impl AnonymousCredential {
-    /// Create one normalized server-side anonymous credential record.
+    /// Create one exactly spelled server-side anonymous credential record.
     ///
-    /// The proof must already have been hashed by the trusted credential-issuance boundary. This
-    /// constructor accepts only canonical lowercase SHA-256 digest evidence and therefore never
-    /// receives the raw bearer secret.
+    /// Resource references must already use their canonical spelling. The proof must already have
+    /// been hashed by the trusted credential-issuance boundary. This constructor accepts only
+    /// canonical lowercase SHA-256 digest evidence and therefore never receives the raw bearer
+    /// secret.
     ///
     /// # Errors
     ///
-    /// Returns [`AnonymousCredentialError::InvalidReference`] for malformed product references,
-    /// [`AnonymousCredentialError::InvalidDigest`] for noncanonical digest evidence,
-    /// [`AnonymousCredentialError::InvalidTimestamp`] when either lifetime boundary is zero, or
-    /// [`AnonymousCredentialError::InvalidLifetime`] when expiry is not strictly after issuance.
+    /// Returns [`AnonymousCredentialError::InvalidReference`] for malformed or noncanonical
+    /// product references, [`AnonymousCredentialError::InvalidDigest`] for noncanonical digest
+    /// evidence, [`AnonymousCredentialError::InvalidTimestamp`] when either lifetime boundary is
+    /// zero, or [`AnonymousCredentialError::InvalidLifetime`] when expiry is not strictly after
+    /// issuance.
     pub fn new(
         credential_ref: &str,
         tenant_ref: &str,
@@ -241,7 +243,10 @@ impl AnonymousCredential {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousCredentialError> {
-    normalized_reference(reference).ok_or(AnonymousCredentialError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(AnonymousCredentialError::InvalidReference),
+    }
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
