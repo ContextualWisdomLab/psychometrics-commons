@@ -7,6 +7,7 @@
 //! computation remains in `fast-mlsirm` and is consumed through versioned
 //! contracts rather than reimplemented here.
 
+pub mod account_link;
 pub mod anonymous_session;
 pub mod authorization;
 pub mod consent;
