@@ -65,6 +65,49 @@ impl ResponseEvent {
     pub const fn sequence(&self) -> usize {
         self.sequence
     }
+
+    /// Rebuild one accepted event from durable store columns.
+    ///
+    /// Use this after a process restart. The caller must still assemble events
+    /// into [`ResponseLedger::from_persisted`] so sequence `1..n` is checked.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] for blank or numeric-like
+    /// identities, [`WriteError::EmptyReference`] for a blank digest,
+    /// [`WriteError::InvalidPayloadDigest`] for a noncanonical digest, or
+    /// [`WriteError::InvalidStoredSequence`] when `sequence` is zero.
+    pub fn from_persisted(
+        server_event_ref: impl AsRef<str>,
+        client_event_ref: impl AsRef<str>,
+        item_version_ref: impl AsRef<str>,
+        payload_digest: impl AsRef<str>,
+        sequence: usize,
+    ) -> Result<Self, WriteError> {
+        let server_event_ref =
+            normalized_reference(server_event_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let client_event_ref =
+            normalized_reference(client_event_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let item_version_ref =
+            normalized_reference(item_version_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let payload_digest = payload_digest.as_ref();
+        if payload_digest.trim().is_empty() {
+            return Err(WriteError::EmptyReference);
+        }
+        if !is_canonical_sha256(payload_digest) {
+            return Err(WriteError::InvalidPayloadDigest);
+        }
+        if sequence == 0 {
+            return Err(WriteError::InvalidStoredSequence);
+        }
+        Ok(Self {
+            server_event_ref: server_event_ref.to_owned(),
+            client_event_ref: client_event_ref.to_owned(),
+            item_version_ref: item_version_ref.to_owned(),
+            payload_digest: payload_digest.to_owned(),
+            sequence,
+        })
+    }
 }
 
 /// Immutable response snapshot frozen when collection completes.
@@ -140,6 +183,8 @@ pub enum WriteError {
     ServerReferenceConflict,
     /// A response snapshot was requested before the session reached completion.
     SnapshotRequiresCompleted(SessionState),
+    /// Stored events were missing, gapped, or rewound relative to server sequence `1..n`.
+    InvalidStoredSequence,
 }
 
 impl Display for WriteError {
@@ -163,6 +208,9 @@ impl Display for WriteError {
             Self::SnapshotRequiresCompleted(state) => write!(
                 formatter,
                 "response snapshot requires Completed session state, found {state:?}"
+            ),
+            Self::InvalidStoredSequence => formatter.write_str(
+                "stored response events must keep server sequence 1..n without gaps",
             ),
         }
     }
@@ -210,6 +258,60 @@ impl ResponseLedger {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
+    }
+
+    /// Return the opaque assessment-session reference bound to this ledger.
+    #[must_use]
+    pub fn session_ref(&self) -> &str {
+        &self.session_ref
+    }
+
+    /// Return accepted response events in server-authoritative order.
+    #[must_use]
+    pub fn events(&self) -> &[ResponseEvent] {
+        &self.events
+    }
+
+    /// Rebuild a ledger from durable events after process restart.
+    ///
+    /// Events must already be valid identities with server sequence `1..n` and
+    /// no reused client or server references. This does not re-check whether
+    /// the live session is still Active; stored answers stay stored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] for a blank or numeric-like
+    /// session, [`WriteError::InvalidStoredSequence`] when sequences are not
+    /// exactly `1..n` in order, [`WriteError::IdempotencyConflict`] when a
+    /// client reference repeats, or [`WriteError::ServerReferenceConflict`]
+    /// when a server event reference repeats.
+    pub fn from_persisted(
+        session_ref: impl AsRef<str>,
+        events: Vec<ResponseEvent>,
+    ) -> Result<Self, WriteError> {
+        let session_ref =
+            normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        for (index, event) in events.iter().enumerate() {
+            if event.sequence != index + 1 {
+                return Err(WriteError::InvalidStoredSequence);
+            }
+            if events[..index]
+                .iter()
+                .any(|prior| prior.client_event_ref == event.client_event_ref)
+            {
+                return Err(WriteError::IdempotencyConflict);
+            }
+            if events[..index]
+                .iter()
+                .any(|prior| prior.server_event_ref == event.server_event_ref)
+            {
+                return Err(WriteError::ServerReferenceConflict);
+            }
+        }
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            events,
+        })
     }
 
     /// Record one response event or replay an identical prior event.

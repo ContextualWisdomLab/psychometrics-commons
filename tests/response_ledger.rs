@@ -1,6 +1,8 @@
 //! Integration tests for response-event idempotency and immutable snapshots.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
+use psychometrics_commons_runtime::response::{
+    ResponseEvent, ResponseLedger, ResponseWrite, WriteError,
+};
 use psychometrics_commons_runtime::session::SessionState;
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -334,5 +336,145 @@ fn write_errors_have_stable_human_readable_context() {
     assert_eq!(
         WriteError::SnapshotRequiresCompleted(SessionState::Active).to_string(),
         "response snapshot requires Completed session state, found Active"
+    );
+    assert_eq!(
+        WriteError::InvalidStoredSequence.to_string(),
+        "stored response events must keep server sequence 1..n without gaps"
+    );
+}
+
+#[test]
+fn two_item_korean_path_reloads_the_same_answers_after_restart() {
+    let mut live = ResponseLedger::new("session_big_five_ko").unwrap();
+    live.record(
+        SessionState::Active,
+        write(
+            "response_event_openness",
+            "client_openness",
+            "item_version_openness_ko",
+            DIGEST_A,
+        ),
+    )
+    .unwrap();
+    live.record(
+        SessionState::Active,
+        write(
+            "response_event_conscientiousness",
+            "client_conscientiousness",
+            "item_version_conscientiousness_ko",
+            DIGEST_B,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(live.session_ref(), "session_big_five_ko");
+    assert_eq!(live.events().len(), 2);
+    assert_eq!(live.events()[0].sequence(), 1);
+    assert_eq!(live.events()[1].item_version_ref(), "item_version_conscientiousness_ko");
+
+    let reloaded = ResponseLedger::from_persisted(live.session_ref(), live.events().to_vec()).unwrap();
+    assert_eq!(reloaded, live);
+    assert_eq!(
+        reloaded.freeze_as(SessionState::Completed, "response_snapshot_big_five_ko")
+            .unwrap()
+            .event_refs(),
+        ["response_event_openness", "response_event_conscientiousness"]
+    );
+}
+
+#[test]
+fn persisted_events_reject_rewound_or_gapped_sequence() {
+    let first = ResponseEvent::from_persisted(
+        "response_event_openness",
+        "client_openness",
+        "item_version_openness_ko",
+        DIGEST_A,
+        2,
+    )
+    .unwrap();
+    assert_eq!(
+        ResponseLedger::from_persisted("session_big_five_ko", vec![first]).unwrap_err(),
+        WriteError::InvalidStoredSequence
+    );
+    assert_eq!(
+        ResponseEvent::from_persisted(
+            "response_event_openness",
+            "client_openness",
+            "item_version_openness_ko",
+            DIGEST_A,
+            0,
+        )
+        .unwrap_err(),
+        WriteError::InvalidStoredSequence
+    );
+}
+
+#[test]
+fn persisted_events_reject_reused_identities_and_blank_session() {
+    let first = ResponseEvent::from_persisted(
+        "response_event_openness",
+        "client_openness",
+        "item_version_openness_ko",
+        DIGEST_A,
+        1,
+    )
+    .unwrap();
+    let duplicate_client = ResponseEvent::from_persisted(
+        "response_event_other",
+        "client_openness",
+        "item_version_conscientiousness_ko",
+        DIGEST_B,
+        2,
+    )
+    .unwrap();
+    let duplicate_server = ResponseEvent::from_persisted(
+        "response_event_openness",
+        "client_conscientiousness",
+        "item_version_conscientiousness_ko",
+        DIGEST_B,
+        2,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ResponseLedger::from_persisted("session_big_five_ko", vec![first.clone(), duplicate_client])
+            .unwrap_err(),
+        WriteError::IdempotencyConflict
+    );
+    assert_eq!(
+        ResponseLedger::from_persisted("session_big_five_ko", vec![first, duplicate_server])
+            .unwrap_err(),
+        WriteError::ServerReferenceConflict
+    );
+    assert_eq!(
+        ResponseLedger::from_persisted("12", Vec::new()).unwrap_err(),
+        WriteError::InvalidReference
+    );
+    assert_eq!(
+        ResponseEvent::from_persisted("12", "client_openness", "item_version_o", DIGEST_A, 1)
+            .unwrap_err(),
+        WriteError::InvalidReference
+    );
+    assert_eq!(
+        ResponseEvent::from_persisted(
+            "response_event_openness",
+            "client_openness",
+            "item_version_openness_ko",
+            " ",
+            1,
+        )
+        .unwrap_err(),
+        WriteError::EmptyReference
+    );
+    assert_eq!(
+        ResponseEvent::from_persisted(
+            "response_event_openness",
+            "client_openness",
+            "item_version_openness_ko",
+            "sha256:not-canonical",
+            1,
+        )
+        .unwrap_err(),
+        WriteError::InvalidPayloadDigest
     );
 }
