@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main contains in-memory/domain lifecycle primitives only; active PR #24 carries the first PostgreSQL integration-evidence migration/adapter but is not protected-main truth until merged
+- Current/as-built status: protected main persists integration, scoring-job, data-rights, item-delivery, consent, instrument-release, result-snapshot, response-snapshot, scoring-request, and inbox-consumption slices; in-progress `response_event` persist/load is Active PR work on this branch and is not protected-main truth until merged
 - Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
-- Migration status: active PR #24 introduces only the bounded integration-evidence slice; the remaining product schema still must be established from the logical ERD and this ADR without synthetic provenance backfills
+- Migration status: `migrations/0020_response_event.sql` adds the in-progress event ledger with observed/received timestamps; remaining session HTTP and response HTTP families still must be established from the logical ERD without synthetic provenance backfills
 
 ## Context
 
@@ -76,7 +76,7 @@ A physical migration may split an entity across tables or co-locate value object
 
 ### Response recording
 
-One transaction validates the current session state, reserves server sequence, applies the idempotency/uniqueness contract, and stores the accepted response event. Two concurrent requests cannot both create the same logical `client_event_ref`.
+One transaction validates the current session state, reserves server sequence, applies the idempotency/uniqueness contract, and stores the accepted response event with distinct observed and received instants (ISO 8601-1). Two concurrent requests cannot both create the same logical `client_event_ref`. The first physical classifier uses `READ COMMITTED` so a concurrent unique-key winner is visible to the exact-replay inspection (Berenson et al., 1995; PostgreSQL Global Development Group, 2026).
 
 ### Session completion
 
@@ -302,6 +302,10 @@ Costs:
 The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed. The `READ COMMITTED` restriction may be removed only when a replacement replay algorithm is proven isolation-correct by real concurrent PostgreSQL tests and the documentation/traceability contract is updated in the same change.
 
 ## References
+
+Berenson, H., Bernstein, P., Gray, J., Melton, J., O'Neil, E., & O'Neil, P. (1995). A critique of ANSI SQL isolation levels. *ACM SIGMOD Record, 24*(2), 1–10. https://doi.org/10.1145/568271.223785
+
+International Organization for Standardization. (2019). *Date and time — Representations for information interchange — Part 1: Basic rules* (ISO 8601-1:2019).
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
 
