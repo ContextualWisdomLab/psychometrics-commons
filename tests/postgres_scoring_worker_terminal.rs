@@ -9,7 +9,7 @@ use psychometrics_commons_runtime::postgres_scoring_completion::ScoringCompletio
 use psychometrics_commons_runtime::postgres_scoring_failure::ScoringFailureOutboxError;
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
-    ScoringJobCompletionDisposition, ScoringJobFailureDisposition,
+    ScoringJobCompletionDisposition, ScoringJobFailureDisposition, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_scoring_worker::{
     commit_scoring_worker_outcome, run_scoring_worker_attempt, ScoringWorkerCommitError,
@@ -20,6 +20,7 @@ use psychometrics_commons_runtime::scoring_worker::{
     scoring_terminal_event_ref, ScoringTerminalIdentity, ScoringWorkerEngine,
     ScoringWorkerEngineOutcome, ScoringWorkerEnvelope, ScoringWorkerError,
 };
+use std::cell::Cell;
 use std::error::Error;
 use std::sync::{Mutex, MutexGuard};
 
@@ -348,7 +349,8 @@ fn minted_event_ref_cannot_add_a_second_outbox_row_after_accept() {
 }
 
 struct ScriptedScoringEngine {
-    outcome: ScoringWorkerEngineOutcome,
+    result: Result<ScoringWorkerEngineOutcome, ScoringWorkerError>,
+    calls: Cell<usize>,
 }
 
 impl ScoringWorkerEngine for ScriptedScoringEngine {
@@ -357,7 +359,8 @@ impl ScoringWorkerEngine for ScriptedScoringEngine {
         _scoring_job_ref: &str,
         _scoring_request_ref: &str,
     ) -> Result<ScoringWorkerEngineOutcome, ScoringWorkerError> {
-        Ok(self.outcome.clone())
+        self.calls.set(self.calls.get() + 1);
+        self.result.clone()
     }
 }
 
@@ -386,9 +389,10 @@ fn worker_attempt_commits_engine_completion_with_the_stable_event_ref() {
         "scoring_request_worker_attempt_completed",
     );
     let engine = ScriptedScoringEngine {
-        outcome: ScoringWorkerEngineOutcome::Completed {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
             result_ref: "result_worker_attempt_completed".to_owned(),
-        },
+        }),
+        calls: Cell::new(0),
     };
 
     let mut transaction = client.transaction().unwrap();
@@ -456,9 +460,10 @@ fn worker_attempt_commits_engine_failure_with_the_stable_event_ref() {
         "scoring_request_worker_attempt_failed",
     );
     let engine = ScriptedScoringEngine {
-        outcome: ScoringWorkerEngineOutcome::Failed {
+        result: Ok(ScoringWorkerEngineOutcome::Failed {
             cause_code: "invalid_scientific_evidence".to_owned(),
-        },
+        }),
+        calls: Cell::new(0),
     };
 
     let mut transaction = client.transaction().unwrap();
@@ -490,6 +495,223 @@ fn worker_attempt_commits_engine_failure_with_the_stable_event_ref() {
     assert_eq!(result_ref, None);
     assert_eq!(cause.as_deref(), Some("invalid_scientific_evidence"));
     assert_eq!(outbox_count(&mut client, &event_ref), 1);
+
+    let mut transaction = client.transaction().unwrap();
+    let duplicate = run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_failed",
+        &engine,
+        worker_envelope("scoring.result.failed"),
+        3,
+    )
+    .unwrap();
+    assert!(matches!(
+        duplicate,
+        ScoringWorkerPersistence::Failed(persistence)
+            if persistence.failure() == ScoringJobFailureDisposition::Duplicate
+                && persistence.outbox() == PersistenceDisposition::Duplicate
+    ));
+    transaction.commit().unwrap();
+    assert_eq!(outbox_count(&mut client, &event_ref), 1);
+}
+
+#[test]
+fn worker_attempt_planning_failure_leaves_the_job_leased() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_plan_fail";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_plan_fail",
+    );
+    let engine = ScriptedScoringEngine {
+        result: Err(ScoringWorkerError::InvalidEnvelope),
+        calls: Cell::new(0),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            "scoring_request_worker_attempt_plan_fail",
+            &engine,
+            worker_envelope("scoring.result.completed"),
+            3,
+        ),
+        Err(ScoringWorkerCommitError::Identity(
+            ScoringWorkerError::InvalidEnvelope
+        ))
+    ));
+    assert_eq!(engine.calls.get(), 1);
+    transaction.rollback().unwrap();
+
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "leased");
+    assert_eq!(result_ref, None);
+    assert_eq!(cause, None);
+    let total_outbox: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(total_outbox, 0);
+}
+
+#[test]
+fn worker_attempt_rejects_a_conflicting_result_after_accept() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_conflict";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_conflict",
+    );
+    let accepted = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_accepted".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_conflict",
+        &accepted,
+        worker_envelope("scoring.result.completed"),
+        3,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let conflicting = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_other".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            "scoring_request_worker_attempt_conflict",
+            &conflicting,
+            worker_envelope("scoring.result.completed"),
+            3,
+        ),
+        Err(ScoringWorkerCommitError::Completion(
+            ScoringCompletionOutboxError::Completion(
+                ScoringJobPersistenceError::ConflictingCompletion
+            )
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let accepted_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_accepted"),
+    )
+    .unwrap();
+    let conflicting_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_other"),
+    )
+    .unwrap();
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "completed");
+    assert_eq!(
+        result_ref.as_deref(),
+        Some("result_worker_attempt_accepted")
+    );
+    assert_eq!(cause, None);
+    assert_eq!(outbox_count(&mut client, &accepted_event_ref), 1);
+    assert_eq!(outbox_count(&mut client, &conflicting_event_ref), 0);
+}
+
+#[test]
+fn worker_attempt_rejects_a_cause_after_accepted_completion() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_cause_after";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_cause_after",
+    );
+    let accepted = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_cause_after".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_cause_after",
+        &accepted,
+        worker_envelope("scoring.result.completed"),
+        3,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let failed = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Failed {
+            cause_code: "invalid_scientific_evidence".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            "scoring_request_worker_attempt_cause_after",
+            &failed,
+            worker_envelope("scoring.result.failed"),
+            3,
+        ),
+        Err(ScoringWorkerCommitError::Failure(
+            ScoringFailureOutboxError::Failure(ScoringJobPersistenceError::NotLeased)
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let accepted_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_cause_after"),
+    )
+    .unwrap();
+    let cause_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Cause("invalid_scientific_evidence"),
+    )
+    .unwrap();
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "completed");
+    assert_eq!(
+        result_ref.as_deref(),
+        Some("result_worker_attempt_cause_after")
+    );
+    assert_eq!(cause, None);
+    assert_eq!(outbox_count(&mut client, &accepted_event_ref), 1);
+    assert_eq!(outbox_count(&mut client, &cause_event_ref), 0);
 }
 
 #[test]

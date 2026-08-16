@@ -146,7 +146,7 @@ fn scoring_worker_errors_explain_the_next_safe_action() {
 struct ScriptedScoringEngine {
     expected_job: &'static str,
     expected_request: &'static str,
-    outcome: ScoringWorkerEngineOutcome,
+    result: Result<ScoringWorkerEngineOutcome, ScoringWorkerError>,
     calls: Cell<usize>,
 }
 
@@ -159,7 +159,7 @@ impl ScoringWorkerEngine for ScriptedScoringEngine {
         assert_eq!(scoring_job_ref, self.expected_job);
         assert_eq!(scoring_request_ref, self.expected_request);
         self.calls.set(self.calls.get() + 1);
-        Ok(self.outcome.clone())
+        self.result.clone()
     }
 }
 
@@ -181,9 +181,9 @@ fn planner_binds_the_stable_result_event_and_ignores_a_minted_identity() {
     let engine = ScriptedScoringEngine {
         expected_job: "scoring_job_alpha",
         expected_request: "scoring_request_alpha",
-        outcome: ScoringWorkerEngineOutcome::Completed {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
             result_ref: "result_alpha".to_owned(),
-        },
+        }),
         calls: Cell::new(0),
     };
 
@@ -221,9 +221,9 @@ fn planner_binds_a_permanent_scientific_failure_to_the_stable_cause_identity() {
     let engine = ScriptedScoringEngine {
         expected_job: "scoring_job_alpha",
         expected_request: "scoring_request_unknown",
-        outcome: ScoringWorkerEngineOutcome::Failed {
+        result: Ok(ScoringWorkerEngineOutcome::Failed {
             cause_code: "invalid_scientific_evidence".to_owned(),
-        },
+        }),
         calls: Cell::new(0),
     };
 
@@ -254,9 +254,9 @@ fn planner_rejects_blank_request_identity_before_calling_the_engine() {
     let engine = ScriptedScoringEngine {
         expected_job: "scoring_job_alpha",
         expected_request: "unused",
-        outcome: ScoringWorkerEngineOutcome::Completed {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
             result_ref: "result_alpha".to_owned(),
-        },
+        }),
         calls: Cell::new(0),
     };
 
@@ -278,9 +278,9 @@ fn planner_rejects_an_invalid_caller_envelope_after_the_engine_returns() {
     let engine = ScriptedScoringEngine {
         expected_job: "scoring_job_alpha",
         expected_request: "scoring_request_alpha",
-        outcome: ScoringWorkerEngineOutcome::Completed {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
             result_ref: "result_alpha".to_owned(),
-        },
+        }),
         calls: Cell::new(0),
     };
     let mut envelope = worker_envelope("scoring.result.completed");
@@ -297,4 +297,93 @@ fn planner_rejects_an_invalid_caller_envelope_after_the_engine_returns() {
         ScoringWorkerError::InvalidEnvelope
     );
     assert_eq!(engine.calls.get(), 1);
+}
+
+#[test]
+fn planner_rejects_invalid_job_identity_before_calling_the_engine() {
+    let engine = ScriptedScoringEngine {
+        expected_job: "unused",
+        expected_request: "unused",
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_alpha".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "123",
+            "scoring_request_alpha",
+            &engine,
+            worker_envelope("scoring.result.completed"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+    assert_eq!(engine.calls.get(), 0);
+}
+
+#[test]
+fn planner_returns_a_non_terminal_engine_error_without_binding_an_event() {
+    let engine = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "scoring_request_unknown",
+        result: Err(ScoringWorkerError::InvalidEnvelope),
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "scoring_job_alpha",
+            "scoring_request_unknown",
+            &engine,
+            worker_envelope("scoring.result.completed"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidEnvelope
+    );
+    assert_eq!(engine.calls.get(), 1);
+}
+
+#[test]
+fn planner_rejects_a_blank_or_numeric_engine_result_identity() {
+    let blank = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "scoring_request_alpha",
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: " ".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "scoring_job_alpha",
+            "scoring_request_alpha",
+            &blank,
+            worker_envelope("scoring.result.completed"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+    assert_eq!(blank.calls.get(), 1);
+
+    let numeric = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "scoring_request_alpha",
+        result: Ok(ScoringWorkerEngineOutcome::Failed {
+            cause_code: "1e5".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "scoring_job_alpha",
+            "scoring_request_alpha",
+            &numeric,
+            worker_envelope("scoring.result.failed"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+    assert_eq!(numeric.calls.get(), 1);
 }

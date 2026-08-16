@@ -93,7 +93,7 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
-A scoring worker that records a terminal outcome must ask a `ScoringWorkerEngine` first, then reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018). The planner overwrites any minted event identity before `commit_scoring_worker_outcome` writes. Live `fast-mlsirm` execution remains a later adapter behind that engine trait.
+A scoring worker that records a terminal outcome must ask a `ScoringWorkerEngine` first, then reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018). `ScoringWorkerEnvelope` does not accept a caller-minted `event_ref`; the planner assigns the length-prefixed job-plus-outcome identity before `commit_scoring_worker_outcome` writes. A later attempt that presents a different result or a cause after an accepted write fails closed without inserting a second outbox row. Live `fast-mlsirm` execution and immutable result-snapshot composition remain later adapters behind that engine trait.
 
 ### Integration outbox enqueue
 
