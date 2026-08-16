@@ -89,20 +89,73 @@ impl ScoringRequest {
         if requested_snapshot_ref != snapshot_ref {
             return Err(ScoringContractError::ResponseSnapshotMismatch);
         }
-        if input.requested_output_schema_version != SUPPORTED_OUTPUT_SCHEMA_VERSION {
+        Self::from_validated_pins(ValidatedScoringPins {
+            session_ref: snapshot.session_ref(),
+            request_ref,
+            response_snapshot_ref: requested_snapshot_ref,
+            assessment_spec_ref,
+            instrument_version_ref,
+            scoring_version_ref,
+            calibration_reference,
+            norm_version_ref,
+            requested_output_schema_version: input.requested_output_schema_version,
+        })
+    }
+
+    /// Reconstruct one version-pinned scoring request from durable stored identity.
+    ///
+    /// Call this after process restart when a scoring job still names
+    /// `scoring_request_ref`. The stored session and snapshot identities are
+    /// accepted as pins; this does not reload response events and does not call
+    /// `fast-mlsirm`. Empty-snapshot rejection remains the persist-time
+    /// [`Self::from_snapshot`] check.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScoringContractError::EmptyReference`] when a required or
+    /// supplied optional reference is blank, or
+    /// [`ScoringContractError::UnsupportedOutputSchemaVersion`] when the stored
+    /// schema major is not supported by this runtime.
+    pub fn from_persisted(
+        session_ref: &str,
+        input: ScoringRequestInput<'_>,
+    ) -> Result<Self, ScoringContractError> {
+        let session_ref = required_reference(session_ref)?;
+        let request_ref = required_reference(input.scoring_request_ref)?;
+        let requested_snapshot_ref = required_reference(input.response_snapshot_ref)?;
+        let assessment_spec_ref = required_reference(input.assessment_spec_ref)?;
+        let instrument_version_ref = required_reference(input.instrument_version_ref)?;
+        let scoring_version_ref = required_reference(input.scoring_version_ref)?;
+        let calibration_reference = required_reference(input.calibration_reference)?;
+        let norm_version_ref = input.norm_version_ref.map(required_reference).transpose()?;
+        Self::from_validated_pins(ValidatedScoringPins {
+            session_ref,
+            request_ref,
+            response_snapshot_ref: requested_snapshot_ref,
+            assessment_spec_ref,
+            instrument_version_ref,
+            scoring_version_ref,
+            calibration_reference,
+            norm_version_ref,
+            requested_output_schema_version: input.requested_output_schema_version,
+        })
+    }
+
+    fn from_validated_pins(pins: ValidatedScoringPins<'_>) -> Result<Self, ScoringContractError> {
+        if pins.requested_output_schema_version != SUPPORTED_OUTPUT_SCHEMA_VERSION {
             return Err(ScoringContractError::UnsupportedOutputSchemaVersion);
         }
 
         Ok(Self {
-            request_ref: request_ref.to_owned(),
-            session_ref: snapshot.session_ref().to_owned(),
-            response_snapshot_ref: snapshot_ref.to_owned(),
-            assessment_spec_ref: assessment_spec_ref.to_owned(),
-            instrument_version_ref: instrument_version_ref.to_owned(),
-            scoring_version_ref: scoring_version_ref.to_owned(),
-            calibration_reference: calibration_reference.to_owned(),
-            norm_version_ref: norm_version_ref.map(str::to_owned),
-            requested_output_schema_version: input.requested_output_schema_version,
+            request_ref: pins.request_ref.to_owned(),
+            session_ref: pins.session_ref.to_owned(),
+            response_snapshot_ref: pins.response_snapshot_ref.to_owned(),
+            assessment_spec_ref: pins.assessment_spec_ref.to_owned(),
+            instrument_version_ref: pins.instrument_version_ref.to_owned(),
+            scoring_version_ref: pins.scoring_version_ref.to_owned(),
+            calibration_reference: pins.calibration_reference.to_owned(),
+            norm_version_ref: pins.norm_version_ref.map(str::to_owned),
+            requested_output_schema_version: pins.requested_output_schema_version,
         })
     }
 
@@ -428,6 +481,18 @@ impl Display for ScoringContractError {
 }
 
 impl Error for ScoringContractError {}
+
+struct ValidatedScoringPins<'a> {
+    session_ref: &'a str,
+    request_ref: &'a str,
+    response_snapshot_ref: &'a str,
+    assessment_spec_ref: &'a str,
+    instrument_version_ref: &'a str,
+    scoring_version_ref: &'a str,
+    calibration_reference: &'a str,
+    norm_version_ref: Option<&'a str>,
+    requested_output_schema_version: u16,
+}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
     normalized_reference(reference).ok_or(ScoringContractError::EmptyReference)
