@@ -110,12 +110,14 @@ src/lib.rs
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
+├── postgres_scoring_worker.rs  # Active PR: stable terminal commit + scripted-engine attempt
 ├── reference.rs      # internal opaque-reference normalization
 ├── research_release.rs  # product-side Research Commons release-evidence gate
 ├── response.rs       # idempotent response ledger + immutable response snapshots
 ├── result.rs         # immutable result provenance/supersession
 ├── scoring.rs        # version-pinned scoring dispatch contract
 ├── scoring_job.rs    # bounded retry/quarantine lifecycle with lease fencing
+├── scoring_worker.rs  # Active PR: stable terminal event identity + scripted-engine planner
 └── session.rs        # server-authoritative assessment-session transitions bound to a published locale release
 
 migrations/
@@ -132,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #136 scoring-worker terminal identity is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The worker reuses one stable `event_ref` for the job plus accepted result, or the job plus permanent cause, and rejects a minted identity before any write. This head also carries #115 completion/failure outbox composition and #69 completion-only work; those predecessors should not land separately. Live fast-mlsirm execution remains outside this slice.
+**Active PR** successor to #136 scoring-worker attempt planning is not protected-main truth until an unchanged reviewed/check-clean head is integrated. A scripted scoring engine binds one stable `event_ref` for the job plus accepted result, or the job plus permanent cause, before `commit_scoring_worker_outcome`. A minted envelope identity is rewritten rather than inserted. Retryable engine outcomes record the existing retry helper and write no terminal outbox row. This head also carries #136 worker-identity, #115 completion/failure outbox composition, and #69 completion-only work; those predecessors should not land separately. Live fast-mlsirm execution remains outside this slice.
 
 ## 5. ADR traceability by concern
 

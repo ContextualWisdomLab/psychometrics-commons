@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- One fenced scoring-worker attempt binds a scripted engine outcome to the stable job-plus-result or job-plus-cause outbox identity before the terminal write, rewrites a minted envelope `event_ref`, and records retryable engine failures without a terminal outbox row.
 - Scoring-worker terminal commits reuse one stable outbox `event_ref` for the job plus accepted result, or the job plus permanent cause, and reject a minted identity before any write so a crashed worker cannot enqueue a second terminal event.
 - Atomic PostgreSQL scoring-job permanent-failure and integration-outbox composition: a fenced scientific quarantine and its bound outbox event commit together, exact replay of the same cause stays idempotent, a different cause fails closed, mixed exact dispositions reconcile legacy one-sided state, and a late outbox conflict rolls the quarantine back.
 - Atomic PostgreSQL scoring-job completion and integration-outbox composition: a fenced successful result and its bound outbox event commit together, exact replay stays idempotent, mixed exact dispositions reconcile legacy one-sided state, and a late outbox conflict rolls the completion back.

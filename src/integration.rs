@@ -226,6 +226,27 @@ impl IntegrationEvent {
     pub fn payload_digest(&self) -> &str {
         &self.payload_digest
     }
+
+    /// Return a copy of this envelope with a different already-validated event identity.
+    ///
+    /// Callers that derived `event_ref` from the same opaque-reference rules as
+    /// [`IntegrationEvent::new`] can replace only the identity without re-validating
+    /// tenant, schema, or digest evidence.
+    #[must_use]
+    pub(crate) fn with_event_ref(&self, event_ref: String) -> Self {
+        Self {
+            event_ref,
+            event_type: self.event_type.clone(),
+            schema_version: self.schema_version.clone(),
+            source: self.source.clone(),
+            tenant_ref: self.tenant_ref.clone(),
+            subject_ref: self.subject_ref.clone(),
+            occurred_at_unix_ms: self.occurred_at_unix_ms,
+            correlation_ref: self.correlation_ref.clone(),
+            causation_ref: self.causation_ref.clone(),
+            payload_digest: self.payload_digest.clone(),
+        }
+    }
 }
 
 /// Delivery outcome recorded for one outbox attempt.

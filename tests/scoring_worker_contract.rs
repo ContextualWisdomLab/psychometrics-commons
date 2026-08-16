@@ -2,8 +2,9 @@
 
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::scoring_worker::{
-    require_stable_terminal_event, scoring_terminal_event_ref, ScoringTerminalIdentity,
-    ScoringWorkerError,
+    bind_scoring_worker_terminal_event, plan_scoring_worker_attempt, require_stable_terminal_event,
+    scoring_terminal_event_ref, ScoringEngineAttempt, ScoringTerminalIdentity, ScoringWorkerError,
+    ScoringWorkerPlan, ScriptedScoringEngine,
 };
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -120,4 +121,119 @@ fn scoring_worker_errors_explain_the_next_safe_action() {
         ScoringWorkerError::UnstableEventRef.to_string(),
         "scoring worker must reuse the stable job and outcome event identity"
     );
+}
+
+#[test]
+fn planner_rewrites_a_minted_envelope_to_the_stable_result_identity() {
+    let engine = ScriptedScoringEngine::new(ScoringEngineAttempt::Completed {
+        result_ref: "result_alpha",
+    });
+    let planned = plan_scoring_worker_attempt(
+        "scoring_job_alpha",
+        engine.evaluate(),
+        &event("event_scoring_worker_minted", "scoring_job_alpha"),
+    )
+    .unwrap();
+    let ScoringWorkerPlan::Complete {
+        result_ref,
+        event: bound,
+    } = planned
+    else {
+        panic!("completed engine must plan a terminal completion");
+    };
+    assert_eq!(result_ref, "result_alpha");
+    assert_eq!(
+        bound.event_ref(),
+        "scoring_terminal:result:scoring_job_alpha:result_alpha"
+    );
+    assert_eq!(bound.event_type(), "scoring.result.completed");
+    assert_eq!(bound.tenant_ref(), "tenant_scoring_worker");
+    require_stable_terminal_event(
+        "scoring_job_alpha",
+        ScoringTerminalIdentity::Result("result_alpha"),
+        &bound,
+    )
+    .unwrap();
+}
+
+#[test]
+fn planner_rewrites_a_minted_envelope_to_the_stable_cause_identity() {
+    let engine = ScriptedScoringEngine::new(ScoringEngineAttempt::PermanentFailure {
+        cause_code: "invalid_scientific_evidence",
+    });
+    let planned = plan_scoring_worker_attempt(
+        "scoring_job_alpha",
+        engine.evaluate(),
+        &event("event_scoring_worker_minted", "scoring_job_alpha"),
+    )
+    .unwrap();
+    let ScoringWorkerPlan::FailPermanently {
+        cause_code,
+        event: bound,
+    } = planned
+    else {
+        panic!("permanent engine failure must plan a terminal quarantine");
+    };
+    assert_eq!(cause_code, "invalid_scientific_evidence");
+    assert_eq!(
+        bound.event_ref(),
+        "scoring_terminal:cause:scoring_job_alpha:invalid_scientific_evidence"
+    );
+}
+
+#[test]
+fn planner_does_not_bind_a_terminal_event_for_retryable_engine_failure() {
+    let engine = ScriptedScoringEngine::new(ScoringEngineAttempt::Retryable {
+        cause_code: "scoring_engine_unavailable",
+    });
+    let planned = plan_scoring_worker_attempt(
+        "scoring_job_alpha",
+        engine.evaluate(),
+        &event("event_scoring_worker_minted", "scoring_job_alpha"),
+    )
+    .unwrap();
+    assert_eq!(
+        planned,
+        ScoringWorkerPlan::Retry {
+            cause_code: "scoring_engine_unavailable",
+        }
+    );
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "scoring_job_alpha",
+            ScoringEngineAttempt::Retryable { cause_code: " " },
+            &event("event_scoring_worker_minted", "scoring_job_alpha"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            " ",
+            ScoringEngineAttempt::Retryable {
+                cause_code: "scoring_engine_unavailable",
+            },
+            &event("event_scoring_worker_minted", "scoring_job_alpha"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+}
+
+#[test]
+fn bind_helper_replaces_only_the_event_identity() {
+    let minted = event("event_scoring_worker_minted", "scoring_job_alpha");
+    let bound = bind_scoring_worker_terminal_event(
+        "scoring_job_alpha",
+        ScoringTerminalIdentity::Result("result_alpha"),
+        &minted,
+    )
+    .unwrap();
+    assert_eq!(
+        bound.event_ref(),
+        "scoring_terminal:result:scoring_job_alpha:result_alpha"
+    );
+    assert_eq!(bound.source(), minted.source());
+    assert_eq!(bound.payload_digest(), minted.payload_digest());
+    assert_eq!(bound.correlation_ref(), minted.correlation_ref());
 }

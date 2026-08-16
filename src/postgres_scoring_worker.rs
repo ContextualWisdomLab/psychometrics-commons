@@ -14,8 +14,11 @@ use crate::postgres_scoring_failure::{
     record_permanent_scoring_failure_with_outbox, ScoringFailureOutboxError,
     ScoringFailureOutboxPersistence,
 };
+use crate::postgres_scoring_job::{record_retryable_scoring_failure, ScoringJobPersistenceError};
+use crate::scoring_job::ScoringJobState;
 use crate::scoring_worker::{
-    require_stable_terminal_event, ScoringTerminalIdentity, ScoringWorkerError,
+    plan_scoring_worker_attempt, require_stable_terminal_event, ScoringEngineAttempt,
+    ScoringTerminalIdentity, ScoringWorkerError, ScoringWorkerPlan,
 };
 use postgres::Transaction;
 use std::error::Error;
@@ -140,5 +143,158 @@ pub fn commit_scoring_worker_outcome(
             .map(ScoringWorkerPersistence::Failed)
             .map_err(ScoringWorkerCommitError::Failure)
         }
+    }
+}
+
+/// Durable dispositions produced by one fenced scoring-worker attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScoringWorkerAttemptPersistence {
+    /// A terminal completion or permanent failure and its bound outbox evidence.
+    Terminal(ScoringWorkerPersistence),
+    /// A retryable engine failure recorded without a terminal outbox row.
+    Retryable(ScoringJobState),
+}
+
+/// Fail-closed error for one fenced scoring-worker attempt.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ScoringWorkerAttemptError {
+    /// The engine outcome could not be bound to a stable terminal identity.
+    Identity(ScoringWorkerError),
+    /// Fenced successful completion or its outbox evidence failed.
+    Completion(ScoringCompletionOutboxError),
+    /// Fenced permanent failure or its outbox evidence failed.
+    Failure(ScoringFailureOutboxError),
+    /// Retryable engine failure could not be recorded on the current lease.
+    Retry(ScoringJobPersistenceError),
+}
+
+impl Display for ScoringWorkerAttemptError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Identity(_) => {
+                "bind the stable job and outcome event identity before the terminal write"
+            }
+            Self::Completion(_) => "scoring worker completion persistence failed",
+            Self::Failure(_) => "scoring worker failure persistence failed",
+            Self::Retry(_) => "record the retryable engine failure without a terminal outbox row",
+        })
+    }
+}
+
+impl Error for ScoringWorkerAttemptError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Identity(error) => Some(error),
+            Self::Completion(error) => Some(error),
+            Self::Failure(error) => Some(error),
+            Self::Retry(error) => Some(error),
+        }
+    }
+}
+
+/// Run one fenced scoring-worker attempt from a replaceable engine outcome.
+///
+/// Completed and permanently failed outcomes rewrite a minted envelope `event_ref` to the
+/// stable job-plus-result or job-plus-cause identity, then reuse
+/// [`commit_scoring_worker_outcome`]. Retryable outcomes call the existing retry helper and
+/// insert no terminal outbox row. Event type, tenant, schema version, correlation,
+/// causation, payload digest, and `cause_code` stay on the caller contract.
+///
+/// The caller supplies and owns a `READ COMMITTED` transaction and must roll it back when
+/// this function returns an error.
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerAttemptError::Identity`] when the engine outcome cannot be bound,
+/// [`ScoringWorkerAttemptError::Completion`] or [`ScoringWorkerAttemptError::Failure`] when
+/// a terminal write fails, or [`ScoringWorkerAttemptError::Retry`] when retryable failure
+/// cannot be recorded.
+#[allow(clippy::too_many_arguments)]
+pub fn run_scoring_worker_attempt(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    fencing_token: u64,
+    attempt: ScoringEngineAttempt<'_>,
+    envelope: &IntegrationEvent,
+    occurred_at_unix_ms: u64,
+    retry_at_unix_ms: u64,
+    outbox_max_attempts: usize,
+) -> Result<ScoringWorkerAttemptPersistence, ScoringWorkerAttemptError> {
+    let plan = plan_scoring_worker_attempt(scoring_job_ref, attempt, envelope)
+        .map_err(ScoringWorkerAttemptError::Identity)?;
+    match plan {
+        ScoringWorkerPlan::Complete { result_ref, event } => commit_scoring_worker_outcome(
+            transaction,
+            scoring_job_ref,
+            fencing_token,
+            ScoringWorkerOutcome::Completed { result_ref },
+            occurred_at_unix_ms,
+            &event,
+            outbox_max_attempts,
+        )
+        .map(ScoringWorkerAttemptPersistence::Terminal)
+        .map_err(map_commit_error),
+        ScoringWorkerPlan::FailPermanently { cause_code, event } => commit_scoring_worker_outcome(
+            transaction,
+            scoring_job_ref,
+            fencing_token,
+            ScoringWorkerOutcome::Failed { cause_code },
+            occurred_at_unix_ms,
+            &event,
+            outbox_max_attempts,
+        )
+        .map(ScoringWorkerAttemptPersistence::Terminal)
+        .map_err(map_commit_error),
+        ScoringWorkerPlan::Retry { cause_code } => record_retryable_scoring_failure(
+            transaction,
+            scoring_job_ref,
+            fencing_token,
+            cause_code,
+            occurred_at_unix_ms,
+            retry_at_unix_ms,
+        )
+        .map(ScoringWorkerAttemptPersistence::Retryable)
+        .map_err(ScoringWorkerAttemptError::Retry),
+    }
+}
+
+fn map_commit_error(error: ScoringWorkerCommitError) -> ScoringWorkerAttemptError {
+    match error {
+        ScoringWorkerCommitError::Identity(error) => ScoringWorkerAttemptError::Identity(error),
+        ScoringWorkerCommitError::Completion(error) => ScoringWorkerAttemptError::Completion(error),
+        ScoringWorkerCommitError::Failure(error) => ScoringWorkerAttemptError::Failure(error),
+    }
+}
+
+#[cfg(test)]
+mod attempt_error_mapping_tests {
+    use super::{map_commit_error, ScoringWorkerAttemptError, ScoringWorkerCommitError};
+    use crate::postgres_scoring_completion::ScoringCompletionOutboxError;
+    use crate::postgres_scoring_failure::ScoringFailureOutboxError;
+    use crate::scoring_worker::ScoringWorkerError;
+
+    #[test]
+    fn commit_errors_keep_their_typed_attempt_sources() {
+        assert!(matches!(
+            map_commit_error(ScoringWorkerCommitError::Identity(
+                ScoringWorkerError::UnstableEventRef
+            )),
+            ScoringWorkerAttemptError::Identity(ScoringWorkerError::UnstableEventRef)
+        ));
+        assert!(matches!(
+            map_commit_error(ScoringWorkerCommitError::Completion(
+                ScoringCompletionOutboxError::InvalidCompletionEnvelope
+            )),
+            ScoringWorkerAttemptError::Completion(
+                ScoringCompletionOutboxError::InvalidCompletionEnvelope
+            )
+        ));
+        assert!(matches!(
+            map_commit_error(ScoringWorkerCommitError::Failure(
+                ScoringFailureOutboxError::InvalidFailureEnvelope
+            )),
+            ScoringWorkerAttemptError::Failure(ScoringFailureOutboxError::InvalidFailureEnvelope)
+        ));
     }
 }
