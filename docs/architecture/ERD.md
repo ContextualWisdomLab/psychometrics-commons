@@ -425,7 +425,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
-- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
+- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by `migrations/0005_consent_lifecycle.sql`; HTTP consent transport remains Target. The successor of #116 adds a purpose-specific durable projection `research_consent_snapshot` plus append-only `research_contribution` and `research_withdrawal_event` (`migrations/0017_research_contribution.sql`). Logical `research_contribution.contribution_state` is physically split so withdrawal cannot be erased by replaying Active evidence. Live write capability is the latest research-purpose `consent_event` by `occurred_at_unix_ms` then `created_at`, not a stored snapshot row.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
 - `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
@@ -456,6 +456,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `response_snapshot` and `response_snapshot_entry`;
 - `result_snapshot`;
 - `consent_snapshot`;
+- `research_consent_snapshot`, `research_contribution`, and `research_withdrawal_event` once persisted (Active PR successor of #116);
 - `participant_identity_link` history;
 - accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
@@ -484,6 +485,8 @@ A physical schema must enforce equivalents of the following constraints:
 | unique analysis-submission idempotency identity per `(enrollment_ref, analysis_spec_ref, observation_set_digest)` | repeatable TEPP dispatch |
 | unique `(tenant_ref, source, outbox_event_ref)` or an equivalently stronger globally unique event identity with tenant binding | durable outbound event identity |
 | unique `(tenant_ref, consumer_name, source, source_event_ref)` | tenant-bound inbox deduplication |
+| unique `research_participant_ref` across `research_contribution` and inequality versus the bound operational `participant_ref` | operational and research identity namespaces cannot collapse |
+| unique `withdrawal_event_ref` and at most one `research_withdrawal_event` per `contribution_ref` | append-only withdrawal identity |
 | unique research linkage for `(research_program_ref, participant_ref)` unless an ADR explicitly permits rotation semantics | controlled pseudonym mapping |
 | unique manifest digest identity for a published research release reference | release replay safety |
 

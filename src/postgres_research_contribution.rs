@@ -12,14 +12,14 @@
 //! start re-checks the latest research-purpose `consent_event` for that
 //! participant. That event must still be `granted` for the contribution's exact
 //! scope, matching [`ConsentSnapshot::is_granted`] and
-//! [`ConsentSnapshot::active_research_scope`]. A later grant or revoke for
-//! another scope therefore replaces the prior scope as the live write capability.
+//! [`ConsentSnapshot::active_research_scope`]. Same-millisecond events use
+//! `consent_event.created_at` append order, not `event_ref` sort order. A later
+//! grant or revoke for another scope therefore replaces the prior scope as the
+//! live write capability.
 //! Exact replay and withdrawal of already stored evidence stay allowed. The
 //! caller owns credentials and the surrounding transaction boundary.
 
-use crate::consent::{
-    ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState,
-};
+use crate::consent::{ConsentPurpose, ConsentSnapshot, ResearchContribution};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -192,6 +192,7 @@ pub fn persist_research_consent_snapshot(
 /// participant must differ from the pseudonymous research participant. A new
 /// contribution start also requires the latest research-purpose `consent_event`
 /// for that participant to still be `granted` for the contribution's exact scope.
+/// Latest means last-appended (`occurred_at_unix_ms`, then `created_at`).
 ///
 /// The contribution start record is append-only. Withdrawal is stored as a separate
 /// event, so replaying original active evidence after withdrawal cannot reactivate
@@ -266,17 +267,12 @@ fn validated_contribution_evidence<'a>(
         return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
     }
 
-    let withdrawal = match contribution.state() {
-        ResearchContributionState::Active => None,
-        ResearchContributionState::Withdrawn => {
-            let (event_ref, withdrawn_at_unix_ms) = contribution
-                .withdrawal_evidence()
-                .ok_or(ResearchContributionPersistenceError::InvalidReference)?;
-            Some(ValidatedWithdrawal {
-                withdrawal_event_ref: required_reference(event_ref)?,
-                withdrawn_at_unix_ms: bounded_timestamp(withdrawn_at_unix_ms)?,
-            })
-        }
+    let withdrawal = match contribution.withdrawal_evidence() {
+        Some((event_ref, withdrawn_at_unix_ms)) => Some(ValidatedWithdrawal {
+            withdrawal_event_ref: required_reference(event_ref)?,
+            withdrawn_at_unix_ms: bounded_timestamp(withdrawn_at_unix_ms)?,
+        }),
+        None => None,
     };
 
     Ok(ValidatedEvidence {
@@ -407,7 +403,7 @@ fn require_live_research_grant(
          FROM consent_event \
          WHERE participant_ref = $1 \
            AND consent_purpose = 'research_contribution' \
-         ORDER BY occurred_at_unix_ms DESC, event_ref DESC \
+         ORDER BY occurred_at_unix_ms DESC, created_at DESC \
          LIMIT 1",
         &[&participant_ref],
     )?;

@@ -101,9 +101,9 @@ classDiagram
     }
     class ResearchContribution {
       +contribution_ref
-      +participant_ref
       +research_participant_ref
-      +scope_ref
+      +consent_snapshot_ref
+      +research_scope_ref
       +state
     }
     class DataRightsRequest {
@@ -180,7 +180,7 @@ classDiagram
 - `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence.
 - `ScoringJob` is operational state; `ResultSnapshot` is scientific/product evidence. They are not the same aggregate.
 - `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
-- `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.
+- `ResearchContribution` is a product-domain participation record that does not carry operational participant identity. Persistence resolves that identity from the durable `research_consent_snapshot` binding. Public research data uses a separate research participant namespace behind the restricted linkage boundary.
 - `ParticipantIdentityLink` is product-owned append-only account-attachment history. It is neither the participant primary key nor a research pseudonym.
 - Longitudinal records preserve collection and temporal-analysis references without duplicating the Gyeot application database or TEPP analytical kernel.
 - Associations involving external scientific artifacts are references, not cross-service foreign keys into another service database.
