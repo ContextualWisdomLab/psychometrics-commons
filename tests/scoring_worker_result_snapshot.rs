@@ -108,7 +108,9 @@ fn planner_builds_a_result_snapshot_bound_to_the_loaded_request() {
     .unwrap();
 
     assert_eq!(engine.calls.get(), 1);
-    let snapshot = attempt.snapshot().expect("completed attempt must carry a snapshot");
+    let snapshot = attempt
+        .snapshot()
+        .expect("completed attempt must carry a snapshot");
     assert_eq!(snapshot.result_snapshot_ref(), "result_reload_score");
     assert_eq!(snapshot.scoring_result_ref(), "result_reload_score");
     assert_eq!(snapshot.session_ref(), "session_reload_score");
@@ -117,10 +119,7 @@ fn planner_builds_a_result_snapshot_bound_to_the_loaded_request() {
         "response_snapshot_reload_score"
     );
     assert_eq!(snapshot.score_observations().len(), 1);
-    assert_eq!(
-        snapshot.score_observations()[0].score(),
-        Some(1.2)
-    );
+    assert_eq!(snapshot.score_observations()[0].score(), Some(1.2));
     assert_eq!(
         attempt.event().event_ref(),
         "scoring_terminal:result:24:scoring_job_reload_score:19:result_reload_score"

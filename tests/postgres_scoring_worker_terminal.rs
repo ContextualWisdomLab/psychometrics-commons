@@ -5,12 +5,14 @@ use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, PersistenceDisposition,
 };
+use psychometrics_commons_runtime::postgres_result_snapshot::ResultSnapshotPersistenceError;
 use psychometrics_commons_runtime::postgres_scoring_completion::ScoringCompletionOutboxError;
 use psychometrics_commons_runtime::postgres_scoring_failure::ScoringFailureOutboxError;
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
     ScoringJobCompletionDisposition, ScoringJobFailureDisposition, ScoringJobPersistenceError,
 };
+use psychometrics_commons_runtime::postgres_scoring_request::ScoringRequestPersistenceError;
 use psychometrics_commons_runtime::postgres_scoring_worker::{
     commit_scoring_worker_outcome, run_scoring_worker_attempt, ScoringWorkerCommitError,
     ScoringWorkerOutcome, ScoringWorkerPersistence,
@@ -901,4 +903,19 @@ fn worker_commit_errors_retain_typed_sources() {
         "reload the persisted scoring request before completing the job; do not invent a score"
     );
     assert!(missing.source().is_none());
+
+    let request = ScoringWorkerCommitError::Request(ScoringRequestPersistenceError::CorruptHistory);
+    assert_eq!(
+        request.to_string(),
+        "scoring worker could not reconstruct the persisted scoring request; keep the job leased"
+    );
+    assert!(request.source().is_some());
+
+    let snapshot =
+        ScoringWorkerCommitError::Snapshot(ResultSnapshotPersistenceError::ConflictingReplay);
+    assert_eq!(
+        snapshot.to_string(),
+        "scoring worker could not persist the immutable result snapshot; keep the job leased"
+    );
+    assert!(snapshot.source().is_some());
 }
