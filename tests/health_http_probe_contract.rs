@@ -146,4 +146,12 @@ fn as_built_openapi_lists_only_implemented_health_probe_operations() {
     assert!(openapi.contains(HEALTH_READY_PATH));
     assert!(!openapi.contains("/v1/sessions"));
     assert!(!openapi.contains("/v1/instruments"));
+    let live_section = openapi
+        .split("/ready:")
+        .next()
+        .expect("as-built OpenAPI must describe /live before /ready");
+    assert!(
+        live_section.contains("\"503\""),
+        "GET /live must document HTTP 503 when the process is not live"
+    );
 }
