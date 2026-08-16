@@ -1,8 +1,8 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-14
-- Evaluated protected-main implementation baseline: `085ef4b4714796a77fd4645eeb46b028f95929fc`
+- Date: 2026-08-16
+- Evaluated protected-main implementation baseline: `62524a3efca319d6b624950d6f26db658f1e6ebb`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -22,12 +22,12 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|---|
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
+| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs` plus `migrations/0004_item_delivery_evidence.sql` and `src/postgres_item_delivery.rs`; API delivery orchestration remains Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
-| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
+| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` plus `migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
-| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result-serving transport is Target |
+| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs` plus `migrations/0007_result_snapshot.sql` and `src/postgres_result_snapshot.rs`; result-serving transport remains Target |
 | Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010, ADR-0018 | Target |
 | Continuous scores remain source of truth; Personality Style is presentation | PRD §3.2 | Measurement Governance; AI Governance | ADR-0018 | Target product narrative mapping; numeric source remains External fast-mlsirm contract |
 | Immutable instrument release/version lifecycle | PRD §6, §9 | TRD §7; UML publication state | ADR-0005, ADR-0010 | **Implemented** in `src/instrument.rs` plus `migrations/0006_instrument_release.sql` and `src/postgres_instrument_release.rs`: immutable release manifest, exact version/digest/locale/item set, fail-closed Draft/Review/Published/Suspended/Retired lifecycle, idempotent publication events, and new-session eligibility |
@@ -54,13 +54,13 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
-| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
+| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + `src/postgres_item_delivery.rs` persist exact delivery events | API delivery orchestration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
 | Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, claim, retry, terminal outcomes, expired-lease recovery, and cancellation without transferring a fence | live adapter evidence |
 | Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
-| Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
+| Historical result does not mutate | TRD §9 | `src/result.rs` plus `src/postgres_result_snapshot.rs` immutable snapshot persistence | API supersession tests |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
 | Instrument release bytes/version/item order are immutable | TRD §7 | `src/instrument.rs` + publication contract tests; `src/postgres_instrument_release.rs` persists immutable manifest columns | API publication integration |
 | Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch | session-creation persistence/API integration test |
@@ -73,7 +73,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Export/deletion requires request-specific identity verification | TRD §13 | `src/data_rights.rs`; `src/postgres_data_rights.rs` persists the requested identity and local propagation events | Keyverse/account/anonymous transport integration |
 | Legal retention represented explicitly | TRD §13 | `src/data_rights.rs` partial completion | dependency execution/restore tests after local propagation |
 | No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy only | deployment credential/fitness-function test |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0005_consent_lifecycle.sql`, `migrations/0006_instrument_release.sql`, `migrations/0011_scoring_request.sql`, `migrations/0012_integration_consumption.sql`, matching adapters, and PostgreSQL operational-store readiness | remaining product aggregates, crash/restart restore acceptance |
+| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** in `migrations/0001_integration_delivery.sql`, `migrations/0002_scoring_job_state.sql`, `migrations/0003_data_rights_propagation.sql`, `migrations/0004_item_delivery_evidence.sql`, `migrations/0005_consent_lifecycle.sql`, `migrations/0006_instrument_release.sql`, `migrations/0007_result_snapshot.sql`, `migrations/0010_response_snapshot.sql`, `migrations/0011_scoring_request.sql`, `migrations/0012_integration_consumption.sql`, `migrations/0015_data_rights_identity_verification.sql`, matching adapters, and PostgreSQL operational-store readiness | remaining product aggregates, crash/restart restore acceptance |
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence, delivery-attempt persistence, and inbox consumption | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL inbox consumption persists pending/processing/completed and expire-and-reclaim | live adapter crash/retry tests |
@@ -89,7 +89,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `085ef4b4714796a77fd4645eeb46b028f95929fc`:
+Current protected-main Rust module surface on `62524a3efca319d6b624950d6f26db658f1e6ebb`:
 
 ```text
 src/lib.rs
@@ -108,6 +108,9 @@ src/lib.rs
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
+├── postgres_item_delivery.rs  # PostgreSQL sequence-aware item-delivery event persistence
+├── postgres_response_snapshot.rs  # PostgreSQL immutable completed-session response snapshots
+├── postgres_result_snapshot.rs  # PostgreSQL immutable result-snapshot persistence
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── reference.rs      # internal opaque-reference normalization
@@ -122,17 +125,21 @@ migrations/
 ├── 0001_integration_delivery.sql
 ├── 0002_scoring_job_state.sql
 ├── 0003_data_rights_propagation.sql
+├── 0004_item_delivery_evidence.sql
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
+├── 0007_result_snapshot.sql
+├── 0010_response_snapshot.sql
 ├── 0011_scoring_request.sql
-└── 0012_integration_consumption.sql
+├── 0012_integration_consumption.sql
+└── 0015_data_rights_identity_verification.sql
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #66 scoring-job fallback classification locking is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Cancel and lease-expiry classify terminal or unleased rows under `FOR UPDATE` so a concurrent worker cannot rewrite that evidence. Live fast-mlsirm execution remains outside this slice.
+**Active PR** remaining PostgreSQL persist and operator-health HTTP slices are not protected-main truth until unchanged reviewed/check-clean heads are integrated. This baseline records item-delivery ledger persistence (#48) and immutable result snapshots (#51). Session, identity-link, response-event, scoring-completion, research, data-rights completion, and HTTP health-probe work remain Active PR only.
 
 ## 5. ADR traceability by concern
 
