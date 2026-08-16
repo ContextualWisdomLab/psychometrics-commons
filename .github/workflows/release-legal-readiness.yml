@@ -1,0 +1,25 @@
+name: Release legal readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Verify explicit source-distribution license evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact protected revision
+        uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify readiness checker contracts
+        run: |
+          python3 tests/test_release_legal_readiness.py
+          python3 tests/test_check_release_legal_readiness.py
+      - name: Evaluate explicit source-distribution license evidence
+        run: python3 scripts/check_release_legal_readiness.py .
