@@ -1,7 +1,7 @@
 # Logical Entity-Relationship Model
 
 - Status: Normative logical data model
-- Date: 2026-08-13
+- Date: 2026-08-16
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
@@ -25,6 +25,9 @@ erDiagram
     assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
+    tenant_account ||--o{ anonymous_credential_evidence : scopes
+    assessment_participant ||--o{ anonymous_credential_evidence : holds
+    assessment_session ||--o{ anonymous_credential_evidence : authorizes
     assessment_session ||--o{ item_delivery_event : delivers
     item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
@@ -152,6 +155,18 @@ erDiagram
       string locale
       timestamp created_at
       timestamp latest_event_at
+    }
+
+    anonymous_credential_evidence {
+      string credential_ref PK
+      string tenant_ref FK
+      string participant_ref FK
+      string session_ref FK
+      string proof_digest UK
+      timestamp issued_at
+      timestamp expires_at
+      timestamp revoked_at
+      timestamp recorded_at
     }
 
     item_delivery_event {
@@ -429,6 +444,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
 - `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
+- `anonymous_credential_evidence` is the persistence target for ADR-0003 short-lived anonymous-session proofs. Physical `migrations/0020_anonymous_credential_evidence.sql` stores only a canonical SHA-256 digest plus exact tenant/participant/session binding; HTTP issuance, audience, and max-TTL enforcement remain Target.
 
 This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
 
@@ -457,6 +473,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `result_snapshot`;
 - `consent_snapshot`;
 - `participant_identity_link` history;
+- `anonymous_credential_evidence` identity, digest, and lifetime columns after first persist (only `revoked_at` may be appended once);
 - accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
 - published `research_release`.
@@ -469,6 +486,8 @@ A physical schema must enforce equivalents of the following constraints:
 
 | Constraint | Purpose |
 |---|---|
+| unique `credential_ref` | no anonymous-credential evidence identity reuse |
+| unique `proof_digest` for one canonical SHA-256 bearer-proof digest | prevent digest reuse across sessions |
 | unique `(session_ref, delivery_sequence)` | authoritative item-presentation order |
 | unique `delivery_event_ref` | no delivery evidence identity reuse |
 | unique `(session_ref, client_event_ref)` | response replay idempotency |
@@ -502,6 +521,8 @@ Requirements:
 - historical sessions/results never cascade-delete or rewrite because an IdP account changes;
 - restricted research linkage never reads the current account-link table as its public pseudonym namespace;
 - data-rights/retention handling is explicit and auditable.
+
+`anonymous_credential_evidence` is operational authentication evidence, not a Keyverse credential store and not a research identifier. The table stores only a canonical SHA-256 digest of a bearer proof together with the exact tenant, participant, and assessment-session binding (Temoshok et al., 2025). Raw bearer secrets, Keyverse subject identifiers, and research pseudonyms are prohibited columns. Revocation is append-only so a restart cannot revive an already-invalid proof.
 
 ## 7. Longitudinal boundary
 
@@ -588,3 +609,8 @@ The first physical migration must be reviewed against this logical model and the
 ## 13. As-built rule
 
 Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, identity-link history, longitudinal time semantics, and ownership rules against this model. Silent divergence is a release defect.
+
+## References
+
+Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
+
