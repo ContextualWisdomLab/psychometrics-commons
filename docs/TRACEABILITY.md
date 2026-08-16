@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #66 scoring-job fallback classification locking is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Cancel and lease-expiry classify terminal or unleased rows under `FOR UPDATE` so a concurrent worker cannot rewrite that evidence. Live fast-mlsirm execution remains outside this slice.
+**Active PR** #71 research-release persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Immutable release approval evidence is persisted with exact replay and fail-closed rebinding. Public catalog presentation remains outside this slice.
 
 ## 5. ADR traceability by concern
 
