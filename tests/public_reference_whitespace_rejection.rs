@@ -115,6 +115,50 @@ fn embedded_control_characters_are_rejected_at_public_reference_boundaries() {
 }
 
 #[test]
+fn invisible_and_bidirectional_format_characters_are_rejected() {
+    // Unicode UTS #39 classifies default-ignorable characters as restricted for security
+    // identifiers. These examples are not `char::is_control`, so they protect the distinct
+    // spoofing/log-reordering boundary that ordinary C0/C1 control tests cannot exercise.
+    for invalid_reference in [
+        "tenant\u{200b}ref", // ZERO WIDTH SPACE
+        "tenant\u{200e}ref", // LEFT-TO-RIGHT MARK
+        "tenant\u{202e}ref", // RIGHT-TO-LEFT OVERRIDE
+        "tenant\u{2066}ref", // LEFT-TO-RIGHT ISOLATE
+        "tenant\u{2060}ref", // WORD JOINER
+        "tenant\u{feff}ref", // ZERO WIDTH NO-BREAK SPACE / BOM
+    ] {
+        assert_eq!(
+            AnonymousSessionContext::new(
+                invalid_reference,
+                "participant_ref",
+                "session_ref",
+                "authorization_evidence_ref",
+                10_000,
+            ),
+            Err(AnonymousSessionContextError::InvalidReference),
+            "anonymous-session references must reject invisible or directional formatting {invalid_reference:?}",
+        );
+        assert_eq!(
+            DataRightsRequest::new(
+                "request_ref",
+                invalid_reference,
+                "participant_ref",
+                DataRightsRequestKind::Export,
+                "account_data_scope",
+                1_000,
+            ),
+            Err(DataRightsError::InvalidReference),
+            "data-rights references must reject invisible or directional formatting {invalid_reference:?}",
+        );
+        assert_eq!(
+            AuthorizationContext::new(invalid_reference, "subject_ref", Some("participant_ref"), &[]),
+            Err(AuthorizationError::InvalidReference),
+            "authorization references must reject invisible or directional formatting {invalid_reference:?}",
+        );
+    }
+}
+
+#[test]
 fn canonical_opaque_public_references_remain_accepted() {
     let anonymous = AnonymousSessionContext::new(
         "tenant_ref",
