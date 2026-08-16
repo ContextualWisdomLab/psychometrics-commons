@@ -7,7 +7,9 @@
 //! [`created_session_for_start_from_published_snapshot`], or
 //! [`start_created_assessment_session_from_stored_release`]. Start locks the
 //! stored `instrument_release` row in the same transaction so a stale in-memory
-//! Published object cannot insert after persist Suspend or Retire. Created
+//! Published object cannot insert after persist Suspend or Retire. Exact replay
+//! of an already stored start still returns the original session after a later
+//! persist Suspend or Retire, so a buyer who already started can retry. Created
 //! identity is inserted only for
 //! [`SessionState::Created`]. Later lifecycle states persist as append-only
 //! command history plus a current-state projection. A shorter persist than
@@ -261,9 +263,10 @@ pub fn created_session_for_start(
 /// This is the in-memory start boundary: it calls [`created_session_for_start`],
 /// locks the stored `instrument_release` row, and then
 /// [`persist_assessment_session`]. A stale Published object fails when the
-/// stored row is missing, unpublished, or digest-mismatched. Exact replay of
-/// the same start is idempotent. It does not treat load as authorization and
-/// does not accept a reconstituted session.
+/// stored row is missing, unpublished, or digest-mismatched and no exact stored
+/// start exists. Exact replay of an already stored start returns the original
+/// session after a later persist Suspend or Retire. It does not treat load as
+/// authorization and does not accept a reconstituted first insert.
 ///
 /// # Errors
 ///
@@ -278,16 +281,63 @@ pub fn start_created_assessment_session(
     created_at_unix_ms: u64,
 ) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
 {
-    let session = created_session_for_start(
+    match created_session_for_start(
         session_ref,
         participant_ref,
         release,
         requested_locale,
         created_at_unix_ms,
-    )?;
-    require_locked_published_release(transaction, &session, requested_locale)?;
-    let disposition = persist_assessment_session(transaction, &session)?;
-    Ok((session, disposition))
+    ) {
+        Ok(session) => {
+            match require_locked_published_release(transaction, &session, requested_locale) {
+                Ok(()) => {
+                    let disposition = persist_assessment_session(transaction, &session)?;
+                    Ok((session, disposition))
+                }
+                Err(AssessmentSessionStartError::InstrumentReleaseUnavailable) => {
+                    replay_started_session_after_publication_block(
+                        transaction,
+                        &StartedSessionReplayRequest {
+                            session_ref,
+                            participant_ref,
+                            instrument_release_ref: session.instrument_release_ref(),
+                            instrument_version_ref: Some(session.instrument_version_ref()),
+                            content_digest: Some(session.instrument_release_content_digest()),
+                            requested_locale,
+                            created_at_unix_ms,
+                        },
+                    )
+                }
+                Err(error) => Err(error),
+            }
+        }
+        Err(AssessmentSessionStartError::InstrumentReleaseUnavailable) => {
+            match load_published_instrument_release(
+                transaction,
+                release.manifest().release_ref(),
+                requested_locale,
+            ) {
+                Ok(_)
+                | Err(
+                    InstrumentReleaseQueryError::NotPublished
+                    | InstrumentReleaseQueryError::NotFound,
+                ) => replay_started_session_after_publication_block(
+                    transaction,
+                    &StartedSessionReplayRequest {
+                        session_ref,
+                        participant_ref,
+                        instrument_release_ref: release.manifest().release_ref(),
+                        instrument_version_ref: Some(release.manifest().instrument_version_ref()),
+                        content_digest: Some(release.manifest().content_digest()),
+                        requested_locale,
+                        created_at_unix_ms,
+                    },
+                ),
+                Err(error) => Err(AssessmentSessionStartError::from(error)),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Build a created session from a store-validated published-release snapshot.
@@ -325,7 +375,9 @@ pub fn created_session_for_start_from_published_snapshot(
 /// This locks the exact release and locale from the same transaction, then
 /// calls [`created_session_for_start_from_published_snapshot`] and
 /// [`persist_assessment_session`]. A stored Draft, Review, Suspended, or
-/// Retired release fails before insert.
+/// Retired release fails before a first insert. Exact replay of an already
+/// stored start still returns the original session after that later persist
+/// Suspend or Retire.
 ///
 /// # Errors
 ///
@@ -340,17 +392,90 @@ pub fn start_created_assessment_session_from_stored_release(
     created_at_unix_ms: u64,
 ) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
 {
-    let snapshot =
-        load_published_instrument_release(transaction, instrument_release_ref, requested_locale)?;
-    let session = created_session_for_start_from_published_snapshot(
-        session_ref,
-        participant_ref,
-        &snapshot,
-        requested_locale,
-        created_at_unix_ms,
-    )?;
-    let disposition = persist_assessment_session(transaction, &session)?;
-    Ok((session, disposition))
+    match load_published_instrument_release(transaction, instrument_release_ref, requested_locale) {
+        Ok(snapshot) => {
+            let session = created_session_for_start_from_published_snapshot(
+                session_ref,
+                participant_ref,
+                &snapshot,
+                requested_locale,
+                created_at_unix_ms,
+            )?;
+            let disposition = persist_assessment_session(transaction, &session)?;
+            Ok((session, disposition))
+        }
+        Err(InstrumentReleaseQueryError::NotPublished | InstrumentReleaseQueryError::NotFound) => {
+            replay_started_session_after_publication_block(
+                transaction,
+                &StartedSessionReplayRequest {
+                    session_ref,
+                    participant_ref,
+                    instrument_release_ref,
+                    instrument_version_ref: None,
+                    content_digest: None,
+                    requested_locale,
+                    created_at_unix_ms,
+                },
+            )
+        }
+        Err(error) => Err(AssessmentSessionStartError::from(error)),
+    }
+}
+
+/// Identity a later start retry must match after publication no longer accepts new sessions.
+struct StartedSessionReplayRequest<'a> {
+    session_ref: &'a str,
+    participant_ref: &'a str,
+    instrument_release_ref: &'a str,
+    instrument_version_ref: Option<&'a str>,
+    content_digest: Option<&'a str>,
+    requested_locale: &'a str,
+    created_at_unix_ms: u64,
+}
+
+/// Return an exact stored start after the release no longer accepts new sessions.
+fn replay_started_session_after_publication_block(
+    transaction: &mut Transaction<'_>,
+    request: &StartedSessionReplayRequest<'_>,
+) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
+{
+    let Some(stored) = load_assessment_session(transaction, request.session_ref)? else {
+        return Err(AssessmentSessionStartError::InstrumentReleaseUnavailable);
+    };
+    if stored_start_identity_matches(&stored, request) {
+        Ok((stored, AssessmentSessionPersistenceDisposition::Duplicate))
+    } else {
+        Err(AssessmentSessionStartError::Persistence(
+            AssessmentSessionPersistenceError::ConflictingReplay,
+        ))
+    }
+}
+
+/// Compare a stored session with the start request without re-checking publication.
+fn stored_start_identity_matches(
+    stored: &AssessmentSession,
+    request: &StartedSessionReplayRequest<'_>,
+) -> bool {
+    let Some(session_ref) = normalized_reference(request.session_ref) else {
+        return false;
+    };
+    let Some(participant_ref) = normalized_reference(request.participant_ref) else {
+        return false;
+    };
+    let Some(instrument_release_ref) = normalized_reference(request.instrument_release_ref) else {
+        return false;
+    };
+    stored.session_ref() == session_ref
+        && stored.participant_ref() == participant_ref
+        && stored.instrument_release_ref() == instrument_release_ref
+        && request
+            .instrument_version_ref
+            .is_none_or(|version_ref| stored.instrument_version_ref() == version_ref)
+        && request
+            .content_digest
+            .is_none_or(|digest| stored.instrument_release_content_digest() == digest)
+        && stored.locale() == request.requested_locale
+        && stored.created_at_unix_ms() == request.created_at_unix_ms
 }
 
 fn require_locked_published_release(
@@ -715,10 +840,89 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        reject_stale_command_prefix, AssessmentSessionPersistenceError, AssessmentSessionStartError,
+        reject_stale_command_prefix, stored_start_identity_matches,
+        AssessmentSessionPersistenceError, AssessmentSessionStartError,
+        StartedSessionReplayRequest,
     };
     use crate::postgres_instrument_release::InstrumentReleaseQueryError;
-    use crate::session::{SessionCommand, SessionCreationError, SessionState};
+    use crate::session::{AssessmentSession, SessionCommand, SessionCreationError, SessionState};
+
+    const REPLAY_DIGEST: &str =
+        "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn exact_start_identity_matches_stored_session_and_rejects_rebind() {
+        let stored = AssessmentSession::from_persisted_created(
+            "ses_start_replay_alpha",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            REPLAY_DIGEST,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        assert!(stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "ses_start_replay_alpha",
+                participant_ref: "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: Some("instrument_version_big_five_ko_v1"),
+                content_digest: Some(REPLAY_DIGEST),
+                requested_locale: "ko-KR",
+                created_at_unix_ms: 20_000,
+            },
+        ));
+        assert!(stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "ses_start_replay_alpha",
+                participant_ref: "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: None,
+                content_digest: None,
+                requested_locale: "ko-KR",
+                created_at_unix_ms: 20_000,
+            },
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "ses_start_replay_alpha",
+                participant_ref: "ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: None,
+                content_digest: None,
+                requested_locale: "ko-KR",
+                created_at_unix_ms: 20_000,
+            },
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "ses_start_replay_alpha",
+                participant_ref: "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: Some("instrument_version_rebinding_v2"),
+                content_digest: None,
+                requested_locale: "ko-KR",
+                created_at_unix_ms: 20_000,
+            },
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "12345",
+                participant_ref: "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: None,
+                content_digest: None,
+                requested_locale: "ko-KR",
+                created_at_unix_ms: 20_000,
+            },
+        ));
+    }
 
     #[test]
     fn session_persistence_errors_are_safe_and_specific() {

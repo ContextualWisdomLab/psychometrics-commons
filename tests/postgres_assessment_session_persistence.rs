@@ -312,6 +312,100 @@ fn start_from_stored_release_uses_database_publication_state() {
 }
 
 #[test]
+fn start_replays_exact_session_after_stored_release_is_suspended() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+    apply_assessment_session_migration(&mut client).unwrap();
+    let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
+
+    let mut transaction = client.transaction().unwrap();
+    persist_instrument_release(&mut transaction, &published).unwrap();
+    start_created_assessment_session(
+        &mut transaction,
+        "ses_start_replay_after_suspend",
+        PARTICIPANT_REF,
+        &published,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE instrument_release SET publication_state = 'suspended' WHERE release_ref = $1",
+            &[&"release_big_five_ko_v1"],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let (from_memory, memory_disposition) = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_replay_after_suspend",
+        PARTICIPANT_REF,
+        &published,
+        "ko-KR",
+        20_000,
+    )
+    .expect("a buyer who already started must retry after later persist suspend");
+    let (from_store, store_disposition) = start_created_assessment_session_from_stored_release(
+        &mut transaction,
+        "ses_start_replay_after_suspend",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        "ko-KR",
+        20_000,
+    )
+    .expect("HTTP start must replay the same stored session after later persist suspend");
+    assert!(matches!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_new_after_suspend",
+            PARTICIPANT_REF,
+            &published,
+            "ko-KR",
+            21_000,
+        ),
+        Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
+    ));
+    assert!(matches!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_replay_after_suspend",
+            "ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &published,
+            "ko-KR",
+            20_000,
+        ),
+        Err(AssessmentSessionStartError::Persistence(
+            AssessmentSessionPersistenceError::ConflictingReplay
+        ))
+    ));
+    transaction.commit().unwrap();
+
+    assert_eq!(
+        memory_disposition,
+        AssessmentSessionPersistenceDisposition::Duplicate
+    );
+    assert_eq!(
+        store_disposition,
+        AssessmentSessionPersistenceDisposition::Duplicate
+    );
+    assert_eq!(from_memory.session_ref(), "ses_start_replay_after_suspend");
+    assert_eq!(from_store.participant_ref(), PARTICIPANT_REF);
+    assert_eq!(from_memory.state(), SessionState::Created);
+    let new_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session WHERE session_ref = $1",
+            &[&"ses_start_new_after_suspend"],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(new_count, 0, "a later suspend must not mint a second start");
+}
+
+#[test]
 fn created_session_persists_release_binding_and_replays_exactly() {
     let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);

@@ -48,6 +48,12 @@ This document converts broad quality goals into **stimulus → environment → r
 - **Response:** inbox deduplication prevents duplicate externally visible side effects.
 - **Evidence:** duplicate/reordered delivery tests.
 
+### QA-REL-04 — Session start retry after later suspend
+
+- **Stimulus:** a buyer retries the exact start after the stored release is suspended or retired.
+- **Response:** the original created session is returned; a new `session_ref` or rebound participant fails closed and does not insert.
+- **Evidence:** `start_replays_exact_session_after_stored_release_is_suspended` against real PostgreSQL and `exact_start_identity_matches_stored_session_and_rejects_rebind`.
+
 ## 3. Availability and graceful degradation
 
 ### QA-AVL-01 — AI unavailable
