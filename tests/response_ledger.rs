@@ -370,15 +370,23 @@ fn two_item_korean_path_reloads_the_same_answers_after_restart() {
     assert_eq!(live.session_ref(), "session_big_five_ko");
     assert_eq!(live.events().len(), 2);
     assert_eq!(live.events()[0].sequence(), 1);
-    assert_eq!(live.events()[1].item_version_ref(), "item_version_conscientiousness_ko");
+    assert_eq!(
+        live.events()[1].item_version_ref(),
+        "item_version_conscientiousness_ko"
+    );
 
-    let reloaded = ResponseLedger::from_persisted(live.session_ref(), live.events().to_vec()).unwrap();
+    let reloaded =
+        ResponseLedger::from_persisted(live.session_ref(), live.events().to_vec()).unwrap();
     assert_eq!(reloaded, live);
     assert_eq!(
-        reloaded.freeze_as(SessionState::Completed, "response_snapshot_big_five_ko")
+        reloaded
+            .freeze_as(SessionState::Completed, "response_snapshot_big_five_ko")
             .unwrap()
             .event_refs(),
-        ["response_event_openness", "response_event_conscientiousness"]
+        [
+            "response_event_openness",
+            "response_event_conscientiousness"
+        ]
     );
 }
 
@@ -437,8 +445,11 @@ fn persisted_events_reject_reused_identities_and_blank_session() {
     .unwrap();
 
     assert_eq!(
-        ResponseLedger::from_persisted("session_big_five_ko", vec![first.clone(), duplicate_client])
-            .unwrap_err(),
+        ResponseLedger::from_persisted(
+            "session_big_five_ko",
+            vec![first.clone(), duplicate_client]
+        )
+        .unwrap_err(),
         WriteError::IdempotencyConflict
     );
     assert_eq!(

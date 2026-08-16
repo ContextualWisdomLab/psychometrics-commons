@@ -209,9 +209,8 @@ impl Display for WriteError {
                 formatter,
                 "response snapshot requires Completed session state, found {state:?}"
             ),
-            Self::InvalidStoredSequence => formatter.write_str(
-                "stored response events must keep server sequence 1..n without gaps",
-            ),
+            Self::InvalidStoredSequence => formatter
+                .write_str("stored response events must keep server sequence 1..n without gaps"),
         }
     }
 }
