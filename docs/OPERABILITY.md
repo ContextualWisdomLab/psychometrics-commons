@@ -39,7 +39,7 @@ The implementation must distinguish at least:
 - **liveness** — process can make progress / is not irrecoverably wedged;
 - **readiness** — mandatory dependencies for the selected profile are available enough to accept new work safely;
 - **capability health** — optional/independent capabilities such as authenticated linking, scoring, AI narrative, research registration, or temporal analysis;
-- **backlog health** — durable work is within measured operating bounds and not silently stalled;
+- **backlog health** — durable work is within measured operating bounds and not silently stalled. When a PostgreSQL operational-backlog probe is present, it classifies aggregate outbox, inbox-consumption, data-rights, and scoring-job counts/ages against caller-supplied policy only and must not expose payloads, tenant identities, worker identities, or restricted linkage values. Scoring-job observation also counts leased rows whose persisted lease expiry is already past the database clock; enqueue-age alone is not lease-expiry observation. Apply `migrations/0020_backlog_health_indexes.sql` through `apply_backlog_health_index_migration` after the owning table migrations, and apply scoring-job readiness indexes through `apply_scoring_job_migration`, so readiness probes stay bounded as terminal history grows;
 - **data integrity health** — migrations/schema/digests/reconciliation do not indicate incompatible or corrupt state.
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
@@ -161,6 +161,7 @@ The deployed profile must have executable or operator-tested runbooks for at lea
 - outbox publication backlog;
 - inbox processing backlog or poison message;
 - scoring dependency outage and job reconciliation;
+- scoring-job queue, live-lease, expired-lease, retry, or quarantine backlog;
 - Keyverse/JWKS/federation outage;
 - account-link conflict/adjudication;
 - optional AI provider/orchestrator outage and deterministic fallback verification;
@@ -229,6 +230,14 @@ Never collapse these maturity levels. SOC 2/CSAP readiness work may map evidence
 
 ## 15. References
 
+Beyer, B., Jones, C., Petoff, J., & Murphy, N. R. (Eds.). (2016). *Site reliability engineering: How Google runs production systems*. O'Reilly Media.
+
+Gray, C., & Cheriton, D. (1989). Leases: An efficient fault-tolerant mechanism for distributed file cache consistency. In *Proceedings of the 12th ACM Symposium on Operating Systems Principles* (pp. 202–210). https://doi.org/10.1145/74850.74870
+
+The Kubernetes Authors. (2026). *Configure Liveness, Readiness and Startup Probes*. https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+
 International Organization for Standardization & International Electrotechnical Commission. (2023). *ISO/IEC 25010:2023 Systems and software engineering—Systems and software Quality Requirements and Evaluation (SQuaRE)—Product quality model*.
+
+National Institute of Standards and Technology. (2020). *Security and privacy controls for information systems and organizations* (NIST SP 800-53 Rev. 5). https://doi.org/10.6028/NIST.SP.800-53r5
 
 National Institute of Standards and Technology. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST SP 800-218). https://doi.org/10.6028/NIST.SP.800-218

@@ -22,6 +22,23 @@ pub enum BacklogHealth {
 }
 
 impl BacklogHealth {
+    /// Combine two independently measured durable-work signals for one readiness decision.
+    ///
+    /// A known stalled backlog takes precedence because accepting more state-changing work is
+    /// already unsafe. Otherwise an unknown signal takes precedence over a healthy signal so a
+    /// missing observation cannot be masked. The result is within bounds only when both signals
+    /// are within their caller-supplied operating bounds.
+    #[must_use]
+    pub const fn combine(self, other: Self) -> Self {
+        if matches!(self, Self::Stalled) || matches!(other, Self::Stalled) {
+            Self::Stalled
+        } else if matches!(self, Self::Unknown) || matches!(other, Self::Unknown) {
+            Self::Unknown
+        } else {
+            Self::WithinBounds
+        }
+    }
+
     const fn accepts_new_work(self) -> bool {
         matches!(self, Self::WithinBounds)
     }

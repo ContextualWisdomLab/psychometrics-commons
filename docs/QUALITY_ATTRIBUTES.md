@@ -226,6 +226,12 @@ Performance goals are workload/profile-specific. The architecture nevertheless r
 - **Response:** immutable manifests connect source version, scoring/calibration/norm/narrative or release metadata and artifact digests without participant identity leakage.
 - **Evidence:** provenance replay/verification test.
 
+### QA-OBS-03 — Distinguish a dead scoring worker from a healthy queue depth
+
+- **Stimulus:** a scoring worker dies after claiming a job; the lease is past `active_lease_expires_at_unix_ms` while enqueue-to-complete age and active count remain inside the operator policy.
+- **Response:** readiness classifies the expired-lease count against an explicit caller bound. A healthy outbox or created-at age cannot hide the dead worker. The probe exposes only aggregate counts and the oldest already-expired lease timestamp from the same database-clock snapshot.
+- **Evidence:** `tests/postgres_scoring_job_backlog_health.rs` expired-lease count, oldest-expiry, live-lease, and policy cases plus `src/postgres_health.rs` composition tests. HTTP probe transport remains #132.
+
 ## 13. Recoverability
 
 ### QA-REC-01 — Restore current release
