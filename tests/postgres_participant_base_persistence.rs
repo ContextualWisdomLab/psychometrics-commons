@@ -204,3 +204,47 @@ fn schema_rejects_blank_numeric_and_nonpositive_identity_evidence() {
         assert!(client.batch_execute(statement).is_err());
     }
 }
+
+#[test]
+fn schema_rejects_unicode_reference_forms_rejected_by_the_domain_contract() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    for statement in [
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (E'\\tparticipant_public_demo', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('participant_public_demo', U&'\\00A0tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'12\\066B3', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'12\\FF0E3', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\0661\\0662\\066B\\0663', 'tenant_public_demo', 40000)",
+    ] {
+        assert!(
+            client.batch_execute(statement).is_err(),
+            "database constraint must reject identity spelling the Rust domain would reject: {statement}"
+        );
+    }
+
+    let count: i64 = client
+        .query_one("SELECT COUNT(*) FROM assessment_participant", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 0, "invalid direct SQL must leave no corrupt identity row");
+    assert!(load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .unwrap()
+    .is_none());
+}
