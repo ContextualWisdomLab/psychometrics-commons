@@ -386,8 +386,9 @@ pub fn grant_account_linked_capability(
 ///
 /// The proof must still be valid. The participant's current tenant, issuer,
 /// subject, and `link_event_ref` must still match the grant. After unlink the
-/// current event is cleared; after rebound it is a different event. Either case
-/// returns [`AccountLinkWriteError::NoCurrentBinding`].
+/// current event is cleared. After rebound — including a later attach of the
+/// same issuer-scoped subject under a new `link_event_ref` — the current event
+/// is different. Either case returns [`AccountLinkWriteError::NoCurrentBinding`].
 ///
 /// # Errors
 ///

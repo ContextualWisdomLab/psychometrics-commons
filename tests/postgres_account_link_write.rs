@@ -14,8 +14,8 @@ use psychometrics_commons_runtime::account_link_write::{
 use psychometrics_commons_runtime::anonymous_session::AnonymousSessionContext;
 use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_participant_identity_link::{
-    apply_participant_identity_link_migration, IdentityLinkPersistenceDisposition,
-    IdentityLinkPersistenceError,
+    apply_participant_identity_link_migration, load_participant_identity_history,
+    IdentityLinkPersistenceDisposition, IdentityLinkPersistenceError,
 };
 use std::sync::{Mutex, MutexGuard};
 
@@ -656,4 +656,108 @@ fn persisted_unlink_invalidates_a_previously_granted_account_capability() {
         recovered.is_none(),
         "recover after persisted unlink must not return the participant"
     );
+
+    let mut transaction = client.transaction().unwrap();
+    let reloaded = load_participant_identity_history(
+        &mut transaction,
+        "participant_identity_write",
+        "tenant_identity_write",
+    )
+    .unwrap()
+    .expect("unlink must keep the stable participant history loadable");
+    transaction.commit().unwrap();
+    let reloaded_error =
+        accept_account_linked_capability(&reloaded, &capability, &authenticated_control(), 10_650)
+            .expect_err("accept against reloaded history must fail closed after persisted unlink");
+    assert!(matches!(
+        reloaded_error,
+        AccountLinkWriteError::NoCurrentBinding
+    ));
+}
+
+#[test]
+fn persisted_same_subject_relink_rejects_the_ended_account_capability() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let ended_capability =
+        grant_account_linked_capability(&participant, &authenticated_control(), 10_450)
+            .unwrap()
+            .expect("the first persisted binding must grant an account-linked capability");
+
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_relink",
+        10_700,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let reloaded = load_participant_identity_history(
+        &mut transaction,
+        "participant_identity_write",
+        "tenant_identity_write",
+    )
+    .unwrap()
+    .expect("same-subject relink must keep the participant history loadable");
+    transaction.commit().unwrap();
+    assert_eq!(
+        reloaded.link_event_ref(),
+        Some("link_event_identity_relink")
+    );
+
+    let current_capability =
+        grant_account_linked_capability(&reloaded, &authenticated_control(), 10_750)
+            .unwrap()
+            .expect("the reloaded same-subject binding must grant a capability for the new event");
+    assert_eq!(
+        current_capability.link_event_ref(),
+        "link_event_identity_relink"
+    );
+    accept_account_linked_capability(
+        &reloaded,
+        &current_capability,
+        &authenticated_control(),
+        10_760,
+    )
+    .expect("the new persisted binding must accept the grant issued for that event");
+
+    let error = accept_account_linked_capability(
+        &reloaded,
+        &ended_capability,
+        &authenticated_control(),
+        10_770,
+    )
+    .expect_err(
+        "persisted same-subject relink must reject the ended grant so subject match cannot hide a missing link-event check",
+    );
+    assert!(matches!(error, AccountLinkWriteError::NoCurrentBinding));
 }

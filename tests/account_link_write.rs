@@ -421,6 +421,59 @@ fn rebound_current_binding_rejects_the_ended_subject_capability() {
 }
 
 #[test]
+fn same_subject_relink_with_a_new_event_rejects_the_ended_grant() {
+    let mut participant = linked_participant("keyverse_subject_write");
+    let ended_capability =
+        grant_account_linked_capability(&participant, &authenticated_control(), 10_500)
+            .unwrap()
+            .unwrap();
+    authorize_account_unlink(
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_550,
+    )
+    .unwrap();
+    participant
+        .link_account(
+            "link_event_identity_relink",
+            "keyverse_issuer_write",
+            "keyverse_subject_write",
+            "anonymous_proof_relink",
+            "authenticated_proof_relink",
+            10_700,
+        )
+        .unwrap();
+
+    let current_capability =
+        grant_account_linked_capability(&participant, &authenticated_control(), 10_750)
+            .unwrap()
+            .expect("the same subject must grant a capability bound to the new link event");
+    assert_eq!(
+        current_capability.link_event_ref(),
+        "link_event_identity_relink"
+    );
+    accept_account_linked_capability(
+        &participant,
+        &current_capability,
+        &authenticated_control(),
+        10_760,
+    )
+    .expect("the new current binding must accept the grant issued for that event");
+
+    let error = accept_account_linked_capability(
+        &participant,
+        &ended_capability,
+        &authenticated_control(),
+        10_770,
+    )
+    .expect_err(
+        "a same-subject relink must reject the ended grant so subject match cannot hide a missing link-event check",
+    );
+    assert!(matches!(error, AccountLinkWriteError::NoCurrentBinding));
+}
+
+#[test]
 fn expired_or_unknown_time_cannot_grant_or_accept_an_account_capability() {
     let participant = linked_participant("keyverse_subject_write");
     let expired = AuthenticatedAccountControl::new(
@@ -460,6 +513,14 @@ fn expired_or_unknown_time_cannot_grant_or_accept_an_account_capability() {
             AccountLinkAuthorizationError::AuthenticatedProofExpired
         )
     ));
+
+    let unknown_accept =
+        accept_account_linked_capability(&participant, &capability, &authenticated_control(), 0)
+            .expect_err("unknown accept time must not keep an account-linked capability");
+    assert!(matches!(
+        unknown_accept,
+        AccountLinkWriteError::Authorization(AccountLinkAuthorizationError::InvalidTimestamp)
+    ));
 }
 
 #[test]
@@ -483,4 +544,36 @@ fn accept_rejects_a_foreign_tenant_proof_for_an_issued_grant() {
         error,
         AccountLinkWriteError::Authorization(AccountLinkAuthorizationError::CrossTenantDenied)
     ));
+}
+
+#[test]
+fn grant_returns_none_for_an_unlinked_or_foreign_tenant_binding() {
+    let unlinked = ParticipantRecord::new_anonymous(
+        "participant_identity_write",
+        "tenant_identity_write",
+        10_000,
+    )
+    .unwrap();
+    assert!(
+        grant_account_linked_capability(&unlinked, &authenticated_control(), 10_500)
+            .unwrap()
+            .is_none(),
+        "an unlinked participant must not receive an account-linked capability"
+    );
+
+    let participant = linked_participant("keyverse_subject_write");
+    let foreign = AuthenticatedAccountControl::new(
+        "tenant_identity_foreign",
+        "keyverse_issuer_write",
+        "keyverse_subject_write",
+        "authenticated_proof_foreign",
+        11_000,
+    )
+    .unwrap();
+    assert!(
+        grant_account_linked_capability(&participant, &foreign, 10_550)
+            .unwrap()
+            .is_none(),
+        "a foreign-tenant proof must not grant another tenant's account capability"
+    );
 }
