@@ -14,6 +14,7 @@ Product consequences:
 
 - an instrument release states intended score interpretations and prohibited/unsupported uses;
 - a published form remains reconstructable after process restart from its stored locale, digest, item set, and publication state so administration uses the same versioned instrument the participant was assigned;
+- after restart, only currently Published stored forms are offered as startable catalog entries so withdrawn, draft, or damaged work cannot be administered as if it were the current form;
 - scoring and norms are versioned and reproducible;
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;

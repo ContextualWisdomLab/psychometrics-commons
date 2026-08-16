@@ -182,40 +182,89 @@ pub fn load_instrument_release(
     require_read_committed(transaction)?;
     let release_ref = required_reference(release_ref)?;
     let header = transaction.query_opt(
-        "SELECT instrument_ref, instrument_version_ref, construct_ref, item_version_refs, \
-                locale, assessment_spec_ref, scoring_version_ref, calibration_reference, \
-                norm_version_ref, narrative_version_ref, consent_requirement_refs, \
-                intended_use_ref, limitations_ref, content_digest, publication_state, \
-                created_at_unix_ms \
+        "SELECT release_ref, instrument_ref, instrument_version_ref, construct_ref, \
+                item_version_refs, locale, assessment_spec_ref, scoring_version_ref, \
+                calibration_reference, norm_version_ref, narrative_version_ref, \
+                consent_requirement_refs, intended_use_ref, limitations_ref, \
+                content_digest, publication_state, created_at_unix_ms \
          FROM instrument_release WHERE release_ref = $1",
         &[&release_ref],
     )?;
     let Some(header) = header else {
         return Ok(None);
     };
-    let instrument_ref: String = header.get(0);
-    let instrument_version_ref: String = header.get(1);
-    let construct_ref: String = header.get(2);
-    let item_version_refs: Vec<String> = header.get(3);
-    let locale: String = header.get(4);
-    let assessment_spec_ref: String = header.get(5);
-    let scoring_version_ref: String = header.get(6);
-    let calibration_reference: String = header.get(7);
-    let norm_version_ref: Option<String> = header.get(8);
-    let narrative_version_ref: String = header.get(9);
-    let consent_requirement_refs: Vec<String> = header.get(10);
-    let intended_use_ref: String = header.get(11);
-    let limitations_ref: String = header.get(12);
-    let content_digest: String = header.get(13);
-    let publication_state = publication_state_from_stored(&header.get::<_, String>(14))?;
-    let created_at_unix_ms = stored_timestamp(header.get(15))?;
+    reconstruct_stored_release(&header).map(Some)
+}
+
+/// List stored Published instrument releases that may start new sessions.
+///
+/// After process restart, call this before presenting a catalog or choosing a
+/// `release_ref` for session start. Draft, Review, Suspended, and Retired rows
+/// are omitted so unpublished work stays hidden. Each returned release
+/// reconstructs the stored locale, digest, and item set, ordered by
+/// `instrument_ref`, `locale`, then `release_ref`. A corrupt Published row
+/// fails closed as [`InstrumentReleasePersistenceError::InconsistentEvidence`]
+/// so the catalog cannot treat damaged evidence as startable. Copy a returned
+/// `release_ref` and exact `locale` into session start. HTTP catalog transport
+/// remains a separate slice.
+///
+/// # Errors
+///
+/// Returns [`InstrumentReleasePersistenceError`] for unsupported isolation,
+/// inconsistent durable evidence, or a database failure.
+pub fn list_startable_instrument_releases(
+    transaction: &mut Transaction<'_>,
+) -> Result<Vec<InstrumentRelease>, InstrumentReleasePersistenceError> {
+    require_read_committed(transaction)?;
+    let rows = transaction.query(
+        "SELECT release_ref, instrument_ref, instrument_version_ref, construct_ref, \
+                item_version_refs, locale, assessment_spec_ref, scoring_version_ref, \
+                calibration_reference, norm_version_ref, narrative_version_ref, \
+                consent_requirement_refs, intended_use_ref, limitations_ref, \
+                content_digest, publication_state, created_at_unix_ms \
+         FROM instrument_release \
+         WHERE publication_state = $1 \
+         ORDER BY instrument_ref, locale, release_ref",
+        &[&publication_state_name(PublicationState::Published)],
+    )?;
+    let mut releases = Vec::with_capacity(rows.len());
+    for row in rows {
+        let release = reconstruct_stored_release(&row)?;
+        if !release.accepts_new_sessions() {
+            return Err(InstrumentReleasePersistenceError::InconsistentEvidence);
+        }
+        releases.push(release);
+    }
+    Ok(releases)
+}
+
+fn reconstruct_stored_release(
+    header: &postgres::Row,
+) -> Result<InstrumentRelease, InstrumentReleasePersistenceError> {
+    let release_ref: String = header.get(0);
+    let instrument_ref: String = header.get(1);
+    let instrument_version_ref: String = header.get(2);
+    let construct_ref: String = header.get(3);
+    let item_version_refs: Vec<String> = header.get(4);
+    let locale: String = header.get(5);
+    let assessment_spec_ref: String = header.get(6);
+    let scoring_version_ref: String = header.get(7);
+    let calibration_reference: String = header.get(8);
+    let norm_version_ref: Option<String> = header.get(9);
+    let narrative_version_ref: String = header.get(10);
+    let consent_requirement_refs: Vec<String> = header.get(11);
+    let intended_use_ref: String = header.get(12);
+    let limitations_ref: String = header.get(13);
+    let content_digest: String = header.get(14);
+    let publication_state = publication_state_from_stored(&header.get::<_, String>(15))?;
+    let created_at_unix_ms = stored_timestamp(header.get(16))?;
     let item_refs: Vec<&str> = item_version_refs.iter().map(String::as_str).collect();
     let consent_refs: Vec<&str> = consent_requirement_refs
         .iter()
         .map(String::as_str)
         .collect();
     let manifest = InstrumentReleaseManifest::new(
-        release_ref,
+        &release_ref,
         &instrument_ref,
         &instrument_version_ref,
         &construct_ref,
@@ -233,7 +282,6 @@ pub fn load_instrument_release(
     )
     .map_err(durable_evidence_error)?;
     InstrumentRelease::from_persisted_snapshot(manifest, publication_state, created_at_unix_ms)
-        .map(Some)
         .map_err(durable_evidence_error)
 }
 
@@ -411,8 +459,8 @@ fn require_read_committed(
 mod reference_guard_tests {
     use super::{
         durable_evidence_error, postgres_timestamp, publication_state_from_stored,
-        publication_state_may_replace, required_reference, stored_timestamp,
-        InstrumentReleasePersistenceError,
+        publication_state_may_replace, publication_state_name, required_reference,
+        stored_timestamp, InstrumentReleasePersistenceError,
     };
     use crate::instrument::{InstrumentReleaseError, PublicationState};
 
@@ -532,6 +580,10 @@ mod reference_guard_tests {
         assert_eq!(
             InstrumentReleasePersistenceError::InconsistentEvidence.to_string(),
             "durable instrument-release evidence cannot reconstruct the stored snapshot"
+        );
+        assert_eq!(
+            publication_state_name(PublicationState::Published),
+            "published"
         );
     }
 }

@@ -14,6 +14,10 @@ Psychometrics Commons owns product APIs, instrument publication, participant/ses
 
 It does **not** duplicate psychometric numerical kernels, identity credentials, temporal model kernels, public research catalog internals, or generic LLM orchestration. `g7` is an optional replaceable reference client rather than a platform dependency.
 
+## Instrument catalog after restart
+
+After a worker restart, open a `READ COMMITTED` transaction and call `list_startable_instrument_releases`. Copy a returned `release_ref` and exact `locale` into session start. Draft, Review, Suspended, and Retired forms are omitted. If listing fails, repair the corrupt stored snapshot before offering any form. Do not start sessions from a partial untrusted catalog.
+
 ## Documentation
 
 ### Product, technical, and governance baseline

@@ -7,8 +7,9 @@ use psychometrics_commons_runtime::instrument::{
     PublicationState,
 };
 use psychometrics_commons_runtime::postgres_instrument_release::{
-    apply_instrument_release_migration, load_instrument_release, persist_instrument_release,
-    InstrumentReleasePersistenceDisposition, InstrumentReleasePersistenceError,
+    apply_instrument_release_migration, list_startable_instrument_releases,
+    load_instrument_release, persist_instrument_release, InstrumentReleasePersistenceDisposition,
+    InstrumentReleasePersistenceError,
 };
 use std::sync::{Mutex, MutexGuard};
 
@@ -79,6 +80,13 @@ fn manifest_with_norm(
 }
 
 fn approved_publication_evidence_for(release_ref: &str) -> PublicationEvidenceRecord {
+    approved_publication_evidence_for_locale(release_ref, "ko-KR")
+}
+
+fn approved_publication_evidence_for_locale(
+    release_ref: &str,
+    locale: &str,
+) -> PublicationEvidenceRecord {
     PublicationEvidenceRecord::new(
         "publication_evidence_big_five_ko_v1",
         "evidence_policy_self_reflection_v1",
@@ -86,7 +94,7 @@ fn approved_publication_evidence_for(release_ref: &str) -> PublicationEvidenceRe
         "instrument_version_big_five_ko_v1",
         &["item_version_001", "item_version_002"],
         RELEASE_DIGEST,
-        "ko-KR",
+        locale,
         "intended_use_self_reflection_v1",
         "assessment_spec_big_five_v1",
         "scoring_version_big_five_v1",
@@ -115,6 +123,58 @@ fn published_release() -> InstrumentRelease {
 }
 
 fn published_release_named(release_ref: &str) -> InstrumentRelease {
+    published_release_for(release_ref, "instrument_big_five", "ko-KR")
+}
+
+fn published_release_for(
+    release_ref: &str,
+    instrument_ref: &str,
+    locale: &str,
+) -> InstrumentRelease {
+    let mut release = InstrumentRelease::new(
+        InstrumentReleaseManifest::new(
+            release_ref,
+            instrument_ref,
+            "instrument_version_big_five_ko_v1",
+            "construct_big_five",
+            &["item_version_001", "item_version_002"],
+            locale,
+            "assessment_spec_big_five_v1",
+            "scoring_version_big_five_v1",
+            "calibration_big_five_ko_v1",
+            Some("norm_version_big_five_ko_v1"),
+            "narrative_version_big_five_v1",
+            &["consent_service_v1"],
+            "intended_use_self_reflection_v1",
+            "limitations_nonclinical_v1",
+            RELEASE_DIGEST,
+        )
+        .unwrap(),
+        40_000,
+    )
+    .unwrap();
+    release
+        .apply_command(
+            "submit_review_event",
+            PublicationCommand::SubmitReview,
+            40_100,
+        )
+        .unwrap();
+    release
+        .bind_publication_evidence(approved_publication_evidence_for_locale(
+            release_ref,
+            locale,
+        ))
+        .unwrap();
+    release
+        .apply_command("publish_event", PublicationCommand::Publish, 40_200)
+        .unwrap();
+    assert_eq!(release.state(), PublicationState::Published);
+    assert!(release.accepts_new_sessions());
+    release
+}
+
+fn review_release_named(release_ref: &str) -> InstrumentRelease {
     let mut release =
         InstrumentRelease::new(manifest(release_ref, RELEASE_DIGEST), 40_000).unwrap();
     release
@@ -125,13 +185,21 @@ fn published_release_named(release_ref: &str) -> InstrumentRelease {
         )
         .unwrap();
     release
-        .bind_publication_evidence(approved_publication_evidence_for(release_ref))
+}
+
+fn suspended_release_named(release_ref: &str) -> InstrumentRelease {
+    let mut release = published_release_named(release_ref);
+    release
+        .apply_command("suspend_event", PublicationCommand::Suspend, 40_300)
         .unwrap();
     release
-        .apply_command("publish_event", PublicationCommand::Publish, 40_200)
+}
+
+fn retired_release_named(release_ref: &str) -> InstrumentRelease {
+    let mut release = published_release_named(release_ref);
+    release
+        .apply_command("retire_event", PublicationCommand::Retire, 40_300)
         .unwrap();
-    assert_eq!(release.state(), PublicationState::Published);
-    assert!(release.accepts_new_sessions());
     release
 }
 
@@ -599,6 +667,133 @@ fn duplicate_stored_item_versions_fail_closed_instead_of_starting_sessions() {
     assert!(matches!(
         load_instrument_release(&mut transaction, "release_big_five_ko_v1"),
         Err(InstrumentReleasePersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn startable_catalog_lists_only_published_forms_in_stable_order() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &InstrumentRelease::new(manifest("release_draft_ko_v1", RELEASE_DIGEST), 40_000).unwrap(),
+    );
+    persist_ok(&mut client, &review_release_named("release_review_ko_v1"));
+    persist_ok(
+        &mut client,
+        &published_release_for("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+    persist_ok(
+        &mut client,
+        &published_release_for("release_big_five_en_v1", "instrument_big_five", "en-US"),
+    );
+    persist_ok(
+        &mut client,
+        &published_release_for("release_alpha_en_v1", "instrument_alpha", "en-US"),
+    );
+    persist_ok(
+        &mut client,
+        &suspended_release_named("release_suspended_ko_v1"),
+    );
+    persist_ok(&mut client, &retired_release_named("release_retired_ko_v1"));
+
+    let mut transaction = client.transaction().unwrap();
+    let listed = list_startable_instrument_releases(&mut transaction).unwrap();
+    let identities: Vec<(&str, &str, &str)> = listed
+        .iter()
+        .map(|release| {
+            (
+                release.manifest().instrument_ref(),
+                release.manifest().locale(),
+                release.manifest().release_ref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        identities,
+        [
+            ("instrument_alpha", "en-US", "release_alpha_en_v1"),
+            ("instrument_big_five", "en-US", "release_big_five_en_v1"),
+            ("instrument_big_five", "ko-KR", "release_big_five_ko_v1"),
+        ]
+    );
+    for release in &listed {
+        assert!(release.accepts_new_sessions());
+        assert_eq!(
+            persist_instrument_release(&mut transaction, release).unwrap(),
+            InstrumentReleasePersistenceDisposition::Duplicate
+        );
+    }
+    transaction.commit().unwrap();
+}
+
+#[test]
+fn startable_catalog_is_empty_when_no_published_form_is_stored() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &InstrumentRelease::new(manifest("release_draft_ko_v1", RELEASE_DIGEST), 40_000).unwrap(),
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(list_startable_instrument_releases(&mut transaction)
+        .unwrap()
+        .is_empty());
+    transaction.commit().unwrap();
+}
+
+#[test]
+fn startable_catalog_fails_closed_on_corrupt_published_row() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &published_release());
+    persist_ok(
+        &mut client,
+        &published_release_for("release_alpha_en_v1", "instrument_alpha", "en-US"),
+    );
+    client
+        .execute(
+            "UPDATE instrument_release SET item_version_refs = ARRAY[\
+                 'item_version_001', 'item_version_001'\
+             ] WHERE release_ref = 'release_big_five_ko_v1'",
+            &[],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        list_startable_instrument_releases(&mut transaction),
+        Err(InstrumentReleasePersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn startable_catalog_requires_read_committed_isolation() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        list_startable_instrument_releases(&mut transaction),
+        Err(InstrumentReleasePersistenceError::UnsupportedIsolationLevel)
     ));
     transaction.rollback().unwrap();
 }
