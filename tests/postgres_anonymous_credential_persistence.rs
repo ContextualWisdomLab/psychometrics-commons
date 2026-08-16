@@ -333,3 +333,83 @@ fn already_revoked_first_insert_reloads_as_revoked() {
         AnonymousCredentialPersistenceDisposition::Duplicate
     );
 }
+
+#[test]
+fn missing_relation_and_revocation_races_fail_closed() {
+    let _guard = credential_test_guard();
+    let mut client = test_client();
+    reset_credential_table(&mut client);
+    apply_anonymous_credential_migration(&mut client).unwrap();
+
+    let credential = credential_named("anonymous_credential_db", DIGEST_A);
+    persist_ok(&mut client, &credential);
+    client
+        .batch_execute("ALTER TABLE anonymous_credential_evidence DROP COLUMN tenant_ref;")
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &credential),
+        AnonymousCredentialPersistenceError::Database(_)
+    ));
+
+    reset_credential_table(&mut client);
+    apply_anonymous_credential_migration(&mut client).unwrap();
+    persist_ok(&mut client, &credential);
+    client
+        .batch_execute(
+            "ALTER TABLE anonymous_credential_evidence \
+             ADD CONSTRAINT anonymous_credential_evidence_no_revoke \
+             CHECK (revoked_at_unix_ms IS NULL);",
+        )
+        .unwrap();
+    let mut revoked = credential.clone();
+    revoked.revoke(1_500).unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &revoked),
+        AnonymousCredentialPersistenceError::Database(_)
+    ));
+
+    reset_credential_table(&mut client);
+    apply_anonymous_credential_migration(&mut client).unwrap();
+    persist_ok(&mut client, &credential);
+    client
+        .batch_execute(
+            "CREATE FUNCTION skip_anonymous_credential_revoke() RETURNS trigger AS $$\
+             BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql;\
+             CREATE TRIGGER skip_anonymous_credential_revoke \
+             BEFORE UPDATE ON anonymous_credential_evidence \
+             FOR EACH ROW EXECUTE FUNCTION skip_anonymous_credential_revoke();",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &revoked),
+        AnonymousCredentialPersistenceError::ConflictingRevocation
+    ));
+    client
+        .batch_execute(
+            "DROP TRIGGER skip_anonymous_credential_revoke ON anonymous_credential_evidence;\
+             DROP FUNCTION skip_anonymous_credential_revoke();",
+        )
+        .unwrap();
+
+    client
+        .batch_execute("DROP TABLE anonymous_credential_evidence;")
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &credential),
+        AnonymousCredentialPersistenceError::Database(_)
+    ));
+    assert!(matches!(
+        load_anonymous_credential(&mut client, "anonymous_credential_db"),
+        Err(AnonymousCredentialPersistenceError::Database(_))
+    ));
+    assert!(matches!(
+        load_anonymous_credential_for_binding(
+            &mut client,
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            DIGEST_A,
+        ),
+        Err(AnonymousCredentialPersistenceError::Database(_))
+    ));
+}
