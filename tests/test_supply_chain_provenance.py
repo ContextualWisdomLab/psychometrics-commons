@@ -55,6 +55,19 @@ class SupplyChainProvenanceContract(unittest.TestCase):
         self.assertIn("subject-path: package/*.crate", text)
         self.assertIn("python3 tests/test_supply_chain_provenance.py", text)
 
+    def test_protected_main_attestation_is_verified_against_exact_signer_and_source(self) -> None:
+        """A stored provenance claim must verify against this workflow and exact main SHA."""
+        text = self.workflow_text()
+        self.assertIn('GH_TOKEN: ${{ github.token }}', text)
+        self.assertIn('gh attestation verify "$package_file"', text)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', text)
+        self.assertIn(
+            '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/supply-chain-provenance.yml"',
+            text,
+        )
+        self.assertIn('--source-ref "refs/heads/main"', text)
+        self.assertIn('--source-digest "$GITHUB_SHA"', text)
+
 
 if __name__ == "__main__":
     unittest.main()
