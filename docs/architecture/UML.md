@@ -308,7 +308,7 @@ sequenceDiagram
     A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
-    W->>DB: claim scoring work
+    W->>DB: claim next due queued or retry-scheduled job FOR UPDATE SKIP LOCKED
     W->>DB: load persisted ScoringRequest FOR SHARE
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance

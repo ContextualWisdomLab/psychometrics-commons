@@ -218,6 +218,48 @@ fn missing_scoring_request_leaves_the_job_and_snapshot_untouched() {
     assert_eq!(snapshots, 0);
 }
 
+struct PanicResultEngine;
+
+impl ScoringWorkerResultEngine for PanicResultEngine {
+    fn score_claimed_request(
+        &self,
+        _scoring_job_ref: &str,
+        _request: &ScoringRequest,
+    ) -> Result<ScoringWorkerResultOutcome, ScoringWorkerError> {
+        panic!("engine must not run when the scoring job row is missing");
+    }
+}
+
+#[test]
+fn missing_job_row_fails_closed_before_the_engine_runs() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let request = loaded_request();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_request(&mut transaction, &request).unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            "scoring_job_worker_snapshot_missing_job",
+            1,
+            request.scoring_request_ref(),
+            &PanicResultEngine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            40_000,
+        ),
+        Err(ScoringWorkerCommitError::MissingJob)
+    ));
+    transaction.rollback().unwrap();
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
+}
+
 #[test]
 fn worker_persists_the_result_snapshot_with_the_terminal_job() {
     let _guard = worker_snapshot_guard();
@@ -760,6 +802,7 @@ fn later_due_claim_persists_the_snapshot_after_a_retryable_outage() {
     assert_eq!(state, "completed");
     assert_eq!(result_ref.as_deref(), Some("result_worker_snapshot"));
     assert_eq!(snapshot_count(&mut client), 1);
+    assert_eq!(outbox_count(&mut client), 1);
 }
 
 #[test]

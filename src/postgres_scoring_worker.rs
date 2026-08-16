@@ -17,7 +17,10 @@ use crate::postgres_scoring_failure::{
     record_permanent_scoring_failure_with_outbox, ScoringFailureOutboxError,
     ScoringFailureOutboxPersistence,
 };
-use crate::postgres_scoring_job::{record_retryable_scoring_failure, ScoringJobPersistenceError};
+use crate::postgres_scoring_job::{
+    claim_next_due_scoring_job, record_retryable_scoring_failure, ClaimedScoringJob,
+    ScoringJobPersistenceError,
+};
 use crate::postgres_scoring_request::{load_scoring_request, ScoringRequestPersistenceError};
 use crate::result::ResultSnapshotInput;
 use crate::scoring_job::ScoringJobState;
@@ -89,8 +92,12 @@ pub enum ScoringWorkerCommitError {
     Planning(ScoringWorkerError),
     /// The persisted scoring request could not be reconstructed.
     Request(ScoringRequestPersistenceError),
+    /// The scoring job row is missing, so the worker cannot bind a request pin.
+    MissingJob,
     /// The scoring job named a request that is not stored after restart.
     MissingRequest,
+    /// Claim-next could not lease a due job without inventing work.
+    Claim(ScoringJobPersistenceError),
     /// Immutable result-snapshot persistence failed.
     Snapshot(ResultSnapshotPersistenceError),
     /// Fenced successful completion or its outbox evidence failed.
@@ -113,8 +120,14 @@ impl Display for ScoringWorkerCommitError {
             Self::Request(_) => {
                 "scoring worker could not reconstruct the persisted scoring request; keep the job leased"
             }
+            Self::MissingJob => {
+                "claim the scoring job before completing it; do not invent a score"
+            }
             Self::MissingRequest => {
                 "reload the persisted scoring request before completing the job; do not invent a score"
+            }
+            Self::Claim(_) => {
+                "scoring worker could not claim the next due job; do not invent a score"
             }
             Self::Snapshot(_) => {
                 "scoring worker could not persist the immutable result snapshot; keep the job leased"
@@ -133,11 +146,11 @@ impl Error for ScoringWorkerCommitError {
         match self {
             Self::Identity(error) | Self::Planning(error) => Some(error),
             Self::Request(error) => Some(error),
-            Self::MissingRequest => None,
+            Self::MissingJob | Self::MissingRequest => None,
+            Self::Claim(error) | Self::Retry(error) => Some(error),
             Self::Snapshot(error) => Some(error),
             Self::Completion(error) => Some(error),
             Self::Failure(error) => Some(error),
-            Self::Retry(error) => Some(error),
         }
     }
 }
@@ -279,14 +292,16 @@ fn commit_planned_scoring_worker_attempt(
 /// snapshot conflict leaves the leased job untouched when the caller rolls
 /// back. A retryable engine or transport outage records the existing job retry
 /// schedule, writes no terminal outbox row, and does not invent a score.
-/// Claim-next must call this function rather than
-/// [`run_scoring_worker_attempt`], which can complete a job without a snapshot.
+/// [`run_next_due_scoring_worker_attempt_with_result_snapshot`] must call this
+/// function rather than [`run_scoring_worker_attempt`], which can complete a
+/// job without a snapshot.
 /// Live `fast-mlsirm` execution remains a later adapter behind
 /// [`ScoringWorkerResultEngine`].
 ///
 /// # Errors
 ///
-/// Returns [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
+/// Returns [`ScoringWorkerCommitError::MissingJob`] when the job row is absent,
+/// [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
 /// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
 /// [`ScoringWorkerCommitError::Planning`] when the job names a different
 /// request or the engine/planner cannot produce a typed attempt,
@@ -312,13 +327,14 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
         )
         .map_err(ScoringRequestPersistenceError::from)
         .map_err(ScoringWorkerCommitError::Request)?;
-    if let Some(row) = stored_request {
-        let stored_request_ref: String = row.get(0);
-        if stored_request_ref != scoring_request_ref {
-            return Err(ScoringWorkerCommitError::Planning(
-                ScoringWorkerError::MismatchedScoringResult,
-            ));
-        }
+    let Some(row) = stored_request else {
+        return Err(ScoringWorkerCommitError::MissingJob);
+    };
+    let stored_request_ref: String = row.get(0);
+    if stored_request_ref != scoring_request_ref {
+        return Err(ScoringWorkerCommitError::Planning(
+            ScoringWorkerError::MismatchedScoringResult,
+        ));
     }
     let request = load_scoring_request(transaction, scoring_request_ref)
         .map_err(ScoringWorkerCommitError::Request)?
@@ -379,4 +395,78 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
             Ok(ScoringWorkerSnapshotPersistence { terminal, snapshot })
         }
     }
+}
+
+/// Owned claim plus the snapshot/terminal dispositions from that attempt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScoringWorkerNextAttemptOutcome {
+    claimed: ClaimedScoringJob,
+    persistence: ScoringWorkerSnapshotPersistence,
+}
+
+impl ScoringWorkerNextAttemptOutcome {
+    /// Return the job and stored request pin that this attempt claimed.
+    #[must_use]
+    pub const fn claimed(&self) -> &ClaimedScoringJob {
+        &self.claimed
+    }
+
+    /// Return the snapshot and terminal dispositions for the claimed job.
+    #[must_use]
+    pub const fn persistence(&self) -> ScoringWorkerSnapshotPersistence {
+        self.persistence
+    }
+}
+
+/// Claim the oldest due job, then run only the request-bound snapshot worker.
+///
+/// The stored `scoring_request_ref` is the only pin passed to
+/// [`run_scoring_worker_attempt_with_result_snapshot`]. An empty due set returns
+/// `Ok(None)` and writes no snapshot and no outbox row. The caller owns the
+/// `READ COMMITTED` transaction and must roll it back when this function
+/// returns an error. Live `fast-mlsirm` execution remains a later adapter.
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerCommitError::Claim`] when the due row cannot be
+/// leased, or the existing request-bound snapshot-worker errors.
+#[allow(clippy::too_many_arguments)]
+pub fn run_next_due_scoring_worker_attempt_with_result_snapshot(
+    transaction: &mut Transaction<'_>,
+    worker_ref: &str,
+    lease_ref: &str,
+    claimed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+    engine: &impl ScoringWorkerResultEngine,
+    snapshot_input: ResultSnapshotInput<'_>,
+    envelope: ScoringWorkerEnvelope<'_>,
+    outbox_max_attempts: usize,
+    retry_at_unix_ms: u64,
+) -> Result<Option<ScoringWorkerNextAttemptOutcome>, ScoringWorkerCommitError> {
+    let Some(claimed) = claim_next_due_scoring_job(
+        transaction,
+        worker_ref,
+        lease_ref,
+        claimed_at_unix_ms,
+        expires_at_unix_ms,
+    )
+    .map_err(ScoringWorkerCommitError::Claim)?
+    else {
+        return Ok(None);
+    };
+    let persistence = run_scoring_worker_attempt_with_result_snapshot(
+        transaction,
+        claimed.scoring_job_ref(),
+        claimed.fencing_token(),
+        claimed.scoring_request_ref(),
+        engine,
+        snapshot_input,
+        envelope,
+        outbox_max_attempts,
+        retry_at_unix_ms,
+    )?;
+    Ok(Some(ScoringWorkerNextAttemptOutcome {
+        claimed,
+        persistence,
+    }))
 }

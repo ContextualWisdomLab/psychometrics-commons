@@ -897,12 +897,26 @@ fn worker_commit_errors_retain_typed_sources() {
     );
     assert!(failure.source().is_some());
 
+    let missing_job = ScoringWorkerCommitError::MissingJob;
+    assert_eq!(
+        missing_job.to_string(),
+        "claim the scoring job before completing it; do not invent a score"
+    );
+    assert!(missing_job.source().is_none());
+
     let missing = ScoringWorkerCommitError::MissingRequest;
     assert_eq!(
         missing.to_string(),
         "reload the persisted scoring request before completing the job; do not invent a score"
     );
     assert!(missing.source().is_none());
+
+    let claim = ScoringWorkerCommitError::Claim(ScoringJobPersistenceError::InvalidLeaseWindow);
+    assert_eq!(
+        claim.to_string(),
+        "scoring worker could not claim the next due job; do not invent a score"
+    );
+    assert!(claim.source().is_some());
 
     let request = ScoringWorkerCommitError::Request(ScoringRequestPersistenceError::CorruptHistory);
     assert_eq!(

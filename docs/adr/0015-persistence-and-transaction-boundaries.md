@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main includes PostgreSQL 18 integration, scoring-job, scoring-request, result-snapshot, consent, inbox, data-rights, instrument-release, and health persistence; Active PR #203 composes scoring-worker snapshot+job+outbox or a typed retryable outage and is not protected-main truth until merged
+- Current/as-built status: protected main includes PostgreSQL 18 integration, scoring-job, scoring-request, result-snapshot, consent, inbox, data-rights, instrument-release, and health persistence; Active PR claim-next successor of #203 composes oldest-due job selection with the request-bound snapshot worker and is not protected-main truth until merged
 - Target status: remaining product aggregates, live side-effect execution, crash/restart restore acceptance, and measured Hosted/Enterprise recovery evidence
-- Migration status: later aggregates still must be established from the logical ERD and this ADR without synthetic provenance backfills; scoring-worker composition on #203 must not land in parallel with #214, #207, #200, or #190
+- Migration status: later aggregates still must be established from the logical ERD and this ADR without synthetic provenance backfills; claim-next composition must not land in parallel with #203, #217, #214, #207, #200, or #190
 
 ## Context
 
@@ -93,7 +93,7 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
-A scoring worker that records a terminal outcome must validate caller envelope fields, reconstruct the persisted `ScoringRequest` under `READ COMMITTED` after `FOR SHARE`, reject a job whose stored request is not the reconstructed pin, ask a request-bound engine, persist the immutable `ResultSnapshot`, then reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018; PostgreSQL Global Development Group, 2026). `ScoringWorkerEnvelope` has no caller-supplied event identity, so the planner binds the stable key after the engine returns and cannot accept a minted `event_ref`. A missing or corrupt request, job/request mismatch, planner failure, or snapshot conflict stays a distinct error, leaves the leased job untouched, and does not write outbox evidence. A typed retryable engine or transport outage records the existing retry helper, writes no snapshot and no terminal outbox, and keeps the buyer score pending; a later due claim may then persist the snapshot inside a new lease. Permanent engine failure quarantines without inventing a score. Live `fast-mlsirm` execution remains a later adapter behind that engine trait. Completion must occur inside the unexpired lease window.
+A scoring worker that records a terminal outcome must validate caller envelope fields, reconstruct the persisted `ScoringRequest` under `READ COMMITTED` after `FOR SHARE`, reject a job whose stored request is not the reconstructed pin, ask a request-bound engine, persist the immutable `ResultSnapshot`, then reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018; PostgreSQL Global Development Group, 2026). `ScoringWorkerEnvelope` has no caller-supplied event identity, so the planner binds the stable key after the engine returns and cannot accept a minted `event_ref`. A missing job row, missing or corrupt request, job/request mismatch, planner failure, or snapshot conflict stays a distinct error, leaves any leased job untouched, and does not write outbox evidence. A typed retryable engine or transport outage records the existing retry helper, writes no snapshot and no terminal outbox, and keeps the buyer score pending; a later due claim may then persist the snapshot inside a new lease. Permanent engine failure quarantines without inventing a score. Claim-next selects the oldest due queued or retry-scheduled row with `FOR UPDATE SKIP LOCKED` and then calls only `run_scoring_worker_attempt_with_result_snapshot` using the stored request pin, so two workers cannot own the same attempt and a caller cannot complete job A with request B (Gray & Reuter, 1993; PostgreSQL Global Development Group, 2026). Live `fast-mlsirm` execution remains a later adapter behind that engine trait. Completion must occur inside the unexpired lease window. Named tests: `tests/postgres_scoring_job_claim_next.rs`, `tests/postgres_scoring_worker_claim_next.rs`, and `later_due_claim_persists_the_snapshot_after_a_retryable_outage`.
 
 ### Integration outbox enqueue
 
@@ -151,7 +151,7 @@ The adapter must bind payload/reference to digest and preserve authorization, en
 
 ## Data and persistence impact
 
-Protected main already persists integration evidence, scoring jobs and requests, result snapshots, consent, inbox consumption, data-rights, and instrument releases. Active PR #203 composes the scoring-worker snapshot+job+outbox (or retryable outage) transaction and is not protected-main truth until merged. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
+Protected main already persists integration evidence, scoring jobs and requests, result snapshots, consent, inbox consumption, data-rights, and instrument releases. Active PR claim-next successor of #203 composes oldest-due selection with the scoring-worker snapshot+job+outbox (or retryable outage) transaction and is not protected-main truth until merged. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
 
 ## Migration policy
 
@@ -304,6 +304,8 @@ Costs:
 The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed. The `READ COMMITTED` restriction may be removed only when a replacement replay algorithm is proven isolation-correct by real concurrent PostgreSQL tests and the documentation/traceability contract is updated in the same change.
 
 ## References
+
+Gray, J., & Reuter, A. (1993). *Transaction processing: Concepts and techniques*. Morgan Kaufmann.
 
 Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
 
