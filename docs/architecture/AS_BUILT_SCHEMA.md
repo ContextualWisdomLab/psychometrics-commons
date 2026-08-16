@@ -68,7 +68,7 @@ PR #133 adds `migrations/0022_participant_identity_link.sql` and `src/postgres_p
 - derived `current_participant_identity_link` projection enforcing one current link per participant and one current issuer-scoped subject per tenant;
 - composite foreign keys so a link-end or current projection cannot point at another participant's link.
 
-Exact replay is idempotent. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from unterminated issuer-scoped history even when the derived current projection is missing. HTTP account-link transport and live Keyverse verification remain Target.
+Exact replay is idempotent and reconciles the derived current projection so a missing or stale unique enforcer is restored or cleared. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from unterminated issuer-scoped history even when the derived current projection is missing. HTTP account-link transport and live Keyverse verification remain Target.
 
 ## Logical-to-physical mapping rule
 

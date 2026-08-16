@@ -158,3 +158,6 @@ CREATE TABLE IF NOT EXISTS current_participant_identity_link (
         identity_subject_ref
     )
 );
+
+CREATE INDEX IF NOT EXISTS participant_identity_link_current_subject_lookup
+    ON participant_identity_link (tenant_ref, identity_issuer, identity_subject_ref);

@@ -54,6 +54,21 @@ fn drop_current_projection(client: &mut Client) {
         .unwrap();
 }
 
+fn current_projection(
+    client: &mut Client,
+    participant_ref: &str,
+) -> Option<(String, String, String)> {
+    client
+        .query_opt(
+            "SELECT identity_link_ref, identity_issuer, identity_subject_ref \
+             FROM identity_link_persistence_test.current_participant_identity_link \
+             WHERE participant_ref = $1",
+            &[&participant_ref],
+        )
+        .unwrap()
+        .map(|row| (row.get(0), row.get(1), row.get(2)))
+}
+
 fn anonymous_participant() -> ParticipantRecord {
     ParticipantRecord::new_anonymous(
         "participant_identity_alpha",
@@ -64,12 +79,8 @@ fn anonymous_participant() -> ParticipantRecord {
 }
 
 fn anonymous_participant_beta() -> ParticipantRecord {
-    ParticipantRecord::new_anonymous(
-        "participant_identity_beta",
-        "tenant_identity_alpha",
-        10_000,
-    )
-    .unwrap()
+    ParticipantRecord::new_anonymous("participant_identity_beta", "tenant_identity_alpha", 10_000)
+        .unwrap()
 }
 
 fn linked_participant() -> ParticipantRecord {
@@ -514,6 +525,93 @@ fn lost_current_projection_cannot_rebind_subject_to_another_participant() {
 }
 
 #[test]
+fn exact_replay_restores_missing_current_projection() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+    drop_current_projection(&mut client);
+    assert!(current_projection(&mut client, "participant_identity_alpha").is_none());
+
+    assert_eq!(
+        persist_ok(&mut client, &linked_participant()),
+        IdentityLinkPersistenceDisposition::Duplicate
+    );
+
+    let restored = current_projection(&mut client, "participant_identity_alpha")
+        .expect("exact replay must restore the derived current projection");
+    assert_eq!(restored.0, "link_event_identity_alpha");
+    assert_eq!(restored.1, "keyverse_issuer_alpha");
+    assert_eq!(restored.2, "keyverse_subject_alpha");
+}
+
+#[test]
+fn exact_replay_of_relink_restores_only_the_current_projection() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &relinked_participant());
+    drop_current_projection(&mut client);
+
+    assert_eq!(
+        persist_ok(&mut client, &relinked_participant()),
+        IdentityLinkPersistenceDisposition::Duplicate
+    );
+
+    let restored = current_projection(&mut client, "participant_identity_alpha")
+        .expect("relink replay must restore only the current account projection");
+    assert_eq!(restored.0, "link_event_identity_gamma");
+    assert_eq!(restored.1, "keyverse_issuer_gamma");
+    assert_eq!(restored.2, "keyverse_subject_gamma");
+}
+
+#[test]
+fn exact_replay_clears_stale_projection_after_unlink() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut unlinked = linked_participant();
+    unlinked
+        .record_link_end(
+            "link_end_event_identity_alpha",
+            "unlink_evidence_identity_alpha",
+            10_200,
+        )
+        .unwrap();
+    persist_ok(&mut client, &unlinked);
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.current_participant_identity_link (\
+                 participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref\
+             ) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &"participant_identity_alpha",
+                &"link_event_identity_alpha",
+                &"tenant_identity_alpha",
+                &"keyverse_issuer_alpha",
+                &"keyverse_subject_alpha",
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        persist_ok(&mut client, &unlinked),
+        IdentityLinkPersistenceDisposition::Duplicate
+    );
+    assert!(
+        current_projection(&mut client, "participant_identity_alpha").is_none(),
+        "unlink replay must drop a stale current projection"
+    );
+}
+
+#[test]
 fn two_unterminated_links_for_one_subject_fail_closed_on_lookup() {
     let _guard = identity_link_test_guard();
     let mut client = test_client();
@@ -625,6 +723,30 @@ fn other_tenant_cannot_load_or_rebind_participant_identity() {
         persist_err(&mut client, &rebound),
         IdentityLinkPersistenceError::ConflictingReplay
     ));
+}
+
+#[test]
+fn migration_indexes_history_subject_lookup() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let indexed: bool = client
+        .query_one(
+            "SELECT EXISTS (\
+                 SELECT 1 FROM pg_indexes \
+                 WHERE schemaname = 'identity_link_persistence_test' \
+                   AND indexname = 'participant_identity_link_current_subject_lookup'\
+             )",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(
+        indexed,
+        "unterminated-subject lookup must use an indexed history path"
+    );
 }
 
 #[test]
