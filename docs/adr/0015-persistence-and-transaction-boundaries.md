@@ -93,6 +93,8 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
+A scoring worker that records a terminal outcome must reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018). Minting a new event identity after an accepted terminal write is rejected before any write. Live `fast-mlsirm` execution remains a later adapter.
+
 ### Integration outbox enqueue
 
 The first physical integration slice inserts an immutable outbox row under the composite identity `(source_ref, tenant_ref, event_ref)`. `INSERT ... ON CONFLICT DO NOTHING` is followed by an exact immutable-evidence query only when the insert did not create a row. Because a caller may supply its own transaction, this algorithm explicitly requires `READ COMMITTED`, where each statement receives a fresh command snapshot after a conflicting transaction completes. Stronger isolation is rejected rather than converting an invisible concurrent duplicate into a false `ConflictingReplay` result.
@@ -303,6 +305,10 @@ The physical database technology or decomposition may change if scale, residency
 
 ## References
 
+Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
+
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+
+Richardson, C. (2018). *Microservices patterns: With examples in Java*. Manning.

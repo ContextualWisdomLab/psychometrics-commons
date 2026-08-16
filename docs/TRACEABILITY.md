@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #115 scoring completion/failure outbox persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Successful scoring completion and permanent scientific failure each commit the job outcome with a bound outbox event atomically. Exact replay stays idempotent, mixed exact dispositions reconcile legacy one-sided state, a different failure cause fails closed, and a late outbox conflict rolls the in-transaction job write back. Live fast-mlsirm execution remains outside this slice. #69 remains the completion-only predecessor and should not land separately once this head is reviewable.
+**Active PR** scoring-worker terminal identity on this successor of #115 is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The worker reuses one stable `event_ref` for the job plus accepted result, or the job plus permanent cause, and rejects a minted identity before any write. This head also carries #115 completion/failure outbox composition and #69 completion-only work; those predecessors should not land separately. Live fast-mlsirm execution remains outside this slice.
 
 ## 5. ADR traceability by concern
 

@@ -311,7 +311,7 @@ sequenceDiagram
     W->>DB: claim scoring work
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance
-    W->>DB: persist immutable scoring-result evidence
+    W->>DB: commit terminal job + outbox using the stable job/outcome event_ref
     W->>N: resolve deterministic style/narrative from pinned ScoreProfile + mapping/rules/locale
     N-->>W: finalized deterministic or validated optional-AI narrative artifact/provenance
     W->>DB: atomically persist immutable ResultSnapshot binding scoring + narrative provenance, then release
@@ -346,7 +346,7 @@ sequenceDiagram
 
     W->>F: retry same version-pinned request
     F-->>W: valid scoring result
-    W->>DB: persist scoring evidence; result finalization proceeds only after required presentation provenance is resolved
+    W->>DB: persist scoring evidence with the same stable job-plus-result event identity; result finalization proceeds only after required presentation provenance is resolved
 ```
 
 No fallback score may be fabricated merely because the scoring dependency is unavailable.

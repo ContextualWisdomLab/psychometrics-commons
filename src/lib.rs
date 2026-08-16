@@ -33,6 +33,7 @@ pub mod postgres_scoring_completion;
 pub mod postgres_scoring_failure;
 pub mod postgres_scoring_job;
 pub mod postgres_scoring_request;
+pub mod postgres_scoring_worker;
 mod reference;
 pub mod research_release;
 pub mod response;
