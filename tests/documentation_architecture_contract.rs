@@ -329,8 +329,9 @@ fn as_built_and_traceability_name_the_publication_persist_lock_pr() {
     assert!(
         as_built.contains("**Active PR** #196")
             && as_built.contains("FOR UPDATE")
+            && as_built.contains("load_published_instrument_release")
             && as_built.contains("not protected-main truth"),
-        "as-built instrument-release section must name persist-classification lock Active PR #196 without promoting it to Implemented"
+        "as-built instrument-release section must name persist-classification lock Active PR #196 and the start-load lock without promoting them to Implemented"
     );
     let traceability = read_required(&repository_root().join("docs/TRACEABILITY.md"));
     assert!(
