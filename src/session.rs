@@ -7,7 +7,9 @@
 //! rewinding later state. Session creation pins the exact immutable published
 //! instrument release, content digest, and locale before lifecycle transitions begin.
 
-use crate::instrument::{valid_locale, valid_sha256_digest, InstrumentRelease};
+use crate::instrument::{
+    valid_locale, valid_sha256_digest, InstrumentRelease, InstrumentReleaseManifest,
+};
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -208,17 +210,54 @@ impl AssessmentSession {
         if !release.accepts_new_sessions() {
             return Err(SessionCreationError::InstrumentReleaseUnavailable);
         }
-        if requested_locale != release.manifest().locale() {
+        Self::from_currently_published_manifest(
+            session_ref,
+            participant_ref,
+            release.manifest(),
+            requested_locale,
+            created_at_unix_ms,
+        )
+    }
+
+    /// Create a session from a manifest that a published-release load already accepted.
+    ///
+    /// Use this after
+    /// [`crate::postgres_instrument_release::load_published_instrument_release`].
+    /// It does not re-check publication lifecycle; the load boundary is the
+    /// eligibility gate. Call [`AssessmentSession::new`] when the caller still
+    /// holds a live [`InstrumentRelease`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionCreationError::InvalidReference`] for malformed
+    /// session/participant references, [`SessionCreationError::InvalidTimestamp`]
+    /// for a zero server timestamp, or [`SessionCreationError::LocaleMismatch`]
+    /// when the requested locale is not exactly the manifest locale.
+    pub fn from_currently_published_manifest(
+        session_ref: &str,
+        participant_ref: &str,
+        manifest: &InstrumentReleaseManifest,
+        requested_locale: &str,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, SessionCreationError> {
+        let session_ref =
+            normalized_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let participant_ref =
+            normalized_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+        if created_at_unix_ms == 0 {
+            return Err(SessionCreationError::InvalidTimestamp);
+        }
+        if requested_locale != manifest.locale() {
             return Err(SessionCreationError::LocaleMismatch);
         }
 
         Ok(Self {
             session_ref: session_ref.to_owned(),
             participant_ref: participant_ref.to_owned(),
-            instrument_release_ref: release.manifest().release_ref().to_owned(),
-            instrument_version_ref: release.manifest().instrument_version_ref().to_owned(),
-            instrument_release_content_digest: release.manifest().content_digest().to_owned(),
-            locale: release.manifest().locale().to_owned(),
+            instrument_release_ref: manifest.release_ref().to_owned(),
+            instrument_version_ref: manifest.instrument_version_ref().to_owned(),
+            instrument_release_content_digest: manifest.content_digest().to_owned(),
+            locale: manifest.locale().to_owned(),
             created_at_unix_ms,
             state: SessionState::Created,
             accepted_commands: Vec::new(),

@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- New assessment sessions start only from a currently published release (`created_session_for_start` / `start_created_assessment_session`). A draft, suspended, or retired release fails closed before a row is inserted. Reconstituting stored identity remains load, not start.
+- New assessment sessions start only from a currently published release. Durable start locks the stored `instrument_release` row (`created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`) so a stale in-memory Published object cannot insert after persist Suspend or Retire. A draft, suspended, retired, missing, or digest-mismatched stored release fails closed before a row is inserted. Reconstituting stored identity remains load, not start.
 - Assessment-session command persist locks the created-session header row until the caller transaction ends, so a concurrent Activate-only worker cannot count a shorter history and then rewind a later Pause/Resume projection.
 - Created assessment sessions can be loaded from PostgreSQL without re-checking current publication eligibility, so a later suspend or retire cannot rewrite stored provenance. Missing sessions return none; later stored states without command history fail closed.
 - Assessment-session Activate/Pause/Resume command history persists in PostgreSQL so an in-progress session reloads after restart. Exact command replay is idempotent; sequence reuse and evidence rebinding fail closed.

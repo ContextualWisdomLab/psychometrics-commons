@@ -10,8 +10,11 @@ use psychometrics_commons_runtime::instrument::{
 use psychometrics_commons_runtime::postgres_assessment_session::{
     apply_assessment_session_migration, load_assessment_session, persist_assessment_session,
     persist_assessment_session_commands, start_created_assessment_session,
-    AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
-    AssessmentSessionStartError,
+    start_created_assessment_session_from_stored_release, AssessmentSessionPersistenceDisposition,
+    AssessmentSessionPersistenceError, AssessmentSessionStartError,
+};
+use psychometrics_commons_runtime::postgres_instrument_release::{
+    apply_instrument_release_migration, persist_instrument_release,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
@@ -45,7 +48,8 @@ fn reset_session_table(client: &mut Client) {
     client
         .batch_execute(&format!(
             "DROP TABLE IF EXISTS {SCHEMA}.assessment_session_command;
-             DROP TABLE IF EXISTS {SCHEMA}.assessment_session;"
+             DROP TABLE IF EXISTS {SCHEMA}.assessment_session;
+             DROP TABLE IF EXISTS {SCHEMA}.instrument_release;"
         ))
         .unwrap();
 }
@@ -145,10 +149,12 @@ fn created_session(
 fn start_persists_published_release_and_rejects_unpublished_before_insert() {
     let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
     apply_assessment_session_migration(&mut client).unwrap();
     let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
 
     let mut transaction = client.transaction().unwrap();
+    persist_instrument_release(&mut transaction, &published).unwrap();
     let (started, disposition) = start_created_assessment_session(
         &mut transaction,
         "ses_start_published_persist_alpha",
@@ -205,6 +211,104 @@ fn start_persists_published_release_and_rejects_unpublished_before_insert() {
         count, 0,
         "an unpublished start must not insert a session row"
     );
+}
+
+#[test]
+fn start_from_stored_release_uses_database_publication_state() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+    apply_assessment_session_migration(&mut client).unwrap();
+
+    let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    let mut transaction = client.transaction().unwrap();
+    persist_instrument_release(&mut transaction, &published).unwrap();
+    let (started, inserted) = start_created_assessment_session_from_stored_release(
+        &mut transaction,
+        "ses_start_from_stored_published",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    assert_eq!(inserted, AssessmentSessionPersistenceDisposition::Inserted);
+    assert_eq!(started.instrument_release_ref(), "release_big_five_ko_v1");
+    assert_eq!(started.locale(), "ko-KR");
+    transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE instrument_release SET content_digest = $2 WHERE release_ref = $1",
+            &[&"release_big_five_ko_v1", &OTHER_DIGEST],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_digest_mismatch",
+            PARTICIPANT_REF,
+            &published,
+            "ko-KR",
+            20_500,
+        ),
+        Err(AssessmentSessionStartError::InvalidStoredRelease)
+    ));
+    transaction.rollback().unwrap();
+    client
+        .execute(
+            "UPDATE instrument_release SET content_digest = $2 WHERE release_ref = $1",
+            &[&"release_big_five_ko_v1", &VALID_DIGEST],
+        )
+        .unwrap();
+
+    client
+        .execute(
+            "UPDATE instrument_release SET publication_state = 'suspended' WHERE release_ref = $1",
+            &[&"release_big_five_ko_v1"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        start_created_assessment_session_from_stored_release(
+            &mut transaction,
+            "ses_start_from_stored_suspended",
+            PARTICIPANT_REF,
+            "release_big_five_ko_v1",
+            "ko-KR",
+            21_000,
+        ),
+        Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
+    ));
+    assert!(matches!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_stale_published_memory",
+            PARTICIPANT_REF,
+            &published,
+            "ko-KR",
+            21_100,
+        ),
+        Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
+    ));
+    transaction.rollback().unwrap();
+    let suspended_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session WHERE session_ref = $1",
+            &[&"ses_start_from_stored_suspended"],
+        )
+        .unwrap()
+        .get(0);
+    let stale_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session WHERE session_ref = $1",
+            &[&"ses_start_stale_published_memory"],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(suspended_count, 0);
+    assert_eq!(stale_count, 0);
 }
 
 #[test]

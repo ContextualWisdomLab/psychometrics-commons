@@ -3,8 +3,12 @@
 //! This module stores the participant, published-release, version, content-digest,
 //! and locale identity copied at session creation. It does not rewrite provenance
 //! when the release is later suspended or retired. New sessions must start
-//! through [`created_session_for_start`] or [`start_created_assessment_session`],
-//! which call [`AssessmentSession::new`]. Created identity is inserted only for
+//! through [`created_session_for_start`], [`start_created_assessment_session`],
+//! [`created_session_for_start_from_published_snapshot`], or
+//! [`start_created_assessment_session_from_stored_release`]. Start locks the
+//! stored `instrument_release` row in the same transaction so a stale in-memory
+//! Published object cannot insert after persist Suspend or Retire. Created
+//! identity is inserted only for
 //! [`SessionState::Created`]. Later lifecycle states persist as append-only
 //! command history plus a current-state projection. A shorter persist than
 //! already stored fails closed so a stale worker cannot rewind that projection.
@@ -14,6 +18,10 @@
 //! `READ COMMITTED`.
 
 use crate::instrument::InstrumentRelease;
+use crate::postgres_instrument_release::{
+    load_published_instrument_release, InstrumentReleaseQueryError,
+    PublishedInstrumentReleaseSnapshot,
+};
 use crate::reference::normalized_reference;
 use crate::session::{
     AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionCreationError, SessionState,
@@ -125,6 +133,8 @@ pub enum AssessmentSessionStartError {
     InstrumentReleaseUnavailable,
     /// The requested assessment locale does not exactly match the published release locale.
     LocaleMismatch,
+    /// Stored publication evidence could not be used as a start source.
+    InvalidStoredRelease,
     /// The created session could not be persisted.
     Persistence(AssessmentSessionPersistenceError),
 }
@@ -142,6 +152,9 @@ impl Display for AssessmentSessionStartError {
                 "publish the exact instrument release before starting a new session"
             }
             Self::LocaleMismatch => "start the session with the exact published release locale",
+            Self::InvalidStoredRelease => {
+                "repair the stored instrument release before starting a new session"
+            }
             Self::Persistence(_) => {
                 "session start could not persist the created session; retry the exact start or repair the store"
             }
@@ -156,7 +169,8 @@ impl Error for AssessmentSessionStartError {
             Self::InvalidReference
             | Self::InvalidTimestamp
             | Self::InstrumentReleaseUnavailable
-            | Self::LocaleMismatch => None,
+            | Self::LocaleMismatch
+            | Self::InvalidStoredRelease => None,
         }
     }
 }
@@ -180,6 +194,23 @@ impl From<AssessmentSessionPersistenceError> for AssessmentSessionStartError {
     }
 }
 
+impl From<InstrumentReleaseQueryError> for AssessmentSessionStartError {
+    fn from(error: InstrumentReleaseQueryError) -> Self {
+        match error {
+            InstrumentReleaseQueryError::InvalidReference => Self::InvalidReference,
+            InstrumentReleaseQueryError::InvalidLocale
+            | InstrumentReleaseQueryError::LocaleMismatch => Self::LocaleMismatch,
+            InstrumentReleaseQueryError::NotFound | InstrumentReleaseQueryError::NotPublished => {
+                Self::InstrumentReleaseUnavailable
+            }
+            InstrumentReleaseQueryError::InvalidStoredValue => Self::InvalidStoredRelease,
+            InstrumentReleaseQueryError::Database(error) => {
+                Self::Persistence(AssessmentSessionPersistenceError::from(error))
+            }
+        }
+    }
+}
+
 /// Apply the idempotent assessment-session and command-history migrations.
 ///
 /// # Errors
@@ -194,11 +225,14 @@ pub fn apply_assessment_session_migration(
 
 /// Build a created session that is legal to persist as a new start.
 ///
-/// HTTP `POST /v1/sessions` and any other start path must call this, or
-/// [`start_created_assessment_session`], rather than
+/// HTTP `POST /v1/sessions` and any other start path must call this,
+/// [`start_created_assessment_session`],
+/// [`created_session_for_start_from_published_snapshot`], or
+/// [`start_created_assessment_session_from_stored_release`], rather than
 /// [`AssessmentSession::from_persisted_created`]. This uses
-/// [`AssessmentSession::new`], so a suspended or retired release cannot begin a
-/// new session.
+/// [`AssessmentSession::new`], so a suspended or retired in-memory release
+/// cannot begin a new session. Durable start must still lock the stored
+/// publication row.
 ///
 /// # Errors
 ///
@@ -224,10 +258,12 @@ pub fn created_session_for_start(
 
 /// Start one created session from a live published release and persist it.
 ///
-/// This is the start boundary: it calls [`created_session_for_start`] and then
-/// [`persist_assessment_session`]. Exact replay of the same start is idempotent.
-/// It does not treat load as authorization and does not accept a reconstituted
-/// session.
+/// This is the in-memory start boundary: it calls [`created_session_for_start`],
+/// locks the stored `instrument_release` row, and then
+/// [`persist_assessment_session`]. A stale Published object fails when the
+/// stored row is missing, unpublished, or digest-mismatched. Exact replay of
+/// the same start is idempotent. It does not treat load as authorization and
+/// does not accept a reconstituted session.
 ///
 /// # Errors
 ///
@@ -249,8 +285,91 @@ pub fn start_created_assessment_session(
         requested_locale,
         created_at_unix_ms,
     )?;
+    require_locked_published_release(transaction, &session, requested_locale)?;
     let disposition = persist_assessment_session(transaction, &session)?;
     Ok((session, disposition))
+}
+
+/// Build a created session from a store-validated published-release snapshot.
+///
+/// HTTP `POST /v1/sessions` must call this after
+/// [`load_published_instrument_release`], or call
+/// [`start_created_assessment_session_from_stored_release`], so a stale
+/// in-memory Published object cannot start a session after the stored release
+/// is suspended or retired.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionStartError`] when the session or participant
+/// reference is invalid, the timestamp is zero, or the requested locale is not
+/// the snapshot locale.
+pub fn created_session_for_start_from_published_snapshot(
+    session_ref: &str,
+    participant_ref: &str,
+    snapshot: &PublishedInstrumentReleaseSnapshot,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<AssessmentSession, AssessmentSessionStartError> {
+    AssessmentSession::from_currently_published_manifest(
+        session_ref,
+        participant_ref,
+        snapshot.manifest(),
+        requested_locale,
+        created_at_unix_ms,
+    )
+    .map_err(AssessmentSessionStartError::from)
+}
+
+/// Start one created session from the stored published release and persist it.
+///
+/// This locks the exact release and locale from the same transaction, then
+/// calls [`created_session_for_start_from_published_snapshot`] and
+/// [`persist_assessment_session`]. A stored Draft, Review, Suspended, or
+/// Retired release fails before insert.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionStartError`] when the stored release is missing,
+/// unpublished, locale-mismatched, corrupt, or persist fails.
+pub fn start_created_assessment_session_from_stored_release(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    participant_ref: &str,
+    instrument_release_ref: &str,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
+{
+    let snapshot =
+        load_published_instrument_release(transaction, instrument_release_ref, requested_locale)?;
+    let session = created_session_for_start_from_published_snapshot(
+        session_ref,
+        participant_ref,
+        &snapshot,
+        requested_locale,
+        created_at_unix_ms,
+    )?;
+    let disposition = persist_assessment_session(transaction, &session)?;
+    Ok((session, disposition))
+}
+
+fn require_locked_published_release(
+    transaction: &mut Transaction<'_>,
+    session: &AssessmentSession,
+    requested_locale: &str,
+) -> Result<(), AssessmentSessionStartError> {
+    let snapshot = load_published_instrument_release(
+        transaction,
+        session.instrument_release_ref(),
+        requested_locale,
+    )?;
+    if snapshot.manifest().content_digest() != session.instrument_release_content_digest()
+        || snapshot.manifest().instrument_version_ref() != session.instrument_version_ref()
+        || snapshot.manifest().locale() != session.locale()
+    {
+        return Err(AssessmentSessionStartError::InvalidStoredRelease);
+    }
+    Ok(())
 }
 
 /// Persist one created assessment-session identity bound to a published release.
@@ -598,6 +717,7 @@ mod tests {
     use super::{
         reject_stale_command_prefix, AssessmentSessionPersistenceError, AssessmentSessionStartError,
     };
+    use crate::postgres_instrument_release::InstrumentReleaseQueryError;
     use crate::session::{SessionCommand, SessionCreationError, SessionState};
 
     #[test]
@@ -730,5 +850,61 @@ mod tests {
             )
         ));
         assert!(std::error::Error::source(&persistence).is_some());
+
+        assert_eq!(
+            AssessmentSessionStartError::from(InstrumentReleaseQueryError::NotPublished)
+                .to_string(),
+            AssessmentSessionStartError::InstrumentReleaseUnavailable.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionStartError::from(InstrumentReleaseQueryError::NotFound).to_string(),
+            AssessmentSessionStartError::InstrumentReleaseUnavailable.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidLocale)
+                .to_string(),
+            AssessmentSessionStartError::LocaleMismatch.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionStartError::from(InstrumentReleaseQueryError::LocaleMismatch)
+                .to_string(),
+            AssessmentSessionStartError::LocaleMismatch.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidReference)
+                .to_string(),
+            AssessmentSessionStartError::InvalidReference.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidStoredValue)
+                .to_string(),
+            AssessmentSessionStartError::InvalidStoredRelease.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionStartError::InvalidStoredRelease.to_string(),
+            "repair the stored instrument release before starting a new session"
+        );
+        assert!(
+            std::error::Error::source(&AssessmentSessionStartError::InvalidStoredRelease).is_none()
+        );
+
+        let Err(source) = postgres::Config::new()
+            .host("/no/such/psychometrics-commons.socket")
+            .port(1)
+            .user("postgres")
+            .dbname("psychometrics_commons_test")
+            .connect_timeout(std::time::Duration::from_millis(50))
+            .connect(postgres::NoTls)
+        else {
+            panic!("missing local socket must fail closed")
+        };
+        let mapped = AssessmentSessionStartError::from(InstrumentReleaseQueryError::from(source));
+        assert!(matches!(
+            mapped,
+            AssessmentSessionStartError::Persistence(AssessmentSessionPersistenceError::Database(
+                _
+            ))
+        ));
+        assert!(std::error::Error::source(&mapped).is_some());
     }
 }
