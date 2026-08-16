@@ -114,7 +114,7 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
 
-A consent-change write that must propagate shares the caller-owned transaction with its bound outbox row. After the submitted ledger snapshot is persisted, the same transaction locks `consent_ledger` and requires the durable `consent_event` tail—ordered by `occurred_at_unix_ms`, then physical `created_at`, then `event_ref`—to equal the envelope `causation_ref` and occurrence time. Equal server timestamps therefore keep a later-inserted revocation ahead of an earlier grant whose opaque identity sorts later. Callers roll back when either adapter fails so newly accepted consent evidence cannot survive without its outbox record.
+A consent-change write that must propagate shares the caller-owned transaction with its bound outbox row. After the submitted ledger snapshot is persisted, the same transaction locks `consent_ledger`, requires every durable `consent_event` identity to appear in the submitted ledger, and requires a unique durable tail—ordered by `occurred_at_unix_ms`, then physical `created_at`—to equal the envelope `causation_ref` and occurrence time. Equal server timestamps therefore keep a later-inserted revocation ahead of an earlier grant. Two rows that also share `created_at` fail closed; opaque `event_ref` is not a correctness tie-breaker. Callers roll back when either adapter fails so newly accepted consent evidence cannot survive without its outbox record.
 
 ## Concurrency and idempotency
 

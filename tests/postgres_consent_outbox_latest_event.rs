@@ -268,6 +268,100 @@ fn same_millisecond_revoke_beats_lexicographic_grant_tail() {
 }
 
 #[test]
+fn equal_created_at_cannot_bind_a_lexicographic_grant_envelope() {
+    let mut client = ready_client();
+    let research_scope_ref = Some("research_scope_latest_alpha");
+    client
+        .execute(
+            "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
+            &[&"participant_consent_latest_alpha"],
+        )
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO consent_event (\
+                 participant_ref, event_ref, consent_purpose, consent_decision, \
+                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms, created_at\
+             ) VALUES ($1, $2, 'research_contribution', 'granted', $3, $4, 33000, \
+             TIMESTAMPTZ '2026-08-16 15:00:00+00')",
+            &[
+                &"participant_consent_latest_alpha",
+                &"consent_event_zzz_tied_grant",
+                &"consent_form_latest_v1",
+                &research_scope_ref,
+            ],
+        )
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO consent_event (\
+                 participant_ref, event_ref, consent_purpose, consent_decision, \
+                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms, created_at\
+             ) VALUES ($1, $2, 'research_contribution', 'revoked', $3, $4, 33000, \
+             TIMESTAMPTZ '2026-08-16 15:00:00+00')",
+            &[
+                &"participant_consent_latest_alpha",
+                &"consent_event_aaa_tied_revoke",
+                &"consent_form_latest_v1",
+                &research_scope_ref,
+            ],
+        )
+        .unwrap();
+
+    let mut complete = ConsentLedger::new("participant_consent_latest_alpha").unwrap();
+    complete
+        .record(ConsentEventInput {
+            event_ref: "consent_event_zzz_tied_grant",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "consent_form_latest_v1",
+            research_scope_ref: Some("research_scope_latest_alpha"),
+            occurred_at_unix_ms: 33_000,
+        })
+        .unwrap();
+    complete
+        .record(ConsentEventInput {
+            event_ref: "consent_event_aaa_tied_revoke",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Revoked,
+            consent_form_version_ref: "consent_form_latest_v1",
+            research_scope_ref: Some("research_scope_latest_alpha"),
+            occurred_at_unix_ms: 33_000,
+        })
+        .unwrap();
+    let stale_grant = propagation_event(
+        "event_consent_tied_grant",
+        "consent_event_zzz_tied_grant",
+        33_000,
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &complete,
+            &stale_grant,
+            3,
+        ),
+        Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+    ));
+    transaction.rollback().unwrap();
+
+    let outbox_count: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox_count, 0);
+
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public;
+             DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
 fn latest_revocation_can_be_persisted_with_its_propagation_event() {
     let mut client = ready_client();
     let ledger = ledger_with_revocation();
