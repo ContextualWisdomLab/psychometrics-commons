@@ -44,6 +44,7 @@ fn event_type_and_schema_version_are_bounded_and_exact() {
         "assessment.\tcompleted",
         "assessment.\ncompleted",
         "assessment.\u{00a0}completed",
+        "assessment.\0completed",
     ] {
         assert_eq!(
             create(event_type, "v1", VALID_DIGEST),
@@ -52,7 +53,7 @@ fn event_type_and_schema_version_are_bounded_and_exact() {
         );
     }
 
-    for schema_version in [" v1", "v1 ", "v\t1", "v\n1", "v\u{00a0}1"] {
+    for schema_version in [" v1", "v1 ", "v\t1", "v\n1", "v\u{00a0}1", "v\01"] {
         assert_eq!(
             create("assessment.completed", schema_version, VALID_DIGEST),
             Err(IntegrationError::InvalidSchemaVersion),
