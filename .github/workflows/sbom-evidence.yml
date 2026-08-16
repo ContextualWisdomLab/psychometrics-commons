@@ -50,3 +50,27 @@ jobs:
             sbom.spdx.json.sha256
           if-no-files-found: error
           retention-days: 14
+
+  verify-evidence:
+    name: Reverify preserved SPDX evidence
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head for locked dependency evidence
+        uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Download exact SBOM evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: sbom-spdx-${{ github.event.pull_request.head.sha || github.sha }}
+          path: evidence
+      - name: Verify checksum after artifact handoff
+        working-directory: evidence
+        run: sha256sum --check sbom.spdx.json.sha256
+      - name: Reverify locked dependency coverage after artifact handoff
+        run: python3 scripts/validate_spdx_sbom.py evidence/sbom.spdx.json Cargo.lock
