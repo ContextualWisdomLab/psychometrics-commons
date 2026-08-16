@@ -341,9 +341,7 @@ fn created_at_rebinding_and_conflicting_end_fail_closed() {
         .unwrap();
     persist_ok(&mut client, &ended);
     client
-        .batch_execute(
-            "ALTER TABLE participant_identity_link_end_event DISABLE TRIGGER ALL;",
-        )
+        .batch_execute("ALTER TABLE participant_identity_link_end_event DISABLE TRIGGER ALL;")
         .unwrap();
     client
         .execute(
@@ -454,9 +452,7 @@ fn each_link_and_end_stored_field_mismatch_fails_closed() {
     let participant = linked("participant_field_mismatch");
     persist_ok(&mut client, &participant);
     client
-        .batch_execute(
-            "ALTER TABLE participant_identity_link_event DISABLE TRIGGER ALL;",
-        )
+        .batch_execute("ALTER TABLE participant_identity_link_event DISABLE TRIGGER ALL;")
         .unwrap();
     for sql in [
         "UPDATE participant_identity_link_event SET issuer_ref = 'issuer_other' \
@@ -494,9 +490,7 @@ fn each_link_and_end_stored_field_mismatch_fails_closed() {
         .unwrap();
     persist_ok(&mut client, &ended);
     client
-        .batch_execute(
-            "ALTER TABLE participant_identity_link_end_event DISABLE TRIGGER ALL;",
-        )
+        .batch_execute("ALTER TABLE participant_identity_link_end_event DISABLE TRIGGER ALL;")
         .unwrap();
     client
         .execute(
