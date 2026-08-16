@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -92,7 +92,13 @@ Product consequences:
 - clock skew, impossible ordering, and unknown precision are typed validation
   outcomes rather than reasons to rewrite source history;
 - analysis-set digests bind the exact observations and time semantics consumed by
-  temporal, multilevel, cross-classified, or multiple-membership analysis.
+  temporal, multilevel, cross-classified, or multiple-membership analysis;
+- multiple-membership weights stay explicit and complete so a `primary_group`
+  shortcut cannot recreate the atomistic fallacy Robinson (1950) described;
+- within-person change is not inferred from a between-person snapshot
+  (Curran & Bauer, 2011; Hamaker & Wichers, 2017);
+- multiple-membership / multiple-classification structure is retained for TEPP
+  rather than flattened in the product ingest (Browne et al., 2001).
 
 ## Evidence maintenance rules
 
@@ -106,6 +112,14 @@ Product consequences:
 ## References — APA 7th
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Browne, W. J., Goldstein, H., & Rasbash, J. (2001). Multiple membership multiple classification (MMMC) models. *Statistical Modelling, 1*(2), 103–124. https://doi.org/10.1177/1471082X0100100202
+
+Curran, P. J., & Bauer, D. J. (2011). The disaggregation of within-person and between-person effects in longitudinal models of change. *Annual Review of Psychology, 62*, 583–619. https://doi.org/10.1146/annurev.psych.093008.100356
+
+Hamaker, E. L., & Wichers, M. (2017). No time like the present: Discovering the hidden dynamics in intensive longitudinal data. *Current Directions in Psychological Science, 26*(1), 10–15. https://doi.org/10.1177/0963721416666518
+
+Robinson, W. S. (1950). Ecological correlations and the behavior of individuals. *American Sociological Review, 15*(3), 351–357. https://doi.org/10.2307/2087176
 
 International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 
