@@ -5,7 +5,9 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseSnapshot, ResponseWrite};
-use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
+use psychometrics_commons_runtime::result::{
+    ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
+};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
@@ -86,9 +88,9 @@ fn published_release() -> InstrumentRelease {
     release
 }
 
-fn session(participant_ref: &str) -> AssessmentSession {
+fn session(session_ref: &str, participant_ref: &str) -> AssessmentSession {
     AssessmentSession::new(
-        "session_result_binding",
+        session_ref,
         participant_ref,
         &published_release(),
         "ko-KR",
@@ -155,36 +157,91 @@ fn result_input(participant_ref: &str) -> ResultSnapshotInput<'_> {
 }
 
 #[test]
-fn result_snapshot_cannot_rebind_a_session_to_another_participant() {
-    let session = session("participant_authoritative");
+fn result_snapshot_rejects_participant_rebinding() {
+    let session = session("session_result_binding", "participant_authoritative");
+    let response_snapshot = completed_snapshot(session.session_ref());
+    let request = scoring_request(&response_snapshot, session.instrument_version_ref());
+    let result = scoring_result(&request);
+
+    let error = ResultSnapshot::new(
+        &session,
+        &request,
+        &result,
+        result_input("participant_attacker_controlled"),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, ResultSnapshotError::ParticipantMismatch);
+    assert_eq!(
+        error.to_string(),
+        "result participant does not match the assessment session owner"
+    );
+}
+
+#[test]
+fn result_snapshot_rejects_instrument_version_rebinding() {
+    let session = session("session_result_binding", "participant_authoritative");
+    let response_snapshot = completed_snapshot(session.session_ref());
+    let request = scoring_request(&response_snapshot, "instrument_version_unrelated");
+    let result = scoring_result(&request);
+
+    let error = ResultSnapshot::new(
+        &session,
+        &request,
+        &result,
+        result_input(session.participant_ref()),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, ResultSnapshotError::InstrumentVersionMismatch);
+    assert_eq!(
+        error.to_string(),
+        "scoring request instrument version does not match the assessment session"
+    );
+}
+
+#[test]
+fn result_snapshot_rejects_session_rebinding() {
+    let authoritative_session = session("session_authoritative", "participant_authoritative");
+    let response_snapshot = completed_snapshot("session_request_other");
+    let request = scoring_request(
+        &response_snapshot,
+        authoritative_session.instrument_version_ref(),
+    );
+    let result = scoring_result(&request);
+
+    let error = ResultSnapshot::new(
+        &authoritative_session,
+        &request,
+        &result,
+        result_input(authoritative_session.participant_ref()),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, ResultSnapshotError::SessionMismatch);
+    assert_eq!(
+        error.to_string(),
+        "scoring request does not belong to the supplied assessment session"
+    );
+}
+
+#[test]
+fn result_snapshot_copies_authoritative_session_provenance() {
+    let session = session("session_result_binding", "participant_authoritative");
     let response_snapshot = completed_snapshot(session.session_ref());
     let request = scoring_request(&response_snapshot, session.instrument_version_ref());
     let result = scoring_result(&request);
 
     let snapshot = ResultSnapshot::new(
-        &request,
-        &result,
-        result_input("participant_attacker_controlled"),
-    )
-    .unwrap();
-
-    assert_eq!(snapshot.participant_ref(), session.participant_ref());
-}
-
-#[test]
-fn result_snapshot_cannot_rebind_a_session_to_another_instrument_version() {
-    let session = session("participant_authoritative");
-    let response_snapshot = completed_snapshot(session.session_ref());
-    let request = scoring_request(&response_snapshot, "instrument_version_unrelated");
-    let result = scoring_result(&request);
-
-    let snapshot = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         result_input(session.participant_ref()),
     )
     .unwrap();
 
+    assert_eq!(snapshot.participant_ref(), session.participant_ref());
+    assert_eq!(snapshot.session_ref(), session.session_ref());
     assert_eq!(
         snapshot.instrument_version_ref(),
         session.instrument_version_ref()
