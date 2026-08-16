@@ -25,7 +25,7 @@ fn create(
 }
 
 #[test]
-fn event_type_and_schema_version_are_bounded() {
+fn event_type_and_schema_version_are_bounded_and_exact() {
     let long_event_type = "e".repeat(129);
     let long_schema_version = "v".repeat(65);
 
@@ -38,9 +38,27 @@ fn event_type_and_schema_version_are_bounded() {
         Err(IntegrationError::InvalidSchemaVersion)
     );
 
-    let trimmed = create(" assessment.completed ", " v1 ", VALID_DIGEST).unwrap();
-    assert_eq!(trimmed.event_type(), "assessment.completed");
-    assert_eq!(trimmed.schema_version(), "v1");
+    for event_type in [
+        " assessment.completed",
+        "assessment.completed ",
+        "assessment.\tcompleted",
+        "assessment.\ncompleted",
+        "assessment.\u{00a0}completed",
+    ] {
+        assert_eq!(
+            create(event_type, "v1", VALID_DIGEST),
+            Err(IntegrationError::InvalidEventType),
+            "event type {event_type:?} must not normalize onto another contract identity"
+        );
+    }
+
+    for schema_version in [" v1", "v1 ", "v\t1", "v\n1", "v\u{00a0}1"] {
+        assert_eq!(
+            create("assessment.completed", schema_version, VALID_DIGEST),
+            Err(IntegrationError::InvalidSchemaVersion),
+            "schema version {schema_version:?} must not normalize onto another contract identity"
+        );
+    }
 
     let max_event_type = "e".repeat(128);
     let max_schema_version = "v".repeat(64);
