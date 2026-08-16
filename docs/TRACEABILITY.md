@@ -22,7 +22,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|---|
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
+| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs` plus `migrations/0004_item_delivery_evidence.sql` / `src/postgres_item_delivery.rs` persist on later protected main; HTTP delivery orchestration remains Target. Active reload reconstructs by stored `delivery_sequence` and fails closed on a gap, foreign tenant, or padded session alias |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
@@ -54,7 +54,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
-| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
+| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests; `src/postgres_item_delivery.rs` persist plus Active PR restart reload by contiguous `delivery_sequence` | API delivery orchestration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
@@ -100,6 +100,7 @@ src/lib.rs
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
+├── postgres_item_delivery.rs  # PostgreSQL item-delivery persist and Active PR restart reload
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
@@ -122,6 +123,7 @@ migrations/
 ├── 0001_integration_delivery.sql
 ├── 0002_scoring_job_state.sql
 ├── 0003_data_rights_propagation.sql
+├── 0004_item_delivery_evidence.sql
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
 ├── 0011_scoring_request.sql
@@ -133,6 +135,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 ### Active implementation work that is not protected-main truth
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+
+**Active PR** item-delivery reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `load_item_delivery_ledger` reconstructs one tenant-bound ledger from `item_delivery_ledger` / `item_delivery_event` under `READ COMMITTED` after `FOR SHARE` on the header. Reconstruct uses stored `delivery_sequence` order. A sequence gap, an item outside the stored allowed set, a foreign tenant, or a whitespace-padded session alias fails closed instead of inventing, skipping, or re-presenting items. This does not add HTTP item delivery.
 
 ## 5. ADR traceability by concern
 

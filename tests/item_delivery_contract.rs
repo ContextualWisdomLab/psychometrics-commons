@@ -343,6 +343,10 @@ fn delivery_errors_have_stable_safe_text() {
             ItemDeliveryError::DuplicateItemDelivery,
             "item version was already delivered in this session",
         ),
+        (
+            ItemDeliveryError::CorruptHistory,
+            "stored item-delivery history cannot reconstruct a valid ledger",
+        ),
     ];
 
     for (error, expected) in cases {
