@@ -1047,6 +1047,73 @@ fn same_millisecond_later_append_with_smaller_event_ref_replaces_live_scope() {
 }
 
 #[test]
+fn later_same_scope_grant_with_new_form_blocks_stale_snapshot_start() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (mut ledger, stale_snapshot) = granted_research(
+        "participant_research_chi",
+        "consent_snapshot_research_chi_v1",
+        "research_scope_chi",
+        20_000,
+    );
+    persist_grant(&mut client, &ledger);
+    persist_snapshot_ok(&mut client, &stale_snapshot);
+
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_grant_form_v2",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v2",
+            research_scope_ref: Some("research_scope_chi"),
+            occurred_at_unix_ms: 20_200,
+        })
+        .unwrap();
+    persist_grant(&mut client, &ledger);
+    let current_snapshot = ledger
+        .snapshot_as("consent_snapshot_research_chi_v2")
+        .unwrap();
+    persist_snapshot_ok(&mut client, &current_snapshot);
+
+    assert_eq!(
+        current_snapshot.active_form_version(ConsentPurpose::ResearchContribution),
+        Some("research_consent_form_v2"),
+        "domain purpose-latest form is the later grant, not the frozen v1 snapshot"
+    );
+    assert!(
+        matches!(
+            persist_err(
+                &mut client,
+                &contribution(
+                    "research_contribution_chi_stale",
+                    "research_participant_chi_stale",
+                    &stale_snapshot,
+                    20_300,
+                ),
+            ),
+            ResearchContributionPersistenceError::ResearchConsentRequired
+        ),
+        "a later same-scope grant under a new form must replace the prior form as the live write capability"
+    );
+    assert_eq!(
+        persist_ok(
+            &mut client,
+            &contribution(
+                "research_contribution_chi_current",
+                "research_participant_chi_current",
+                &current_snapshot,
+                20_400,
+            ),
+        ),
+        ResearchContributionPersistenceDisposition::Inserted
+    );
+}
+
+#[test]
 fn operational_participant_cannot_reuse_existing_research_participant_ref() {
     let _guard = test_guard();
     let mut client = test_client();
