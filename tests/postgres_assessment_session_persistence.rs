@@ -163,20 +163,23 @@ fn created_session_persists_release_binding_and_replays_exactly() {
 
     let row = client
         .query_one(
-            "SELECT participant_ref, instrument_release_ref, instrument_release_content_digest,
-                    locale, session_state, created_at_unix_ms
+            "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
+                    instrument_release_content_digest, locale, session_state,
+                    created_at_unix_ms
              FROM assessment_session WHERE session_ref = $1",
             &[&"ses_02fe09e373504b7986ae78491116edbd"],
         )
         .unwrap();
     let participant: String = row.get(0);
     let release: String = row.get(1);
-    let digest: String = row.get(2);
-    let locale: String = row.get(3);
-    let state: String = row.get(4);
-    let created_at: i64 = row.get(5);
+    let version: String = row.get(2);
+    let digest: String = row.get(3);
+    let locale: String = row.get(4);
+    let state: String = row.get(5);
+    let created_at: i64 = row.get(6);
     assert_eq!(participant, PARTICIPANT_REF);
     assert_eq!(release, "release_big_five_ko_v1");
+    assert_eq!(version, "instrument_version_big_five_ko_v1");
     assert_eq!(digest, VALID_DIGEST);
     assert_eq!(locale, "ko-KR");
     assert_eq!(state, "created");

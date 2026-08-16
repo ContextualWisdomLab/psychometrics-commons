@@ -1,7 +1,7 @@
 //! `PostgreSQL` 18 persistence for assessment-session creation identity.
 //!
-//! This adapter stores the participant, published-release, content-digest, and
-//! locale identity copied at session creation. It does not rewrite provenance
+//! This module stores the participant, published-release, version, content-digest,
+//! and locale identity copied at session creation. It does not rewrite provenance
 //! when the release is later suspended or retired. This first slice persists
 //! only [`SessionState::Created`] rows. Replay requires `READ COMMITTED`.
 
@@ -87,11 +87,11 @@ pub fn apply_assessment_session_migration(
 
 /// Persist one created assessment-session identity bound to a published release.
 ///
-/// Exact replay of the same session, participant, release, digest, locale, state,
-/// and creation time is idempotent. Rebinding any stored field fails closed.
-/// Session and participant references are already validated and normalized by
-/// [`AssessmentSession::new`], so this adapter does not add an unreachable second
-/// reference-validation layer.
+/// Exact replay of the same session, participant, release, `instrument_version_ref`,
+/// digest, locale, state, and creation time is idempotent. Rebinding any stored
+/// field fails closed. [`AssessmentSession::new`] validates and normalizes session
+/// and participant references. This function stores those references without
+/// validating them again.
 ///
 /// # Errors
 ///
