@@ -111,7 +111,18 @@ Product consequences:
 - unsupported stored schema versions fail closed instead of being coerced into
   the current output contract;
 - a completed job cannot commit without the immutable result snapshot a buyer
-  later retrieves.
+  later retrieves;
+- a retryable engine or transport outage schedules the next attempt and writes
+  no terminal outbox row, so a later success still uses one stable `event_ref`
+  (Hohpe & Woolf, 2003; Richardson, 2018);
+- a later due claim after that outage persists the real result snapshot rather
+  than inventing a score while the engine is down (American Educational Research
+  Association et al., 2014; Hohpe & Woolf, 2003);
+- the recovered claim must reuse the job-row `scoring_request_ref`; a caller
+  that names a different request fails closed before the engine runs
+  (Hohpe & Woolf, 2003; Richardson, 2018);
+- a permanent scientific failure writes a terminal cause without a snapshot, and
+  exhausted retry budget quarantines with zero outbox rows (Richardson, 2018).
 
 ## Evidence maintenance rules
 

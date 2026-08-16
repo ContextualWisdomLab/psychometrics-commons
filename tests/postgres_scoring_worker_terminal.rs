@@ -919,7 +919,7 @@ fn worker_commit_errors_retain_typed_sources() {
     );
     assert!(snapshot.source().is_some());
 
-    let retry = ScoringWorkerCommitError::Retry(ScoringJobPersistenceError::TransitionNotApplied);
+    let retry = ScoringWorkerCommitError::Retry(ScoringJobPersistenceError::LeaseExpired);
     assert_eq!(
         retry.to_string(),
         "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
