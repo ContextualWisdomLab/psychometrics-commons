@@ -667,3 +667,157 @@ pub fn probe_postgres_relation_integrity(
     }
     Ok(DataIntegrityHealth::Verified)
 }
+
+/// Combine independently measured operational-backlog families into one readiness signal.
+///
+/// Scoring-job, integration, and data-rights evidence stay separately classified so a
+/// healthy outbox cannot hide a stalled scoring queue. [`BacklogHealth::combine`]
+/// keeps a known stall above an unknown observation, and unknown above a healthy one.
+#[must_use]
+pub fn classify_postgres_operational_backlog(
+    integration: &PostgresIntegrationBacklogEvidence,
+    data_rights: &PostgresDataRightsBacklogEvidence,
+    scoring_job: &PostgresScoringJobBacklogEvidence,
+    observed_at_unix_ms: u64,
+    integration_policy: &IntegrationBacklogPolicy,
+    data_rights_policy: &DataRightsBacklogPolicy,
+    scoring_job_policy: &ScoringJobBacklogPolicy,
+) -> BacklogHealth {
+    classify_postgres_integration_backlog(integration, observed_at_unix_ms, integration_policy)
+        .combine(classify_postgres_data_rights_backlog(
+            data_rights,
+            observed_at_unix_ms,
+            data_rights_policy,
+        ))
+        .combine(classify_postgres_scoring_job_backlog(
+            scoring_job,
+            observed_at_unix_ms,
+            scoring_job_policy,
+        ))
+}
+
+#[cfg(test)]
+mod operational_backlog_composition_tests {
+    use super::{
+        classify_postgres_operational_backlog, DataRightsBacklogPolicy, IntegrationBacklogPolicy,
+        PostgresDataRightsBacklogEvidence, PostgresIntegrationBacklogEvidence,
+        PostgresScoringJobBacklogEvidence, ScoringJobBacklogPolicy,
+    };
+    use crate::health::BacklogHealth;
+
+    fn integration_policy() -> IntegrationBacklogPolicy {
+        IntegrationBacklogPolicy {
+            max_pending_outbox_count: 4,
+            max_pending_outbox_age_ms: 5_000,
+            max_quarantined_outbox_count: 1,
+            max_active_consumption_count: 4,
+            max_active_consumption_age_ms: 5_000,
+            max_quarantined_consumption_count: 1,
+        }
+    }
+
+    fn data_rights_policy() -> DataRightsBacklogPolicy {
+        DataRightsBacklogPolicy {
+            max_active_request_count: 4,
+            max_active_request_age_ms: 10_000,
+            max_pending_propagation_count: 4,
+            max_pending_propagation_age_ms: 5_000,
+            max_quarantined_propagation_count: 1,
+        }
+    }
+
+    fn scoring_job_policy() -> ScoringJobBacklogPolicy {
+        ScoringJobBacklogPolicy {
+            max_active_job_count: 4,
+            max_active_job_age_ms: 5_000,
+            max_quarantined_job_count: 1,
+        }
+    }
+
+    fn empty_integration() -> PostgresIntegrationBacklogEvidence {
+        PostgresIntegrationBacklogEvidence {
+            pending_outbox_count: 0,
+            quarantined_outbox_count: 0,
+            active_consumption_count: 0,
+            quarantined_consumption_count: 0,
+            oldest_pending_outbox_event_at_unix_ms: None,
+            oldest_active_consumption_event_at_unix_ms: None,
+        }
+    }
+
+    fn empty_data_rights() -> PostgresDataRightsBacklogEvidence {
+        PostgresDataRightsBacklogEvidence {
+            active_request_count: 0,
+            pending_propagation_count: 0,
+            quarantined_propagation_count: 0,
+            oldest_active_request_at_unix_ms: None,
+            oldest_pending_propagation_event_at_unix_ms: None,
+        }
+    }
+
+    fn empty_scoring_job() -> PostgresScoringJobBacklogEvidence {
+        PostgresScoringJobBacklogEvidence {
+            active_job_count: 0,
+            quarantined_job_count: 0,
+            oldest_active_job_at_unix_ms: None,
+        }
+    }
+
+    #[test]
+    fn empty_families_are_within_bounds_without_invented_thresholds() {
+        assert_eq!(
+            classify_postgres_operational_backlog(
+                &empty_integration(),
+                &empty_data_rights(),
+                &empty_scoring_job(),
+                10_000,
+                &integration_policy(),
+                &data_rights_policy(),
+                &scoring_job_policy(),
+            ),
+            BacklogHealth::WithinBounds
+        );
+    }
+
+    #[test]
+    fn stalled_scoring_job_cannot_be_masked_by_healthy_integration_or_data_rights() {
+        let stalled_scoring = PostgresScoringJobBacklogEvidence {
+            active_job_count: 1,
+            quarantined_job_count: 0,
+            oldest_active_job_at_unix_ms: Some(1_000),
+        };
+        assert_eq!(
+            classify_postgres_operational_backlog(
+                &empty_integration(),
+                &empty_data_rights(),
+                &stalled_scoring,
+                10_000,
+                &integration_policy(),
+                &data_rights_policy(),
+                &scoring_job_policy(),
+            ),
+            BacklogHealth::Stalled
+        );
+    }
+
+    #[test]
+    fn unknown_scoring_observation_cannot_be_masked_by_healthy_siblings() {
+        let future_scoring = PostgresScoringJobBacklogEvidence {
+            active_job_count: 1,
+            quarantined_job_count: 0,
+            oldest_active_job_at_unix_ms: Some(20_000),
+        };
+        assert_eq!(
+            classify_postgres_operational_backlog(
+                &empty_integration(),
+                &empty_data_rights(),
+                &future_scoring,
+                10_000,
+                &integration_policy(),
+                &data_rights_policy(),
+                &scoring_job_policy(),
+            ),
+            BacklogHealth::Unknown
+        );
+    }
+}
