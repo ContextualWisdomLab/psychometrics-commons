@@ -32,6 +32,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             InstrumentReleasePersistenceError::UnsupportedIsolationLevel,
             "instrument release persistence requires read committed isolation",
         ),
+        (
+            InstrumentReleasePersistenceError::InconsistentEvidence,
+            "durable instrument-release evidence cannot reconstruct the published snapshot",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());

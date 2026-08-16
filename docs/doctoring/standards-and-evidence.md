@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -13,6 +13,7 @@ The product's core scientific governance follows the *Standards for Educational 
 Product consequences:
 
 - an instrument release states intended score interpretations and prohibited/unsupported uses;
+- a published form remains reconstructable after process restart from its stored locale, digest, item set, and publication state so administration uses the same versioned instrument the participant was assigned;
 - scoring and norms are versioned and reproducible;
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;

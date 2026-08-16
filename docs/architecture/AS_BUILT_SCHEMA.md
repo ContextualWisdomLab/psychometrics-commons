@@ -56,6 +56,8 @@ The protected-main slice persists:
 - reachable publication-state advance without rewriting immutable manifest columns;
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
+Reload of the stored locale, digest, item set, and publication state after process restart is Active PR work and is not protected-main truth until an unchanged reviewed/check-clean head is integrated. After that lands, call `load_instrument_release` before starting a new session on a previously persisted form.
+
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
 ## Logical-to-physical mapping rule

@@ -7,7 +7,7 @@ use psychometrics_commons_runtime::instrument::{
     PublicationState,
 };
 use psychometrics_commons_runtime::postgres_instrument_release::{
-    apply_instrument_release_migration, persist_instrument_release,
+    apply_instrument_release_migration, load_instrument_release, persist_instrument_release,
     InstrumentReleasePersistenceDisposition, InstrumentReleasePersistenceError,
 };
 use std::sync::{Mutex, MutexGuard};
@@ -473,4 +473,132 @@ fn unreachable_publication_state_rewind_fails_closed() {
         stored_state(&mut client, "release_big_five_ko_v1"),
         "published"
     );
+}
+
+#[test]
+fn published_release_reloads_after_restart_and_stays_scoreable_for_new_sessions() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    let published = published_release();
+    persist_ok(&mut client, &published);
+
+    let mut transaction = client.transaction().unwrap();
+    let loaded = load_instrument_release(&mut transaction, "release_big_five_ko_v1")
+        .unwrap()
+        .expect("stored published release must reload after restart");
+    assert!(loaded.accepts_new_sessions());
+    assert_eq!(loaded.state(), PublicationState::Published);
+    assert_eq!(loaded.manifest().locale(), "ko-KR");
+    assert_eq!(loaded.manifest().content_digest(), RELEASE_DIGEST);
+    assert_eq!(
+        loaded.manifest().item_version_refs(),
+        ["item_version_001", "item_version_002"]
+    );
+    assert_eq!(
+        persist_instrument_release(&mut transaction, &loaded).unwrap(),
+        InstrumentReleasePersistenceDisposition::Duplicate
+    );
+    transaction.commit().unwrap();
+}
+
+#[test]
+fn draft_release_reloads_but_does_not_start_new_sessions() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    let draft =
+        InstrumentRelease::new(manifest("release_big_five_ko_v1", RELEASE_DIGEST), 40_000).unwrap();
+    persist_ok(&mut client, &draft);
+
+    let mut transaction = client.transaction().unwrap();
+    let loaded = load_instrument_release(&mut transaction, "release_big_five_ko_v1")
+        .unwrap()
+        .expect("stored draft release must reload after restart");
+    assert!(!loaded.accepts_new_sessions());
+    assert_eq!(loaded.state(), PublicationState::Draft);
+    transaction.commit().unwrap();
+}
+
+#[test]
+fn missing_instrument_release_is_absent_after_restart() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        load_instrument_release(&mut transaction, "release_big_five_missing")
+            .unwrap()
+            .is_none()
+    );
+    transaction.commit().unwrap();
+}
+
+#[test]
+fn instrument_release_load_rejects_blank_or_numeric_identity() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_instrument_release(&mut transaction, " "),
+        Err(InstrumentReleasePersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        load_instrument_release(&mut transaction, "12"),
+        Err(InstrumentReleasePersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn instrument_release_load_requires_read_committed_isolation() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_instrument_release(&mut transaction, "release_big_five_ko_v1"),
+        Err(InstrumentReleasePersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn duplicate_stored_item_versions_fail_closed_instead_of_starting_sessions() {
+    let _guard = instrument_release_test_guard();
+    let mut client = test_client();
+    reset_instrument_release_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &published_release());
+    client
+        .execute(
+            "UPDATE instrument_release SET item_version_refs = ARRAY[\
+                 'item_version_001', 'item_version_001'\
+             ] WHERE release_ref = 'release_big_five_ko_v1'",
+            &[],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_instrument_release(&mut transaction, "release_big_five_ko_v1"),
+        Err(InstrumentReleasePersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
 }

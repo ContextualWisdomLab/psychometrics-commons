@@ -724,6 +724,37 @@ impl InstrumentRelease {
         })
     }
 
+    /// Rebuild one persisted instrument-release snapshot after process restart.
+    ///
+    /// Call this with the stored manifest, publication state, and creation time
+    /// before starting a new session. If the reconstructed state is
+    /// [`PublicationState::Published`], start sessions on that exact locale,
+    /// digest, and item set. Event history and bound publication evidence are
+    /// not part of the persist snapshot, so reactivation still requires the
+    /// caller to bind approved evidence again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstrumentReleaseError::InvalidTimestamp`] when the stored
+    /// creation time is zero.
+    pub fn from_persisted_snapshot(
+        manifest: InstrumentReleaseManifest,
+        state: PublicationState,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, InstrumentReleaseError> {
+        if created_at_unix_ms == 0 {
+            return Err(InstrumentReleaseError::InvalidTimestamp);
+        }
+        Ok(Self {
+            manifest,
+            publication_evidence: None,
+            state,
+            created_at_unix_ms,
+            latest_event_at_unix_ms: created_at_unix_ms,
+            events: Vec::new(),
+        })
+    }
+
     /// Return the immutable release manifest.
     #[must_use]
     pub const fn manifest(&self) -> &InstrumentReleaseManifest {
