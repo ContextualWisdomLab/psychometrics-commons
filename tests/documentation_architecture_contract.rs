@@ -324,6 +324,29 @@ fn as_built_session_table_names_the_active_persist_and_load_pr() {
 }
 
 #[test]
+fn as_built_and_traceability_name_the_publication_persist_lock_pr() {
+    let as_built = read_required(&repository_root().join("docs/architecture/AS_BUILT_SCHEMA.md"));
+    assert!(
+        as_built.contains("**Active PR** #196")
+            && as_built.contains("FOR UPDATE")
+            && as_built.contains("not protected-main truth"),
+        "as-built instrument-release section must name persist-classification lock Active PR #196 without promoting it to Implemented"
+    );
+    let traceability = read_required(&repository_root().join("docs/TRACEABILITY.md"));
+    assert!(
+        traceability.contains("**Active PR** #196")
+            && traceability.contains("FOR UPDATE")
+            && !traceability
+                .split("### Active implementation work that is not protected-main truth")
+                .nth(1)
+                .and_then(|section| section.split("\n## ").next())
+                .expect("traceability must define the active implementation-work section")
+                .contains("**Implemented**"),
+        "traceability must name persist-classification lock Active PR #196 without calling it Implemented"
+    );
+}
+
+#[test]
 fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
     let erd = read_required(&repository_root().join("docs/architecture/ERD.md"));
 
