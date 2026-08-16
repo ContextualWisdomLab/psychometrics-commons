@@ -1,5 +1,7 @@
 //! Result provenance preserves the intentional absence of a norm version.
 
+mod common;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::scoring::{
@@ -49,7 +51,13 @@ fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
         vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
     )
     .unwrap();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let snapshot = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {
