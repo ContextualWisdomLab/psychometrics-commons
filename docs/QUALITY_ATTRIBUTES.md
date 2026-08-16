@@ -54,6 +54,12 @@ This document converts broad quality goals into **stimulus → environment → r
 - **Response:** the later Pause remains the durable projection; load reconstitutes Paused; the stale persist fails closed or is serialized before the later command.
 - **Evidence:** `concurrent_stale_shorter_persist_cannot_rewind_paused_projection` against real PostgreSQL.
 
+### QA-REL-05 — Session start fails closed after publication withdrawal
+
+- **Stimulus:** a buyer starts a session after the published release is suspended or retired, or retries an exact start after a later suspend.
+- **Response:** a new start fails closed; a reconstituted Created identity is not persisted; an exact replay of an already stored start returns the original session.
+- **Evidence:** `start_boundary_rejects_suspended_release_instead_of_reconstituting` and `start_created_session_fails_after_release_is_suspended` / `start_created_session_replays_after_later_suspend` against real PostgreSQL.
+
 ## 3. Availability and graceful degradation
 
 ### QA-AVL-01 — AI unavailable

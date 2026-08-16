@@ -18,7 +18,7 @@ Psychometrics Commons implements an explicit hosted assessment runtime with appe
 draft -> review -> published -> suspended -> retired
 ```
 
-Published releases are immutable. Editing content creates a new `instrument_version_ref`. Suspension blocks new sessions but does not invalidate existing result provenance. Retirement blocks new sessions permanently unless a new release is published. A created session loaded from durable storage must restore the copied release/version/digest/locale identity without re-checking whether the release currently accepts new sessions. Later lifecycle commands persist as append-only history and replay on load so Activate/Pause/Resume survive process restart.
+Published releases are immutable. Editing content creates a new `instrument_version_ref`. Suspension blocks new sessions but does not invalidate existing result provenance. Retirement blocks new sessions permanently unless a new release is published. Starting a session must go through `created_session_for_start` / `start_created_assessment_session` so a reconstituted `from_persisted_created` identity cannot be inserted after suspend or retire. Exact replay of an already stored start still returns the original session. A created session loaded from durable storage must restore the copied release/version/digest/locale identity without re-checking whether the release currently accepts new sessions. Later lifecycle commands persist as append-only history and replay on load so Activate/Pause/Resume survive process restart.
 
 ### Assessment session
 
@@ -61,6 +61,7 @@ A released result references exactly one response snapshot and one scoring resul
 5. Repeated completion/scoring commands are idempotent.
 6. No client-provided timestamp determines authoritative ordering.
 7. Persisting session command history is append-only. A shorter in-memory history than already stored is conflicting replay and must not rewind the current-state projection. Command persist locks the `assessment_session` header row (`SELECT … FOR UPDATE`) for the caller transaction so a concurrent Activate-only worker cannot overwrite a later Pause/Resume after that later command commits under `READ COMMITTED`.
+8. Starting a session requires a currently published locale-specific release. `persist_assessment_session` remains a storage adapter; transports must call `start_created_assessment_session` so a reconstituted Created aggregate cannot bypass publication eligibility. Exact start replay after a later suspend returns the original stored session.
 
 ## Failure modes
 
@@ -83,6 +84,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);
 - concurrent stale shorter command-history persist tests (`concurrent_stale_shorter_persist_cannot_rewind_paused_projection`);
 - header-row lock-hold tests (`command_persist_locks_session_header_until_caller_commits`);
+- publication-gated start tests (`start_boundary_rejects_suspended_release_instead_of_reconstituting`, `start_created_session_fails_after_release_is_suspended`, `start_created_session_replays_after_later_suspend`);
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests.
 

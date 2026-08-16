@@ -291,7 +291,8 @@ sequenceDiagram
 
     P->>C: choose published instrument + locale
     C->>A: POST session (idempotency key)
-    A->>DB: persist anonymous participant/session
+    A->>A: created_session_for_start against current publication eligibility
+    A->>DB: start_created_assessment_session (fail closed if suspended/retired)
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
 
