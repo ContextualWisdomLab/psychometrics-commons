@@ -2,8 +2,8 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::{
-    apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
-    ResultSnapshotPersistenceError,
+    apply_result_snapshot_migration, load_result_snapshot, persist_result_snapshot,
+    ResultSnapshotPersistenceDisposition, ResultSnapshotPersistenceError,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
@@ -449,4 +449,155 @@ fn observation_insert_failure_is_a_database_failure() {
         ResultSnapshotPersistenceError::Database(_)
     ));
     cleanup_result_snapshot_fault_injection(&mut client);
+}
+
+fn load_ok(client: &mut Client, result_snapshot_ref: &str) -> Option<ResultSnapshot> {
+    let mut transaction = client.transaction().unwrap();
+    let snapshot = load_result_snapshot(&mut transaction, result_snapshot_ref).unwrap();
+    transaction.commit().unwrap();
+    snapshot
+}
+
+#[test]
+fn persisted_result_reloads_the_same_published_snapshot() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let successor = snapshot_named(
+        "session_result_reload",
+        "result_snapshot_reload",
+        ENGINE_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        Some("result_snapshot_predecessor"),
+        vec![
+            ScoreObservation::scored("construct_extraversion", 0.5, Some(0.04)).unwrap(),
+            ScoreObservation::without_score(
+                "construct_openness",
+                ObservationDisposition::Abstained,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_agreeableness",
+                ObservationDisposition::Failed,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_conscientiousness",
+                ObservationDisposition::Excluded,
+            )
+            .unwrap(),
+        ],
+    );
+    persist_ok(
+        &mut client,
+        &default_snapshot("result_snapshot_predecessor"),
+    );
+    persist_ok(&mut client, &successor);
+
+    let reloaded = load_ok(&mut client, "result_snapshot_reload").expect("stored result");
+    assert_eq!(reloaded, successor);
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_result_snapshot(&mut transaction, &reloaded).unwrap(),
+            ResultSnapshotPersistenceDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+}
+
+#[test]
+fn missing_or_empty_result_identity_does_not_invent_a_score() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    assert!(load_ok(&mut client, "result_snapshot_absent").is_none());
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "12"),
+        Err(ResultSnapshotPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_requires_read_committed_isolation() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_serializable_load"),
+        Err(ResultSnapshotPersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_rejects_header_without_copied_observations() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &default_snapshot("result_snapshot_gap"));
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot_observation DISABLE TRIGGER USER; \
+             DELETE FROM result_snapshot_observation \
+             WHERE result_snapshot_ref = 'result_snapshot_gap'; \
+             ALTER TABLE result_snapshot_observation ENABLE TRIGGER USER;",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_gap"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_result_relation_on_load_is_a_database_failure() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_missing_header"),
+        Err(ResultSnapshotPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_observation_relation_on_load_is_a_database_failure() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &default_snapshot("result_snapshot_missing_obs"),
+    );
+    client
+        .batch_execute("DROP TABLE result_snapshot_observation;")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_missing_obs"),
+        Err(ResultSnapshotPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
 }

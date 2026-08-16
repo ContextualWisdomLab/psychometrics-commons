@@ -7,8 +7,8 @@
 //! is visible to the exact-replay classifier.
 
 use crate::reference::normalized_reference;
-use crate::result::ResultSnapshot;
-use crate::scoring::ObservationDisposition;
+use crate::result::{ResultSnapshot, ResultSnapshotError, ResultSnapshotEvidence};
+use crate::scoring::{ObservationDisposition, ScoreObservation};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -39,6 +39,8 @@ pub enum ResultSnapshotPersistenceError {
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
+    /// Durable rows cannot reconstruct the published result snapshot.
+    InconsistentEvidence,
 }
 
 impl Display for ResultSnapshotPersistenceError {
@@ -57,6 +59,9 @@ impl Display for ResultSnapshotPersistenceError {
                 "result snapshot persistence requires read committed isolation"
             }
             Self::Database(_) => "PostgreSQL result-snapshot persistence failed",
+            Self::InconsistentEvidence => {
+                "durable result evidence cannot reconstruct the published snapshot"
+            }
         })
     }
 }
@@ -140,6 +145,89 @@ pub fn persist_result_snapshot(
         return Ok(ResultSnapshotPersistenceDisposition::Inserted);
     }
     classify_existing_snapshot(transaction, snapshot, created_at, schema_version)
+}
+
+/// Load one immutable result snapshot from durable evidence.
+///
+/// Returns `Ok(None)` when no snapshot header exists. Copied observations are
+/// reconstructed in stored `observation_order`. After load, exact persist
+/// replay stays [`ResultSnapshotPersistenceDisposition::Duplicate`].
+///
+/// # Errors
+///
+/// Returns [`ResultSnapshotPersistenceError`] for unsupported isolation, an
+/// invalid snapshot reference, inconsistent durable evidence, or a database
+/// failure.
+pub fn load_result_snapshot(
+    transaction: &mut Transaction<'_>,
+    result_snapshot_ref: &str,
+) -> Result<Option<ResultSnapshot>, ResultSnapshotPersistenceError> {
+    require_read_committed(transaction)?;
+    let result_snapshot_ref = required_reference(result_snapshot_ref)?;
+    let header = transaction.query_opt(
+        "SELECT participant_ref, scoring_result_ref, session_ref, response_snapshot_ref, \
+                assessment_spec_ref, instrument_version_ref, scoring_version_ref, \
+                calibration_reference, norm_version_ref, requested_output_schema_version, \
+                narrative_version_ref, consent_snapshot_refs, engine_artifact_digest, \
+                created_at_unix_ms, supersedes_ref \
+         FROM result_snapshot WHERE result_snapshot_ref = $1",
+        &[&result_snapshot_ref],
+    )?;
+    let Some(header) = header else {
+        return Ok(None);
+    };
+    let participant_ref: String = header.get(0);
+    let scoring_result_ref: String = header.get(1);
+    let session_ref: String = header.get(2);
+    let response_snapshot_ref: String = header.get(3);
+    let assessment_spec_ref: String = header.get(4);
+    let instrument_version_ref: String = header.get(5);
+    let scoring_version_ref: String = header.get(6);
+    let calibration_reference: String = header.get(7);
+    let norm_version_ref: Option<String> = header.get(8);
+    let requested_output_schema_version = stored_schema_version(header.get(9))?;
+    let narrative_version_ref: String = header.get(10);
+    let consent_snapshot_refs: Vec<String> = header.get(11);
+    let engine_artifact_digest: String = header.get(12);
+    let created_at_unix_ms = stored_timestamp(header.get(13))?;
+    let supersedes_ref: Option<String> = header.get(14);
+    let rows = transaction.query(
+        "SELECT construct_ref, observation_disposition, score, standard_error \
+         FROM result_snapshot_observation \
+         WHERE result_snapshot_ref = $1 \
+         ORDER BY observation_order",
+        &[&result_snapshot_ref],
+    )?;
+    let mut score_observations = Vec::with_capacity(rows.len());
+    for row in rows {
+        score_observations.push(observation_from_stored(
+            row.get(0),
+            &row.get::<_, String>(1),
+            row.get(2),
+            row.get(3),
+        )?);
+    }
+    ResultSnapshot::from_durable_evidence(ResultSnapshotEvidence {
+        result_snapshot_ref,
+        participant_ref: &participant_ref,
+        scoring_result_ref: &scoring_result_ref,
+        session_ref: &session_ref,
+        response_snapshot_ref: &response_snapshot_ref,
+        assessment_spec_ref: &assessment_spec_ref,
+        instrument_version_ref: &instrument_version_ref,
+        scoring_version_ref: &scoring_version_ref,
+        calibration_reference: &calibration_reference,
+        norm_version_ref: norm_version_ref.as_deref(),
+        requested_output_schema_version,
+        narrative_version_ref: &narrative_version_ref,
+        consent_snapshot_refs: &consent_snapshot_refs,
+        engine_artifact_digest: &engine_artifact_digest,
+        score_observations,
+        created_at_unix_ms,
+        supersedes_ref: supersedes_ref.as_deref(),
+    })
+    .map(Some)
+    .map_err(durable_evidence_error)
 }
 
 fn insert_observations(
@@ -296,6 +384,59 @@ fn observation_disposition_name(disposition: ObservationDisposition) -> &'static
     }
 }
 
+fn observation_from_stored(
+    construct_ref: String,
+    disposition: &str,
+    score: Option<f64>,
+    standard_error: Option<f64>,
+) -> Result<ScoreObservation, ResultSnapshotPersistenceError> {
+    let disposition = match disposition {
+        "scored" => ObservationDisposition::Scored,
+        "abstained" => ObservationDisposition::Abstained,
+        "failed" => ObservationDisposition::Failed,
+        "excluded" => ObservationDisposition::Excluded,
+        _ => return Err(ResultSnapshotPersistenceError::InconsistentEvidence),
+    };
+    match disposition {
+        ObservationDisposition::Scored => {
+            let score = score.ok_or(ResultSnapshotPersistenceError::InconsistentEvidence)?;
+            ScoreObservation::scored(construct_ref, score, standard_error)
+                .map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)
+        }
+        ObservationDisposition::Abstained
+        | ObservationDisposition::Failed
+        | ObservationDisposition::Excluded => {
+            if score.is_some() || standard_error.is_some() {
+                return Err(ResultSnapshotPersistenceError::InconsistentEvidence);
+            }
+            ScoreObservation::without_score(construct_ref, disposition)
+                .map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)
+        }
+    }
+}
+
+fn stored_timestamp(timestamp: i64) -> Result<u64, ResultSnapshotPersistenceError> {
+    u64::try_from(timestamp).map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)
+}
+
+fn stored_schema_version(schema_version: i32) -> Result<u16, ResultSnapshotPersistenceError> {
+    u16::try_from(schema_version).map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)
+}
+
+fn durable_evidence_error(error: ResultSnapshotError) -> ResultSnapshotPersistenceError {
+    match error {
+        ResultSnapshotError::EmptyReference => ResultSnapshotPersistenceError::InvalidReference,
+        ResultSnapshotError::InconsistentEvidence
+        | ResultSnapshotError::MissingConsentSnapshot
+        | ResultSnapshotError::DuplicateConsentSnapshot
+        | ResultSnapshotError::InvalidCreationTime
+        | ResultSnapshotError::SelfSupersession
+        | ResultSnapshotError::ScoringRequestMismatch => {
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        }
+    }
+}
+
 fn required_reference(reference: &str) -> Result<&str, ResultSnapshotPersistenceError> {
     normalized_reference(reference).ok_or(ResultSnapshotPersistenceError::InvalidReference)
 }
@@ -323,9 +464,11 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        observation_disposition_name, observation_order, postgres_timestamp, required_reference,
-        ResultSnapshotPersistenceError,
+        durable_evidence_error, observation_disposition_name, observation_from_stored,
+        observation_order, postgres_timestamp, required_reference, stored_schema_version,
+        stored_timestamp, ResultSnapshotPersistenceError,
     };
+    use crate::result::ResultSnapshotError;
     use crate::scoring::ObservationDisposition;
 
     #[test]
@@ -368,5 +511,119 @@ mod reference_guard_tests {
             observation_disposition_name(ObservationDisposition::Excluded),
             "excluded"
         );
+    }
+
+    #[test]
+    fn stored_observations_rebuild_or_fail_closed() {
+        assert_eq!(stored_timestamp(70_000).unwrap(), 70_000);
+        assert!(matches!(
+            stored_timestamp(-1),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert_eq!(stored_schema_version(1).unwrap(), 1);
+        assert!(matches!(
+            stored_schema_version(-1),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert_eq!(
+            observation_from_stored(
+                "construct_extraversion".to_owned(),
+                "scored",
+                Some(0.5),
+                Some(0.04)
+            )
+            .unwrap()
+            .score(),
+            Some(0.5)
+        );
+        assert_eq!(
+            observation_from_stored("construct_openness".to_owned(), "abstained", None, None)
+                .unwrap()
+                .disposition(),
+            ObservationDisposition::Abstained
+        );
+        assert_eq!(
+            observation_from_stored("construct_agreeableness".to_owned(), "failed", None, None)
+                .unwrap()
+                .disposition(),
+            ObservationDisposition::Failed
+        );
+        assert_eq!(
+            observation_from_stored(
+                "construct_conscientiousness".to_owned(),
+                "excluded",
+                None,
+                None
+            )
+            .unwrap()
+            .disposition(),
+            ObservationDisposition::Excluded
+        );
+        assert!(matches!(
+            observation_from_stored("construct_unknown".to_owned(), "invented", None, None),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            observation_from_stored("construct_extraversion".to_owned(), "scored", None, None),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            observation_from_stored(
+                "construct_openness".to_owned(),
+                "abstained",
+                Some(0.1),
+                None
+            ),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            observation_from_stored("construct_openness".to_owned(), "failed", None, Some(0.1)),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            observation_from_stored(" ".to_owned(), "excluded", None, None),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            observation_from_stored(
+                "construct_extraversion".to_owned(),
+                "scored",
+                Some(f64::NAN),
+                None
+            ),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+    }
+
+    #[test]
+    fn durable_reconstruction_errors_map_to_persistence_failures() {
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::EmptyReference),
+            ResultSnapshotPersistenceError::InvalidReference
+        ));
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::InconsistentEvidence),
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::MissingConsentSnapshot),
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::DuplicateConsentSnapshot),
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::InvalidCreationTime),
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::SelfSupersession),
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ResultSnapshotError::ScoringRequestMismatch),
+            ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
     }
 }
