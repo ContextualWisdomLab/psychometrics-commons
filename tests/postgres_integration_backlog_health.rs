@@ -120,7 +120,7 @@ fn insert_consumption(client: &mut Client, suffix: &str, state: &str, event_at: 
                          latest_event_at_unix_ms, claim_expires_at_unix_ms, claim_deadline_at\
                      ) VALUES ('consumer_backlog_alpha','upstream_backlog_alpha',\
                                'tenant_backlog_alpha',$1,$2,$3,'processing',1,$4,$5,\
-                               TIMESTAMPTZ 'epoch' + ($5 * INTERVAL '1 millisecond'))",
+                               clock_timestamp() + INTERVAL '1 second')",
                     &[
                         &source_event_ref,
                         &consumption_ref,
