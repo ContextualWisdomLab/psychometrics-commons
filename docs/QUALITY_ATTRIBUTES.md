@@ -48,6 +48,12 @@ This document converts broad quality goals into **stimulus → environment → r
 - **Response:** inbox deduplication prevents duplicate externally visible side effects.
 - **Evidence:** duplicate/reordered delivery tests.
 
+### QA-REL-04 — Session command persist does not rewind under concurrency
+
+- **Stimulus:** a stale worker persists Activate-only while another worker persists Activate+Pause against the same session.
+- **Response:** the later Pause remains the durable projection; load reconstitutes Paused; the stale persist fails closed or is serialized before the later command.
+- **Evidence:** `concurrent_stale_shorter_persist_cannot_rewind_paused_projection` against real PostgreSQL.
+
 ## 3. Availability and graceful degradation
 
 ### QA-AVL-01 — AI unavailable

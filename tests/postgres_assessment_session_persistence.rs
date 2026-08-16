@@ -1,6 +1,7 @@
 //! Real `PostgreSQL` contract for created assessment-session identity.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::thread;
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::instrument::{
@@ -24,10 +25,13 @@ const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "assessment_session_persistence_test";
 static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn test_client() -> (MutexGuard<'static, ()>, Client) {
-    let guard = DATABASE_TEST_LOCK
+fn test_guard() -> MutexGuard<'static, ()> {
+    DATABASE_TEST_LOCK
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn connect_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
@@ -37,7 +41,11 @@ fn test_client() -> (MutexGuard<'static, ()>, Client) {
             "CREATE SCHEMA IF NOT EXISTS {SCHEMA}; SET search_path TO {SCHEMA};"
         ))
         .unwrap();
-    (guard, client)
+    client
+}
+
+fn test_client() -> (MutexGuard<'static, ()>, Client) {
+    (test_guard(), connect_client())
 }
 
 fn reset_session_table(client: &mut Client) {
@@ -700,6 +708,83 @@ fn stale_shorter_command_history_cannot_rewind_paused_projection() {
     let loaded = load_assessment_session(&mut load_transaction, "ses_stale_prefix_alpha")
         .unwrap()
         .expect("paused session must remain loadable after a rejected stale persist");
+    load_transaction.commit().unwrap();
+    assert_eq!(loaded.state(), SessionState::Paused);
+    assert_eq!(loaded.accepted_commands().len(), 2);
+}
+
+#[test]
+fn concurrent_stale_shorter_persist_cannot_rewind_paused_projection() {
+    let _database_test_guard = test_guard();
+    let mut setup_client = connect_client();
+    reset_session_table(&mut setup_client);
+    apply_assessment_session_migration(&mut setup_client).unwrap();
+    let mut session = created_session(
+        "ses_stale_prefix_concurrent",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    {
+        let mut transaction = setup_client.transaction().unwrap();
+        persist_assessment_session(&mut transaction, &session).unwrap();
+        session
+            .apply_command("cmd_activate_before_pause", 1, SessionCommand::Activate)
+            .unwrap();
+        persist_assessment_session_commands(&mut transaction, &session).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mut paused = session;
+    paused
+        .apply_command("cmd_pause_after_activate", 2, SessionCommand::Pause)
+        .unwrap();
+    let mut stale = created_session(
+        "ses_stale_prefix_concurrent",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    stale
+        .apply_command("cmd_activate_before_pause", 1, SessionCommand::Activate)
+        .unwrap();
+
+    let barrier = Arc::new(Barrier::new(2));
+    let handles: Vec<_> = [paused, stale]
+        .into_iter()
+        .map(|worker_session| {
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                let mut client = connect_client();
+                barrier.wait();
+                let mut transaction = client.transaction().unwrap();
+                match persist_assessment_session_commands(&mut transaction, &worker_session) {
+                    Ok(_) => {
+                        transaction.commit().unwrap();
+                        Ok(worker_session.state())
+                    }
+                    Err(AssessmentSessionPersistenceError::ConflictingReplay) => {
+                        transaction.rollback().unwrap();
+                        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+                    }
+                    Err(error) => panic!("unexpected concurrent command persist error: {error:?}"),
+                }
+            })
+        })
+        .collect();
+    let outcomes: Vec<_> = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect();
+    assert!(
+        outcomes.iter().any(Result::is_ok),
+        "at least the later Pause persist must commit: {outcomes:?}"
+    );
+
+    let mut load_transaction = setup_client.transaction().unwrap();
+    let loaded = load_assessment_session(&mut load_transaction, "ses_stale_prefix_concurrent")
+        .unwrap()
+        .expect("paused session must remain loadable after concurrent stale persist");
     load_transaction.commit().unwrap();
     assert_eq!(loaded.state(), SessionState::Paused);
     assert_eq!(loaded.accepted_commands().len(), 2);

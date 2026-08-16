@@ -60,7 +60,7 @@ A released result references exactly one response snapshot and one scoring resul
 4. Scoring cannot begin before the response snapshot is durable.
 5. Repeated completion/scoring commands are idempotent.
 6. No client-provided timestamp determines authoritative ordering.
-7. Persisting session command history is append-only. A shorter in-memory history than already stored is conflicting replay and must not rewind the current-state projection.
+7. Persisting session command history is append-only. A shorter in-memory history than already stored is conflicting replay and must not rewind the current-state projection. Command persist locks the `assessment_session` header row (`SELECT … FOR UPDATE`) for the caller transaction so a concurrent Activate-only worker cannot overwrite a later Pause/Resume after that later command commits under `READ COMMITTED`.
 
 ## Failure modes
 
@@ -81,6 +81,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - crash testing between transaction and event publication;
 - pause/resume and offline replay tests;
 - stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);
+- concurrent stale shorter command-history persist tests (`concurrent_stale_shorter_persist_cannot_rewind_paused_projection`);
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests.
 
@@ -96,8 +97,14 @@ Revisit the storage implementation if event volume demands a different backend, 
 
 ## References
 
+Berenson, H., Bernstein, P., Gray, J., Melton, J., O'Neil, E., & O'Neil, P. (1995). A critique of ANSI SQL isolation levels. In M. Carey & D. Schneider (Eds.), *Proceedings of the 1995 ACM SIGMOD International Conference on Management of Data* (pp. 1–10). Association for Computing Machinery. https://doi.org/10.1145/223784.223785
+
 Fowler, M. (2005, December 12). *Event sourcing*. https://martinfowler.com/eaaDev/EventSourcing.html
 
 Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
 
+PostgreSQL Global Development Group. (2026). *Explicit locking*. https://www.postgresql.org/docs/18/explicit-locking.html
+
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/index.html
+
+PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html

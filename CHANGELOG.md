@@ -62,6 +62,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Concurrent stale shorter assessment-session command history now locks the session header row, so a later Pause/Resume still reloads after a racing Activate-only persist.
 - Stale shorter assessment-session command history now fails closed instead of rewinding the current-state projection, so a later Pause/Resume still reloads after a rejected Activate-only persist.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
