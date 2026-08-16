@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** result-snapshot reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ResultSnapshot::from_durable_evidence` and `load_result_snapshot` reconstruct the stored participant, session, scoring provenance, consent, engine digest, and copied construct observations so a restarted worker can serve the published result without inventing a score. Exact persist replay stays Duplicate. Missing headers return `None`. Gapped observation sets and noncanonical provenance fail closed. Psychometric recomputation remains in `fast-mlsirm`.
+**Active PR** #119 result-snapshot reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ResultSnapshot::from_durable_evidence` and `load_result_snapshot` reconstruct the stored participant, session, scoring provenance, consent, engine digest, and copied construct observations so a restarted worker can serve the published result without inventing a score. Exact persist replay stays Duplicate. Missing headers return `None`. Gapped observation sets and noncanonical provenance fail closed. Psychometric recomputation remains in `fast-mlsirm`.
 
 ## 5. ADR traceability by concern
 
