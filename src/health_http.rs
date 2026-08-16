@@ -270,5 +270,24 @@ mod tests {
             .body()
             .contains("\"data_integrity_health\":\"incompatible\""));
         assert!(live.body().contains("\"state\":\"degraded\""));
+        assert_eq!(live.content_type(), "application/json");
+
+        let ready_snapshot = RuntimeHealthSnapshot::new(
+            true,
+            BacklogHealth::WithinBounds,
+            DataIntegrityHealth::Verified,
+            vec![
+                CapabilityHealth::new("research_registration", CapabilityState::Degraded, true)
+                    .unwrap(),
+            ],
+        )
+        .unwrap();
+        let ready = handle_health_http_request(
+            "GET /ready?capability=research_registration HTTP/1.1\r\n\r\n",
+            &ready_snapshot,
+        );
+        assert_eq!(ready.status(), 200);
+        assert_eq!(ready.content_type(), "application/json");
+        assert!(ready.body().contains("\"ready\":true"));
     }
 }
