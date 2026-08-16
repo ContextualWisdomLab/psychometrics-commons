@@ -22,7 +22,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|---|
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
+| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs` plus `migrations/0004_item_delivery_evidence.sql` / `src/postgres_item_delivery.rs`; durable `instrument_version_ref` pin is Active PR; HTTP delivery orchestration remains Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
@@ -100,6 +100,7 @@ src/lib.rs
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
+├── postgres_item_delivery.rs  # PostgreSQL tenant-bound item-delivery ledger persistence
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
@@ -122,17 +123,19 @@ migrations/
 ├── 0001_integration_delivery.sql
 ├── 0002_scoring_job_state.sql
 ├── 0003_data_rights_propagation.sql
+├── 0004_item_delivery_evidence.sql
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
 ├── 0011_scoring_request.sql
-└── 0012_integration_consumption.sql
+├── 0012_integration_consumption.sql
+└── 0020_item_delivery_instrument_version.sql
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** item-delivery `instrument_version_ref` persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ItemDeliveryLedger` copies the published instrument version from the release manifest, `migrations/0020_item_delivery_instrument_version.sql` stores that identity on `item_delivery_ledger`, and exact persist replay fails closed when a caller rebinds version under a reused digest. Session-authority item-set pinning remains #99. Ledger reload after restart remains #110. HTTP delivery transport remains Target.
 
 ## 5. ADR traceability by concern
 

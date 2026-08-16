@@ -53,9 +53,10 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let numeric_session = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-             allowed_item_version_refs\
+             tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+             release_content_digest, locale, allowed_item_version_refs\
          ) VALUES ('tenant_item_delivery', '12', 'release_big_five_ko_v1', \
+             'instrument_version_ko_v1', \
              'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
              'ko-KR', ARRAY['item_version_001'])",
             &[],
@@ -69,9 +70,10 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let empty_items = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-             allowed_item_version_refs\
+             tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+             release_content_digest, locale, allowed_item_version_refs\
          ) VALUES ('tenant_item_delivery', 'session_schema_empty', 'release_big_five_ko_v1', \
+             'instrument_version_ko_v1', \
              'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
              'ko-KR', ARRAY[]::TEXT[])",
             &[],
@@ -85,10 +87,10 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     let bad_digest = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-             allowed_item_version_refs\
+             tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+             release_content_digest, locale, allowed_item_version_refs\
          ) VALUES ('tenant_item_delivery', 'session_schema_digest', 'release_big_five_ko_v1', \
-             'not-a-digest', 'ko-KR', ARRAY['item_version_001'])",
+             'instrument_version_ko_v1', 'not-a-digest', 'ko-KR', ARRAY['item_version_001'])",
             &[],
         )
         .unwrap_err();
@@ -100,9 +102,10 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
+                 tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                 release_content_digest, locale, allowed_item_version_refs\
              ) VALUES ('tenant_item_delivery', 'session_schema_valid', 'release_big_five_ko_v1', \
+                 'instrument_version_ko_v1', \
                  'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
                  'ko-KR', ARRAY['item_version_001'])",
             &[],
@@ -137,5 +140,30 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
     assert_eq!(
         constraint_name(&numeric_delivery),
         "item_delivery_event_delivery_ref_format_check"
+    );
+}
+
+#[test]
+fn schema_rejects_numeric_instrument_version_refs() {
+    let _guard = schema_test_guard();
+    let mut client = test_client();
+    reset_schema(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let numeric_version = client
+        .execute(
+            "INSERT INTO item_delivery_ledger (\
+             tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+             release_content_digest, locale, allowed_item_version_refs\
+         ) VALUES ('tenant_item_delivery', 'session_schema_version', 'release_big_five_ko_v1', \
+             '12', \
+             'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
+             'ko-KR', ARRAY['item_version_001'])",
+            &[],
+        )
+        .unwrap_err();
+    assert_eq!(
+        constraint_name(&numeric_version),
+        "item_delivery_ledger_instrument_version_ref_format_check"
     );
 }

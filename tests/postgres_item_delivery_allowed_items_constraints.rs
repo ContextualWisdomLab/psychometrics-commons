@@ -26,9 +26,10 @@ fn assert_invalid_allowed_items(
     let error = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
-             ) VALUES ('tenant_item_delivery', $1, 'release_big_five_ko_v1', $2, 'ko-KR', $3)",
+                 tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                 release_content_digest, locale, allowed_item_version_refs\
+             ) VALUES ('tenant_item_delivery', $1, 'release_big_five_ko_v1', \
+                 'instrument_version_ko_v1', $2, 'ko-KR', $3)",
             &[&session_ref, &DIGEST, &allowed_items],
         )
         .unwrap_err();
