@@ -54,6 +54,7 @@ Product consequences:
 - risk treatment, change control, access control, incident/vulnerability handling, supplier/dependency evidence, backup/restore, continuity, and audit evidence are designed as ongoing processes;
 - identity-link restore inspects projection drift and rebuilds the derived current projection from unterminated history before `persist_authorized_account_link` accepts a new dual-proof write, including a later participant binding an ended issuer-scoped subject, following NIST SP 800-53 Rev. 5 CP-9/CP-10 and NIST SP 800-34 Rev. 1 contingency-planning evidence rather than assuming a dump alone restored uniqueness;
 - a returning authenticated account may unlink through `persist_authorized_account_unlink` after the anonymous session expired, matching NIST SP 800-63-4 federation-binding termination without rewriting historical participant identifiers (Temoshok et al., 2025);
+- recover after unlink+relink keeps a loaded participant only when the reconstructed current tenant, issuer, and subject still match the still-valid federation proof, so a stale `READ COMMITTED` reconstruct cannot grant another account's current binding (Temoshok et al., 2025);
 - release gates include secret scanning, static analysis, dependency/supply-chain evidence, SBOM/provenance, migration/rollback, and recovery tests;
 - cross-service database access and ambient credentials are prohibited by architecture, not merely discouraged by documentation.
 
