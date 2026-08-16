@@ -467,7 +467,7 @@ fn lookup_is_strict_and_serializable_transactions_are_rejected() {
         let mut transaction = client.transaction().unwrap();
         let error = load_anonymous_credential(&mut transaction, "1", "tenant_alpha").unwrap_err();
         assert!(matches!(
-            error,
+            &error,
             AnonymousCredentialPersistenceError::InvalidReference
         ));
         assert!(std::error::Error::source(&error).is_none());
@@ -509,7 +509,7 @@ fn database_failure_preserves_typed_source_and_safe_text() {
     let mut transaction = client.transaction().unwrap();
     let error = persist_anonymous_credential_issue(&mut transaction, &credential).unwrap_err();
     assert!(matches!(
-        error,
+        &error,
         AnonymousCredentialPersistenceError::Database(_)
     ));
     assert_eq!(
