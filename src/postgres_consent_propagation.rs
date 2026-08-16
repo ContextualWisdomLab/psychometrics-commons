@@ -4,11 +4,11 @@
 //! existing consent adapter with the existing transactional outbox and verifies that the emitted
 //! event is bound to the authorized tenant, same participant, and latest accepted consent event
 //! before any durable write. After the ledger snapshot is persisted, the same transaction locks
-//! the participant ledger and requires the durable event tail—ordered by occurrence time, then
-//! insertion time, then event identity—to match the envelope, so a grant-only in-memory snapshot
-//! cannot pair a later stored revocation with stale grant propagation even when both events share
-//! one server timestamp. An ambiguous physical tail—two rows with the same occurrence time and
-//! `created_at`—fails closed instead of using opaque event identity as a correctness key.
+//! the participant ledger and requires a unique durable event tail—ordered by occurrence time, then
+//! insertion time—to match the envelope, so a grant-only in-memory snapshot cannot pair a later
+//! stored revocation with stale grant propagation even when both events share one server timestamp.
+//! An ambiguous physical tail—two rows with the same occurrence time and `created_at`—fails closed
+//! instead of using opaque event identity as a correctness key.
 
 use crate::consent::{ConsentEvent, ConsentLedger};
 use crate::integration::IntegrationEvent;

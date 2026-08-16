@@ -268,7 +268,7 @@ fn same_millisecond_revoke_beats_lexicographic_grant_tail() {
 }
 
 #[test]
-fn equal_created_at_cannot_bind_a_lexicographic_grant_envelope() {
+fn equal_created_at_cannot_bind_either_tied_envelope() {
     let mut client = ready_client();
     let research_scope_ref = Some("research_scope_latest_alpha");
     client
@@ -334,17 +334,18 @@ fn equal_created_at_cannot_bind_a_lexicographic_grant_envelope() {
         "consent_event_zzz_tied_grant",
         33_000,
     );
+    let tied_revoke = propagation_event(
+        "event_consent_tied_revoke",
+        "consent_event_aaa_tied_revoke",
+        33_000,
+    );
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_consent_ledger_with_outbox(
-            &mut transaction,
-            TENANT_REF,
-            &complete,
-            &stale_grant,
-            3,
-        ),
-        Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
-    ));
+    for event in [&stale_grant, &tied_revoke] {
+        assert!(matches!(
+            persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &complete, event, 3,),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+    }
     transaction.rollback().unwrap();
 
     let outbox_count: i64 = client
