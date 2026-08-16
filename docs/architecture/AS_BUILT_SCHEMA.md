@@ -61,7 +61,7 @@ The protected-main slice persists:
 - reachable publication-state advance without rewriting immutable manifest columns;
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
-An **Active PR** on this branch additionally locks `instrument_release` with `SELECT … FOR UPDATE` during persist classification so a Duplicate published classification cannot lose the row to a concurrent Suspend or Retire before the caller transaction ends. That lock is not protected-main truth until the reviewed head is integrated.
+**Active PR** #196 additionally locks `instrument_release` with `SELECT … FOR UPDATE` during persist classification so a Duplicate published classification cannot lose the row to a concurrent Suspend or Retire before the caller transaction ends. That lock is not protected-main truth until the reviewed head is integrated.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
