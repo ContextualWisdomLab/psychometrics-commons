@@ -17,7 +17,7 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
-| `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
+| `integration_consumption` | integration | Implemented subset |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
@@ -32,14 +32,14 @@ The active slice adds:
 - `delivery_lease_generation BIGINT NOT NULL DEFAULT 0 CHECK (delivery_lease_generation >= 0)` as the persisted monotonic generation;
 - `integration_outbox_fencing_generation_check`, requiring any live `lease_fencing_token` to equal the current persisted generation;
 - exclusive pending-row claims, explicit expired-lease recovery, and fenced attempt recording that clears the current lease after an accepted attempt;
-- database-clock authority for worker-side lease-expiry classification, while caller-supplied attempt timestamps remain immutable delivery-attempt evidence;
+- database-clock authority for both worker-side lease-expiry classification and exclusive-lease recovery, while caller-supplied attempt timestamps remain immutable delivery-attempt evidence and a future caller observation cannot steal a still-live lease;
 - fail-closed stale fencing before replay classification whenever a current lease exists, while exact replay after a completed attempt has cleared its lease remains idempotent.
 
-Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_delivery_lease.rs`, `tests/postgres_outbox_delivery_lease_fencing_integrity.rs`, `tests/postgres_outbox_delivery_lease_authority.rs`, `tests/postgres_outbox_delivery_lease_concurrency.rs`, `tests/postgres_outbox_delivery_lease_coverage_edges.rs`, and `tests/postgres_outbox_delivery_lease_migration_isolation.rs`. These tests cover exclusive claim/recovery, monotonic fencing, invalid physical state rejection, database-authoritative expiry, stale-fence replay precedence, blocking-proven concurrent claims, schema isolation, and persistence failure paths. The slice must remain **Active PR** until the exact reviewed/check-clean head is merged and protected main is refetched.
+Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_delivery_lease.rs`, `tests/postgres_outbox_delivery_lease_fencing_integrity.rs`, `tests/postgres_outbox_delivery_lease_authority.rs`, `tests/postgres_outbox_delivery_lease_concurrency.rs`, `tests/postgres_outbox_delivery_lease_coverage_edges.rs`, and `tests/postgres_outbox_delivery_lease_migration_isolation.rs`. These tests cover exclusive claim/recovery, monotonic fencing, invalid physical state rejection, database-authoritative expiry, rejection of a future caller timestamp against a still-live lease, stale-fence replay precedence, blocking-proven concurrent claims, schema isolation, and persistence failure paths. The slice must remain **Active PR** until the exact reviewed/check-clean head is merged and protected main is refetched.
 
-## Active PR inbox-consumption physical schema
+## Protected-main inbox-consumption physical schema
 
-PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
+`migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` persist one consumption work item for an existing `integration_inbox` receipt. This is an **Implemented subset** on protected main after #58. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence. Subsequent claim-deadline columns from later inbox-expiry slices remain documented with those slices.
 
 ## Protected-main scoring-job physical schema
 

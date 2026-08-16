@@ -4,8 +4,8 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent};
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, claim_outbox_delivery, enqueue_outbox_event,
-    record_leased_outbox_delivery_attempt, OutboxPersistenceIdentity, PersistenceDisposition,
-    PersistenceError,
+    expire_outbox_delivery_lease, record_leased_outbox_delivery_attempt, OutboxPersistenceIdentity,
+    PersistenceDisposition, PersistenceError,
 };
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -95,6 +95,54 @@ fn claim(
     .unwrap();
     transaction.commit().unwrap();
     lease.fencing_token()
+}
+
+#[test]
+fn future_caller_timestamp_cannot_expire_a_live_database_lease() {
+    let mut client = ready_client();
+    let now = database_now_unix_ms(&mut client);
+    let event_time = now - 10_000;
+    enqueue(&mut client, "event_live_lease_steal", event_time);
+    let fence = claim(
+        &mut client,
+        "event_live_lease_steal",
+        "worker_owner",
+        "outbox_lease_owner",
+        now,
+        now + 60_000,
+    );
+    assert_eq!(fence, 1);
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            expire_outbox_delivery_lease(
+                &mut transaction,
+                identity("event_live_lease_steal"),
+                now + 86_400_000,
+            ),
+            Err(PersistenceError::LeaseStillActive)
+        ),
+        "a future caller observation must not steal a lease that is still live on the database clock"
+    );
+    transaction.rollback().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT lease_worker_ref, lease_fencing_token
+             FROM integration_outbox
+             WHERE source_ref = 'psychometrics_commons'
+               AND tenant_ref = 'tenant_alpha'
+               AND event_ref = 'event_live_lease_steal'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(
+        row.get::<_, Option<String>>(0).as_deref(),
+        Some("worker_owner")
+    );
+    assert_eq!(row.get::<_, Option<i64>>(1), Some(1));
+    cleanup(&mut client);
 }
 
 #[test]

@@ -325,18 +325,22 @@ fn unexpired_lease_and_missing_or_unleased_outbox_fail_closed() {
     let mut client = test_client();
     reset_integration_tables(&mut client);
     apply_integration_migration(&mut client).unwrap();
-    enqueue_and_claim(
+    enqueue_and_claim_live(
         &mut client,
         "event_still_live",
         "worker_live",
         "outbox_lease_live",
-        20_000,
     );
     enqueue(&mut client, "event_never_claimed");
 
+    let steal_observed_at_unix_ms = database_now_unix_ms(&mut client) + 86_400_000;
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        expire_outbox_delivery_lease(&mut transaction, identity("event_still_live"), 19_999),
+        expire_outbox_delivery_lease(
+            &mut transaction,
+            identity("event_still_live"),
+            steal_observed_at_unix_ms,
+        ),
         Err(PersistenceError::LeaseStillActive)
     ));
     assert!(matches!(

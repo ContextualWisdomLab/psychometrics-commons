@@ -457,6 +457,10 @@ pub fn claim_outbox_delivery(
 /// [`claim_outbox_delivery`] issues the next fencing token. `READ COMMITTED` is
 /// required so concurrent expiry recovery observes the latest committed lease.
 ///
+/// `observed_at_unix_ms` must be a positive caller observation, but liveness is
+/// classified from the database clock. A future caller timestamp cannot steal a
+/// lease that is still live on `clock_timestamp()`.
+///
 /// # Errors
 ///
 /// Returns [`PersistenceError`] for invalid identity or timestamp, unsupported
@@ -473,7 +477,7 @@ pub fn expire_outbox_delivery_lease(
     if observed_at_unix_ms == 0 {
         return Err(PersistenceError::InvalidTimestamp);
     }
-    let observed_at_unix_ms = postgres_bigint(observed_at_unix_ms)?;
+    let _observed_at_unix_ms = postgres_bigint(observed_at_unix_ms)?;
     require_read_committed(transaction)?;
 
     let recovered = match transaction.query_opt(
@@ -486,9 +490,10 @@ pub fn expire_outbox_delivery_lease(
            AND tenant_ref = $2
            AND event_ref = $3
            AND lease_worker_ref IS NOT NULL
-           AND lease_expires_at_unix_ms <= $4
+           AND lease_expires_at_unix_ms
+               <= floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint
          RETURNING event_ref",
-        &[&source_ref, &tenant_ref, &event_ref, &observed_at_unix_ms],
+        &[&source_ref, &tenant_ref, &event_ref],
     ) {
         Ok(row) => row,
         Err(error) => return Err(PersistenceError::from(error)),
