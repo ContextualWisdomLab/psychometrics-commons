@@ -23,6 +23,7 @@ pub mod postgres_health;
 pub mod postgres_inbox_consumption;
 pub mod postgres_instrument_release;
 pub mod postgres_integration;
+pub mod postgres_item_delivery;
 pub mod postgres_response_snapshot;
 pub mod postgres_scoring_job;
 pub mod postgres_scoring_request;
