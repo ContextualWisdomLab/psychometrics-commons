@@ -33,7 +33,16 @@ pub fn manifest() -> InstrumentReleaseManifest {
 }
 
 pub fn published_release() -> InstrumentRelease {
-    let mut release = InstrumentRelease::new(manifest(), 10_000).unwrap();
+    published_release_from_manifest(manifest())
+}
+
+pub fn published_release_from_manifest(manifest: InstrumentReleaseManifest) -> InstrumentRelease {
+    let item_version_refs: Vec<&str> = manifest
+        .item_version_refs()
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let mut release = InstrumentRelease::new(manifest.clone(), 10_000).unwrap();
     release
         .apply_command(
             "publication_review_item_delivery",
@@ -46,17 +55,17 @@ pub fn published_release() -> InstrumentRelease {
             PublicationEvidenceRecord::new(
                 "publication_evidence_item_delivery",
                 "evidence_policy_self_reflection_v1",
-                "release_big_five_ko_v1",
-                "instrument_version_ko_v1",
-                &["item_version_001", "item_version_002"],
-                RELEASE_DIGEST,
-                "ko-KR",
-                "intended_use_self_reflection_v1",
-                "assessment_spec_big_five_v1",
-                "scoring_big_five_v1",
-                "calibration_big_five_v1",
-                Some("norm_big_five_ko_v1"),
-                "limitations_big_five_v1",
+                manifest.release_ref(),
+                manifest.instrument_version_ref(),
+                &item_version_refs,
+                manifest.content_digest(),
+                manifest.locale(),
+                manifest.intended_use_ref(),
+                manifest.assessment_spec_ref(),
+                manifest.scoring_version_ref(),
+                manifest.calibration_reference(),
+                manifest.norm_version_ref(),
+                manifest.limitations_ref(),
                 PublicationEvidenceProvenance::new(
                     EVIDENCE_DIGEST,
                     "population_general_adult_v1",
@@ -85,11 +94,19 @@ pub fn published_release() -> InstrumentRelease {
 }
 
 pub fn session_in_state(release: &InstrumentRelease, state: SessionState) -> AssessmentSession {
+    session_with_ref_in_state(release, "session_big_five_001", state)
+}
+
+pub fn session_with_ref_in_state(
+    release: &InstrumentRelease,
+    session_ref: &str,
+    state: SessionState,
+) -> AssessmentSession {
     let mut session = AssessmentSession::new(
-        "session_big_five_001",
+        session_ref,
         "participant_big_five_001",
         release,
-        "ko-KR",
+        release.manifest().locale(),
         20_000,
     )
     .unwrap();
