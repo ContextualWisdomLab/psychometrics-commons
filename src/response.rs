@@ -67,6 +67,17 @@ impl ResponseEvent {
     }
 }
 
+/// One ordered entry reconstructed from durable snapshot evidence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResponseSnapshotEntryInput<'a> {
+    /// Server-generated opaque event reference frozen into the snapshot.
+    pub event_ref: &'a str,
+    /// Exact immutable item-version reference answered by the participant.
+    pub item_version_ref: &'a str,
+    /// Canonical SHA-256 digest of the response payload, never the payload itself.
+    pub payload_digest: &'a str,
+}
+
 /// Immutable response snapshot frozen when collection completes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResponseSnapshot {
@@ -120,6 +131,67 @@ impl ResponseSnapshot {
     pub fn payload_digests(&self) -> &[String] {
         &self.payload_digests
     }
+
+    /// Reconstruct one immutable snapshot from durable header and ordered entries.
+    ///
+    /// Call this after a process restart when the stored prefix must become the
+    /// same [`ResponseSnapshot`] that scoring dispatch already accepts. Entry
+    /// order is the stored server order. `last_sequence` must be absent for an
+    /// empty prefix and equal to the entry count otherwise. This does not accept
+    /// new responses and does not invent a client idempotency reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] for a blank or numeric-like
+    /// identity, [`WriteError::InvalidPayloadDigest`] for a noncanonical digest,
+    /// or [`WriteError::CorruptSnapshotEvidence`] when `last_sequence` does not
+    /// match the reconstructed prefix.
+    pub fn from_persisted(
+        snapshot_ref: &str,
+        session_ref: &str,
+        entries: &[ResponseSnapshotEntryInput<'_>],
+        last_sequence: Option<usize>,
+    ) -> Result<Self, WriteError> {
+        let snapshot_ref =
+            normalized_reference(snapshot_ref).ok_or(WriteError::InvalidReference)?;
+        let session_ref = normalized_reference(session_ref).ok_or(WriteError::InvalidReference)?;
+        let expected_last_sequence = if entries.is_empty() {
+            None
+        } else {
+            Some(entries.len())
+        };
+        if last_sequence != expected_last_sequence {
+            return Err(WriteError::CorruptSnapshotEvidence);
+        }
+
+        let mut event_refs = Vec::with_capacity(entries.len());
+        let mut item_version_refs = Vec::with_capacity(entries.len());
+        let mut payload_digests = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let event_ref =
+                normalized_reference(entry.event_ref).ok_or(WriteError::InvalidReference)?;
+            let item_version_ref =
+                normalized_reference(entry.item_version_ref).ok_or(WriteError::InvalidReference)?;
+            if entry.payload_digest.trim().is_empty() {
+                return Err(WriteError::EmptyReference);
+            }
+            if !is_canonical_sha256(entry.payload_digest) {
+                return Err(WriteError::InvalidPayloadDigest);
+            }
+            event_refs.push(event_ref.to_owned());
+            item_version_refs.push(item_version_ref.to_owned());
+            payload_digests.push(entry.payload_digest.to_owned());
+        }
+
+        Ok(Self {
+            snapshot_ref: Some(snapshot_ref.to_owned()),
+            session_ref: session_ref.to_owned(),
+            event_refs,
+            item_version_refs,
+            payload_digests,
+            last_sequence,
+        })
+    }
 }
 
 /// Fail-closed error returned by response recording or snapshot freezing.
@@ -140,6 +212,8 @@ pub enum WriteError {
     ServerReferenceConflict,
     /// A response snapshot was requested before the session reached completion.
     SnapshotRequiresCompleted(SessionState),
+    /// Stored snapshot header evidence cannot reconstruct the frozen prefix.
+    CorruptSnapshotEvidence,
 }
 
 impl Display for WriteError {
@@ -163,6 +237,9 @@ impl Display for WriteError {
             Self::SnapshotRequiresCompleted(state) => write!(
                 formatter,
                 "response snapshot requires Completed session state, found {state:?}"
+            ),
+            Self::CorruptSnapshotEvidence => formatter.write_str(
+                "stored response snapshot sequence does not match the reconstructed prefix",
             ),
         }
     }
