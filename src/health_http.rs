@@ -197,11 +197,9 @@ where
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                if let Err(error) = serve_accepted_health_http(&mut stream, &mut handler) {
-                    if !should_continue_after_serve_error(&error, ServeIoSource::Connection) {
-                        return Err(error);
-                    }
-                }
+                // Per-connection I/O never stops later probes; a dropped client
+                // must not take the operator listener down.
+                let _ = serve_accepted_health_http(&mut stream, &mut handler);
             }
             Err(error) => {
                 if !should_continue_after_serve_error(&error, ServeIoSource::Accept) {
@@ -226,7 +224,6 @@ where
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ServeIoSource {
     Accept,
-    Connection,
 }
 
 fn should_continue_after_serve_error(error: &io::Error, source: ServeIoSource) -> bool {
@@ -237,7 +234,6 @@ fn should_continue_after_serve_error(error: &io::Error, source: ServeIoSource) -
                 | io::ErrorKind::ConnectionAborted
                 | io::ErrorKind::ConnectionReset
         ),
-        ServeIoSource::Connection => true,
     }
 }
 
@@ -458,17 +454,18 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_request_read, backlog_label, capability_state_label, handle_health_http_request,
-        health_ready_response, health_request_required_capabilities,
+        apply_request_read, backlog_label, bind_health_http, capability_state_label,
+        handle_health_http_request, health_ready_response, health_request_required_capabilities,
         health_request_requires_readiness_snapshot, integrity_label, json_string, reason_phrase,
-        should_continue_after_serve_error, RequestReadProgress, ServeIoSource,
-        HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
+        serve_health_http_with, should_continue_after_serve_error, RequestReadProgress,
+        ServeIoSource, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
         RuntimeHealthSnapshot,
     };
     use std::io;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     #[test]
     fn remaining_labels_and_json_escapes_are_stable() {
@@ -695,6 +692,20 @@ mod tests {
     }
 
     #[test]
+    fn serve_loop_stops_when_accept_returns_a_fatal_error() {
+        let listener =
+            bind_health_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+        listener
+            .set_nonblocking(true)
+            .expect("the test must force accept to return WouldBlock");
+        let error = serve_health_http_with(&listener, |_| {
+            panic!("a fatal accept must not invoke the request handler")
+        })
+        .expect_err("WouldBlock on accept must stop the probe process");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
     fn serve_loop_retries_interrupted_accepts_and_stops_on_other_errors() {
         assert!(should_continue_after_serve_error(
             &io::Error::new(io::ErrorKind::Interrupted, "signal"),
@@ -722,21 +733,6 @@ mod tests {
 
     #[test]
     fn serve_loop_keeps_running_after_per_connection_io_errors() {
-        assert!(
-            should_continue_after_serve_error(
-                &io::Error::new(io::ErrorKind::BrokenPipe, "peer gone"),
-                ServeIoSource::Connection,
-            ),
-            "a load-balancer reset after accept must not stop later probes"
-        );
-        assert!(should_continue_after_serve_error(
-            &io::Error::new(io::ErrorKind::ConnectionReset, "rst"),
-            ServeIoSource::Connection,
-        ));
-        assert!(should_continue_after_serve_error(
-            &io::Error::new(io::ErrorKind::TimedOut, "write timeout"),
-            ServeIoSource::Connection,
-        ));
         assert!(should_continue_after_serve_error(
             &io::Error::new(io::ErrorKind::ConnectionAborted, "client gone"),
             ServeIoSource::Accept,
