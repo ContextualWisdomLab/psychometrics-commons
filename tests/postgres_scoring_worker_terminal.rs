@@ -901,4 +901,11 @@ fn worker_commit_errors_retain_typed_sources() {
         "reload the persisted scoring request before completing the job; do not invent a score"
     );
     assert!(missing.source().is_none());
+
+    let retry = ScoringWorkerCommitError::Retry(ScoringJobPersistenceError::LeaseExpired);
+    assert_eq!(
+        retry.to_string(),
+        "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
+    );
+    assert!(retry.source().is_some());
 }

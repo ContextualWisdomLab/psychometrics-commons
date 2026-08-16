@@ -17,12 +17,14 @@ use crate::postgres_scoring_failure::{
     record_permanent_scoring_failure_with_outbox, ScoringFailureOutboxError,
     ScoringFailureOutboxPersistence,
 };
+use crate::postgres_scoring_job::{record_retryable_scoring_failure, ScoringJobPersistenceError};
 use crate::postgres_scoring_request::{load_scoring_request, ScoringRequestPersistenceError};
 use crate::result::ResultSnapshotInput;
+use crate::scoring_job::ScoringJobState;
 use crate::scoring_worker::{
     plan_scoring_worker_attempt, plan_scoring_worker_result_attempt, require_stable_terminal_event,
     ScoringTerminalIdentity, ScoringWorkerAttempt, ScoringWorkerEngine, ScoringWorkerEngineOutcome,
-    ScoringWorkerEnvelope, ScoringWorkerError, ScoringWorkerResultEngine,
+    ScoringWorkerEnvelope, ScoringWorkerError, ScoringWorkerResultEngine, ScoringWorkerResultPlan,
 };
 use postgres::Transaction;
 use std::error::Error;
@@ -50,6 +52,10 @@ pub enum ScoringWorkerPersistence {
     Completed(ScoringCompletionOutboxPersistence),
     /// Permanent failure and its bound outbox evidence.
     Failed(ScoringFailureOutboxPersistence),
+    /// A retryable engine or transport outage released the lease for a later attempt.
+    RetryScheduled,
+    /// Retry budget was exhausted without inventing a score or writing a terminal event.
+    Quarantined,
 }
 
 /// Durable dispositions produced by one request-load plus result-snapshot worker attempt.
@@ -91,6 +97,8 @@ pub enum ScoringWorkerCommitError {
     Completion(ScoringCompletionOutboxError),
     /// Fenced permanent failure or its outbox evidence failed.
     Failure(ScoringFailureOutboxError),
+    /// Retryable outage persistence failed; keep the job leased.
+    Retry(ScoringJobPersistenceError),
 }
 
 impl Display for ScoringWorkerCommitError {
@@ -113,6 +121,9 @@ impl Display for ScoringWorkerCommitError {
             }
             Self::Completion(_) => "scoring worker completion persistence failed",
             Self::Failure(_) => "scoring worker failure persistence failed",
+            Self::Retry(_) => {
+                "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
+            }
         })
     }
 }
@@ -126,6 +137,7 @@ impl Error for ScoringWorkerCommitError {
             Self::Snapshot(error) => Some(error),
             Self::Completion(error) => Some(error),
             Self::Failure(error) => Some(error),
+            Self::Retry(error) => Some(error),
         }
     }
 }
@@ -262,8 +274,10 @@ fn commit_planned_scoring_worker_attempt(
 /// After restart, the worker reconstructs the version pin from `scoring_request`
 /// and asks a request-bound engine. A completed result and its product snapshot
 /// commit in the same caller-owned transaction as the fenced job and outbox
-/// evidence. A missing request, planner failure, or snapshot conflict leaves the
-/// leased job untouched when the caller rolls back. Live `fast-mlsirm` execution
+/// evidence. A retryable engine or transport outage records the existing job
+/// retry schedule, writes no terminal outbox row, and does not invent a score.
+/// A missing request, planner failure, or snapshot conflict leaves the leased
+/// job untouched when the caller rolls back. Live `fast-mlsirm` execution
 /// remains a later adapter behind [`ScoringWorkerResultEngine`].
 ///
 /// # Errors
@@ -271,7 +285,8 @@ fn commit_planned_scoring_worker_attempt(
 /// Returns [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
 /// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
 /// [`ScoringWorkerCommitError::Planning`] when the engine or planner cannot
-/// produce a typed attempt, [`ScoringWorkerCommitError::Snapshot`] when the
+/// produce a typed attempt, [`ScoringWorkerCommitError::Retry`] when retry
+/// evidence cannot persist, [`ScoringWorkerCommitError::Snapshot`] when the
 /// immutable snapshot cannot persist, or the existing completion/failure error.
 #[allow(clippy::too_many_arguments)]
 pub fn run_scoring_worker_attempt_with_result_snapshot(
@@ -283,11 +298,12 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
     snapshot_input: ResultSnapshotInput<'_>,
     envelope: ScoringWorkerEnvelope<'_>,
     outbox_max_attempts: usize,
+    retry_at_unix_ms: u64,
 ) -> Result<ScoringWorkerSnapshotPersistence, ScoringWorkerCommitError> {
     let request = load_scoring_request(transaction, scoring_request_ref)
         .map_err(ScoringWorkerCommitError::Request)?
         .ok_or(ScoringWorkerCommitError::MissingRequest)?;
-    let attempt = plan_scoring_worker_result_attempt(
+    let plan = plan_scoring_worker_result_attempt(
         scoring_job_ref,
         &request,
         engine,
@@ -295,19 +311,52 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
         envelope,
     )
     .map_err(ScoringWorkerCommitError::Planning)?;
-    let snapshot = match attempt.snapshot() {
-        Some(snapshot) => Some(
-            persist_result_snapshot(transaction, snapshot)
-                .map_err(ScoringWorkerCommitError::Snapshot)?,
-        ),
-        None => None,
-    };
-    let terminal = commit_planned_scoring_worker_attempt(
-        transaction,
-        scoring_job_ref,
-        fencing_token,
-        &ScoringWorkerAttempt::from_planned(attempt.outcome().clone(), attempt.event().clone()),
-        outbox_max_attempts,
-    )?;
-    Ok(ScoringWorkerSnapshotPersistence { terminal, snapshot })
+    match plan {
+        ScoringWorkerResultPlan::Retryable { cause_code } => {
+            let state = record_retryable_scoring_failure(
+                transaction,
+                scoring_job_ref,
+                fencing_token,
+                &cause_code,
+                envelope.occurred_at_unix_ms,
+                retry_at_unix_ms,
+            )
+            .map_err(ScoringWorkerCommitError::Retry)?;
+            Ok(ScoringWorkerSnapshotPersistence {
+                terminal: match state {
+                    ScoringJobState::RetryScheduled => ScoringWorkerPersistence::RetryScheduled,
+                    ScoringJobState::Quarantined => ScoringWorkerPersistence::Quarantined,
+                    ScoringJobState::Queued
+                    | ScoringJobState::Leased
+                    | ScoringJobState::Completed
+                    | ScoringJobState::Cancelled => {
+                        return Err(ScoringWorkerCommitError::Retry(
+                            ScoringJobPersistenceError::TransitionNotApplied,
+                        ));
+                    }
+                },
+                snapshot: None,
+            })
+        }
+        ScoringWorkerResultPlan::Terminal(attempt) => {
+            let snapshot = match attempt.snapshot() {
+                Some(snapshot) => Some(
+                    persist_result_snapshot(transaction, snapshot)
+                        .map_err(ScoringWorkerCommitError::Snapshot)?,
+                ),
+                None => None,
+            };
+            let terminal = commit_planned_scoring_worker_attempt(
+                transaction,
+                scoring_job_ref,
+                fencing_token,
+                &ScoringWorkerAttempt::from_planned(
+                    attempt.outcome().clone(),
+                    attempt.event().clone(),
+                ),
+                outbox_max_attempts,
+            )?;
+            Ok(ScoringWorkerSnapshotPersistence { terminal, snapshot })
+        }
+    }
 }
