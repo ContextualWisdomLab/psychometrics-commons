@@ -100,6 +100,29 @@ impl PublishedInstrumentReleaseSnapshot {
     pub const fn created_at_unix_ms(&self) -> u64 {
         self.created_at_unix_ms
     }
+
+    /// Wrap a manifest that a published-release load already accepted.
+    ///
+    /// HTTP start and tests use this after
+    /// [`load_published_instrument_release`] or an equivalent store proof.
+    /// It does not mark a draft manifest as published.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InstrumentReleaseQueryError::InvalidStoredValue`] when the stored
+    /// creation time is zero.
+    pub fn from_published_manifest(
+        manifest: InstrumentReleaseManifest,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, InstrumentReleaseQueryError> {
+        if created_at_unix_ms == 0 {
+            return Err(InstrumentReleaseQueryError::InvalidStoredValue);
+        }
+        Ok(Self {
+            manifest,
+            created_at_unix_ms,
+        })
+    }
 }
 
 /// Fail-closed error for loading a release that is eligible to start a new session.

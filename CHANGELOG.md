@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Session start can load the stored published release in the same transaction (`start_created_assessment_session_from_stored_release`), so a stale in-memory Published object cannot begin a session after the stored release is suspended or retired.
 - Session start composition calls `AssessmentSession::new` from a currently published release and then persists the created identity, so a suspended or retired release cannot begin a new session and reconstitution cannot be used as the start path.
 - Created assessment sessions can be loaded from PostgreSQL without re-checking current publication eligibility, so a later suspend or retire cannot rewrite stored provenance. Missing sessions return none; later stored states, corrupt stored identity, and load-path database failures fail closed.
 - PostgreSQL persistence for created assessment sessions bound to one published locale-specific release: exact replay is idempotent, and rebinding participant, release, version, digest, locale, state, or creation time fails closed.

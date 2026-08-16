@@ -5,8 +5,10 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::postgres_assessment_session::{
-    created_session_for_start, AssessmentSessionStartError,
+    created_session_for_start, created_session_for_start_from_published_snapshot,
+    AssessmentSessionStartError,
 };
+use psychometrics_commons_runtime::postgres_instrument_release::PublishedInstrumentReleaseSnapshot;
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionState};
 
 const VALID_DIGEST: &str =
@@ -159,6 +161,10 @@ fn start_errors_tell_the_caller_what_to_do_next() {
         AssessmentSessionStartError::LocaleMismatch.to_string(),
         "start the session with the exact published release locale"
     );
+    assert_eq!(
+        AssessmentSessionStartError::InvalidStoredRelease.to_string(),
+        "repair the stored instrument release before starting a new session"
+    );
     let persistence = AssessmentSessionStartError::Persistence(
         psychometrics_commons_runtime::postgres_assessment_session::AssessmentSessionPersistenceError::ConflictingReplay,
     );
@@ -168,4 +174,53 @@ fn start_errors_tell_the_caller_what_to_do_next() {
     );
     assert!(std::error::Error::source(&persistence).is_some());
     assert!(std::error::Error::source(&AssessmentSessionStartError::LocaleMismatch).is_none());
+}
+
+#[test]
+fn start_from_published_snapshot_matches_new_and_rejects_locale_mismatch() {
+    let release = published_release();
+    let snapshot = PublishedInstrumentReleaseSnapshot::from_published_manifest(
+        release.manifest().clone(),
+        release.created_at_unix_ms(),
+    )
+    .unwrap();
+    let started = created_session_for_start_from_published_snapshot(
+        SESSION_REF,
+        PARTICIPANT_REF,
+        &snapshot,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    let via_new =
+        AssessmentSession::new(SESSION_REF, PARTICIPANT_REF, &release, "ko-KR", 20_000).unwrap();
+
+    assert_eq!(started, via_new);
+    assert_eq!(started.state(), SessionState::Created);
+    assert!(matches!(
+        created_session_for_start_from_published_snapshot(
+            SESSION_REF,
+            PARTICIPANT_REF,
+            &snapshot,
+            "en-US",
+            20_000,
+        ),
+        Err(AssessmentSessionStartError::LocaleMismatch)
+    ));
+    assert!(matches!(
+        created_session_for_start_from_published_snapshot(
+            "12345",
+            PARTICIPANT_REF,
+            &snapshot,
+            "ko-KR",
+            20_000,
+        ),
+        Err(AssessmentSessionStartError::InvalidReference)
+    ));
+    assert!(matches!(
+        PublishedInstrumentReleaseSnapshot::from_published_manifest(release.manifest().clone(), 0),
+        Err(
+            psychometrics_commons_runtime::postgres_instrument_release::InstrumentReleaseQueryError::InvalidStoredValue
+        )
+    ));
 }

@@ -53,7 +53,8 @@ Product consequences:
 - security responsibilities are mapped to accountable owners and bounded contexts;
 - risk treatment, change control, access control, incident/vulnerability handling, supplier/dependency evidence, backup/restore, continuity, and audit evidence are designed as ongoing processes;
 - release gates include secret scanning, static analysis, dependency/supply-chain evidence, SBOM/provenance, migration/rollback, and recovery tests;
-- cross-service database access and ambient credentials are prohibited by architecture, not merely discouraged by documentation.
+- cross-service database access and ambient credentials are prohibited by architecture, not merely discouraged by documentation;
+- session start that depends on publication eligibility reads the stored publication state in the same transaction; an in-memory Published object is not authorization after a later suspend or retire.
 
 ## AI management, risk, and impact
 

@@ -291,8 +291,8 @@ sequenceDiagram
 
     P->>C: choose published instrument + locale
     C->>A: POST session (idempotency key)
-    A->>A: AssessmentSession::new from currently published release
-    A->>DB: persist created session identity
+    A->>DB: load published instrument release for exact locale
+    A->>A: start from stored published snapshot, then persist created session identity
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
 
