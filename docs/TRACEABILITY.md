@@ -133,7 +133,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #91 operator health HTTP probes are not protected-main truth until an unchanged reviewed/check-clean head is integrated. GET `/live` and GET `/ready` translate `RuntimeHealthSnapshot` into HTTP 200/503 JSON and return RFC 9457 problem details for malformed or unsupported requests. Public/admin product routes, measured thresholds, and deployment-profile evidence remain outside this slice. **Active PR** #92 bound TCP listener work is also not protected-main truth: it accepts one HTTP/1.1 request per connection for those same operations and does not add TLS, keep-alive, or public product routes.
+**Active PR** #95 PostgreSQL-backed operator health HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It observes a live operational snapshot and answers GET `/live` and GET `/ready` without exposing driver errors. Public/admin product routes, measured backlog thresholds, TLS, and deployment-profile evidence remain outside this slice.
 
 ## 5. ADR traceability by concern
 

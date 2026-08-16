@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Operator health probes can observe a live PostgreSQL operational snapshot and answer GET `/live` and GET `/ready` without exposing driver errors. Measured backlog thresholds remain caller-supplied.
 - A bound TCP listener serves the existing operator GET `/live` and GET `/ready` probes one HTTP/1.1 request per accepted connection. It does not add public product routes, TLS, keep-alive, or measured SLO values.
 - Operator HTTP probes translate the domain health snapshot into GET `/live` and GET `/ready` responses with an as-built OpenAPI 3.2.0 contract. Liveness stays independent of operation readiness; named required capabilities, stalled backlog, unknown integrity, and unknown capabilities fail closed. Unsupported methods and paths return RFC 9457 problem details without raw store errors.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
