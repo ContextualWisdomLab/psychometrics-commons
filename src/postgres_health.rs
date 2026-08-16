@@ -242,6 +242,7 @@ pub struct PostgresScoringJobBacklogEvidence {
     active_job_count: u64,
     quarantined_job_count: u64,
     expired_lease_count: u64,
+    oldest_expired_lease_at_unix_ms: Option<u64>,
     oldest_active_job_at_unix_ms: Option<u64>,
 }
 
@@ -262,6 +263,15 @@ impl PostgresScoringJobBacklogEvidence {
     #[must_use]
     pub const fn expired_lease_count(self) -> u64 {
         self.expired_lease_count
+    }
+
+    /// Return the oldest persisted lease expiry among already-expired leased jobs.
+    ///
+    /// The value is the stored `active_lease_expires_at_unix_ms`, not created-at age.
+    /// Live leases are excluded so a far-future expiry cannot hide a dead worker.
+    #[must_use]
+    pub const fn oldest_expired_lease_at_unix_ms(self) -> Option<u64> {
+        self.oldest_expired_lease_at_unix_ms
     }
 
     /// Return the oldest `created_at` among active scoring jobs, if any.
@@ -565,8 +575,9 @@ pub fn classify_postgres_data_rights_backlog(
 /// Active work is queued, leased, or retry-scheduled. Completed and cancelled jobs are
 /// terminal and do not participate. Age is measured from `created_at` so a later lease
 /// or retry transition cannot hide a job that has waited too long. Expired leases are
-/// counted separately against the database clock so a dead worker cannot hide behind a
-/// healthy enqueue-age bound. The query returns only counts and one oldest timestamp.
+/// counted separately against one database-clock snapshot so a dead worker cannot hide
+/// behind a healthy enqueue-age bound. The same snapshot supplies the oldest already-
+/// expired lease timestamp. The query returns only counts and those timestamps.
 ///
 /// # Errors
 ///
@@ -577,17 +588,20 @@ pub fn probe_postgres_scoring_job_backlog(
     client: &mut impl GenericClient,
 ) -> Result<PostgresScoringJobBacklogEvidence, PostgresBacklogProbeError> {
     let row = client.query_one(
-        "SELECT \
+        "WITH observed AS ( \
+             SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT AS now_ms \
+         ) \
+         SELECT \
              (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
                  WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled')), \
              (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
                  WHERE scoring_state = 'quarantined'), \
-             (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
+             (SELECT COUNT(*)::BIGINT FROM scoring_job_state, observed \
                  WHERE scoring_state = 'leased' \
-                   AND active_lease_expires_at_unix_ms \
-                       < (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT), \
-             (SELECT MIN(active_lease_expires_at_unix_ms) FROM scoring_job_state \
-                 WHERE scoring_state = 'leased'), \
+                   AND active_lease_expires_at_unix_ms < observed.now_ms), \
+             (SELECT MIN(active_lease_expires_at_unix_ms) FROM scoring_job_state, observed \
+                 WHERE scoring_state = 'leased' \
+                   AND active_lease_expires_at_unix_ms < observed.now_ms), \
              (SELECT (EXTRACT(EPOCH FROM MIN(created_at)) * 1000)::BIGINT \
                  FROM scoring_job_state \
                  WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled'))",
@@ -597,14 +611,14 @@ pub fn probe_postgres_scoring_job_backlog(
     let active_job_count: i64 = row.get(0);
     let quarantined_job_count: i64 = row.get(1);
     let expired_lease_count: i64 = row.get(2);
-    let oldest_leased_expiry_at_unix_ms: Option<i64> = row.get(3);
+    let oldest_expired_lease_at_unix_ms: Option<i64> = row.get(3);
     let oldest_active_job_at_unix_ms: Option<i64> = row.get(4);
-    let _ = positive_optional_millis(oldest_leased_expiry_at_unix_ms)?;
 
     Ok(PostgresScoringJobBacklogEvidence {
         active_job_count: active_job_count.cast_unsigned(),
         quarantined_job_count: quarantined_job_count.cast_unsigned(),
         expired_lease_count: expired_lease_count.cast_unsigned(),
+        oldest_expired_lease_at_unix_ms: positive_optional_millis(oldest_expired_lease_at_unix_ms)?,
         oldest_active_job_at_unix_ms: positive_optional_millis(oldest_active_job_at_unix_ms)?,
     })
 }
@@ -782,6 +796,7 @@ mod operational_backlog_composition_tests {
             active_job_count: 0,
             quarantined_job_count: 0,
             expired_lease_count: 0,
+            oldest_expired_lease_at_unix_ms: None,
             oldest_active_job_at_unix_ms: None,
         }
     }
@@ -808,6 +823,7 @@ mod operational_backlog_composition_tests {
             active_job_count: 1,
             quarantined_job_count: 0,
             expired_lease_count: 0,
+            oldest_expired_lease_at_unix_ms: None,
             oldest_active_job_at_unix_ms: Some(1_000),
         };
         assert_eq!(
@@ -830,6 +846,7 @@ mod operational_backlog_composition_tests {
             active_job_count: 1,
             quarantined_job_count: 0,
             expired_lease_count: 0,
+            oldest_expired_lease_at_unix_ms: None,
             oldest_active_job_at_unix_ms: Some(20_000),
         };
         assert_eq!(
@@ -851,13 +868,15 @@ mod operational_backlog_composition_tests {
         let expired_lease = PostgresScoringJobBacklogEvidence {
             active_job_count: 1,
             quarantined_job_count: 0,
-            oldest_active_job_at_unix_ms: Some(8_000),
             expired_lease_count: 1,
+            oldest_expired_lease_at_unix_ms: Some(3_500),
+            oldest_active_job_at_unix_ms: Some(8_000),
         };
         let refuse_expired = ScoringJobBacklogPolicy {
             max_expired_lease_count: 0,
             ..scoring_job_policy()
         };
+        assert_eq!(expired_lease.oldest_expired_lease_at_unix_ms(), Some(3_500));
         assert_eq!(
             classify_postgres_operational_backlog(
                 &empty_integration(),

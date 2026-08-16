@@ -161,6 +161,7 @@ fn empty_scoring_job_backlog_is_observable_without_inventing_service_levels() {
     assert_eq!(evidence.active_job_count(), 0);
     assert_eq!(evidence.quarantined_job_count(), 0);
     assert_eq!(evidence.expired_lease_count(), 0);
+    assert_eq!(evidence.oldest_expired_lease_at_unix_ms(), None);
     assert_eq!(evidence.oldest_active_job_at_unix_ms(), None);
     assert_eq!(
         classify_postgres_scoring_job_backlog(&evidence, 10_000, &policy()),
@@ -204,6 +205,7 @@ fn probe_counts_queued_leased_retry_and_quarantine_without_terminal_or_identity_
     assert_eq!(evidence.active_job_count(), 3);
     assert_eq!(evidence.quarantined_job_count(), 1);
     assert_eq!(evidence.expired_lease_count(), 1);
+    assert_eq!(evidence.oldest_expired_lease_at_unix_ms(), Some(3_500));
     assert_eq!(evidence.oldest_active_job_at_unix_ms(), Some(2_000));
     assert_eq!(
         classify_postgres_scoring_job_backlog(&evidence, 5_000, &policy()),
@@ -278,6 +280,7 @@ fn expired_lease_count_fails_closed_when_operator_refuses_dead_workers() {
 
     assert_eq!(evidence.active_job_count(), 2);
     assert_eq!(evidence.expired_lease_count(), 1);
+    assert_eq!(evidence.oldest_expired_lease_at_unix_ms(), Some(9_000));
     assert_eq!(evidence.oldest_active_job_at_unix_ms(), Some(8_000));
 
     let refuse_expired = ScoringJobBacklogPolicy {
@@ -288,6 +291,29 @@ fn expired_lease_count_fails_closed_when_operator_refuses_dead_workers() {
         classify_postgres_scoring_job_backlog(&evidence, 10_000, &refuse_expired),
         BacklogHealth::Stalled
     );
+    assert_eq!(
+        classify_postgres_scoring_job_backlog(&evidence, 10_000, &policy()),
+        BacklogHealth::WithinBounds
+    );
+
+    cleanup(client, &schema);
+}
+
+#[test]
+fn live_lease_does_not_invent_an_expired_lease_timestamp() {
+    let (mut client, schema) = isolated_client();
+    insert_job(
+        &mut client,
+        "scoring_job_live_only_lease",
+        "leased_live",
+        8_500,
+    );
+    let evidence = probe_postgres_scoring_job_backlog(&mut client).unwrap();
+
+    assert_eq!(evidence.active_job_count(), 1);
+    assert_eq!(evidence.expired_lease_count(), 0);
+    assert_eq!(evidence.oldest_expired_lease_at_unix_ms(), None);
+    assert_eq!(evidence.oldest_active_job_at_unix_ms(), Some(8_500));
     assert_eq!(
         classify_postgres_scoring_job_backlog(&evidence, 10_000, &policy()),
         BacklogHealth::WithinBounds
