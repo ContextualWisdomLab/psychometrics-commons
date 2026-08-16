@@ -376,6 +376,22 @@ fn anonymous_command_docs_do_not_claim_store_load() {
         ),
         "UML happy-path must distinguish target store load from the as-built command gate"
     );
+    assert!(
+        !uml.contains("authorize anonymous command from loaded records"),
+        "UML command step must not say the gate authorized from loaded records"
+    );
+    assert!(
+        uml.contains("authorize anonymous command from supplied records"),
+        "UML command step must say the gate compares supplied records"
+    );
+    assert!(
+        !authorization.contains("already loaded a participant"),
+        "command authorization rustdoc must not assume the caller already loaded records"
+    );
+    assert!(
+        !command_tests.contains("must load the participant"),
+        "command tests must not say a transport must load records the gate does not prove"
+    );
 
     for (label, document) in [
         ("CHANGELOG.md", changelog.as_str()),
@@ -397,8 +413,12 @@ fn anonymous_command_docs_do_not_claim_store_load() {
             "{label} must not name superseded #114 as the current participant persist landing"
         );
         assert!(
-            document.contains("#133"),
-            "{label} must name Active PR #133 as the current participant persist landing"
+            !document.contains("remains Active PR #133"),
+            "{label} must not name superseded #133 as the current participant persist landing"
+        );
+        assert!(
+            document.contains("#147"),
+            "{label} must name Active PR #147 as the current participant persist landing"
         );
     }
 }

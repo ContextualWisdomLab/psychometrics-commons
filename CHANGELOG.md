@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- Anonymous session command authorization compares the verified actor to the supplied participant tenant/owner and session reference, then applies a lifecycle command only after that check. The command entry point does not accept a caller-built resource scope and does not claim those aggregates were store-loaded. The lower-level exact-resource check remains available for callers that already hold a stored `ResourceScope`. Participant persist/reload remains Active PR #133.
+- Anonymous session command authorization compares the verified actor to the supplied participant tenant/owner and session reference, then applies a lifecycle command only after that check. The command entry point does not accept a caller-built resource scope and does not claim those aggregates were store-loaded. The lower-level exact-resource check remains available for callers that already hold a stored `ResourceScope`. Participant persist/reload remains Active PR #147.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

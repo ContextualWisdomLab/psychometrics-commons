@@ -9,10 +9,10 @@
 //! session named in its context. It cannot be reused to read results, change consent, exercise data
 //! rights, administer a tenant, or access another participant's session.
 //!
-//! Transports that already loaded a participant and session should call
+//! Transports that already hold a participant and session should call
 //! [`authorize_anonymous_session_command`]. That function compares the verified actor to the
 //! supplied records so a matching invented [`ResourceScope`] cannot authorize a different
-//! loaded session. It does not prove the records came from the product store.
+//! supplied session. It does not prove the records came from the product store.
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::authorization::{ResourceKind, ResourceScope};
@@ -130,7 +130,7 @@ pub fn authorize_anonymous_session(
 /// The function compares the actor to those supplied records. It does **not** accept a
 /// caller-built [`ResourceScope`]. It does not prove the records were loaded from the product
 /// store; a transport can still construct both aggregates from the proof. Persist/reload of
-/// `assessment_participant` remains Active PR #133. For example, a proof for `session_alpha` /
+/// `assessment_participant` remains Active PR #147. For example, a proof for `session_alpha` /
 /// `participant_alpha` in `tenant_alpha` is allowed only when the supplied participant is that
 /// same person in that same tenant and the supplied session is `session_alpha` owned by that
 /// person. A session owned by `participant_beta`, or `session_beta` owned by the same person,
