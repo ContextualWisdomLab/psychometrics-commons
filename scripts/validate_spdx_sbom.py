@@ -16,7 +16,7 @@ import tomllib
 from typing import Any
 
 
-SUPPORTED_SPDX_VERSIONS = frozenset({"SPDX-2.0", "SPDX-2.1", "SPDX-2.2", "SPDX-2.3"})
+SUPPORTED_SPDX_VERSIONS = ("SPDX-2.0", "SPDX-2.1", "SPDX-2.2", "SPDX-2.3")
 
 
 class SbomValidationError(ValueError):
