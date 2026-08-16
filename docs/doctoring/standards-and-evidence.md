@@ -94,6 +94,23 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## PostgreSQL transaction isolation
+
+PostgreSQL 18 documents `READ COMMITTED` as the default isolation level in which
+each statement sees only rows committed before that statement began (PostgreSQL
+Global Development Group, 2026). Product persist and restart-reload adapters that
+classify unique-key races or reconstruct immutable prefixes therefore require
+`READ COMMITTED` and fail closed on a stronger isolation level that can hide a
+concurrent committed insert from the classifier.
+
+Product consequences:
+
+- response-snapshot reload reconstructs the frozen completed prefix under
+  `READ COMMITTED` after a share lock on the snapshot header;
+- a missing snapshot is absent rather than an invented empty scoring input;
+- stored header/entry mismatches fail closed instead of being reordered into a
+  newer completed prefix.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -124,3 +141,5 @@ Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html

@@ -114,6 +114,10 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
 
+### Response snapshot reload
+
+Protected main already persists one immutable completed prefix per session. Active PR reload reconstructs that prefix after process restart under `READ COMMITTED`, taking `FOR SHARE` on the snapshot header so a concurrent writer holding the same row waits until reconstruction finishes. Entries are ordered by `snapshot_sequence`, not by opaque event identity. A missing snapshot is absent. Header counts, gapped sequences, and stored labels that cannot rebuild [`ResponseSnapshot::from_persisted`] fail closed. The slice does not add HTTP scoring transport and does not rewrite historical snapshots. PostgreSQL 18 transaction isolation remains the physical classifier (PostgreSQL Global Development Group, 2026).
+
 ## Concurrency and idempotency
 
 Physical constraints must enforce equivalents of:
@@ -306,3 +310,5 @@ The physical database technology or decomposition may change if scale, residency
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+
+PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html

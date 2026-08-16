@@ -24,7 +24,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
-| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
+| Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` plus `migrations/0010_response_snapshot.sql` / `src/postgres_response_snapshot.rs` persist. Active PR reloads that frozen prefix after restart so scoring can dispatch from the stored server order |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
 | Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result-serving transport is Target |
@@ -108,6 +108,7 @@ src/lib.rs
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
+├── postgres_response_snapshot.rs  # PostgreSQL immutable response-snapshot persist and restart reload
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── reference.rs      # internal opaque-reference normalization
@@ -124,6 +125,7 @@ migrations/
 ├── 0003_data_rights_propagation.sql
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
+├── 0010_response_snapshot.sql
 ├── 0011_scoring_request.sql
 └── 0012_integration_consumption.sql
 ```
@@ -132,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** response-snapshot reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `load_response_snapshot` and `load_response_snapshot_for_session` reconstruct the unique frozen prefix from `response_snapshot` / `response_snapshot_entry` under `READ COMMITTED` after `FOR SHARE` on the header. Server `snapshot_sequence` order is preserved. Header/entry mismatches, gapped sequences, and noncanonical stored digests fail closed. This does not add HTTP scoring transport or mutate historical snapshots. Protected-main `#76` data-rights processing-start persist has already landed.
 
 ## 5. ADR traceability by concern
 

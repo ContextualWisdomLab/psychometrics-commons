@@ -163,6 +163,20 @@ fn persisted_reconstruction_rejects_blank_refs_bad_digests_and_sequence_lies() {
             "session_reload_guard",
             &[ResponseSnapshotEntryInput {
                 event_ref: "server_event_001",
+                item_version_ref: "12",
+                payload_digest: PAYLOAD_DIGEST,
+            }],
+            Some(1),
+        )
+        .unwrap_err(),
+        WriteError::InvalidReference
+    );
+    assert_eq!(
+        ResponseSnapshot::from_persisted(
+            "response_snapshot_guard",
+            "session_reload_guard",
+            &[ResponseSnapshotEntryInput {
+                event_ref: "server_event_001",
                 item_version_ref: "item_version_001",
                 payload_digest: "sha256:not-a-digest",
             }],
