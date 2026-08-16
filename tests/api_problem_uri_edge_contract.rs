@@ -43,7 +43,7 @@ fn https_problem_types_cover_authority_port_and_suffix_edges() {
         assert_eq!(
             problem(invalid_type),
             Err(ApiProblemContractError::InvalidTypeUri),
-            "{invalid_type:?} must fail closed"
+            "{invalid_type:?} must fail closed",
         );
     }
 }
@@ -76,7 +76,7 @@ fn urn_problem_types_cover_namespace_and_specific_string_edges() {
         assert_eq!(
             problem(invalid_type),
             Err(ApiProblemContractError::InvalidTypeUri),
-            "{invalid_type:?} must fail closed"
+            "{invalid_type:?} must fail closed",
         );
     }
 }
@@ -91,7 +91,7 @@ fn machine_code_edges_keep_lowercase_ascii_contract_exact() {
         assert_eq!(
             ApiProblem::new("urn:ab:x", 400, TITLE, DETAIL, invalid_code),
             Err(ApiProblemContractError::InvalidCode),
-            "{invalid_code:?} must fail closed"
+            "{invalid_code:?} must fail closed",
         );
     }
 }
