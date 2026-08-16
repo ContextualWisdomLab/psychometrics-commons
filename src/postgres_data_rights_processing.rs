@@ -51,6 +51,7 @@ pub fn apply_data_rights_processing_migration(client: &mut Client) -> Result<(),
 /// Returns [`DataRightsPersistenceError`] when the domain evidence is incomplete or out of range,
 /// transaction isolation is unsupported, the request is missing, immutable evidence conflicts,
 /// the durable lifecycle is not eligible for processing start, or `PostgreSQL` fails.
+#[allow(clippy::question_mark)]
 pub fn persist_data_rights_processing_start(
     transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
