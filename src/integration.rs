@@ -19,9 +19,9 @@ const MAX_SCHEMA_VERSION_LENGTH: usize = 64;
 pub enum IntegrationError {
     /// A required opaque reference was blank or numeric-only.
     InvalidReference,
-    /// An event type was empty or exceeded the supported contract bound.
+    /// An event type was empty, non-canonical, or exceeded the supported contract bound.
     InvalidEventType,
-    /// A schema version was empty or exceeded the supported contract bound.
+    /// A schema version was empty, non-canonical, or exceeded the supported contract bound.
     InvalidSchemaVersion,
     /// A payload digest was not canonical SHA-256 evidence.
     InvalidDigest,
@@ -53,9 +53,11 @@ impl Display for IntegrationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => "integration references must be opaque non-numeric values",
-            Self::InvalidEventType => "integration event type must be non-empty and bounded",
+            Self::InvalidEventType => {
+                "integration event type must be non-empty, bounded, and canonical"
+            }
             Self::InvalidSchemaVersion => {
-                "integration schema version must be non-empty and bounded"
+                "integration schema version must be non-empty, bounded, and canonical"
             }
             Self::InvalidDigest => "integration payload digest must be a canonical sha256 digest",
             Self::InvalidTimestamp => "integration timestamps must be greater than zero",
@@ -926,11 +928,15 @@ fn bounded_label(
     max_length: usize,
     error: IntegrationError,
 ) -> Result<&str, IntegrationError> {
-    let normalized = value.trim();
-    if normalized.is_empty() || normalized.len() > max_length {
+    if value.is_empty()
+        || value.len() > max_length
+        || value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
         Err(error)
     } else {
-        Ok(normalized)
+        Ok(value)
     }
 }
 

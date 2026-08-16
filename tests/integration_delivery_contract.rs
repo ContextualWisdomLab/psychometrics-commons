@@ -391,11 +391,11 @@ fn integration_errors_have_stable_safe_messages() {
         ),
         (
             IntegrationError::InvalidEventType,
-            "integration event type must be non-empty and bounded",
+            "integration event type must be non-empty, bounded, and canonical",
         ),
         (
             IntegrationError::InvalidSchemaVersion,
-            "integration schema version must be non-empty and bounded",
+            "integration schema version must be non-empty, bounded, and canonical",
         ),
         (
             IntegrationError::InvalidDigest,
