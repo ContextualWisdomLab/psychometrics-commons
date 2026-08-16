@@ -7,9 +7,11 @@ use psychometrics_commons_runtime::health_http::{HEALTH_LIVE_PATH, HEALTH_READY_
 use psychometrics_commons_runtime::postgres_health::POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF;
 use psychometrics_commons_runtime::postgres_health_http::{
     accept_one_postgres_health_http, handle_postgres_health_http_request,
+    serve_postgres_health_http,
 };
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -175,5 +177,63 @@ fn bound_listener_serves_a_postgres_ready_probe() {
     stream.read_to_string(&mut body).unwrap();
     assert!(body.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(body.contains("\"ready\":true"));
+    server.join().unwrap();
+}
+
+#[test]
+fn serve_loop_answers_live_then_ready_without_store_io_on_live() {
+    let listener = bind_health_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop = listener.try_clone().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let mut client = test_client();
+        let result = serve_postgres_health_http(
+            &listener,
+            &mut client,
+            &["pg_catalog.pg_class"],
+            BacklogHealth::WithinBounds,
+        );
+        let _ = done_tx.send(result);
+    });
+
+    let mut live_stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    live_stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    live_stream
+        .write_all(format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+        .unwrap();
+    live_stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut live = String::new();
+    live_stream.read_to_string(&mut live).unwrap();
+    assert!(live.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(live.contains("\"live\":true"));
+    assert!(!live.contains(POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF));
+
+    let mut ready_stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    ready_stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    ready_stream
+        .write_all(
+            format!(
+                "GET {HEALTH_READY_PATH}?capability={POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF} HTTP/1.1\r\nHost: localhost\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    ready_stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut ready = String::new();
+    ready_stream.read_to_string(&mut ready).unwrap();
+    assert!(ready.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(ready.contains("\"ready\":true"));
+
+    stop.set_nonblocking(true).unwrap();
+    let _ = TcpStream::connect_timeout(&addr, Duration::from_millis(200));
+    let stopped = done_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("serve_postgres_health_http must return after accept can no longer block");
+    assert!(stopped.is_err());
     server.join().unwrap();
 }
