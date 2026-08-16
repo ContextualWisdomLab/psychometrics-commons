@@ -379,8 +379,14 @@ fn classify_select_failure_after_conflict_is_a_database_failure() {
         ))
         .unwrap();
 
+    let error = result.expect_err("replay classify-select must return the database error");
     assert!(matches!(
-        result,
-        Err(AssessmentSessionPersistenceError::Database(_))
+        error,
+        AssessmentSessionPersistenceError::Database(_)
     ));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL assessment-session persistence failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
 }
