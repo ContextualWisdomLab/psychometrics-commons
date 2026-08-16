@@ -32,6 +32,7 @@ pub mod postgres_result_snapshot;
 pub mod postgres_scoring_job;
 pub mod postgres_scoring_request;
 mod reference;
+pub mod research_identity_linkage;
 pub mod research_release;
 pub mod response;
 pub mod result;
