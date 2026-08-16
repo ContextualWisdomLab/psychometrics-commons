@@ -6,7 +6,8 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::scoring_worker::{
     plan_scoring_worker_result_attempt, ScoringWorkerEnvelope, ScoringWorkerError,
-    ScoringWorkerResultEngine, ScoringWorkerResultOutcome,
+    ScoringWorkerResultAttempt, ScoringWorkerResultEngine, ScoringWorkerResultOutcome,
+    ScoringWorkerResultPlan,
 };
 use std::cell::Cell;
 
@@ -98,14 +99,16 @@ fn planner_builds_a_result_snapshot_bound_to_the_loaded_request() {
         calls: Cell::new(0),
     };
 
-    let attempt = plan_scoring_worker_result_attempt(
-        "scoring_job_reload_score",
-        &request,
-        &engine,
-        snapshot_input(),
-        worker_envelope(),
-    )
-    .unwrap();
+    let attempt = unwrap_terminal(
+        plan_scoring_worker_result_attempt(
+            "scoring_job_reload_score",
+            &request,
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+        )
+        .unwrap(),
+    );
 
     assert_eq!(engine.calls.get(), 1);
     let snapshot = attempt
@@ -245,5 +248,69 @@ fn planner_rejects_a_snapshot_missing_consent_without_binding_an_event() {
         )
         .unwrap_err(),
         ScoringWorkerError::InvalidResultSnapshot
+    );
+}
+
+fn unwrap_terminal(plan: ScoringWorkerResultPlan) -> ScoringWorkerResultAttempt {
+    match plan {
+        ScoringWorkerResultPlan::Terminal(attempt) => *attempt,
+        ScoringWorkerResultPlan::Retryable { cause_code } => {
+            panic!("expected a terminal plan, got retryable {cause_code}")
+        }
+    }
+}
+
+#[test]
+fn planner_schedules_a_retryable_outage_without_binding_an_event() {
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        expected_job: "scoring_job_reload_score",
+        expected_request: request.scoring_request_ref().to_owned(),
+        result: Ok(ScoringWorkerResultOutcome::Retryable {
+            cause_code: "engine_unavailable".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    let plan = plan_scoring_worker_result_attempt(
+        "scoring_job_reload_score",
+        &request,
+        &engine,
+        snapshot_input(),
+        worker_envelope(),
+    )
+    .unwrap();
+
+    assert_eq!(engine.calls.get(), 1);
+    assert_eq!(
+        plan,
+        ScoringWorkerResultPlan::Retryable {
+            cause_code: "engine_unavailable".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn planner_rejects_a_blank_retryable_cause() {
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        expected_job: "scoring_job_reload_score",
+        expected_request: request.scoring_request_ref().to_owned(),
+        result: Ok(ScoringWorkerResultOutcome::Retryable {
+            cause_code: " ".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        plan_scoring_worker_result_attempt(
+            "scoring_job_reload_score",
+            &request,
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
     );
 }

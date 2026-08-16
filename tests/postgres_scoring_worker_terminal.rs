@@ -918,4 +918,11 @@ fn worker_commit_errors_retain_typed_sources() {
         "scoring worker could not persist the immutable result snapshot; keep the job leased"
     );
     assert!(snapshot.source().is_some());
+
+    let retry = ScoringWorkerCommitError::Retry(ScoringJobPersistenceError::TransitionNotApplied);
+    assert_eq!(
+        retry.to_string(),
+        "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
+    );
+    assert!(retry.source().is_some());
 }
