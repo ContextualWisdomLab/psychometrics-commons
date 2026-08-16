@@ -91,6 +91,8 @@ fn bound_listener_returns_problem_details_for_unsupported_methods() {
     );
     assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
     assert!(response.contains("Content-Type: application/problem+json\r\n"));
+    assert!(response.contains("Allow: GET\r\n"));
+    assert!(response.contains("Cache-Control: no-store\r\n"));
     assert!(response.contains("\"title\":\"Method Not Allowed\""));
     assert!(!response.contains("postgres"));
 
@@ -129,7 +131,10 @@ fn bound_listener_rejects_an_oversized_request_without_echoing_it() {
         accept_one_health_http(&listener, &snapshot).unwrap();
     });
 
-    let oversized = format!("GET /live {}", "A".repeat(9_000));
+    let oversized = format!(
+        "GET /live HTTP/1.1\r\nHost: localhost\r\nX-Pad: {}\r\n\r\n",
+        "A".repeat(9_000)
+    );
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
@@ -147,6 +152,34 @@ fn bound_listener_rejects_an_oversized_request_without_echoing_it() {
         "{response}"
     );
     assert!(!response.contains(&"A".repeat(32)));
+
+    server.join().unwrap();
+}
+
+#[test]
+fn bound_listener_fails_closed_when_the_client_never_finishes_the_request() {
+    let listener = bind_health_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let snapshot = healthy_snapshot();
+    let server = thread::spawn(move || {
+        accept_one_health_http(&listener, &snapshot).unwrap();
+    });
+
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(4)))
+        .unwrap();
+    stream.write_all(b"GET /live HTTP/1.1\r\nHost: ").unwrap();
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .expect("the probe listener must answer an incomplete request instead of hanging");
+    assert!(
+        response.starts_with("HTTP/1.1 400 Bad Request\r\n"),
+        "{response}"
+    );
+    assert!(response.contains("Cache-Control: no-store\r\n"));
+    assert!(!response.contains("GET /live HTTP"));
 
     server.join().unwrap();
 }

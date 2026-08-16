@@ -53,6 +53,45 @@ fn writable_store_answers_live_and_postgres_ready_probes() {
 }
 
 #[test]
+fn liveness_probe_does_not_observe_the_store() {
+    let mut client = test_client();
+    let _ = client.batch_execute("SELECT pg_terminate_backend(pg_backend_pid())");
+    let live = handle_postgres_health_http_request(
+        &request(HEALTH_LIVE_PATH),
+        &mut client,
+        &["pg_catalog.pg_class"],
+        BacklogHealth::WithinBounds,
+    );
+    assert_eq!(live.status(), 200);
+    assert!(live.body().contains("\"live\":true"));
+    assert!(!live
+        .body()
+        .contains(POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF));
+    assert!(!live.body().contains("terminate"));
+    assert!(!live.body().contains("postgres::"));
+    assert!(!live.body().contains("DbError"));
+}
+
+#[test]
+fn bare_ready_probe_fails_closed_when_the_store_cannot_accept_writes() {
+    let mut client = test_client();
+    let mut transaction = client.build_transaction().read_only(true).start().unwrap();
+    let ready = handle_postgres_health_http_request(
+        &request(HEALTH_READY_PATH),
+        &mut transaction,
+        &["pg_catalog.pg_class"],
+        BacklogHealth::WithinBounds,
+    );
+    assert_eq!(ready.status(), 503);
+    assert!(ready.body().contains("\"live\":true"));
+    assert!(ready.body().contains("\"ready\":false"));
+    assert!(ready
+        .body()
+        .contains(POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF));
+    assert!(!ready.body().contains("sql"));
+}
+
+#[test]
 fn missing_required_relation_is_live_but_not_ready() {
     let mut client = test_client();
     let ready = handle_postgres_health_http_request(
