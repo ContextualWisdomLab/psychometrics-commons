@@ -3,8 +3,9 @@
 //! The accepted Research Commons governance requires an immutable snapshot, declared
 //! research scope, privacy/scientific review evidence, licensing, measurement provenance,
 //! access classification, citation metadata, and independent approval before release.
-//! This module validates those references only. It does not publish artifacts or call the
-//! external research catalog.
+//! This module validates those references and rejects public fixtures that still carry
+//! operational, Keyverse, or restricted-linkage identifiers. It does not publish artifacts
+//! or call the external research catalog.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -162,6 +163,131 @@ impl ApprovedResearchRelease {
     pub const fn access_class(&self) -> ResearchAccessClass {
         self.access_class
     }
+}
+
+/// One column in a public research-release fixture.
+///
+/// A buyer packaging a public release passes the column name the fixture would
+/// publish and the cell values in that column. Research identities are allowed.
+/// Operational, Keyverse, and restricted-linkage names are not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PublicReleaseFixtureColumn<'a> {
+    /// Published column name.
+    pub column_name: &'a str,
+    /// Cell values that would be written under that column.
+    pub cell_values: &'a [&'a str],
+}
+
+/// Identities that a public release fixture must not carry.
+///
+/// Pass the operational, Keyverse, and restricted-linkage values the operator
+/// already holds for the same people. The scan does not mask those values for
+/// authorized research work; it only keeps them out of a public package.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RestrictedReleaseIdentities<'a> {
+    /// Operational assessment participant references.
+    pub operational_participant_refs: &'a [&'a str],
+    /// Keyverse subject references.
+    pub keyverse_subject_refs: &'a [&'a str],
+    /// Restricted linkage identities.
+    pub linkage_refs: &'a [&'a str],
+    /// Restricted linkage-key versions.
+    pub linkage_key_versions: &'a [&'a str],
+}
+
+/// Fail-closed public-release identifier leakage.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum PublicReleaseLeakageError {
+    /// A published column name is an operational, Keyverse, or linkage field.
+    ForbiddenColumn,
+    /// A cell value is an operational participant identifier.
+    OperationalParticipant,
+    /// A cell value is a Keyverse subject identifier.
+    KeyverseSubject,
+    /// A cell value is a restricted linkage identity or linkage-key version.
+    RestrictedLinkage,
+}
+
+impl Display for PublicReleaseLeakageError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::ForbiddenColumn => {
+                "remove operational, Keyverse, or restricted-linkage columns from the public release fixture"
+            }
+            Self::OperationalParticipant => {
+                "remove operational participant identifiers from the public release fixture"
+            }
+            Self::KeyverseSubject => {
+                "remove Keyverse subject identifiers from the public release fixture"
+            }
+            Self::RestrictedLinkage => {
+                "remove restricted linkage identifiers and linkage-key versions from the public release fixture"
+            }
+        })
+    }
+}
+
+impl Error for PublicReleaseLeakageError {}
+
+const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
+    "participant_ref",
+    "participant_id",
+    "operational_participant_ref",
+    "keyverse_subject",
+    "keyverse_subject_ref",
+    "linkage_ref",
+    "linkage_key",
+    "linkage_key_version",
+];
+
+/// Reject a public-release fixture that still carries restricted identity.
+///
+/// Call this before packaging a public or catalog-facing release. Authorized
+/// research that needs the restricted mapping keeps those values outside this
+/// fixture. A column named `research_participant_ref` is allowed; a column
+/// named `participant_ref` is not.
+///
+/// # Errors
+///
+/// Returns [`PublicReleaseLeakageError`] when a column name or cell value is an
+/// operational participant, Keyverse subject, restricted linkage identity, or
+/// linkage-key version.
+pub fn scan_public_release_fixture(
+    columns: &[PublicReleaseFixtureColumn<'_>],
+    restricted: RestrictedReleaseIdentities<'_>,
+) -> Result<(), PublicReleaseLeakageError> {
+    for column in columns {
+        if forbidden_public_release_column(column.column_name) {
+            return Err(PublicReleaseLeakageError::ForbiddenColumn);
+        }
+        for cell in column.cell_values {
+            if matches_restricted_identity(cell, restricted.operational_participant_refs) {
+                return Err(PublicReleaseLeakageError::OperationalParticipant);
+            }
+            if matches_restricted_identity(cell, restricted.keyverse_subject_refs) {
+                return Err(PublicReleaseLeakageError::KeyverseSubject);
+            }
+            if matches_restricted_identity(cell, restricted.linkage_refs)
+                || matches_restricted_identity(cell, restricted.linkage_key_versions)
+            {
+                return Err(PublicReleaseLeakageError::RestrictedLinkage);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn forbidden_public_release_column(column_name: &str) -> bool {
+    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.contains(&column_name.trim())
+}
+
+fn matches_restricted_identity(cell: &str, restricted_identities: &[&str]) -> bool {
+    let cell = cell.trim();
+    !cell.is_empty()
+        && restricted_identities
+            .iter()
+            .any(|identity| !identity.trim().is_empty() && identity.trim() == cell)
 }
 
 /// Fail-closed research-release gate error.

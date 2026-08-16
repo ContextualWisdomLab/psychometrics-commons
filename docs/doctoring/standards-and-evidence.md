@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -74,6 +74,27 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
+## Research de-identification and public-release leakage
+
+Public research releases must not become joinable to operational assessment
+identity. ISO/IEC 20889:2018, confirmed in 2024, classifies pseudonymization and
+other de-identification techniques so a public fixture can carry a
+program-scoped research identity without carrying the operational participant or
+the restricted linkage key. ISO/IEC 27559:2022 supplies the lifecycle framework
+for identifying and mitigating re-identification risk around that fixture. These
+references constrain public packaging. They do not authorize blanket PII masking
+that would stop authorized research, scoring, or data-rights work.
+
+Product consequences:
+
+- a public-release fixture is scanned for operational, Keyverse, and
+  restricted-linkage column names and cell values before packaging;
+- `research_participant_ref` remains a public research identity and is not
+  treated as an operational `participant_ref`;
+- authorized research keeps the restricted mapping outside the public package;
+- residual re-identification and joinability review remain required after direct
+  identifiers are removed.
+
 ## Temporal and provenance evidence
 
 Longitudinal observations distinguish validity time from source-recorded time,
@@ -107,7 +128,13 @@ Product consequences:
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
 
-International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
+International Organization for Standardization. (2018). *ISO/IEC 20889:2018 Privacy enhancing data de-identification terminology and classification of techniques* (confirmed 2024). https://www.iso.org/standard/69373.html
+
+International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
+International Organization for Standardization. (2022a). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
+
+International Organization for Standardization. (2022b). *ISO/IEC 27559:2022 Information security, cybersecurity and privacy protection—Privacy enhancing data de-identification framework*. https://www.iso.org/standard/71677.html
 
 International Organization for Standardization. (2023a). *ISO/IEC 23894:2023 Information technology—Artificial intelligence—Guidance on risk management*. https://www.iso.org/standard/77304.html
 
@@ -116,8 +143,6 @@ International Organization for Standardization. (2023b). *ISO/IEC 42001:2023 Inf
 International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 1:2024 Information security, cybersecurity and privacy protection—Information security management systems—Requirements—Amendment 1: Climate action changes*. https://www.iso.org/standard/27001
 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
-
-International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 

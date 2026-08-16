@@ -80,7 +80,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`: liveness is modeled independently from operation-scoped readiness and PostgreSQL write-readiness | live transport probes, metrics, and deployment-profile acceptance |
 | Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`: readiness evaluates only capabilities required by the selected operation and maps PostgreSQL evidence onto that contract | degraded-mode transport/integration tests |
 | Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Implemented** domain contract in `src/health.rs`; `src/postgres_health.rs` fails closed on unsupported/read-only PostgreSQL or a missing required relation | persistence/job backlog metrics, stronger schema probes, alerting, and failure-injection evidence |
-| No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
+| No operational IDs in public research release | TRD §14–15; Research Governance | **Active PR** domain scan in `src/research_release.rs` rejects operational, Keyverse, and restricted-linkage columns or cell values in a public fixture; portal registration and adversarial release-pipeline evidence remain Target |
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
 | AI cannot mutate numeric scientific result | AI Governance; ADR-0009, ADR-0018 | architecture policy | product adapter/adversarial mutation tests |
 | Exact locale no silent assessment fallback | TRD §28; ADR-0013 | instrument locale pinning exists; client serving policy is Target | exact English/Korean published-form/client tests |
@@ -111,7 +111,7 @@ src/lib.rs
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── reference.rs      # internal opaque-reference normalization
-├── research_release.rs  # product-side Research Commons release-evidence gate
+├── research_release.rs  # product-side Research Commons release-evidence gate plus public-fixture identifier leakage scan (Active PR, not protected-main truth)
 ├── response.rs       # idempotent response ledger + immutable response snapshots
 ├── result.rs         # immutable result provenance/supersession
 ├── scoring.rs        # version-pinned scoring dispatch contract
@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** public-release identifier leakage scan is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Operators call `scan_public_release_fixture` before packaging a public release. A Seoul-clinic fixture may publish `research_participant_ref` and `research_program_ref`. It cannot publish `participant_ref`, a Keyverse subject, a restricted `linkage_ref`, or a linkage-key version, including when those values appear inside an otherwise public column. Restricted-linkage persistence, portal registration, and the adversarial release pipeline stay outside this slice.
 
 ## 5. ADR traceability by concern
 

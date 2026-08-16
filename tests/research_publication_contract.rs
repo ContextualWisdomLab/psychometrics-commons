@@ -1,8 +1,9 @@
 //! Executable gate coverage for product-side Research Commons release approval.
 
 use psychometrics_commons_runtime::research_release::{
-    approve_research_release, ResearchAccessClass, ResearchReleaseCandidate,
-    ResearchReleaseGateError,
+    approve_research_release, scan_public_release_fixture, PublicReleaseFixtureColumn,
+    PublicReleaseLeakageError, ResearchAccessClass, ResearchReleaseCandidate,
+    ResearchReleaseGateError, RestrictedReleaseIdentities,
 };
 
 const MANIFEST_DIGEST: &str =
@@ -156,6 +157,160 @@ fn release_gate_errors_have_stable_safe_operator_messages() {
         (
             ResearchReleaseGateError::SeparationOfDutiesViolation,
             "research release approver must be independent from ordinary administration",
+        ),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(error.to_string(), expected);
+    }
+}
+
+fn seoul_clinic_restricted_identities() -> RestrictedReleaseIdentities<'static> {
+    RestrictedReleaseIdentities {
+        operational_participant_refs: &["participant_seoul_clinic_one"],
+        keyverse_subject_refs: &["keyverse_subject_seoul_clinic_one"],
+        linkage_refs: &["linkage_seoul_clinic_one"],
+        linkage_key_versions: &["linkage_key_version_2026_q3"],
+    }
+}
+
+fn public_research_identity_columns() -> [PublicReleaseFixtureColumn<'static>; 2] {
+    [
+        PublicReleaseFixtureColumn {
+            column_name: "research_participant_ref",
+            cell_values: &["research_participant_program_alpha_one"],
+        },
+        PublicReleaseFixtureColumn {
+            column_name: "research_program_ref",
+            cell_values: &["research_program_alpha"],
+        },
+    ]
+}
+
+#[test]
+fn seoul_clinic_public_fixture_keeps_only_research_identities() {
+    assert_eq!(
+        scan_public_release_fixture(
+            &public_research_identity_columns(),
+            seoul_clinic_restricted_identities()
+        ),
+        Ok(())
+    );
+}
+
+#[test]
+fn operational_participant_column_fails_closed_even_when_cells_look_like_research_ids() {
+    let columns = [PublicReleaseFixtureColumn {
+        column_name: " participant_ref ",
+        cell_values: &["research_participant_program_alpha_one"],
+    }];
+
+    assert_eq!(
+        scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+        Err(PublicReleaseLeakageError::ForbiddenColumn)
+    );
+}
+
+#[test]
+fn research_participant_column_is_not_treated_as_an_operational_participant_column() {
+    let columns = [PublicReleaseFixtureColumn {
+        column_name: "research_participant_ref",
+        cell_values: &["research_participant_program_alpha_one"],
+    }];
+
+    assert_eq!(
+        scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+        Ok(())
+    );
+}
+
+#[test]
+fn keyverse_and_linkage_columns_cannot_enter_a_public_fixture() {
+    for column_name in [
+        "keyverse_subject_ref",
+        "linkage_ref",
+        "linkage_key_version",
+        "operational_participant_ref",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+        assert_eq!(
+            scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not appear in a public release fixture"
+        );
+    }
+}
+
+#[test]
+fn operational_participant_value_fails_closed_inside_an_otherwise_public_column() {
+    let columns = [PublicReleaseFixtureColumn {
+        column_name: "research_participant_ref",
+        cell_values: &[" participant_seoul_clinic_one "],
+    }];
+
+    assert_eq!(
+        scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+        Err(PublicReleaseLeakageError::OperationalParticipant)
+    );
+}
+
+#[test]
+fn keyverse_subject_value_fails_closed_inside_an_otherwise_public_column() {
+    let columns = [PublicReleaseFixtureColumn {
+        column_name: "theta_estimate",
+        cell_values: &["keyverse_subject_seoul_clinic_one"],
+    }];
+
+    assert_eq!(
+        scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+        Err(PublicReleaseLeakageError::KeyverseSubject)
+    );
+}
+
+#[test]
+fn restricted_linkage_values_fail_closed_inside_an_otherwise_public_column() {
+    for (value, expected) in [
+        (
+            "linkage_seoul_clinic_one",
+            PublicReleaseLeakageError::RestrictedLinkage,
+        ),
+        (
+            "linkage_key_version_2026_q3",
+            PublicReleaseLeakageError::RestrictedLinkage,
+        ),
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name: "research_program_ref",
+            cell_values: &[value],
+        }];
+        assert_eq!(
+            scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+            Err(expected)
+        );
+    }
+}
+
+#[test]
+fn public_release_leakage_errors_tell_the_operator_what_to_remove() {
+    let cases = [
+        (
+            PublicReleaseLeakageError::ForbiddenColumn,
+            "remove operational, Keyverse, or restricted-linkage columns from the public release fixture",
+        ),
+        (
+            PublicReleaseLeakageError::OperationalParticipant,
+            "remove operational participant identifiers from the public release fixture",
+        ),
+        (
+            PublicReleaseLeakageError::KeyverseSubject,
+            "remove Keyverse subject identifiers from the public release fixture",
+        ),
+        (
+            PublicReleaseLeakageError::RestrictedLinkage,
+            "remove restricted linkage identifiers and linkage-key versions from the public release fixture",
         ),
     ];
 

@@ -83,6 +83,8 @@ Public or controlled release bundles must not contain:
 - service authentication identifiers/tokens;
 - internal object-store or database credentials/locations that bypass access policy.
 
+Before packaging a public fixture, call `scan_public_release_fixture` with the columns the fixture would publish and the operational, Keyverse, and restricted-linkage identities already held for those people. The scan keeps those identities out of the public package. It does not mask them for authorized research work. A column named `research_participant_ref` is allowed; a column named `participant_ref` is not.
+
 ## 5. Research staging projection
 
 A research snapshot is built from an explicit variable projection rather than a raw operational table dump.
