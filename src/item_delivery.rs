@@ -129,6 +129,7 @@ impl Error for ItemDeliveryError {}
 pub struct ItemDeliveryLedger {
     session_ref: String,
     instrument_release_ref: String,
+    instrument_version_ref: String,
     release_content_digest: String,
     locale: String,
     allowed_item_version_refs: Vec<String>,
@@ -151,17 +152,26 @@ impl ItemDeliveryLedger {
         session: &AssessmentSession,
         manifest: &InstrumentReleaseManifest,
     ) -> Result<Self, ItemDeliveryError> {
-        if session.instrument_release_ref() != manifest.release_ref()
-            || session.instrument_version_ref() != manifest.instrument_version_ref()
-            || session.instrument_release_content_digest() != manifest.content_digest()
-            || session.locale() != manifest.locale()
-        {
+        let session_provenance = (
+            session.instrument_release_ref(),
+            session.instrument_version_ref(),
+            session.instrument_release_content_digest(),
+            session.locale(),
+        );
+        let manifest_provenance = (
+            manifest.release_ref(),
+            manifest.instrument_version_ref(),
+            manifest.content_digest(),
+            manifest.locale(),
+        );
+        if session_provenance != manifest_provenance {
             return Err(ItemDeliveryError::SessionReleaseMismatch);
         }
 
         Ok(Self {
             session_ref: session.session_ref().to_owned(),
             instrument_release_ref: manifest.release_ref().to_owned(),
+            instrument_version_ref: manifest.instrument_version_ref().to_owned(),
             release_content_digest: manifest.content_digest().to_owned(),
             locale: manifest.locale().to_owned(),
             allowed_item_version_refs: manifest.item_version_refs().to_vec(),
@@ -179,6 +189,12 @@ impl ItemDeliveryLedger {
     #[must_use]
     pub fn instrument_release_ref(&self) -> &str {
         &self.instrument_release_ref
+    }
+
+    /// Return the immutable instrument-version reference pinned by this ledger.
+    #[must_use]
+    pub fn instrument_version_ref(&self) -> &str {
+        &self.instrument_version_ref
     }
 
     /// Return the canonical digest of the immutable release content.
@@ -244,11 +260,21 @@ impl ItemDeliveryLedger {
         session: &AssessmentSession,
         request: ItemDeliveryRequest<'_>,
     ) -> Result<ItemDeliveryEvent, ItemDeliveryError> {
-        if session.session_ref() != self.session_ref
-            || session.instrument_release_ref() != self.instrument_release_ref
-            || session.instrument_release_content_digest() != self.release_content_digest
-            || session.locale() != self.locale
-        {
+        let session_provenance = (
+            session.session_ref(),
+            session.instrument_release_ref(),
+            session.instrument_version_ref(),
+            session.instrument_release_content_digest(),
+            session.locale(),
+        );
+        let ledger_provenance = (
+            self.session_ref.as_str(),
+            self.instrument_release_ref.as_str(),
+            self.instrument_version_ref.as_str(),
+            self.release_content_digest.as_str(),
+            self.locale.as_str(),
+        );
+        if session_provenance != ledger_provenance {
             return Err(ItemDeliveryError::SessionMismatch);
         }
 
