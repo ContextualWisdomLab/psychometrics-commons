@@ -63,7 +63,7 @@ Sync outages leave bounded local queues and clear user state. Clock anomalies ar
 
 ## As-built versus target
 
-Active PR work adds the product enrollment primitive in `src/longitudinal.rs`. It is `IMPLEMENTED_ON_ACTIVE_PR`, not protected-main truth, until the exact reviewed head is merged. Do not treat #184 as the landing vehicle; that head authorized collection from enrollment state alone.
+Active PR #199 adds the product enrollment primitive in `src/longitudinal.rs`. It is `IMPLEMENTED_ON_ACTIVE_PR`, not protected-main truth, until the exact reviewed head is merged. Do not treat #184 as the landing vehicle; that head authorized collection from enrollment state alone.
 
 As-built on this PR:
 

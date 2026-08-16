@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** longitudinal enrollment is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/longitudinal.rs` binds Gyeot program enrollment to a tenant-owned `ParticipantRecord` and an active longitudinal-observation consent snapshot, re-checks that snapshot before collection, preserves explicit multiple-membership contexts, and keeps pause/resume/withdraw fail-closed. Observation ingestion, persistence, and live Gyeot/TEPP adapters remain outside this slice. Do not merge #184; that head authorized collection from enrollment state alone.
+**Active PR** #199 longitudinal enrollment is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/longitudinal.rs` binds Gyeot program enrollment to a tenant-owned `ParticipantRecord` and an active longitudinal-observation consent snapshot, re-checks that snapshot before collection, preserves explicit multiple-membership contexts, and keeps pause/resume/withdraw fail-closed. Observation ingestion, persistence, and live Gyeot/TEPP adapters remain outside this slice. Do not merge #184; that head authorized collection from enrollment state alone.
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
 
