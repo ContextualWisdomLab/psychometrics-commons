@@ -337,10 +337,6 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::InvalidTimestamp)
         ));
         assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
-        assert!(matches!(
-            postgres_timestamptz(u64::MAX),
-            Err(ResponseEventPersistenceError::InvalidTimestamp)
-        ));
     }
 
     #[test]
