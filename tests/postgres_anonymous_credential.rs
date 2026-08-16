@@ -1,6 +1,6 @@
 //! PostgreSQL contract tests for short-lived anonymous assessment credentials.
 
-use postgres::{Client, NoTls};
+use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::anonymous_credential::AnonymousCredential;
 use psychometrics_commons_runtime::postgres_anonymous_credential::{
     apply_anonymous_credential_migration, load_anonymous_credential,
@@ -13,6 +13,8 @@ const PROOF_ALPHA: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const PROOF_BETA: &str =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const PROOF_GAMMA: &str =
+    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
 fn client(schema_prefix: &str) -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
@@ -146,6 +148,57 @@ fn issue_replay_fails_closed_on_rebinding_or_digest_reuse() {
 }
 
 #[test]
+fn issue_replay_after_revocation_is_idempotent_without_restoring_authority() {
+    let mut client = client("anonymous_credential_issue_after_revoke");
+    let issued = credential(
+        "credential_alpha",
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        PROOF_ALPHA,
+    );
+    let mut revoked = issued.clone();
+    revoked.revoke(15_000).unwrap();
+
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_anonymous_credential_issue(&mut transaction, &issued).unwrap();
+        transaction.commit().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_anonymous_credential_revocation(&mut transaction, &revoked).unwrap();
+        transaction.commit().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_anonymous_credential_issue(&mut transaction, &issued).unwrap(),
+            AnonymousCredentialPersistenceDisposition::Duplicate
+        );
+        assert!(matches!(
+            persist_anonymous_credential_issue(&mut transaction, &revoked),
+            Err(AnonymousCredentialPersistenceError::InvalidCredentialState)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    let mut transaction = client.transaction().unwrap();
+    let loaded = load_anonymous_credential(&mut transaction, "credential_alpha", "tenant_alpha")
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.revoked_at_unix_ms(), Some(15_000));
+    assert!(!loaded.authorizes(
+        PROOF_ALPHA,
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        15_000,
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn revocation_is_append_only_idempotent_and_reloadable() {
     let mut client = client("anonymous_credential_revoke");
     let mut credential = credential(
@@ -202,7 +255,7 @@ fn revocation_is_append_only_idempotent_and_reloadable() {
 }
 
 #[test]
-fn revocation_rejects_missing_issue_conflicting_time_and_unrevoked_input() {
+fn revocation_rejects_missing_issue_rebinding_conflicting_time_and_unrevoked_input() {
     let mut client = client("anonymous_credential_revoke_conflict");
     let original = credential(
         "credential_alpha",
@@ -234,6 +287,23 @@ fn revocation_rejects_missing_issue_conflicting_time_and_unrevoked_input() {
         let mut transaction = client.transaction().unwrap();
         persist_anonymous_credential_issue(&mut transaction, &original).unwrap();
         transaction.commit().unwrap();
+    }
+
+    let mut rebound = credential(
+        "credential_alpha",
+        "tenant_alpha",
+        "participant_beta",
+        "session_alpha",
+        PROOF_ALPHA,
+    );
+    rebound.revoke(15_000).unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_anonymous_credential_revocation(&mut transaction, &rebound),
+            Err(AnonymousCredentialPersistenceError::ConflictingReplay)
+        ));
+        transaction.rollback().unwrap();
     }
     {
         let mut transaction = client.transaction().unwrap();
@@ -324,8 +394,28 @@ fn persistence_fails_closed_for_unrepresentable_timestamps_and_corrupt_rows() {
         transaction.rollback().unwrap();
     }
 
+    let mut revocation_overflow = credential(
+        "credential_revocation_overflow",
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        PROOF_GAMMA,
+    );
+    revocation_overflow.revoke((i64::MAX as u64) + 1).unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_anonymous_credential_revocation(&mut transaction, &revocation_overflow),
+            Err(AnonymousCredentialPersistenceError::ValueOutOfRange)
+        ));
+        transaction.rollback().unwrap();
+    }
+
     client
-        .batch_execute("ALTER TABLE anonymous_session_credential DISABLE TRIGGER USER")
+        .batch_execute(
+            "ALTER TABLE anonymous_session_credential DISABLE TRIGGER USER;
+             ALTER TABLE anonymous_session_credential DROP CONSTRAINT anonymous_credential_revocation_time_check;",
+        )
         .unwrap();
     client
         .execute(
@@ -337,25 +427,159 @@ fn persistence_fails_closed_for_unrepresentable_timestamps_and_corrupt_rows() {
                  10000, 20000, 9000)",
             &[&PROOF_BETA],
         )
-        .unwrap_err();
+        .unwrap();
+
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            load_anonymous_credential(&mut transaction, "credential_corrupt", "tenant_alpha"),
+            Err(AnonymousCredentialPersistenceError::InconsistentEvidence)
+        ));
+        transaction.rollback().unwrap();
+    }
 
     client
         .batch_execute(
-            "ALTER TABLE anonymous_session_credential DROP CONSTRAINT anonymous_credential_revocation_time_check;
+            "ALTER TABLE anonymous_session_credential DROP CONSTRAINT anonymous_credential_issue_time_check;
+             ALTER TABLE anonymous_session_credential DROP CONSTRAINT anonymous_credential_expiry_time_check;
              INSERT INTO anonymous_session_credential
                 (credential_ref, tenant_ref, participant_ref, session_ref, proof_digest,
                  issued_at_unix_ms, expires_at_unix_ms, revoked_at_unix_ms)
              VALUES
-                ('credential_corrupt', 'tenant_alpha', 'participant_alpha', 'session_alpha',
-                 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-                 10000, 20000, 9000);",
+                ('credential_negative', 'tenant_alpha', 'participant_alpha', 'session_alpha',
+                 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+                 -1, 20000, NULL);",
         )
         .unwrap();
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        load_anonymous_credential(&mut transaction, "credential_corrupt", "tenant_alpha"),
+        load_anonymous_credential(&mut transaction, "credential_negative", "tenant_alpha"),
         Err(AnonymousCredentialPersistenceError::InconsistentEvidence)
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn lookup_is_strict_and_serializable_transactions_are_rejected() {
+    let mut client = client("anonymous_credential_fail_closed");
+    {
+        let mut transaction = client.transaction().unwrap();
+        let error = load_anonymous_credential(&mut transaction, "1", "tenant_alpha").unwrap_err();
+        assert!(matches!(
+            error,
+            AnonymousCredentialPersistenceError::InvalidReference
+        ));
+        assert!(std::error::Error::source(&error).is_none());
+        transaction.rollback().unwrap();
+    }
+
+    let credential = credential(
+        "credential_alpha",
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        PROOF_ALPHA,
+    );
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        persist_anonymous_credential_issue(&mut transaction, &credential),
+        Err(AnonymousCredentialPersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn database_failure_preserves_typed_source_and_safe_text() {
+    let mut client = client("anonymous_credential_database_error");
+    client
+        .batch_execute("DROP TABLE anonymous_session_credential CASCADE")
+        .unwrap();
+    let credential = credential(
+        "credential_alpha",
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        PROOF_ALPHA,
+    );
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_anonymous_credential_issue(&mut transaction, &credential).unwrap_err();
+    assert!(matches!(
+        error,
+        AnonymousCredentialPersistenceError::Database(_)
+    ));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL anonymous credential persistence failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn unexpected_insert_suppression_is_not_misclassified_as_duplicate() {
+    let mut client = client("anonymous_credential_insert_suppression");
+    client
+        .batch_execute(
+            "CREATE FUNCTION suppress_anonymous_credential_insert()
+             RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$;
+             CREATE TRIGGER anonymous_credential_insert_suppression
+             BEFORE INSERT ON anonymous_session_credential
+             FOR EACH ROW EXECUTE FUNCTION suppress_anonymous_credential_insert();",
+        )
+        .unwrap();
+    let credential = credential(
+        "credential_alpha",
+        "tenant_alpha",
+        "participant_alpha",
+        "session_alpha",
+        PROOF_ALPHA,
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_anonymous_credential_issue(&mut transaction, &credential),
+        Err(AnonymousCredentialPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn public_errors_have_stable_non_sensitive_messages() {
+    let cases = [
+        (
+            AnonymousCredentialPersistenceError::InvalidReference,
+            "anonymous credential persistence references must be exact opaque values",
+        ),
+        (
+            AnonymousCredentialPersistenceError::InvalidCredentialState,
+            "anonymous credential persistence received the wrong lifecycle state",
+        ),
+        (
+            AnonymousCredentialPersistenceError::MissingCredential,
+            "anonymous credential revocation requires an existing tenant-bound issue record",
+        ),
+        (
+            AnonymousCredentialPersistenceError::ConflictingReplay,
+            "anonymous credential identity was replayed with conflicting evidence",
+        ),
+        (
+            AnonymousCredentialPersistenceError::ValueOutOfRange,
+            "anonymous credential timestamp exceeds the PostgreSQL bigint range",
+        ),
+        (
+            AnonymousCredentialPersistenceError::InconsistentEvidence,
+            "durable anonymous credential evidence cannot reconstruct a valid credential",
+        ),
+        (
+            AnonymousCredentialPersistenceError::UnsupportedIsolationLevel,
+            "anonymous credential persistence requires read committed isolation",
+        ),
+    ];
+    for (error, expected) in cases {
+        assert_eq!(error.to_string(), expected);
+    }
 }
