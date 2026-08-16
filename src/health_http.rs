@@ -216,7 +216,7 @@ fn json_string(value: &str) -> String {
 mod tests {
     use super::{
         backlog_label, capability_state_label, handle_health_http_request, integrity_label,
-        json_string, HEALTH_LIVE_PATH,
+        json_string, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
@@ -235,6 +235,7 @@ mod tests {
             "degraded"
         );
         assert_eq!(capability_state_label(CapabilityState::Unknown), "unknown");
+        assert_eq!(integrity_label(DataIntegrityHealth::Unknown), "unknown");
         assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(json_string("a\n\r\t"), "\"a\\n\\r\\t\"");
         assert_eq!(json_string("\u{0001}"), "\"\\u0001\"");
@@ -289,5 +290,43 @@ mod tests {
         assert_eq!(ready.status(), 200);
         assert_eq!(ready.content_type(), "application/json");
         assert!(ready.body().contains("\"ready\":true"));
+
+        let not_allowed = handle_health_http_request("POST /live HTTP/1.1\r\n\r\n", &snapshot);
+        assert_eq!(not_allowed.status(), 405);
+        assert_eq!(not_allowed.content_type(), "application/problem+json");
+        assert!(not_allowed
+            .body()
+            .contains("\"title\":\"Method Not Allowed\""));
+
+        let missing = handle_health_http_request("GET /v1/sessions HTTP/1.1\r\n\r\n", &snapshot);
+        assert_eq!(missing.status(), 404);
+        assert_eq!(missing.content_type(), "application/problem+json");
+        assert!(missing.body().contains("\"title\":\"Not Found\""));
+
+        let not_live = RuntimeHealthSnapshot::new(
+            false,
+            BacklogHealth::Stalled,
+            DataIntegrityHealth::Unknown,
+            vec![
+                CapabilityHealth::new("research_registration", CapabilityState::Unavailable, false)
+                    .unwrap(),
+                CapabilityHealth::new("authenticated_linking", CapabilityState::Available, true)
+                    .unwrap(),
+            ],
+        )
+        .unwrap();
+        let dead = handle_health_http_request(
+            &format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\n\r\n"),
+            &not_live,
+        );
+        assert_eq!(dead.status(), 503);
+        assert!(dead.body().contains("\"live\":false"));
+        assert!(dead.body().contains("\"ready\":false"));
+        let not_ready = handle_health_http_request(
+            &format!("GET {HEALTH_READY_PATH} HTTP/1.1\r\n\r\n"),
+            &not_live,
+        );
+        assert_eq!(not_ready.status(), 503);
+        assert!(not_ready.body().contains("\"ready\":false"));
     }
 }
