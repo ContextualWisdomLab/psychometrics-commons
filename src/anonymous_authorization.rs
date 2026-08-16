@@ -1,31 +1,34 @@
-//! Fail-closed product authorization for validated anonymous assessment sessions.
+//! Product authorization for an already-verified anonymous assessment session.
 //!
-//! Anonymous participation is a first-class product path, but a validated anonymous-session
-//! proof is intentionally narrower than an authenticated participant identity. This module binds
-//! already-validated short-lived anonymous authority to exactly one participant-owned assessment
-//! session. It cannot authorize result access, consent, data-rights, tenant administration, or any
-//! other product resource.
+//! An anonymous participant receives a short-lived proof when an assessment session is created.
+//! Another part of the application verifies that proof and builds an [`AnonymousSessionContext`].
+//! This module does **not** read or verify the raw secret. Instead, it answers a narrower question:
+//! "May this verified anonymous session act on this exact assessment-session resource right now?"
+//!
+//! The answer is deliberately limited. The verified session may act only on the one assessment
+//! session named in its context. It cannot be reused to read results, change consent, exercise data
+//! rights, administer a tenant, or access another participant's session.
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::authorization::{ResourceKind, ResourceScope};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-/// Fail-closed authorization error for a validated anonymous assessment session.
+/// Fail-closed authorization error for a verified anonymous assessment session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AnonymousResourceAuthorizationError {
-    /// The server-authoritative authorization time was zero or otherwise unknown.
+    /// The caller did not provide a positive time obtained from the trusted server clock.
     InvalidTimestamp,
-    /// The short-lived anonymous-session authority was no longer valid.
+    /// The anonymous session had reached or passed its exclusive expiry time.
     Expired,
     /// The target resource belonged to another tenant.
     CrossTenantDenied,
-    /// Anonymous-session authority was presented for a non-session resource.
+    /// Anonymous-session access was requested for a resource other than an assessment session.
     ResourceKindMismatch,
     /// The target session belonged to another operational participant.
     OwnerMismatch,
-    /// The target assessment-session reference differed from the proof binding.
+    /// The target assessment-session reference differed from the session named by the proof.
     SessionMismatch,
 }
 
@@ -54,22 +57,33 @@ impl Display for AnonymousResourceAuthorizationError {
 
 impl Error for AnonymousResourceAuthorizationError {}
 
-/// Authorize one participant-owned assessment-session resource using validated anonymous proof.
+/// Allow a verified anonymous participant to act on one exact assessment session.
 ///
-/// This boundary deliberately has no generic permission parameter. A validated anonymous-session
-/// proof grants only authority over its exact assessment-session resource. Adding another resource
-/// or operation therefore requires a new explicit authorization contract rather than silently
-/// inheriting future authenticated-participant permissions.
+/// Callers provide three values:
 ///
-/// The server time is checked before any resource metadata so an unknown time cannot be treated as
-/// current authority. Tenant, resource kind, participant owner, and exact session identity are then
-/// checked in that order. All comparisons use canonical values that were already validated by
-/// [`AnonymousSessionContext`] and [`ResourceScope`] constructors.
+/// - `actor`: an [`AnonymousSessionContext`] created only after the short-lived anonymous proof has
+///   already been verified;
+/// - `resource`: the [`ResourceScope`] for the assessment session the caller wants to use; and
+/// - `now_unix_ms`: the current time from the application's trusted server clock, not a client clock.
+///
+/// For example, if the verified context names tenant `tenant_alpha`, participant
+/// `participant_alpha`, and session `session_alpha`, this function allows access only to the
+/// `session_alpha` assessment-session resource owned by that same participant in that same tenant.
+/// A result resource or `session_beta` is denied even when the same caller presents the context.
+///
+/// References in `actor` and `resource` are already in their validated, exact spelling because
+/// their constructors reject non-canonical forms. This function therefore compares the exact
+/// values instead of trimming, normalizing, or guessing aliases.
+///
+/// Checks run in a stable fail-closed order: trusted server time, expiry, tenant, resource kind,
+/// participant owner, then session identity. This order is part of the error contract used by
+/// transports when more than one supplied property is wrong.
 ///
 /// # Errors
 ///
-/// Returns [`AnonymousResourceAuthorizationError`] when server time is invalid, the proof has
-/// expired, or the target resource differs from the exact tenant/participant/session binding.
+/// Returns [`AnonymousResourceAuthorizationError`] when the trusted time is invalid, the verified
+/// anonymous session has expired, or the requested resource differs from the exact
+/// tenant/participant/session binding described above.
 pub fn authorize_anonymous_session(
     actor: &AnonymousSessionContext,
     resource: &ResourceScope,
