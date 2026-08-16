@@ -300,7 +300,7 @@ sequenceDiagram
 
     C->>A: activate session
     A->>DB: load assessment_participant + assessment_session
-    A->>A: authorize anonymous command from loaded records
+    A->>A: authorize anonymous command from supplied records
     A->>DB: atomically state=Active
     A-->>C: activation accepted
 
@@ -315,7 +315,7 @@ sequenceDiagram
 
     C->>A: complete session
     A->>DB: load assessment_participant + assessment_session
-    A->>A: authorize anonymous command from loaded records
+    A->>A: authorize anonymous command from supplied records
     A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
