@@ -1,5 +1,8 @@
 //! Request-bound scoring-worker planning must persist one immutable result snapshot.
 
+use psychometrics_commons_runtime::postgres_result_snapshot::ResultSnapshotPersistenceError;
+use psychometrics_commons_runtime::postgres_scoring_request::ScoringRequestPersistenceError;
+use psychometrics_commons_runtime::postgres_scoring_worker::ScoringWorkerCommitError;
 use psychometrics_commons_runtime::result::ResultSnapshotInput;
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
@@ -10,6 +13,7 @@ use psychometrics_commons_runtime::scoring_worker::{
     ScoringWorkerResultPlan,
 };
 use std::cell::Cell;
+use std::error::Error;
 
 const ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -371,4 +375,23 @@ fn planner_binds_a_permanent_scientific_failure_without_a_snapshot() {
         "scoring_terminal:cause:24:scoring_job_reload_score:27:invalid_scientific_evidence"
     );
     assert_eq!(attempt.event().event_type(), "scoring.result.failed");
+}
+
+#[test]
+fn request_and_snapshot_commit_errors_retain_typed_sources() {
+    let request =
+        ScoringWorkerCommitError::Request(ScoringRequestPersistenceError::InvalidReference);
+    assert_eq!(
+        request.to_string(),
+        "scoring worker could not reconstruct the persisted scoring request; keep the job leased"
+    );
+    assert!(request.source().is_some());
+
+    let snapshot =
+        ScoringWorkerCommitError::Snapshot(ResultSnapshotPersistenceError::ConflictingReplay);
+    assert_eq!(
+        snapshot.to_string(),
+        "scoring worker could not persist the immutable result snapshot; keep the job leased"
+    );
+    assert!(snapshot.source().is_some());
 }

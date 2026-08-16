@@ -3,8 +3,10 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 use psychometrics_commons_runtime::postgres_integration::PersistenceDisposition;
-use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
-use psychometrics_commons_runtime::postgres_result_snapshot::ResultSnapshotPersistenceDisposition;
+use psychometrics_commons_runtime::postgres_result_snapshot::{
+    apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
+    ResultSnapshotPersistenceError,
+};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
     ScoringJobCompletionDisposition, ScoringJobFailureDisposition, ScoringJobPersistenceError,
@@ -16,6 +18,7 @@ use psychometrics_commons_runtime::postgres_scoring_worker::{
     run_scoring_worker_attempt_with_result_snapshot, ScoringWorkerCommitError,
     ScoringWorkerPersistence,
 };
+use psychometrics_commons_runtime::result::ResultSnapshot;
 use psychometrics_commons_runtime::result::ResultSnapshotInput;
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
@@ -680,6 +683,78 @@ fn retry_before_the_outage_instant_keeps_the_job_leased() {
         .unwrap()
         .get(0);
     assert_eq!(snapshots, 0);
+    let outbox: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox, 0);
+}
+
+#[test]
+fn conflicting_preinserted_snapshot_keeps_the_job_leased() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_conflict";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let request = loaded_request();
+    let conflicting = ResultSnapshot::new(
+        &request,
+        &ScoringResult::new(
+            "result_worker_snapshot",
+            &request,
+            "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            vec![ScoreObservation::scored("big_five_openness", 0.25, Some(0.05)).unwrap()],
+        )
+        .unwrap(),
+        snapshot_input(),
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_result_snapshot(&mut transaction, &conflicting).unwrap();
+    transaction.commit().unwrap();
+
+    let engine = ScriptedResultEngine {
+        result: ScoringResult::new(
+            "result_worker_snapshot",
+            &request,
+            ENGINE_DIGEST,
+            vec![ScoreObservation::scored("big_five_openness", 1.2, Some(0.15)).unwrap()],
+        )
+        .unwrap(),
+    };
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            request.scoring_request_ref(),
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            80_000,
+        ),
+        Err(ScoringWorkerCommitError::Snapshot(
+            ResultSnapshotPersistenceError::ConflictingReplay
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let state: String = client
+        .query_one(
+            "SELECT scoring_state FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(state, "leased");
+    let snapshots: i64 = client
+        .query_one("SELECT count(*) FROM result_snapshot", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(snapshots, 1);
     let outbox: i64 = client
         .query_one("SELECT count(*) FROM integration_outbox", &[])
         .unwrap()
