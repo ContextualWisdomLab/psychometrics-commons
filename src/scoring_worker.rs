@@ -50,8 +50,9 @@ impl Error for ScoringWorkerError {}
 /// Return the stable outbox event identity for one terminal scoring outcome.
 ///
 /// The same job and result, or the same job and cause, always produce the same
-/// `event_ref`. A later worker attempt must reuse that identity instead of minting
-/// a new event after the terminal write was already accepted.
+/// `event_ref`. Length prefixes keep references that contain `:` from colliding.
+/// A later worker attempt must reuse that identity instead of minting a new event
+/// after the terminal write was already accepted.
 ///
 /// # Errors
 ///
@@ -67,7 +68,9 @@ pub fn scoring_terminal_event_ref(
         ScoringTerminalIdentity::Cause(cause_code) => ("cause", required_reference(cause_code)?),
     };
     Ok(format!(
-        "scoring_terminal:{kind}:{scoring_job_ref}:{outcome_ref}"
+        "scoring_terminal:{kind}:{}:{scoring_job_ref}:{}:{outcome_ref}",
+        scoring_job_ref.len(),
+        outcome_ref.len()
     ))
 }
 

@@ -40,7 +40,7 @@ fn terminal_event_ref_is_stable_for_the_same_job_and_result() {
     .unwrap();
     assert_eq!(
         first,
-        "scoring_terminal:result:scoring_job_alpha:result_alpha"
+        "scoring_terminal:result:17:scoring_job_alpha:12:result_alpha"
     );
     assert_eq!(first, second);
     assert_ne!(
@@ -51,6 +51,21 @@ fn terminal_event_ref_is_stable_for_the_same_job_and_result() {
         )
         .unwrap()
     );
+}
+
+#[test]
+fn terminal_event_ref_does_not_collide_when_references_contain_colons() {
+    let left = scoring_terminal_event_ref(
+        "scoring_job:alpha",
+        ScoringTerminalIdentity::Result("result_beta"),
+    )
+    .unwrap();
+    let right = scoring_terminal_event_ref(
+        "scoring_job",
+        ScoringTerminalIdentity::Result("alpha:result_beta"),
+    )
+    .unwrap();
+    assert_ne!(left, right);
 }
 
 #[test]
@@ -67,7 +82,7 @@ fn result_and_cause_identities_do_not_share_an_event_ref() {
     .unwrap();
     assert_eq!(
         failed,
-        "scoring_terminal:cause:scoring_job_alpha:invalid_scientific_evidence"
+        "scoring_terminal:cause:17:scoring_job_alpha:27:invalid_scientific_evidence"
     );
     assert_ne!(completed, failed);
 }
@@ -183,7 +198,7 @@ fn planner_binds_the_stable_result_event_and_ignores_a_minted_identity() {
     assert_eq!(engine.calls.get(), 1);
     assert_eq!(
         attempt.event().event_ref(),
-        "scoring_terminal:result:scoring_job_alpha:result_alpha"
+        "scoring_terminal:result:17:scoring_job_alpha:12:result_alpha"
     );
     assert_eq!(attempt.event().subject_ref(), "scoring_job_alpha");
     assert_eq!(attempt.event().event_type(), "scoring.result.completed");
@@ -223,7 +238,7 @@ fn planner_binds_a_permanent_scientific_failure_to_the_stable_cause_identity() {
     assert_eq!(engine.calls.get(), 1);
     assert_eq!(
         attempt.event().event_ref(),
-        "scoring_terminal:cause:scoring_job_alpha:invalid_scientific_evidence"
+        "scoring_terminal:cause:17:scoring_job_alpha:27:invalid_scientific_evidence"
     );
     assert_eq!(attempt.event().event_type(), "scoring.result.failed");
     require_stable_terminal_event(
