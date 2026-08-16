@@ -70,7 +70,11 @@ fn approved_evidence(release_ref: &str, evidence_ref: &str) -> PublicationEviden
     .unwrap()
 }
 
-fn published_release(release_ref: &str, instrument_ref: &str, evidence_ref: &str) -> InstrumentRelease {
+fn published_release(
+    release_ref: &str,
+    instrument_ref: &str,
+    evidence_ref: &str,
+) -> InstrumentRelease {
     let mut release = InstrumentRelease::new(manifest(release_ref, instrument_ref), 10_000).unwrap();
     release
         .apply_command(
