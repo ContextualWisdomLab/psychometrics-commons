@@ -107,8 +107,9 @@ pub fn apply_participant_identity_link_migration(
 /// History is applied in the same lifecycle order as reload: each link, then
 /// the ends that close that link. Exact replay of the same participant, link,
 /// and link-end evidence is idempotent. Reusing an event identity with
-/// different issuer, subject, proof, or time fails closed. A current
-/// issuer-scoped subject cannot belong to two participants at once.
+/// different issuer, subject, proof, or time fails closed. An unterminated
+/// issuer-scoped subject cannot belong to two participants at once, even
+/// when the derived current projection is missing.
 ///
 /// # Errors
 ///
@@ -220,7 +221,10 @@ pub fn load_participant_identity_history(
 ///
 /// A returning Keyverse login uses this lookup to recover the stable
 /// product-owned `participant_ref` after the anonymous session token is gone.
-/// A missing current link or a tenant mismatch returns `None`.
+/// The append-only link history is the source of truth: a derived current
+/// projection may be missing after restore or operator repair, but an
+/// unterminated issuer-scoped subject still resolves. A missing current link
+/// or a tenant mismatch returns `None`.
 ///
 /// # Errors
 ///
@@ -235,17 +239,15 @@ pub fn load_participant_by_current_identity_subject(
     let tenant_ref = required_reference(tenant_ref)?;
     let identity_issuer = required_reference(identity_issuer)?;
     let identity_subject_ref = required_reference(identity_subject_ref)?;
-    let row = transaction.query_opt(
-        "SELECT participant_ref FROM current_participant_identity_link \
-         WHERE tenant_ref = $1 AND identity_issuer = $2 \
-               AND identity_subject_ref = $3 \
-         FOR SHARE",
-        &[&tenant_ref, &identity_issuer, &identity_subject_ref],
-    )?;
-    let Some(row) = row else {
+    let Some(participant_ref) = current_subject_participant(
+        transaction,
+        tenant_ref,
+        identity_issuer,
+        identity_subject_ref,
+    )?
+    else {
         return Ok(None);
     };
-    let participant_ref: String = row.get(0);
     load_participant_identity_history(transaction, &participant_ref, tenant_ref)
 }
 
@@ -303,6 +305,13 @@ fn persist_one_link(
     let anonymous_proof_ref = required_reference(event.anonymous_proof_ref())?;
     let authenticated_proof_ref = required_reference(event.authenticated_proof_ref())?;
     let linked_at_unix_ms = unix_ms_to_i64(event.linked_at_unix_ms())?;
+    reject_subject_bound_to_another_participant(
+        transaction,
+        participant_ref,
+        tenant_ref,
+        identity_issuer,
+        identity_subject_ref,
+    )?;
     let inserted = transaction.execute(
         "INSERT INTO participant_identity_link (\
              identity_link_ref, participant_ref, tenant_ref, identity_issuer, \
@@ -498,6 +507,52 @@ fn load_link_end_events(
     Ok(events)
 }
 
+fn current_subject_participant(
+    transaction: &mut Transaction<'_>,
+    tenant_ref: &str,
+    identity_issuer: &str,
+    identity_subject_ref: &str,
+) -> Result<Option<String>, IdentityLinkPersistenceError> {
+    let rows = transaction.query(
+        "SELECT l.participant_ref \
+         FROM participant_identity_link l \
+         WHERE l.tenant_ref = $1 \
+           AND l.identity_issuer = $2 \
+           AND l.identity_subject_ref = $3 \
+           AND NOT EXISTS ( \
+               SELECT 1 FROM participant_identity_link_end e \
+               WHERE e.linked_event_ref = l.identity_link_ref \
+           ) \
+         FOR SHARE",
+        &[&tenant_ref, &identity_issuer, &identity_subject_ref],
+    )?;
+    match rows.as_slice() {
+        [] => Ok(None),
+        [row] => Ok(Some(row.get(0))),
+        _ => Err(IdentityLinkPersistenceError::CorruptHistory),
+    }
+}
+
+fn reject_subject_bound_to_another_participant(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+    tenant_ref: &str,
+    identity_issuer: &str,
+    identity_subject_ref: &str,
+) -> Result<(), IdentityLinkPersistenceError> {
+    match current_subject_participant(
+        transaction,
+        tenant_ref,
+        identity_issuer,
+        identity_subject_ref,
+    )? {
+        Some(holder) if holder != participant_ref => {
+            Err(IdentityLinkPersistenceError::SubjectAlreadyBound)
+        }
+        Some(_) | None => Ok(()),
+    }
+}
+
 fn classify_current_unique_violation(error: postgres::Error) -> IdentityLinkPersistenceError {
     match error
         .as_db_error()
@@ -597,5 +652,10 @@ mod tests {
             Err(IdentityLinkPersistenceError::InvalidTimestamp)
         ));
         assert_eq!(unix_ms_to_i64(10_100).unwrap(), 10_100);
+        assert!(matches!(
+            super::i64_to_unix_ms(-1),
+            Err(IdentityLinkPersistenceError::InvalidTimestamp)
+        ));
+        assert_eq!(super::i64_to_unix_ms(10_100).unwrap(), 10_100);
     }
 }

@@ -46,6 +46,14 @@ fn reset_identity_link_tables(client: &mut Client) {
         .unwrap();
 }
 
+fn drop_current_projection(client: &mut Client) {
+    client
+        .batch_execute(
+            "DELETE FROM identity_link_persistence_test.current_participant_identity_link;",
+        )
+        .unwrap();
+}
+
 fn anonymous_participant() -> ParticipantRecord {
     ParticipantRecord::new_anonymous(
         "participant_identity_alpha",
@@ -335,6 +343,14 @@ fn unlinked_subject_can_become_current_on_another_participant() {
         "participant_identity_alpha"
     );
     assert_eq!(next_loaded.participant_ref(), "participant_identity_beta");
+    let found = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .expect("the reused subject must resolve to the participant that currently holds it");
+    assert_eq!(found.participant_ref(), "participant_identity_beta");
 }
 
 #[test]
@@ -421,6 +437,125 @@ fn one_external_subject_cannot_be_current_on_two_participants() {
     assert!(matches!(
         persist_err(&mut client, &other),
         IdentityLinkPersistenceError::SubjectAlreadyBound
+    ));
+}
+
+#[test]
+fn returning_account_finds_participant_after_current_projection_loss() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+    drop_current_projection(&mut client);
+
+    let found = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .expect("append-only history, not the derived projection, is the source of truth");
+    assert_eq!(found.participant_ref(), "participant_identity_alpha");
+    assert_eq!(found.linked_subject_ref(), Some("keyverse_subject_alpha"));
+}
+
+#[test]
+fn lost_current_projection_cannot_rebind_subject_to_another_participant() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+    drop_current_projection(&mut client);
+
+    let mut other = ParticipantRecord::new_anonymous(
+        "participant_identity_beta",
+        "tenant_identity_alpha",
+        10_000,
+    )
+    .unwrap();
+    other
+        .link_account(
+            "link_event_identity_beta",
+            "keyverse_issuer_alpha",
+            "keyverse_subject_alpha",
+            "anonymous_proof_identity_beta",
+            "authenticated_proof_identity_beta",
+            10_150,
+        )
+        .unwrap();
+    assert!(matches!(
+        persist_err(&mut client, &other),
+        IdentityLinkPersistenceError::SubjectAlreadyBound
+    ));
+
+    let original = load_ok(
+        &mut client,
+        "participant_identity_alpha",
+        "tenant_identity_alpha",
+    );
+    assert_eq!(original.participant_ref(), "participant_identity_alpha");
+    assert_eq!(
+        original.linked_subject_ref(),
+        Some("keyverse_subject_alpha")
+    );
+}
+
+#[test]
+fn two_unterminated_links_for_one_subject_fail_closed_on_lookup() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.assessment_participant \
+             (participant_ref, tenant_ref, created_at_unix_ms) \
+             VALUES ($1, $2, $3)",
+            &[
+                &"participant_identity_beta",
+                &"tenant_identity_alpha",
+                &10_000_i64,
+            ],
+        )
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.participant_identity_link (\
+                 identity_link_ref, participant_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref, anonymous_proof_ref, authenticated_proof_ref, \
+                 linked_at_unix_ms\
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            &[
+                &"link_event_identity_corrupt",
+                &"participant_identity_beta",
+                &"tenant_identity_alpha",
+                &"keyverse_issuer_alpha",
+                &"keyverse_subject_alpha",
+                &"anonymous_proof_identity_corrupt",
+                &"authenticated_proof_identity_corrupt",
+                &10_150_i64,
+            ],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = load_participant_by_current_identity_subject(
+        &mut transaction,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .unwrap_err();
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        IdentityLinkPersistenceError::CorruptHistory
     ));
 }
 
