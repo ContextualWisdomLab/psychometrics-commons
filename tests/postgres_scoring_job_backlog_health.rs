@@ -338,6 +338,30 @@ fn non_positive_created_at_fails_closed_instead_of_normalizing() {
 }
 
 #[test]
+fn sub_millisecond_created_at_rounds_instead_of_truncating_to_invalid() {
+    let (mut client, schema) = isolated_client();
+    client
+        .batch_execute(
+            "INSERT INTO scoring_job_state (\
+                 scoring_job_ref, scoring_request_ref, scoring_state, attempt_count,\
+                 max_attempts, created_at, updated_at\
+             ) VALUES (\
+                 'scoring_job_fractional_created', 'scoring_request_fractional_created', 'queued',\
+                 0, 3,\
+                 TIMESTAMPTZ '1970-01-01 00:00:00+00' + INTERVAL '0.6 milliseconds',\
+                 TIMESTAMPTZ '1970-01-01 00:00:00+00' + INTERVAL '0.6 milliseconds'\
+             )",
+        )
+        .unwrap();
+
+    let evidence = probe_postgres_scoring_job_backlog(&mut client).unwrap();
+    assert_eq!(evidence.active_job_count(), 1);
+    assert_eq!(evidence.oldest_active_job_at_unix_ms(), Some(1));
+
+    cleanup(client, &schema);
+}
+
+#[test]
 fn scoring_job_apply_path_creates_partial_readiness_indexes_idempotently() {
     let (mut client, schema) = isolated_client();
 

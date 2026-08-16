@@ -230,7 +230,7 @@ Performance goals are workload/profile-specific. The architecture nevertheless r
 
 - **Stimulus:** a scoring worker dies after claiming a job; the lease is past `active_lease_expires_at_unix_ms` while enqueue-to-complete age and active count remain inside the operator policy.
 - **Response:** readiness classifies the expired-lease count against an explicit caller bound. A healthy outbox or created-at age cannot hide the dead worker. The probe exposes only aggregate counts and timestamps.
-- **Evidence:** `tests/postgres_scoring_job_backlog_health.rs` expired-lease count/policy cases and `src/postgres_health.rs` composition tests. HTTP transport remains #111.
+- **Evidence:** `tests/postgres_scoring_job_backlog_health.rs` expired-lease count/policy cases and `src/postgres_health.rs` composition tests. HTTP transport remains #122.
 
 ## 13. Recoverability
 

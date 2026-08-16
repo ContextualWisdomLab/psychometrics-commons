@@ -585,10 +585,10 @@ pub fn probe_postgres_scoring_job_backlog(
              (SELECT COUNT(*)::BIGINT FROM scoring_job_state \
                  WHERE scoring_state = 'leased' \
                    AND active_lease_expires_at_unix_ms \
-                       < (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT), \
+                       < ROUND(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT), \
              (SELECT MIN(active_lease_expires_at_unix_ms) FROM scoring_job_state \
                  WHERE scoring_state = 'leased'), \
-             (SELECT (EXTRACT(EPOCH FROM MIN(created_at)) * 1000)::BIGINT \
+             (SELECT ROUND(EXTRACT(EPOCH FROM MIN(created_at)) * 1000)::BIGINT \
                  FROM scoring_job_state \
                  WHERE scoring_state IN ('queued', 'leased', 'retry_scheduled'))",
         &[],

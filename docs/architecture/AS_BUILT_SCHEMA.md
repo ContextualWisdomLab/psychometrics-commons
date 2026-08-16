@@ -25,6 +25,15 @@ The protected-main integration identity is source- and tenant-scoped. A physical
 
 PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
 
+## Active PR operational-backlog health indexes
+
+PR #131 (`feat(health): observe expired scoring-job leases`) adds partial readiness indexes that are **Active PR**, not protected-main truth. They do not change table shape or 3NF ownership. Apply them only through the product paths:
+
+- `migrations/0020_backlog_health_indexes.sql` through `apply_backlog_health_index_migration` after the integration, inbox-consumption, and data-rights table migrations;
+- `migrations/0021_scoring_job_health_indexes.sql` and `migrations/0022_scoring_job_expired_lease_health_indexes.sql` through `apply_scoring_job_migration` after `0002`.
+
+The indexes bound backlog-health probes as terminal history grows. They expose no payloads, worker identities, or restricted linkage values. Do not treat directory-order recovery of these files as a substitute for the product apply functions.
+
 ## Protected-main scoring-job physical schema
 
 `migrations/0002_scoring_job_state.sql` maps a bounded physical subset of the logical `scoring_job` aggregate into `scoring_job_state`, owned by `src/postgres_scoring_job.rs`. This is an **Implemented subset** on the named protected-main baseline.

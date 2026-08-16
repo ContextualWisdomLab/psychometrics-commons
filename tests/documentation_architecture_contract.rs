@@ -329,6 +329,38 @@ fn physical_migrations_use_unique_numeric_prefixes() {
 }
 
 #[test]
+fn active_backlog_health_indexes_are_named_in_the_physical_inventory() {
+    let root = repository_root();
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+    let as_built = read_required(&root.join("docs/architecture/AS_BUILT_SCHEMA.md"));
+    let inventory_files = [
+        "0020_backlog_health_indexes.sql",
+        "0021_scoring_job_health_indexes.sql",
+        "0022_scoring_job_expired_lease_health_indexes.sql",
+    ];
+
+    let migrations_tree = traceability
+        .split("migrations/\n")
+        .nth(1)
+        .and_then(|section| section.split("```").next())
+        .expect("traceability must publish a migrations/ tree");
+    for file_name in inventory_files {
+        assert!(
+            migrations_tree.contains(file_name),
+            "TRACEABILITY migrations tree must name Active-PR {file_name}"
+        );
+        assert!(
+            as_built.contains(file_name),
+            "AS_BUILT_SCHEMA must name Active-PR {file_name}"
+        );
+    }
+    assert!(
+        as_built.contains("**Active PR**") && as_built.contains("backlog health"),
+        "AS_BUILT_SCHEMA must keep backlog-health indexes as Active PR, not protected-main truth"
+    );
+}
+
+#[test]
 fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
     let erd = read_required(&repository_root().join("docs/architecture/ERD.md"));
 
