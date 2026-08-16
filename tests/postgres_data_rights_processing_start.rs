@@ -290,26 +290,37 @@ fn processing_start_classify_select_failure_is_a_database_failure() {
         .verify_identity("verification_evidence_alpha", 10_100)
         .unwrap();
     request.start_processing("operation_alpha", 10_200).unwrap();
+    let sink = format!(
+        "data_rights_processing_classify_sink_{}",
+        std::process::id()
+    );
     client
-        .batch_execute(
-            "CREATE OR REPLACE FUNCTION data_rights_processing_drop_after_update() \
-             RETURNS trigger LANGUAGE plpgsql AS $$ \
-             BEGIN \
-                 EXECUTE format('DROP TABLE %I.data_rights_request_state', TG_TABLE_SCHEMA); \
-                 RETURN NULL; \
-             END $$; \
-             CREATE TRIGGER data_rights_processing_drop_after_update \
-             AFTER UPDATE ON data_rights_request_state \
-             FOR EACH STATEMENT EXECUTE FUNCTION data_rights_processing_drop_after_update();",
-        )
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {sink} CASCADE;
+             CREATE SCHEMA {sink};
+             CREATE OR REPLACE FUNCTION data_rights_processing_redirect_after_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM set_config('search_path', '{sink}', false);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER data_rights_processing_redirect_after_update
+             AFTER UPDATE ON data_rights_request_state
+             FOR EACH STATEMENT
+             EXECUTE FUNCTION data_rights_processing_redirect_after_update();"
+        ))
         .unwrap();
 
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_data_rights_processing_start(&mut transaction, &request),
-        Err(DataRightsPersistenceError::Database(_))
-    ));
+    let error = persist_data_rights_processing_start(&mut transaction, &request)
+        .expect_err("classify-select must return the database error");
     transaction.rollback().unwrap();
+    assert!(matches!(error, DataRightsPersistenceError::Database(_)));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL data-rights persistence operation failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
 }
 
 #[test]
