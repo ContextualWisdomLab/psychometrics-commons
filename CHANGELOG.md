@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- PostgreSQL persistence for anonymous `assessment_participant` identity: exact tenant/participant replay is idempotent, rebinding tenant or creation time fails closed, load requires the stored tenant, and linked participants are rejected so account-link evidence cannot be dropped.
 - Anonymous session command authorization compares the verified actor to the loaded participant tenant/owner and loaded session reference, then applies a lifecycle command only after that check. The command entry point does not accept a caller-built resource scope. The lower-level exact-resource check remains available for callers that already hold a stored `ResourceScope`.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
