@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** successor of #116 research-contribution persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Consent-bound contribution lifecycle evidence is persisted with purpose-latest live-grant re-check that uses append-time `created_at` when two research-purpose events share `occurred_at_unix_ms`. Do not land #74 at `3243f97` or #116 at `4475f60`. Research release packaging remains outside this slice.
+**Active PR** #128 research-contribution persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Consent-bound contribution lifecycle evidence is persisted with purpose-latest live-grant re-check that uses append-time `created_at` when two research-purpose events share `occurred_at_unix_ms`. Do not land #74 at `3243f97` or #116 at `4475f60`. Research release packaging remains outside this slice.
 
 ## 5. ADR traceability by concern
 

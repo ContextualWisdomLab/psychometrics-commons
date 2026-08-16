@@ -18,15 +18,15 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
-| `research_consent_snapshot` | research contribution | **Active PR** successor of #116 (not protected-main truth) |
-| `research_contribution` | research contribution | **Active PR** successor of #116 (not protected-main truth) |
-| `research_withdrawal_event` | research contribution | **Active PR** successor of #116 (not protected-main truth) |
+| `research_consent_snapshot` | research contribution | **Active PR** #128 (not protected-main truth) |
+| `research_contribution` | research contribution | **Active PR** #128 (not protected-main truth) |
+| `research_withdrawal_event` | research contribution | **Active PR** #128 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
 ## Active PR research-contribution physical schema
 
-The successor of #116 (`migrations/0017_research_contribution.sql` and `src/postgres_research_contribution.rs`) persists a 3NF physical split of logical research-contribution evidence. The slice is **Active PR**, not protected-main truth. Do not land #74 at `3243f97` or #116 at `4475f60`.
+PR #128 (`migrations/0017_research_contribution.sql` and `src/postgres_research_contribution.rs`) persists a 3NF physical split of logical research-contribution evidence. The slice is **Active PR**, not protected-main truth. Do not land #74 at `3243f97` or #116 at `4475f60`.
 
 The physical objects are:
 
