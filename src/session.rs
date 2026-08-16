@@ -119,12 +119,43 @@ impl Display for SessionReconstitutionError {
 
 impl Error for SessionReconstitutionError {}
 
+/// One accepted server-authoritative session command.
+///
+/// Persist this history so a later load can replay Activate/Pause/Resume without
+/// inventing a new lifecycle path. Exact replay identity is the command reference
+/// plus sequence and command evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AcceptedSessionCommand {
+pub struct AcceptedSessionCommand {
     command_ref: String,
     sequence: u64,
     command: SessionCommand,
     resulting_state: SessionState,
+}
+
+impl AcceptedSessionCommand {
+    /// Return the opaque server command reference.
+    #[must_use]
+    pub fn command_ref(&self) -> &str {
+        &self.command_ref
+    }
+
+    /// Return the positive strictly increasing command sequence.
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    /// Return the lifecycle command that was accepted.
+    #[must_use]
+    pub const fn command(&self) -> SessionCommand {
+        self.command
+    }
+
+    /// Return the state produced by this accepted command.
+    #[must_use]
+    pub const fn resulting_state(&self) -> SessionState {
+        self.resulting_state
+    }
 }
 
 /// Immutable creation identity and current lifecycle state for one assessment session.
@@ -293,6 +324,15 @@ impl AssessmentSession {
         self.state
     }
 
+    /// Return accepted command history in sequence order.
+    ///
+    /// Use this when persisting later lifecycle states. Load reconstitutes a
+    /// created session and replays these commands; it does not invent state.
+    #[must_use]
+    pub fn accepted_commands(&self) -> &[AcceptedSessionCommand] {
+        &self.accepted_commands
+    }
+
     /// Apply one identified lifecycle command to this aggregate's server-authoritative state.
     ///
     /// New commands must carry a normalized opaque server command reference and a positive,
@@ -380,6 +420,80 @@ pub enum SessionCommand {
     Cancel,
     /// Invalidate a session whose evidence must not proceed to normal serving.
     Invalidate,
+}
+
+impl SessionCommand {
+    /// Return the stable persisted vocabulary for this command.
+    #[must_use]
+    pub const fn persist_name(self) -> &'static str {
+        match self {
+            Self::Activate => "activate",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Complete => "complete",
+            Self::BeginScoring => "begin_scoring",
+            Self::RecordScore => "record_score",
+            Self::Release => "release",
+            Self::Expire => "expire",
+            Self::Cancel => "cancel",
+            Self::Invalidate => "invalidate",
+        }
+    }
+
+    /// Parse a persisted command name.
+    #[must_use]
+    pub fn from_persist_name(name: &str) -> Option<Self> {
+        match name {
+            "activate" => Some(Self::Activate),
+            "pause" => Some(Self::Pause),
+            "resume" => Some(Self::Resume),
+            "complete" => Some(Self::Complete),
+            "begin_scoring" => Some(Self::BeginScoring),
+            "record_score" => Some(Self::RecordScore),
+            "release" => Some(Self::Release),
+            "expire" => Some(Self::Expire),
+            "cancel" => Some(Self::Cancel),
+            "invalidate" => Some(Self::Invalidate),
+            _ => None,
+        }
+    }
+}
+
+impl SessionState {
+    /// Return the stable persisted vocabulary for this state.
+    #[must_use]
+    pub const fn persist_name(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Scoring => "scoring",
+            Self::Scored => "scored",
+            Self::Released => "released",
+            Self::Expired => "expired",
+            Self::Cancelled => "cancelled",
+            Self::Invalidated => "invalidated",
+        }
+    }
+
+    /// Parse a persisted session-state name.
+    #[must_use]
+    pub fn from_persist_name(name: &str) -> Option<Self> {
+        match name {
+            "created" => Some(Self::Created),
+            "active" => Some(Self::Active),
+            "paused" => Some(Self::Paused),
+            "completed" => Some(Self::Completed),
+            "scoring" => Some(Self::Scoring),
+            "scored" => Some(Self::Scored),
+            "released" => Some(Self::Released),
+            "expired" => Some(Self::Expired),
+            "cancelled" => Some(Self::Cancelled),
+            "invalidated" => Some(Self::Invalidated),
+            _ => None,
+        }
+    }
 }
 
 /// Stable reason category for a rejected identified session command.

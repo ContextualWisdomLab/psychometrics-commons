@@ -1,20 +1,23 @@
-//! `PostgreSQL` 18 persistence for assessment-session creation identity.
+//! `PostgreSQL` 18 persistence for assessment-session identity and command history.
 //!
 //! This module stores the participant, published-release, version, content-digest,
 //! and locale identity copied at session creation. It does not rewrite provenance
-//! when the release is later suspended or retired. This first slice persists
-//! only [`SessionState::Created`] rows. Load restores that created identity
-//! without re-checking current publication eligibility. Replay requires
-//! `READ COMMITTED`.
+//! when the release is later suspended or retired. Created identity is inserted
+//! only for [`SessionState::Created`]. Later lifecycle states persist as
+//! append-only command history plus a current-state projection. Load restores
+//! created identity without re-checking publication eligibility, then replays
+//! stored commands. Replay requires `READ COMMITTED`.
 
 use crate::reference::normalized_reference;
-use crate::session::{AssessmentSession, SessionState};
+use crate::session::{AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionState};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const ASSESSMENT_SESSION_MIGRATION: &str =
     include_str!("../migrations/0014_assessment_session.sql");
+const ASSESSMENT_SESSION_COMMAND_MIGRATION: &str =
+    include_str!("../migrations/0016_assessment_session_command.sql");
 
 /// Outcome of persisting one created assessment session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,8 +45,12 @@ pub enum AssessmentSessionPersistenceError {
     InvalidReference,
     /// Stored session identity could not be restored as a created session.
     InvalidStoredIdentity,
-    /// Stored session state is not created; this slice cannot load later states.
+    /// Stored session state is not created and has no command history to replay.
     UnsupportedStoredState,
+    /// Later commands were persisted before the created-session identity row.
+    MissingCreatedIdentity,
+    /// A command sequence was reused by a different command identity.
+    SequenceConflict,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -72,6 +79,12 @@ impl Display for AssessmentSessionPersistenceError {
             Self::UnsupportedStoredState => {
                 "load a created assessment session; persist later lifecycle states before loading them"
             }
+            Self::MissingCreatedIdentity => {
+                "persist the created assessment session before persisting later commands"
+            }
+            Self::SequenceConflict => {
+                "session command sequence was reused by a different command identity"
+            }
             Self::Database(_) => "PostgreSQL assessment-session persistence failed",
         })
     }
@@ -92,7 +105,7 @@ impl From<postgres::Error> for AssessmentSessionPersistenceError {
     }
 }
 
-/// Apply the idempotent assessment-session migration to a `PostgreSQL` connection.
+/// Apply the idempotent assessment-session and command-history migrations.
 ///
 /// # Errors
 ///
@@ -100,7 +113,8 @@ impl From<postgres::Error> for AssessmentSessionPersistenceError {
 pub fn apply_assessment_session_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
-    client.batch_execute(ASSESSMENT_SESSION_MIGRATION)
+    client.batch_execute(ASSESSMENT_SESSION_MIGRATION)?;
+    client.batch_execute(ASSESSMENT_SESSION_COMMAND_MIGRATION)
 }
 
 /// Persist one created assessment-session identity bound to a published release.
@@ -127,7 +141,7 @@ pub fn persist_assessment_session(
     let session_ref = session.session_ref();
     let participant_ref = session.participant_ref();
     let created_at_unix_ms = postgres_bigint(session.created_at_unix_ms())?;
-    let session_state = session_state_name(session.state());
+    let session_state = session.state().persist_name();
     let inserted = transaction.execute(
         "INSERT INTO assessment_session (
              session_ref, participant_ref, instrument_release_ref,
@@ -152,12 +166,49 @@ pub fn persist_assessment_session(
     classify_existing_session(transaction, session, session_ref, created_at_unix_ms)
 }
 
+/// Persist accepted command history and the current lifecycle-state projection.
+///
+/// The created-session identity row must already exist. Exact replay of the same
+/// command reference, sequence, command, and resulting state is idempotent.
+/// Rebinding command evidence or reusing a sequence under another command
+/// identity fails closed. Load later reconstitutes created identity and replays
+/// these commands.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionPersistenceError`] for unsupported isolation, a
+/// missing created-session row, conflicting replay, a sequence conflict, an
+/// out-of-range sequence, or a database failure.
+pub fn persist_assessment_session_commands(
+    transaction: &mut Transaction<'_>,
+    session: &AssessmentSession,
+) -> Result<AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError> {
+    require_read_committed(transaction)?;
+    require_existing_created_identity(transaction, session)?;
+    let session_ref = session.session_ref();
+    let mut inserted_any = false;
+    for command in session.accepted_commands() {
+        if persist_one_session_command(transaction, session_ref, command)? {
+            inserted_any = true;
+        }
+    }
+    transaction.execute(
+        "UPDATE assessment_session SET session_state = $2 WHERE session_ref = $1",
+        &[&session_ref, &session.state().persist_name()],
+    )?;
+    Ok(if inserted_any {
+        AssessmentSessionPersistenceDisposition::Inserted
+    } else {
+        AssessmentSessionPersistenceDisposition::Duplicate
+    })
+}
+
 /// Load one created assessment-session identity without a live published release.
 ///
-/// Missing rows return [`None`]. A stored later lifecycle state fails closed. Exact
-/// stored identity is restored through [`AssessmentSession::from_persisted_created`],
-/// so a later suspend or retire cannot rewrite provenance. Command history is not
-/// stored in this slice.
+/// Missing rows return [`None`]. A stored later lifecycle state without command
+/// history fails closed. Exact stored identity is restored through
+/// [`AssessmentSession::from_persisted_created`], then accepted commands are
+/// replayed, so a later suspend or retire cannot rewrite provenance.
 ///
 /// # Errors
 ///
@@ -185,13 +236,20 @@ pub fn load_assessment_session(
         return Ok(None);
     };
     let stored_state: String = row.get(5);
-    if stored_state != session_state_name(SessionState::Created) {
-        return Err(AssessmentSessionPersistenceError::UnsupportedStoredState);
-    }
     let stored_created_at: i64 = row.get(6);
     let created_at_unix_ms = u64::try_from(stored_created_at)
         .map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)?;
-    AssessmentSession::from_persisted_created(
+    let commands = transaction.query(
+        "SELECT command_ref, command_sequence, command_name, resulting_state
+         FROM assessment_session_command
+         WHERE session_ref = $1
+         ORDER BY command_sequence",
+        &[&session_ref],
+    )?;
+    if commands.is_empty() && stored_state != SessionState::Created.persist_name() {
+        return Err(AssessmentSessionPersistenceError::UnsupportedStoredState);
+    }
+    let mut session = AssessmentSession::from_persisted_created(
         session_ref,
         row.get::<_, String>(0).as_str(),
         row.get::<_, String>(1).as_str(),
@@ -200,8 +258,27 @@ pub fn load_assessment_session(
         row.get::<_, String>(4).as_str(),
         created_at_unix_ms,
     )
-    .map(Some)
-    .map_err(|_| AssessmentSessionPersistenceError::InvalidStoredIdentity)
+    .map_err(|_| AssessmentSessionPersistenceError::InvalidStoredIdentity)?;
+    for command_row in commands {
+        let command_ref: String = command_row.get(0);
+        let stored_sequence: i64 = command_row.get(1);
+        let command_name: String = command_row.get(2);
+        let resulting_state: String = command_row.get(3);
+        let sequence = u64::try_from(stored_sequence)
+            .map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)?;
+        let command = SessionCommand::from_persist_name(&command_name)
+            .ok_or(AssessmentSessionPersistenceError::InvalidStoredIdentity)?;
+        let applied = session
+            .apply_command(&command_ref, sequence, command)
+            .map_err(|_| AssessmentSessionPersistenceError::InvalidStoredIdentity)?;
+        if applied.persist_name() != resulting_state {
+            return Err(AssessmentSessionPersistenceError::InvalidStoredIdentity);
+        }
+    }
+    if session.state().persist_name() != stored_state {
+        return Err(AssessmentSessionPersistenceError::InvalidStoredIdentity);
+    }
+    Ok(Some(session))
 }
 
 /// Compare an existing stored row with the requested immutable session identity.
@@ -237,7 +314,7 @@ fn classify_existing_session(
         && stored_version == session.instrument_version_ref()
         && stored_digest == session.instrument_release_content_digest()
         && stored_locale == session.locale()
-        && stored_state == session_state_name(session.state())
+        && stored_state == session.state().persist_name()
         && stored_created_at == created_at_unix_ms
     {
         Ok(AssessmentSessionPersistenceDisposition::Duplicate)
@@ -251,19 +328,89 @@ fn postgres_bigint(value: u64) -> Result<i64, AssessmentSessionPersistenceError>
     i64::try_from(value).map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)
 }
 
-/// Map the domain session state to its stable persisted vocabulary.
-fn session_state_name(state: SessionState) -> &'static str {
-    match state {
-        SessionState::Created => "created",
-        SessionState::Active => "active",
-        SessionState::Paused => "paused",
-        SessionState::Completed => "completed",
-        SessionState::Scoring => "scoring",
-        SessionState::Scored => "scored",
-        SessionState::Released => "released",
-        SessionState::Expired => "expired",
-        SessionState::Cancelled => "cancelled",
-        SessionState::Invalidated => "invalidated",
+/// Require the created-session identity row before persisting later commands.
+fn require_existing_created_identity(
+    transaction: &mut Transaction<'_>,
+    session: &AssessmentSession,
+) -> Result<(), AssessmentSessionPersistenceError> {
+    let row = transaction
+        .query_opt(
+            "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
+                    instrument_release_content_digest, locale, created_at_unix_ms
+             FROM assessment_session WHERE session_ref = $1",
+            &[&session.session_ref()],
+        )?
+        .ok_or(AssessmentSessionPersistenceError::MissingCreatedIdentity)?;
+    let stored_participant: String = row.get(0);
+    let stored_release: String = row.get(1);
+    let stored_version: String = row.get(2);
+    let stored_digest: String = row.get(3);
+    let stored_locale: String = row.get(4);
+    let stored_created_at: i64 = row.get(5);
+    let created_at_unix_ms = postgres_bigint(session.created_at_unix_ms())?;
+    if stored_participant == session.participant_ref()
+        && stored_release == session.instrument_release_ref()
+        && stored_version == session.instrument_version_ref()
+        && stored_digest == session.instrument_release_content_digest()
+        && stored_locale == session.locale()
+        && stored_created_at == created_at_unix_ms
+    {
+        Ok(())
+    } else {
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    }
+}
+
+/// Persist one accepted command, classifying exact or conflicting replay.
+fn persist_one_session_command(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    command: &AcceptedSessionCommand,
+) -> Result<bool, AssessmentSessionPersistenceError> {
+    let command_sequence = postgres_bigint(command.sequence())?;
+    let existing_sequence = transaction.query_opt(
+        "SELECT command_ref FROM assessment_session_command
+         WHERE session_ref = $1 AND command_sequence = $2",
+        &[&session_ref, &command_sequence],
+    )?;
+    if let Some(row) = existing_sequence {
+        let stored_ref: String = row.get(0);
+        if stored_ref != command.command_ref() {
+            return Err(AssessmentSessionPersistenceError::SequenceConflict);
+        }
+    }
+    let inserted = transaction.execute(
+        "INSERT INTO assessment_session_command (
+             session_ref, command_ref, command_sequence, command_name, resulting_state
+         ) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (session_ref, command_ref) DO NOTHING",
+        &[
+            &session_ref,
+            &command.command_ref(),
+            &command_sequence,
+            &command.command().persist_name(),
+            &command.resulting_state().persist_name(),
+        ],
+    )?;
+    if inserted == 1 {
+        return Ok(true);
+    }
+    let row = transaction.query_one(
+        "SELECT command_sequence, command_name, resulting_state
+         FROM assessment_session_command
+         WHERE session_ref = $1 AND command_ref = $2",
+        &[&session_ref, &command.command_ref()],
+    )?;
+    let stored_sequence: i64 = row.get(0);
+    let stored_name: String = row.get(1);
+    let stored_result: String = row.get(2);
+    if stored_sequence == command_sequence
+        && stored_name == command.command().persist_name()
+        && stored_result == command.resulting_state().persist_name()
+    {
+        Ok(false)
+    } else {
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
     }
 }
 
@@ -282,8 +429,8 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod tests {
-    use super::{session_state_name, AssessmentSessionPersistenceError};
-    use crate::session::SessionState;
+    use super::AssessmentSessionPersistenceError;
+    use crate::session::{SessionCommand, SessionState};
 
     #[test]
     fn session_persistence_errors_are_safe_and_specific() {
@@ -316,6 +463,14 @@ mod tests {
                 AssessmentSessionPersistenceError::UnsupportedStoredState,
                 "load a created assessment session; persist later lifecycle states before loading them",
             ),
+            (
+                AssessmentSessionPersistenceError::MissingCreatedIdentity,
+                "persist the created assessment session before persisting later commands",
+            ),
+            (
+                AssessmentSessionPersistenceError::SequenceConflict,
+                "session command sequence was reused by a different command identity",
+            ),
         ] {
             assert_eq!(error.to_string(), expected);
             assert!(std::error::Error::source(&error).is_none());
@@ -324,16 +479,18 @@ mod tests {
 
     #[test]
     fn session_state_names_cover_the_lifecycle_vocabulary() {
-        assert_eq!(session_state_name(SessionState::Created), "created");
-        assert_eq!(session_state_name(SessionState::Active), "active");
-        assert_eq!(session_state_name(SessionState::Paused), "paused");
-        assert_eq!(session_state_name(SessionState::Completed), "completed");
-        assert_eq!(session_state_name(SessionState::Scoring), "scoring");
-        assert_eq!(session_state_name(SessionState::Scored), "scored");
-        assert_eq!(session_state_name(SessionState::Released), "released");
-        assert_eq!(session_state_name(SessionState::Expired), "expired");
-        assert_eq!(session_state_name(SessionState::Cancelled), "cancelled");
-        assert_eq!(session_state_name(SessionState::Invalidated), "invalidated");
+        assert_eq!(SessionState::Created.persist_name(), "created");
+        assert_eq!(SessionState::Active.persist_name(), "active");
+        assert_eq!(SessionState::Paused.persist_name(), "paused");
+        assert_eq!(SessionState::Completed.persist_name(), "completed");
+        assert_eq!(SessionState::Scoring.persist_name(), "scoring");
+        assert_eq!(SessionState::Scored.persist_name(), "scored");
+        assert_eq!(SessionState::Released.persist_name(), "released");
+        assert_eq!(SessionState::Expired.persist_name(), "expired");
+        assert_eq!(SessionState::Cancelled.persist_name(), "cancelled");
+        assert_eq!(SessionState::Invalidated.persist_name(), "invalidated");
+        assert_eq!(SessionCommand::Activate.persist_name(), "activate");
+        assert_eq!(SessionCommand::BeginScoring.persist_name(), "begin_scoring");
     }
 
     #[test]

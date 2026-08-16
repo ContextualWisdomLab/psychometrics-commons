@@ -9,7 +9,8 @@ use psychometrics_commons_runtime::instrument::{
 };
 use psychometrics_commons_runtime::postgres_assessment_session::{
     apply_assessment_session_migration, load_assessment_session, persist_assessment_session,
-    AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
+    persist_assessment_session_commands, AssessmentSessionPersistenceDisposition,
+    AssessmentSessionPersistenceError,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
@@ -42,7 +43,8 @@ fn test_client() -> (MutexGuard<'static, ()>, Client) {
 fn reset_session_table(client: &mut Client) {
     client
         .batch_execute(&format!(
-            "DROP TABLE IF EXISTS {SCHEMA}.assessment_session;"
+            "DROP TABLE IF EXISTS {SCHEMA}.assessment_session_command;
+             DROP TABLE IF EXISTS {SCHEMA}.assessment_session;"
         ))
         .unwrap();
 }
@@ -396,6 +398,10 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
         Err(AssessmentSessionPersistenceError::UnsupportedIsolationLevel)
     ));
     assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::UnsupportedIsolationLevel)
+    ));
+    assert!(matches!(
         load_assessment_session(&mut transaction, session.session_ref()),
         Err(AssessmentSessionPersistenceError::UnsupportedIsolationLevel)
     ));
@@ -522,4 +528,131 @@ fn isolation_query_failure_is_a_database_failure() {
         "PostgreSQL assessment-session persistence failed"
     );
     assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn activated_session_survives_restart_after_command_persist() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut session = created_session(
+        "ses_restart_active_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &session).unwrap();
+    session
+        .apply_command("cmd_activate_after_create", 1, SessionCommand::Activate)
+        .unwrap();
+    session
+        .apply_command("cmd_pause_after_activate", 2, SessionCommand::Pause)
+        .unwrap();
+    assert_eq!(
+        persist_assessment_session_commands(&mut transaction, &session).unwrap(),
+        AssessmentSessionPersistenceDisposition::Inserted
+    );
+    assert_eq!(
+        persist_assessment_session_commands(&mut transaction, &session).unwrap(),
+        AssessmentSessionPersistenceDisposition::Duplicate
+    );
+    transaction.commit().unwrap();
+
+    let mut load_transaction = client.transaction().unwrap();
+    let mut loaded = load_assessment_session(&mut load_transaction, "ses_restart_active_alpha")
+        .unwrap()
+        .expect("activated session must reload after restart");
+    load_transaction.commit().unwrap();
+    assert_eq!(loaded.state(), SessionState::Paused);
+    assert!(!loaded.state().accepts_responses());
+    assert_eq!(loaded.accepted_commands().len(), 2);
+    assert_eq!(
+        loaded
+            .apply_command("cmd_resume_after_restart", 3, SessionCommand::Resume)
+            .unwrap(),
+        SessionState::Active
+    );
+    assert!(loaded.state().accepts_responses());
+}
+
+#[test]
+fn command_persist_requires_created_identity_and_rejects_conflicts() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut session = created_session(
+        "ses_command_conflict_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    session
+        .apply_command("cmd_activate_conflict", 1, SessionCommand::Activate)
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::MissingCreatedIdentity)
+    ));
+    transaction.rollback().unwrap();
+
+    let created = created_session(
+        "ses_command_conflict_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &created).unwrap();
+    persist_assessment_session_commands(&mut transaction, &session).unwrap();
+    transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET command_name = $2
+             WHERE session_ref = $1 AND command_ref = $3",
+            &[
+                &"ses_command_conflict_alpha",
+                &"pause",
+                &"cmd_activate_conflict",
+            ],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET command_name = $2
+             WHERE session_ref = $1 AND command_ref = $3",
+            &[
+                &"ses_command_conflict_alpha",
+                &"activate",
+                &"cmd_activate_conflict",
+            ],
+        )
+        .unwrap();
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET command_ref = $2
+             WHERE session_ref = $1 AND command_sequence = 1",
+            &[&"ses_command_conflict_alpha", &"cmd_other_sequence_owner"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::SequenceConflict)
+    ));
+    transaction.rollback().unwrap();
 }
