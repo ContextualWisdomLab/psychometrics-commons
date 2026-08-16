@@ -47,11 +47,17 @@ fn persist_rejects_a_server_sequence_gap_before_commit() {
     )
     .unwrap_err();
 
-    assert!(matches!(error, ResponseEventPersistenceError::InvalidSequence));
+    assert!(matches!(
+        error,
+        ResponseEventPersistenceError::InvalidSequence
+    ));
     let persisted_rows: i64 = transaction
         .query_one("SELECT COUNT(*) FROM response_event", &[])
         .unwrap()
         .get(0);
-    assert_eq!(persisted_rows, 0, "a rejected gap must leave no durable row");
+    assert_eq!(
+        persisted_rows, 0,
+        "a rejected gap must leave no durable row"
+    );
     transaction.rollback().unwrap();
 }

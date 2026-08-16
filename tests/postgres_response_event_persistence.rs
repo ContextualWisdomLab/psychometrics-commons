@@ -542,30 +542,35 @@ fn unexpected_unique_constraint_and_negative_sequence_fail_closed() {
     reset_response_event_table(&mut client);
     apply_response_event_migration(&mut client).unwrap();
 
-    let (_, first) = recorded_event(
-        "session_ipip_ko_extra",
-        write(
-            "server_event_item_01",
-            "client_event_item_01",
-            "item_version_n1_ko",
-            DIGEST_N1,
-        ),
-    );
+    let mut ledger = ResponseLedger::new("session_ipip_ko_extra").unwrap();
+    let first = ledger
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_01",
+                "client_event_item_01",
+                "item_version_n1_ko",
+                DIGEST_N1,
+            ),
+        )
+        .unwrap();
     persist_ok(&mut client, "session_ipip_ko_extra", &first);
     client
         .batch_execute(
             "CREATE UNIQUE INDEX response_event_session_only_unique ON response_event (session_ref);",
         )
         .unwrap();
-    let (_, second) = recorded_event(
-        "session_ipip_ko_extra",
-        write(
-            "server_event_item_02",
-            "client_event_item_02",
-            "item_version_n2_ko",
-            DIGEST_N2,
-        ),
-    );
+    let second = ledger
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_02",
+                "client_event_item_02",
+                "item_version_n2_ko",
+                DIGEST_N2,
+            ),
+        )
+        .unwrap();
     assert!(matches!(
         persist_err(&mut client, "session_ipip_ko_extra", &second),
         ResponseEventPersistenceError::Database(_)
