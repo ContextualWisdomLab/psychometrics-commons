@@ -120,6 +120,7 @@ pub fn session_in_state(release: &InstrumentRelease, state: SessionState) -> Ass
         SessionState::Expired => &[SessionCommand::Expire],
         SessionState::Cancelled => &[SessionCommand::Cancel],
         SessionState::Invalidated => &[SessionCommand::Invalidate],
+        _ => panic!("unsupported future session state in item-delivery fixture"),
     };
 
     for (index, command) in commands.iter().copied().enumerate() {
