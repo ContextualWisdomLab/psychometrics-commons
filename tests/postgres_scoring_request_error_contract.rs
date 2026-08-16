@@ -32,6 +32,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ScoringRequestPersistenceError::CorruptHistory,
             "stored scoring request rows cannot reconstruct a valid version-pinned request",
         ),
+        (
+            ScoringRequestPersistenceError::UnsupportedStoredSchema,
+            "stored scoring request schema version is not supported by this runtime",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());

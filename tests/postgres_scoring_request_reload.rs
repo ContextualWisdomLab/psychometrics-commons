@@ -210,10 +210,13 @@ fn stored_unsupported_schema_and_blank_aliases_fail_closed_on_reload() {
         )
         .unwrap();
     let mut unsupported = client.transaction().unwrap();
-    assert!(matches!(
-        load_scoring_request(&mut unsupported, "scoring_request_reload_schema"),
-        Err(ScoringRequestPersistenceError::CorruptHistory)
-    ));
+    assert!(
+        matches!(
+            load_scoring_request(&mut unsupported, "scoring_request_reload_schema"),
+            Err(ScoringRequestPersistenceError::UnsupportedStoredSchema)
+        ),
+        "a well-formed stored schema major this runtime does not implement must tell the operator to upgrade, not quarantine the row as corrupt history"
+    );
     unsupported.rollback().unwrap();
 
     let mut transaction = client.transaction().unwrap();
@@ -313,5 +316,43 @@ fn overflow_stored_schema_version_fails_closed_on_reload() {
         load_scoring_request(&mut transaction, "scoring_request_reload_overflow"),
         Err(ScoringRequestPersistenceError::InvalidSchemaVersion)
     ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn stored_blank_session_alias_fails_closed_as_corrupt_history() {
+    let _guard = reload_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_scoring_request_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &request_named(
+            "session_reload_score_blank",
+            "scoring_request_reload_blank",
+            "response_snapshot_reload_blank",
+            None,
+        ),
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE scoring_request DROP CONSTRAINT scoring_request_session_ref_format_check;",
+        )
+        .unwrap();
+    client
+        .execute(
+            "UPDATE scoring_request SET session_ref = ' ' \
+             WHERE scoring_request_ref = 'scoring_request_reload_blank'",
+            &[],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            load_scoring_request(&mut transaction, "scoring_request_reload_blank"),
+            Err(ScoringRequestPersistenceError::CorruptHistory)
+        ),
+        "a stored blank session pin must quarantine as corrupt history, not a caller alias error"
+    );
     transaction.rollback().unwrap();
 }
