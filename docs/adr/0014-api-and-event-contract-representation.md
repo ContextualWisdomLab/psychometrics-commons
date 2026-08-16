@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral
+- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral. Active item-delivery HTTP (`POST`/`GET` `/v1/sessions/{session_ref}/item-deliveries` plus `openapi/item-deliveries.yaml`) is not protected-main truth until an unchanged reviewed/check-clean head is integrated.
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 

@@ -17,6 +17,7 @@ pub mod health;
 pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
+pub mod item_delivery_http;
 pub mod narrative;
 pub mod participant;
 pub mod postgres_consent;
