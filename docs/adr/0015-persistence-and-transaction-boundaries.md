@@ -114,6 +114,10 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
 
+### Scoring request reload
+
+Protected main already persists one immutable version-pinned scoring-request identity. This Active PR reconstructs that pin after process restart under `READ COMMITTED`, taking `FOR SHARE` on the request row so a concurrent writer holding the same identity waits until reconstruction finishes. A missing request is absent. Stored labels that cannot rebuild [`ScoringRequest::from_persisted`] fail closed. The slice does not add HTTP scoring transport, does not call `fast-mlsirm`, and does not invent a session-unique lookup because `session_ref` is not unique. PostgreSQL 18 transaction isolation remains the physical classifier (PostgreSQL Global Development Group, 2026).
+
 ## Concurrency and idempotency
 
 Physical constraints must enforce equivalents of:
