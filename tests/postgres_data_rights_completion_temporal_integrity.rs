@@ -1,4 +1,4 @@
-//! PostgreSQL must preserve data-rights lifecycle time ordering even against direct writes.
+//! `PostgreSQL` must preserve data-rights lifecycle time ordering even against direct writes.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migration;
@@ -24,10 +24,8 @@ fn ready_client() -> Client {
         .expect("isolated temporal-integrity schema should be reset");
     apply_integration_migration(&mut client).expect("integration migration should apply");
     apply_data_rights_migration(&mut client).expect("data-rights migration should apply");
-    apply_data_rights_processing_migration(&mut client)
-        .expect("processing migration should apply");
-    apply_data_rights_completion_migration(&mut client)
-        .expect("completion migration should apply");
+    apply_data_rights_processing_migration(&mut client).expect("processing migration should apply");
+    apply_data_rights_completion_migration(&mut client).expect("completion migration should apply");
     client
 }
 

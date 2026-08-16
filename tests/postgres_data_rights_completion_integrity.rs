@@ -51,6 +51,7 @@ fn persist_processing(
     let event_type = match kind {
         DataRightsRequestKind::Export => "data_rights.export.requested",
         DataRightsRequestKind::Deletion => "data_rights.deletion.requested",
+        _ => "data_rights.request.requested",
     };
     let event = IntegrationEvent::new(
         &format!("event_{request_ref}"),
@@ -65,7 +66,10 @@ fn persist_processing(
         DIGEST,
     )
     .unwrap();
-    let targets = [DataRightsPropagationTarget::new("dependent_system_alpha", &event)];
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
     persist_requested_data_rights_with_propagation(client, &request, &targets, 3).unwrap();
     request
         .verify_identity("verification_evidence_alpha", 10_100)

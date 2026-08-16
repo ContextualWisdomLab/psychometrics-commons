@@ -41,9 +41,7 @@ struct CompletionEvidence<'a> {
 ///
 /// Returns the `PostgreSQL` error if completion columns, constraints, or retained-scope storage
 /// cannot be applied.
-pub fn apply_data_rights_completion_migration(
-    client: &mut Client,
-) -> Result<(), postgres::Error> {
+pub fn apply_data_rights_completion_migration(client: &mut Client) -> Result<(), postgres::Error> {
     client.batch_execute(DATA_RIGHTS_COMPLETION_MIGRATION)
 }
 
@@ -109,7 +107,11 @@ pub fn persist_data_rights_completion(
                 "INSERT INTO data_rights_retained_scope_evidence
                     (request_ref, tenant_ref, retained_scope_ref)
                  VALUES ($1, $2, $3)",
-                &[&request.request_ref(), &request.tenant_ref(), retained_scope],
+                &[
+                    &request.request_ref(),
+                    &request.tenant_ref(),
+                    retained_scope,
+                ],
             )?;
         }
         return Ok(DataRightsCompletionDisposition::Completed);
@@ -118,13 +120,22 @@ pub fn persist_data_rights_completion(
     classify_replay(transaction, request, request_kind, &evidence)
 }
 
-fn completion_evidence<'a>(
-    request: &'a DataRightsRequest,
-) -> Result<CompletionEvidence<'a>, DataRightsPersistenceError> {
-    let (target_state, completion_ref, completed_at_ms, verification_ref, verified_at_ms,
-        operation_ref, processing_started_at_ms) = match (
+fn completion_evidence(
+    request: &DataRightsRequest,
+) -> Result<CompletionEvidence<'_>, DataRightsPersistenceError> {
+    let (
+        target_state,
+        completion_ref,
+        completed_at_ms,
+        verification_ref,
+        verified_at_ms,
+        operation_ref,
+        processing_started_at_ms,
+    ) = match (
         request.state(),
-        request.completion_evidence_ref().and_then(normalized_reference),
+        request
+            .completion_evidence_ref()
+            .and_then(normalized_reference),
         request.completed_at_unix_ms(),
         request
             .verification_evidence_ref()
@@ -173,12 +184,12 @@ fn completion_evidence<'a>(
         _ => return Err(DataRightsPersistenceError::InvalidRequestState),
     };
 
-    let completed_at = i64::try_from(completed_at_ms)
-        .map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
+    let completed_at =
+        i64::try_from(completed_at_ms).map_err(|_| DataRightsPersistenceError::ValueOutOfRange)?;
     // The domain lifecycle enforces verification <= processing start <= completion. Once the
     // terminal completion timestamp fits PostgreSQL BIGINT, the preceding timestamps fit as well.
-    let verified_at = verified_at_ms as i64;
-    let processing_started_at = processing_started_at_ms as i64;
+    let verified_at = verified_at_ms.cast_signed();
+    let processing_started_at = processing_started_at_ms.cast_signed();
     let retained_scopes = request
         .retained_scope_refs()
         .iter()
@@ -197,13 +208,14 @@ fn completion_evidence<'a>(
     })
 }
 
+#[allow(clippy::question_mark)]
 fn classify_replay(
     transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
     request_kind: &str,
     evidence: &CompletionEvidence<'_>,
 ) -> Result<DataRightsCompletionDisposition, DataRightsPersistenceError> {
-    let row = transaction.query_opt(
+    let row = match transaction.query_opt(
         "SELECT participant_ref, request_kind, scope_ref, current_state,
                 verification_evidence_ref, verified_at_unix_ms,
                 operation_ref, processing_started_at_unix_ms,
@@ -212,7 +224,10 @@ fn classify_replay(
          WHERE request_ref = $1 AND tenant_ref = $2
          FOR UPDATE",
         &[&request.request_ref(), &request.tenant_ref()],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(DataRightsPersistenceError::from(error)),
+    };
     let Some(row) = row else {
         return Err(DataRightsPersistenceError::RequestNotFound);
     };

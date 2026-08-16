@@ -57,6 +57,7 @@ fn event(request_ref: &str, kind: DataRightsRequestKind) -> IntegrationEvent {
     let event_type = match kind {
         DataRightsRequestKind::Export => "data_rights.export.requested",
         DataRightsRequestKind::Deletion => "data_rights.deletion.requested",
+        _ => "data_rights.request.requested",
     };
     IntegrationEvent::new(
         &format!("event_{request_ref}"),
@@ -219,7 +220,9 @@ fn completion_rejects_identity_operation_and_retention_rebinding() {
     conflicting
         .verify_identity("verification_evidence_alpha", 10_100)
         .unwrap();
-    conflicting.start_processing("operation_alpha", 10_200).unwrap();
+    conflicting
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
     conflicting
         .complete("completion_evidence_alpha", &["retention_audit"], 10_300)
         .unwrap();
@@ -274,7 +277,10 @@ fn completion_requires_processing_state_existing_request_and_read_committed() {
     ));
     transaction.rollback().unwrap();
 
-    let mut missing = new_request("data_rights_request_missing", DataRightsRequestKind::Deletion);
+    let mut missing = new_request(
+        "data_rights_request_missing",
+        DataRightsRequestKind::Deletion,
+    );
     missing
         .verify_identity("verification_evidence_alpha", 10_100)
         .unwrap();
@@ -302,6 +308,62 @@ fn completion_requires_processing_state_existing_request_and_read_committed() {
         Err(DataRightsPersistenceError::InvalidRequestState)
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn completion_classify_select_failure_is_a_database_failure() {
+    let mut client = ready_client("data_rights_completion_classify_select");
+    let mut request = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    let event = event(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    let targets = [DataRightsPropagationTarget::new(
+        "dependent_system_alpha",
+        &event,
+    )];
+    persist_requested_data_rights_with_propagation(&mut client, &request, &targets, 3).unwrap();
+    request
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    request.start_processing("operation_alpha", 10_200).unwrap();
+    request
+        .complete("completion_evidence_alpha", &[], 10_300)
+        .unwrap();
+    let sink = format!(
+        "data_rights_completion_classify_sink_{}",
+        std::process::id()
+    );
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {sink} CASCADE;
+             CREATE SCHEMA {sink};
+             CREATE OR REPLACE FUNCTION data_rights_completion_redirect_after_update()
+             RETURNS trigger LANGUAGE plpgsql AS $$
+             BEGIN
+                 PERFORM set_config('search_path', '{sink}', false);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER data_rights_completion_redirect_after_update
+             AFTER UPDATE ON data_rights_request_state
+             FOR EACH STATEMENT
+             EXECUTE FUNCTION data_rights_completion_redirect_after_update();"
+        ))
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_data_rights_completion(&mut transaction, &request)
+        .expect_err("classify-select must return the database error");
+    transaction.rollback().unwrap();
+    assert!(matches!(error, DataRightsPersistenceError::Database(_)));
+    assert_eq!(
+        error.to_string(),
+        "PostgreSQL data-rights persistence operation failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
 }
 
 #[test]
