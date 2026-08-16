@@ -5,7 +5,10 @@
 //! can safely accept product-owned state changes. It does not own credentials,
 //! connection pooling, migrations, backup, or recovery.
 
-use crate::health::{CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError};
+use crate::health::{
+    BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError,
+    RuntimeHealthSnapshot,
+};
 use postgres::GenericClient;
 
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
@@ -157,4 +160,51 @@ pub fn probe_postgres_relation_integrity(
         }
     }
     Ok(DataIntegrityHealth::Verified)
+}
+
+/// Compose live `PostgreSQL` probes into one operation-scoped runtime snapshot.
+///
+/// The process is treated as live because this observation is executing. Probe
+/// failures become unknown capability or integrity evidence and fail readiness
+/// closed. The caller supplies backlog health so this function does not invent
+/// a measured threshold. Raw driver errors are not returned.
+///
+/// # Panics
+///
+/// Panics only if the crate-owned `postgres_operational_store` capability
+/// reference is no longer a valid health identity.
+#[must_use]
+pub fn observe_postgres_operational_snapshot(
+    client: &mut impl GenericClient,
+    required_relations: &[&str],
+    backlog_health: BacklogHealth,
+) -> RuntimeHealthSnapshot {
+    match probe_postgres_runtime(client) {
+        Ok(runtime) => {
+            let integrity = probe_postgres_relation_integrity(client, required_relations)
+                .unwrap_or(DataIntegrityHealth::Unknown);
+            let capability = runtime
+                .capability_health()
+                .expect("repository-owned postgres capability reference must remain valid");
+            RuntimeHealthSnapshot::new(true, backlog_health, integrity, vec![capability])
+                .expect("postgres snapshot contains one unique capability")
+        }
+        Err(_) => unknown_postgres_snapshot(backlog_health),
+    }
+}
+
+fn unknown_postgres_snapshot(backlog_health: BacklogHealth) -> RuntimeHealthSnapshot {
+    let capability = CapabilityHealth::new(
+        POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF,
+        CapabilityState::Unknown,
+        false,
+    )
+    .expect("repository-owned postgres capability reference must remain valid");
+    RuntimeHealthSnapshot::new(
+        true,
+        backlog_health,
+        DataIntegrityHealth::Unknown,
+        vec![capability],
+    )
+    .expect("unknown postgres snapshot contains one unique capability")
 }
