@@ -432,11 +432,17 @@ fn tampered_stored_contribution_is_detected_on_replay() {
     );
     persist_ok(&mut client, &contribution);
     client
+        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
+        .unwrap();
+    client
         .execute(
             "UPDATE research_contribution SET started_at_unix_ms = $1 \
              WHERE contribution_ref = $2",
             &[&9_200_i64, &contribution.contribution_ref()],
         )
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
         .unwrap();
 
     assert!(matches!(
