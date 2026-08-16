@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR participant identity-link physical schema
 
-PR #147 adds `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs`. Prefer this head over #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
+The successor of PR #147 adds `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and hosted write/recover commands in `src/account_link_write.rs`. Prefer this successor over #147, #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
 
 - immutable `assessment_participant` identity (`participant_ref`, `tenant_ref`, `created_at_unix_ms`);
 - append-only `participant_identity_link` rows for accepted dual-proof account links;
@@ -68,7 +68,7 @@ PR #147 adds `migrations/0022_participant_identity_link.sql` and `src/postgres_p
 - derived `current_participant_identity_link` projection enforcing one current link per participant and one current issuer-scoped subject per tenant;
 - composite foreign keys so a link-end or current projection cannot point at another participant's link.
 
-Exact replay is idempotent and reconciles the derived current projection so a missing or stale unique enforcer is restored or cleared. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from unterminated issuer-scoped history even when the derived current projection is missing. HTTP account-link transport and live Keyverse verification remain Target.
+Exact replay is idempotent and reconciles the derived current projection so a missing or stale unique enforcer is restored or cleared. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from unterminated issuer-scoped history even when the derived current projection is missing. Hosted write/recover commands authorize both current proofs before persist and recover from a still-valid authenticated account proof. HTTP account-link transport and live Keyverse verification remain Target.
 
 ## Logical-to-physical mapping rule
 

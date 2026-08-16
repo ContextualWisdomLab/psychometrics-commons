@@ -368,9 +368,16 @@ sequenceDiagram
     C->>A: link request + anonymous-session proof + Keyverse assertion
     A->>K: validate issuer/audience/signature/expiry/anti-replay context
     K-->>A: validated subject claims
+    A->>A: persist_authorized_account_link dual-proof write command
     A->>DB: verify tenant/ownership + append Active ParticipantIdentityLink
     DB-->>A: immutable link evidence / current-link projection
     A-->>C: link complete
+    P->>C: return with the same Keyverse account
+    C->>A: recover request + current Keyverse assertion
+    A->>A: recover_participant_for_authenticated_account
+    A->>DB: load unterminated issuer-scoped subject
+    DB-->>A: same product-owned participant_ref
+    A-->>C: recovered participant
 
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
 ```
