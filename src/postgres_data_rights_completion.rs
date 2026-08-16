@@ -11,7 +11,7 @@ use crate::reference::normalized_reference;
 use postgres::{Client, Transaction};
 
 const DATA_RIGHTS_COMPLETION_MIGRATION: &str =
-    include_str!("../migrations/0019_data_rights_completion.sql");
+    include_str!("../migrations/0024_data_rights_completion.sql");
 
 /// Outcome of persisting a terminal data-rights completion transition.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
