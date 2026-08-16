@@ -17,7 +17,7 @@
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::authorization::{ResourceKind, ResourceScope};
 use crate::participant::ParticipantRecord;
-use crate::session::AssessmentSession;
+use crate::session::{AssessmentSession, SessionCommand, SessionState, TransitionError};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -163,4 +163,64 @@ pub fn authorize_anonymous_session_command(
     )
     .map_err(|_| AnonymousResourceAuthorizationError::SessionMismatch)?;
     authorize_anonymous_session(actor, &resource, now_unix_ms)
+}
+
+/// Fail-closed error for applying a session command after anonymous authorization.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum AnonymousSessionCommandError {
+    /// The verified anonymous session was not allowed to command the loaded session.
+    Authorization(AnonymousResourceAuthorizationError),
+    /// Authorization succeeded, but the lifecycle command was not legal for the current state.
+    Transition(TransitionError),
+}
+
+impl Display for AnonymousSessionCommandError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Authorization(error) => Display::fmt(error, formatter),
+            Self::Transition(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+impl Error for AnonymousSessionCommandError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Authorization(error) => Some(error),
+            Self::Transition(error) => Some(error),
+        }
+    }
+}
+
+/// Apply one session command only after the loaded session is authorized.
+///
+/// Call this from an HTTP or messaging adapter after the short-lived anonymous proof has been
+/// verified and the participant and session have been loaded from the product store. Authorization
+/// runs first. If it fails, the session is left unchanged. If it succeeds, the existing session
+/// lifecycle rules decide whether the command may change state.
+///
+/// For example, a current proof for `session_alpha` may activate that loaded session. The same
+/// proof cannot activate `session_beta`, and an expired proof cannot activate `session_alpha` even
+/// though `Activate` is otherwise legal from `Created`.
+///
+/// # Errors
+///
+/// Returns [`AnonymousSessionCommandError::Authorization`] when the loaded records are not the
+/// exact current anonymous session, or [`AnonymousSessionCommandError::Transition`] when the
+/// command is not legal from the current lifecycle state.
+pub fn apply_anonymous_session_command(
+    actor: &AnonymousSessionContext,
+    participant: &ParticipantRecord,
+    session: &mut AssessmentSession,
+    command_ref: &str,
+    sequence: u64,
+    command: SessionCommand,
+    now_unix_ms: u64,
+) -> Result<SessionState, AnonymousSessionCommandError> {
+    authorize_anonymous_session_command(actor, participant, session, now_unix_ms)
+        .map_err(AnonymousSessionCommandError::Authorization)?;
+    session
+        .apply_command(command_ref, sequence, command)
+        .map_err(AnonymousSessionCommandError::Transition)
 }
