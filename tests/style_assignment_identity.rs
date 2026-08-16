@@ -93,14 +93,19 @@ fn every_behavior_affecting_field_changes_canonical_identity() {
 }
 
 #[test]
-fn opaque_references_are_normalized_but_exact_tokens_are_not() {
-    let normalized = input(ScoreIdentity::ScoreProfileRef(" score_profile_alpha "))
-        .canonical_bytes()
-        .unwrap();
-    let canonical = input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
-        .canonical_bytes()
-        .unwrap();
-    assert_eq!(normalized, canonical);
+fn references_and_exact_tokens_reject_noncanonical_spelling() {
+    for invalid_reference in [
+        " score_profile_alpha ",
+        "score_profile_alpha\t",
+        "score\nprofile_alpha",
+        "score\u{200b}profile_alpha",
+        "score\u{202e}profile_alpha",
+    ] {
+        assert_eq!(
+            input(ScoreIdentity::ScoreProfileRef(invalid_reference)).canonical_bytes(),
+            Err(StyleAssignmentIdentityError::InvalidReference)
+        );
+    }
 
     for invalid in [
         StyleAssignmentIdentity {
