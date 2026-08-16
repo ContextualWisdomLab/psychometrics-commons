@@ -7,10 +7,12 @@
 //! computation remains in `fast-mlsirm` and is consumed through versioned
 //! contracts rather than reimplemented here.
 
+pub mod account_link;
 pub mod anonymous_session;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
+pub mod deterministic_narrative;
 pub mod health;
 pub mod instrument;
 pub mod integration;
@@ -19,6 +21,7 @@ pub mod narrative;
 pub mod participant;
 pub mod postgres_consent;
 pub mod postgres_data_rights;
+pub mod postgres_data_rights_processing;
 pub mod postgres_health;
 pub mod postgres_inbox_consumption;
 pub mod postgres_instrument_release;
