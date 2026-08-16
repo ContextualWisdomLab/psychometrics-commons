@@ -14,6 +14,8 @@ use std::fmt::{Display, Formatter};
 
 const IDENTITY_LINK_MIGRATION: &str =
     include_str!("../migrations/0022_participant_identity_link.sql");
+const UNTERMINATED_SUBJECT_MIGRATION: &str =
+    include_str!("../migrations/0023_participant_identity_link_unterminated_subject.sql");
 
 /// Outcome of persisting one participant identity-link history.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,7 +93,10 @@ impl From<postgres::Error> for IdentityLinkPersistenceError {
     }
 }
 
-/// Apply the idempotent participant identity-link migration to a `PostgreSQL` connection.
+/// Apply the idempotent participant identity-link migrations to a `PostgreSQL` connection.
+///
+/// This applies the append-only history tables and the unterminated-subject
+/// uniqueness guard. Both statements are safe to repeat.
 ///
 /// # Errors
 ///
@@ -99,7 +104,8 @@ impl From<postgres::Error> for IdentityLinkPersistenceError {
 pub fn apply_participant_identity_link_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
-    client.batch_execute(IDENTITY_LINK_MIGRATION)
+    client.batch_execute(IDENTITY_LINK_MIGRATION)?;
+    client.batch_execute(UNTERMINATED_SUBJECT_MIGRATION)
 }
 
 /// Persist one participant and its append-only identity-link history.
@@ -109,7 +115,8 @@ pub fn apply_participant_identity_link_migration(
 /// and link-end evidence is idempotent. Reusing an event identity with
 /// different issuer, subject, proof, or time fails closed. An unterminated
 /// issuer-scoped subject cannot belong to two participants at once, even
-/// when the derived current projection is missing.
+/// when the derived current projection is missing. Exact replay of an
+/// unterminated link restores that derived row so uniqueness stays enforced.
 ///
 /// # Errors
 ///
@@ -312,7 +319,7 @@ fn persist_one_link(
         identity_issuer,
         identity_subject_ref,
     )?;
-    let inserted = transaction.execute(
+    let inserted = match transaction.execute(
         "INSERT INTO participant_identity_link (\
              identity_link_ref, participant_ref, tenant_ref, identity_issuer, \
              identity_subject_ref, anonymous_proof_ref, authenticated_proof_ref, \
@@ -329,7 +336,10 @@ fn persist_one_link(
             &authenticated_proof_ref,
             &linked_at_unix_ms,
         ],
-    )?;
+    ) {
+        Ok(count) => count,
+        Err(error) => return Err(classify_subject_unique_violation(error)),
+    };
     if inserted == 1 {
         insert_current_projection(
             transaction,
@@ -362,9 +372,56 @@ fn persist_one_link(
         && stored_authenticated == authenticated_proof_ref
         && stored_linked == linked_at_unix_ms
     {
+        restore_current_projection_if_unterminated(
+            transaction,
+            participant_ref,
+            identity_link_ref,
+            tenant_ref,
+            identity_issuer,
+            identity_subject_ref,
+        )?;
         Ok(false)
     } else {
         Err(IdentityLinkPersistenceError::ConflictingReplay)
+    }
+}
+
+fn restore_current_projection_if_unterminated(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+    identity_link_ref: &str,
+    tenant_ref: &str,
+    identity_issuer: &str,
+    identity_subject_ref: &str,
+) -> Result<(), IdentityLinkPersistenceError> {
+    let ended = transaction.query_opt(
+        "SELECT 1 FROM participant_identity_link_end WHERE linked_event_ref = $1",
+        &[&identity_link_ref],
+    )?;
+    if ended.is_some() {
+        return Ok(());
+    }
+    match transaction.execute(
+        "INSERT INTO current_participant_identity_link (\
+             participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+             identity_subject_ref\
+         ) VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (participant_ref) DO UPDATE \
+         SET identity_link_ref = EXCLUDED.identity_link_ref, \
+             tenant_ref = EXCLUDED.tenant_ref, \
+             identity_issuer = EXCLUDED.identity_issuer, \
+             identity_subject_ref = EXCLUDED.identity_subject_ref \
+         WHERE current_participant_identity_link.identity_link_ref = EXCLUDED.identity_link_ref",
+        &[
+            &participant_ref,
+            &identity_link_ref,
+            &tenant_ref,
+            &identity_issuer,
+            &identity_subject_ref,
+        ],
+    ) {
+        Ok(_) => Ok(()),
+        Err(error) => Err(classify_subject_unique_violation(error)),
     }
 }
 
@@ -390,7 +447,7 @@ fn insert_current_projection(
         ],
     ) {
         Ok(_) => Ok(()),
-        Err(error) => Err(classify_current_unique_violation(error)),
+        Err(error) => Err(classify_subject_unique_violation(error)),
     }
 }
 
@@ -553,14 +610,15 @@ fn reject_subject_bound_to_another_participant(
     }
 }
 
-fn classify_current_unique_violation(error: postgres::Error) -> IdentityLinkPersistenceError {
+fn classify_subject_unique_violation(error: postgres::Error) -> IdentityLinkPersistenceError {
     match error
         .as_db_error()
         .and_then(postgres::error::DbError::constraint)
     {
-        Some("current_participant_identity_link_subject_unique") => {
-            IdentityLinkPersistenceError::SubjectAlreadyBound
-        }
+        Some(
+            "current_participant_identity_link_subject_unique"
+            | "participant_identity_link_unterminated_subject_unique",
+        ) => IdentityLinkPersistenceError::SubjectAlreadyBound,
         Some("current_participant_identity_link_pkey") => {
             IdentityLinkPersistenceError::ConflictingReplay
         }
