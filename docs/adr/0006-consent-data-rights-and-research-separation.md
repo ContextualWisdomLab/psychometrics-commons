@@ -65,7 +65,7 @@ Construct-relevant personal data remains available to authorized workflows when 
 5. Service denial cannot be based on refusal of optional research contribution.
 6. Data-rights operations are tenant-scoped and identity-verified.
 
-A product consent write is authorized only when the authenticated tenant participant holds `ManageOwnConsent` on that participant's ledger. `persist_authorized_consent_ledger` composes that check with `persist_consent_ledger` so a foreign actor cannot insert. This write-path gate is independent of durable-tail ordering.
+A product consent write is authorized only when the authenticated tenant participant holds `ManageOwnConsent` on that participant's ledger, or when a current anonymous assessment session is bound to the same participant. `persist_authorized_consent_ledger` and `persist_authorized_anonymous_consent_ledger` compose those checks with `persist_consent_ledger` so a foreign actor, expired anonymous session, or unknown server time cannot insert. This write-path gate is independent of durable-tail ordering.
 
 ## Failure behavior
 
@@ -75,7 +75,7 @@ If consent verification is unavailable, optional research processing fails close
 
 - consent-version and revocation state-machine tests;
 - negative tests proving research jobs reject non-opted-in participants;
-- write-path authorization tests proving a foreign participant, foreign tenant, missing participant identity, or numeric tenant cannot authorize another ledger, that a foreign participant inserts no consent row, and that service consent does not create research contribution;
+- write-path authorization tests proving a foreign participant, foreign tenant, missing participant identity, or numeric tenant cannot authorize another ledger, that a foreign participant inserts no consent row, that an expired or foreign anonymous session inserts no consent row, and that service consent does not create research contribution;
 - release joinability and rare-combination privacy review;
 - export completeness and deletion propagation tests;
 - privileged-access audit tests.
