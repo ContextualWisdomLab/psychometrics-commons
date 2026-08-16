@@ -20,7 +20,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Requirement | PRD source | Technical/architecture contract | ADR(s) | Evaluated-main implementation |
 |---|---|---|---|---|
-| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
+| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential flow remains Target. **Active PR** in-process `POST /v1/sessions/{session_ref}/commands` is not protected-main truth |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** session-command HTTP (`POST /v1/sessions/{session_ref}/commands`) is not protected-main truth until an unchanged reviewed/check-clean head is integrated. This in-process family applies Activate, Pause, Resume, Complete, and Cancel with exact `Idempotency-Key` replay and RFC 9457 problems. Session create, item delivery, response write, scoring commands, and command-history persistence remain other families.
 
 ## 5. ADR traceability by concern
 

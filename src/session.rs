@@ -53,6 +53,23 @@ impl SessionState {
     pub const fn accepts_responses(self) -> bool {
         matches!(self, Self::Active)
     }
+
+    /// Return the stable lowercase wire name for this lifecycle state.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Scoring => "scoring",
+            Self::Scored => "scored",
+            Self::Released => "released",
+            Self::Expired => "expired",
+            Self::Cancelled => "cancelled",
+            Self::Invalidated => "invalidated",
+        }
+    }
 }
 
 /// Fail-closed error returned while creating a session from a published release.
@@ -211,6 +228,52 @@ impl AssessmentSession {
         self.state
     }
 
+    /// Return the next strictly increasing command sequence for this aggregate.
+    #[must_use]
+    pub fn next_command_sequence(&self) -> u64 {
+        self.accepted_commands
+            .last()
+            .map_or(1, |accepted| accepted.sequence.saturating_add(1))
+    }
+
+    /// Apply a client-identified command, replaying exact evidence without a new sequence.
+    ///
+    /// HTTP transports pass the `Idempotency-Key` as `command_ref`. An exact replay
+    /// returns the original resulting state and sequence. A reused key with a
+    /// different command fails closed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TransitionError`] for a malformed command identity, conflicting
+    /// replay, or a lifecycle command that is not legal from the current state.
+    pub fn apply_client_command(
+        &mut self,
+        command_ref: &str,
+        command: SessionCommand,
+    ) -> Result<(SessionState, u64), TransitionError> {
+        let canonical_command_ref = normalized_reference(command_ref).ok_or_else(|| {
+            TransitionError::new(self.state, command, TransitionErrorKind::InvalidReference)
+        })?;
+        if let Some(accepted) = self
+            .accepted_commands
+            .iter()
+            .find(|accepted| accepted.command_ref == canonical_command_ref)
+        {
+            return if accepted.command == command {
+                Ok((accepted.resulting_state, accepted.sequence))
+            } else {
+                Err(TransitionError::new(
+                    self.state,
+                    command,
+                    TransitionErrorKind::ConflictingReplay,
+                ))
+            };
+        }
+        let sequence = self.next_command_sequence();
+        let state = self.apply_command(canonical_command_ref, sequence, command)?;
+        Ok((state, sequence))
+    }
+
     /// Apply one identified lifecycle command to this aggregate's server-authoritative state.
     ///
     /// New commands must carry a normalized opaque server command reference and a positive,
@@ -300,6 +363,25 @@ pub enum SessionCommand {
     Invalidate,
 }
 
+impl SessionCommand {
+    /// Return the stable lowercase wire name for this lifecycle command.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Activate => "activate",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Complete => "complete",
+            Self::BeginScoring => "begin_scoring",
+            Self::RecordScore => "record_score",
+            Self::Release => "release",
+            Self::Expire => "expire",
+            Self::Cancel => "cancel",
+            Self::Invalidate => "invalidate",
+        }
+    }
+}
+
 /// Stable reason category for a rejected identified session command.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -323,7 +405,11 @@ pub struct TransitionError {
 }
 
 impl TransitionError {
-    const fn new(state: SessionState, command: SessionCommand, kind: TransitionErrorKind) -> Self {
+    pub(crate) const fn new(
+        state: SessionState,
+        command: SessionCommand,
+        kind: TransitionErrorKind,
+    ) -> Self {
         Self {
             state,
             command,

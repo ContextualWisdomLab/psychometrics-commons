@@ -132,3 +132,38 @@ fn transition_error_has_stable_human_readable_context() {
         "command Release is not valid while session is Created"
     );
 }
+
+#[test]
+fn lifecycle_wire_names_are_stable_and_exhaustive() {
+    let states = [
+        (SessionState::Created, "created"),
+        (SessionState::Active, "active"),
+        (SessionState::Paused, "paused"),
+        (SessionState::Completed, "completed"),
+        (SessionState::Scoring, "scoring"),
+        (SessionState::Scored, "scored"),
+        (SessionState::Released, "released"),
+        (SessionState::Expired, "expired"),
+        (SessionState::Cancelled, "cancelled"),
+        (SessionState::Invalidated, "invalidated"),
+    ];
+    for (state, expected) in states {
+        assert_eq!(state.as_str(), expected);
+    }
+
+    let commands = [
+        (SessionCommand::Activate, "activate"),
+        (SessionCommand::Pause, "pause"),
+        (SessionCommand::Resume, "resume"),
+        (SessionCommand::Complete, "complete"),
+        (SessionCommand::BeginScoring, "begin_scoring"),
+        (SessionCommand::RecordScore, "record_score"),
+        (SessionCommand::Release, "release"),
+        (SessionCommand::Expire, "expire"),
+        (SessionCommand::Cancel, "cancel"),
+        (SessionCommand::Invalidate, "invalidate"),
+    ];
+    for (command, expected) in commands {
+        assert_eq!(command.as_str(), expected);
+    }
+}
