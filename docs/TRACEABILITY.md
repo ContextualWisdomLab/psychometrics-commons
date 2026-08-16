@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** scoring-worker terminal identity on this successor of #115 is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The worker reuses one stable `event_ref` for the job plus accepted result, or the job plus permanent cause, and rejects a minted identity before any write. This head also carries #115 completion/failure outbox composition and #69 completion-only work; those predecessors should not land separately. Live fast-mlsirm execution remains outside this slice.
+**Active PR** #136 scoring-worker terminal identity is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The worker reuses one stable `event_ref` for the job plus accepted result, or the job plus permanent cause, and rejects a minted identity before any write. This head also carries #115 completion/failure outbox composition and #69 completion-only work; those predecessors should not land separately. Live fast-mlsirm execution remains outside this slice.
 
 ## 5. ADR traceability by concern
 
