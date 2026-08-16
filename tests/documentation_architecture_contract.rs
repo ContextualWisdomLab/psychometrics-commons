@@ -309,11 +309,11 @@ fn as_built_session_table_names_the_active_persist_and_load_pr() {
         .find(|line| line.contains("`assessment_session`"))
         .expect("as-built physical schema table must list assessment_session");
     assert!(
-        table_row.contains("**Active PR** #109") && !table_row.contains("#61"),
-        "assessment_session table cell must name persist-and-load Active PR #109, not persist-only predecessor #61"
+        table_row.contains("**Active PR** #121") && !table_row.contains("#61"),
+        "assessment_session table cell must name persist-and-load Active PR #121, not persist-only predecessor #61"
     );
     assert!(
-        as_built.contains("PR #109 `migrations/0014_assessment_session.sql`")
+        as_built.contains("PR #121 `migrations/0014_assessment_session.sql`")
             && as_built.contains("not protected-main truth"),
         "as-built session section must name the persist-and-load PR without promoting it to Implemented"
     );
