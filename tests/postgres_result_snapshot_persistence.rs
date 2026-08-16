@@ -1,5 +1,7 @@
 //! Real `PostgreSQL` contract for durable immutable result snapshots.
 
+mod common;
+
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::{
     apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
@@ -107,7 +109,13 @@ fn snapshot_named(
         observations,
     )
     .unwrap();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_result_one",
+        request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &session,
         &request,
         &scoring_result,
         ResultSnapshotInput {
@@ -292,7 +300,13 @@ fn overflow_snapshot() -> ResultSnapshot {
         vec![ScoreObservation::scored("construct_big_five", 0.25, None).unwrap()],
     )
     .unwrap();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_result_one",
+        request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &session,
         &request,
         &scoring_result,
         ResultSnapshotInput {
