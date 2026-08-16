@@ -1,29 +1,36 @@
 # As-Built PostgreSQL Schema Map
 
 - Status: Normative evidence map
-- Date: 2026-08-14
-- Protected-main baseline: `4b828134f4d597ca1add3d6dbf02bebd72bfb0b2`
+- Date: 2026-08-16
+- Protected-main baseline: `a7637351be8f0f90c12651d3bcafd959bc52ac81`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
 ## Protected-main physical schema
 
-Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, and instrument releases. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
+Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, instrument releases, consent, item-delivery evidence, response snapshots, result snapshots, scoring requests, inbox consumption, and data-rights verification/processing-start. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
 | `integration_outbox` | integration | Implemented subset |
 | `integration_delivery_attempt` | integration | Implemented subset |
 | `integration_inbox` | integration | Implemented subset |
+| `integration_consumption` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
+| `scoring_request` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
-| `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
+| `consent_ledger` / `consent_event` | consent | Implemented subset |
+| `item_delivery_event` | item delivery | Implemented subset |
+| `response_snapshot` / `response_snapshot_entry` | response | Implemented subset |
+| `result_snapshot` / `result_snapshot_observation` | result | Implemented subset |
+| `data_rights_request_state` | data rights | Implemented subset through processing-start |
+| `assessment_session` | session | **Active PR** on this branch (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
-## Active PR inbox-consumption physical schema
+## Protected-main inbox-consumption physical schema
 
-PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
+`migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` persist one consumption work item for an existing `integration_inbox` receipt. `migrations/0019_inbox_claim_expiry_guard.sql` rejects terminal writes after the database-authoritative claim deadline. The slice stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
 
 ## Protected-main scoring-job physical schema
 
@@ -35,13 +42,12 @@ The protected-main slice persists:
 - initial queued state and atomic queued-to-leased claim;
 - worker and lease references;
 - monotonically increasing fencing evidence tied to attempt count;
-- lease-expiry fields and database constraints rejecting impossible lifecycle state shapes.
+- lease-expiry fields and database constraints rejecting impossible lifecycle state shapes;
+- retry, cancellation, terminal outcomes, and expired-lease recovery without transferring a fence.
 
 Migration reapplication does not trust relation existence or constraint names alone as schema evidence. On initial creation, migration `0002` validates the ordered column/type/nullability contract, expected defaults, the complete contract-relevant PostgreSQL constraint inventory (CHECK, PRIMARY KEY, UNIQUE, FOREIGN KEY, EXCLUDE, and PostgreSQL 18 NOT NULL entries, including validation/enforcement state), and a live invalid-state probe, then records the PostgreSQL-normalized `name:definition` constraint manifest on the owned relation. Reapplication recomputes that inventory and normalized manifest and compares them with the creation-time evidence. Incompatible pre-existing relations, missing manifest evidence, renamed/removed or unexpected constraints, non-validated/non-enforced constraints, and same-name weakened constraint definitions therefore fail closed rather than being accepted as successful migration state.
 
-Protected-main PostgreSQL tests cover exact replay/conflicting replay, enqueue and claim isolation contracts, fail-closed invalid evidence, per-test-suite schema isolation, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint-definition weakening, unexpected CHECK/UNIQUE/FOREIGN KEY/EXCLUDE/NOT NULL constraint rejection, database lifecycle-shape constraints, database error propagation, and stable non-sensitive error/source contracts.
-
-This protected-main subset does **not** by itself claim durable retry scheduling/reclaim, completion, permanent failure/quarantine transitions, expired-lease recovery, crash/restart recovery, result persistence, or live fast-mlsirm execution. Those capabilities require their own integrated protected-main evidence before they can be promoted here.
+This protected-main subset does **not** by itself claim live fast-mlsirm execution. That capability requires its own integrated protected-main evidence before it can be promoted here.
 
 ## Protected-main instrument-release physical schema
 
@@ -57,6 +63,10 @@ The protected-main slice persists:
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
+
+## Active PR assessment-session physical schema
+
+This branch's `migrations/0020_assessment_session.sql` and `src/postgres_assessment_session.rs` persist one created assessment-session identity bound to a published locale-specific release. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, content-digest, locale, created state, and creation time. Exact replay is idempotent. Rebinding any stored field fails closed. Later lifecycle states, command history, and HTTP session transport remain outside this slice.
 
 ## Logical-to-physical mapping rule
 

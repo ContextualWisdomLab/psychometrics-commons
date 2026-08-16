@@ -5,7 +5,8 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- Traceability rebaseline after protected-main item-delivery ledger persistence (#48) and immutable result snapshots (#51). Remaining persist and operator-health HTTP slices stay Active PR, not shipped truth.
+- Traceability and as-built schema rebaseline to protected-main `a7637351`, recording item-delivery ledger persistence (#48), immutable response snapshots (#55), immutable result snapshots (#51), deterministic narrative fallback (#73), dual-proof account linking (#85), data-rights processing-start (#76), atomic scoring-dispatch persist (#68), inbox claim-expiry fencing (#81), and recovery invariants (#72). Remaining session, identity-link, response-event, research, data-rights-completion persist and operator-health HTTP stay Active PR, not shipped truth.
+- PostgreSQL persistence for created assessment sessions bound to one published locale-specific release: exact replay is idempotent, and rebinding participant, release, version, digest, locale, state, or creation time fails closed.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
@@ -60,6 +61,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- PostgreSQL recovery acceptance seeds `claim_deadline_at` on a processing consumption row so restore fixtures satisfy the #81 UPDATE-only deadline trigger and keep the database-authoritative claim after COPY restore.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.

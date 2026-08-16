@@ -52,6 +52,7 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/architecture/C4.md",
         "docs/architecture/UML.md",
         "docs/architecture/ERD.md",
+        "docs/architecture/AS_BUILT_SCHEMA.md",
         "docs/architecture/SECURITY_AND_DATA.md",
         "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
         "docs/adr/README.md",
@@ -123,6 +124,7 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
         "docs/architecture/C4.md",
         "docs/architecture/UML.md",
         "docs/architecture/ERD.md",
+        "docs/architecture/AS_BUILT_SCHEMA.md",
         "docs/architecture/SECURITY_AND_DATA.md",
         "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
     ] {
