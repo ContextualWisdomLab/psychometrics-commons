@@ -546,7 +546,7 @@ A tenant/resource mismatch or conflicting replay is quarantined/fails closed bef
 
 `research_identity_linkage` is the highest-sensitivity product-owned data structure because it bridges operational participant identity to research pseudonym identity.
 
-Physical persistence (Active PR #162, not protected-main truth) stores `research_program_ref` on both `research_participant` and `research_identity_linkage` as a composite foreign key. That keeps third-normal-form identity (program is an identifying attribute of the research participant) while enforcing one research identity per operational participant and program. The public-release view `public_research_identity` projects only `research_participant_ref` and `research_program_ref`. A release fixture loads that view by program; it does not look up a restricted linkage identity.
+Physical persistence (Active PR #175, not protected-main truth) stores `research_program_ref` on both `research_participant` and `research_identity_linkage` as a composite foreign key. That keeps third-normal-form identity (program is an identifying attribute of the research participant) while enforcing one research identity per operational participant and program. The public-release view `public_research_identity` projects only `research_participant_ref` and `research_program_ref`. A release fixture loads that view by program; it does not look up a restricted linkage identity.
 
 Requirements:
 
