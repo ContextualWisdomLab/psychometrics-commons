@@ -9,7 +9,7 @@ use crate::health::{BacklogHealth, DataIntegrityHealth, RuntimeHealthSnapshot};
 use crate::health_http::{
     accept_one_health_http_with, handle_health_http_request, health_ready_response,
     health_request_required_capabilities, health_request_requires_readiness_snapshot,
-    HealthHttpResponse,
+    serve_health_http_with, HealthHttpResponse,
 };
 use crate::postgres_health::{
     observe_postgres_operational_snapshot, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF,
@@ -61,6 +61,25 @@ pub fn accept_one_postgres_health_http(
     backlog_health: BacklogHealth,
 ) -> io::Result<()> {
     accept_one_health_http_with(listener, |request| {
+        handle_postgres_health_http_request(request, client, required_relations, backlog_health)
+    })
+}
+
+/// Serve PostgreSQL-backed probes until `accept` fails.
+///
+/// GET `/live` still answers without store I/O. GET `/ready` observes the
+/// caller-owned connection after each accept.
+///
+/// # Errors
+///
+/// Returns the I/O error that stopped the loop.
+pub fn serve_postgres_health_http(
+    listener: &TcpListener,
+    client: &mut impl GenericClient,
+    required_relations: &[&str],
+    backlog_health: BacklogHealth,
+) -> io::Result<()> {
+    serve_health_http_with(listener, |request| {
         handle_postgres_health_http_request(request, client, required_relations, backlog_health)
     })
 }

@@ -160,6 +160,59 @@ where
     write_http_response(&mut stream, &response)
 }
 
+/// Serve probe requests until `accept` fails.
+///
+/// Operators run this loop so Kubernetes or a load balancer can keep asking
+/// GET `/live` and GET `/ready`. Interrupted accepts retry. Any other accept,
+/// read, or write error stops the loop so a closed or non-blocking listener
+/// does not spin. TLS, keep-alive, and measured SLO values remain outside
+/// this slice.
+///
+/// # Errors
+///
+/// Returns the I/O error that stopped the loop.
+pub fn serve_health_http(
+    listener: &TcpListener,
+    snapshot: &RuntimeHealthSnapshot,
+) -> io::Result<()> {
+    serve_health_http_with(listener, |request| {
+        handle_health_http_request(request, snapshot)
+    })
+}
+
+/// Serve probe requests with `handler` until `accept` fails.
+///
+/// # Errors
+///
+/// Returns the I/O error that stopped the loop.
+pub fn serve_health_http_with<F>(listener: &TcpListener, mut handler: F) -> io::Result<()>
+where
+    F: FnMut(&str) -> HealthHttpResponse,
+{
+    loop {
+        match classify_serve_accept(accept_one_health_http_with(listener, |request| {
+            handler(request)
+        })) {
+            ServeAcceptProgress::Continue => {}
+            ServeAcceptProgress::Stop(error) => return Err(error),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ServeAcceptProgress {
+    Continue,
+    Stop(io::Error),
+}
+
+fn classify_serve_accept(result: io::Result<()>) -> ServeAcceptProgress {
+    match result {
+        Ok(()) => ServeAcceptProgress::Continue,
+        Err(error) if error.kind() == io::ErrorKind::Interrupted => ServeAcceptProgress::Continue,
+        Err(error) => ServeAcceptProgress::Stop(error),
+    }
+}
+
 /// Return whether this request is GET `/ready` and must observe operational state.
 #[must_use]
 pub fn health_request_requires_readiness_snapshot(request: &str) -> bool {
@@ -377,10 +430,11 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_request_read, backlog_label, capability_state_label, handle_health_http_request,
-        health_ready_response, health_request_required_capabilities,
+        apply_request_read, backlog_label, capability_state_label, classify_serve_accept,
+        handle_health_http_request, health_ready_response, health_request_required_capabilities,
         health_request_requires_readiness_snapshot, integrity_label, json_string, reason_phrase,
-        RequestReadProgress, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
+        RequestReadProgress, ServeAcceptProgress, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH,
+        HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
@@ -591,5 +645,32 @@ mod tests {
         )
         .expect_err("non-timeout I/O errors must propagate");
         assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+    }
+
+    #[test]
+    fn serve_loop_retries_interrupted_accepts_and_stops_on_other_errors() {
+        assert!(matches!(
+            classify_serve_accept(Ok(())),
+            ServeAcceptProgress::Continue
+        ));
+        assert!(matches!(
+            classify_serve_accept(Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "signal"
+            ))),
+            ServeAcceptProgress::Continue
+        ));
+        let stopped = classify_serve_accept(Err(io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            "closed",
+        )));
+        match stopped {
+            ServeAcceptProgress::Stop(error) => {
+                assert_eq!(error.kind(), io::ErrorKind::ConnectionAborted);
+            }
+            ServeAcceptProgress::Continue => {
+                panic!("non-interrupted accept errors must stop the serve loop")
+            }
+        }
     }
 }
