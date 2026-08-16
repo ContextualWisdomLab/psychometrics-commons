@@ -272,6 +272,8 @@ pub enum ResultSnapshotError {
     ParticipantMismatch,
     /// The scoring request uses an instrument version other than the session's.
     InstrumentVersionMismatch,
+    /// The assessment session has not begun scoring, so no result may be published.
+    SessionNotReadyForResult,
 }
 
 impl Display for ResultSnapshotError {
@@ -298,6 +300,9 @@ impl Display for ResultSnapshotError {
                 .write_str("result participant does not match the assessment session owner"),
             Self::InstrumentVersionMismatch => formatter.write_str(
                 "scoring request instrument version does not match the assessment session",
+            ),
+            Self::SessionNotReadyForResult => formatter.write_str(
+                "result snapshots can be created only after scoring has begun for the assessment session",
             ),
         }
     }

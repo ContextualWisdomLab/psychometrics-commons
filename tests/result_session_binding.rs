@@ -11,7 +11,9 @@ use psychometrics_commons_runtime::result::{
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::{AssessmentSession, SessionState};
+use psychometrics_commons_runtime::session::{
+    AssessmentSession, SessionCommand, SessionState,
+};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -97,6 +99,32 @@ fn session(session_ref: &str, participant_ref: &str) -> AssessmentSession {
         20_000,
     )
     .unwrap()
+}
+
+fn session_in(
+    session_ref: &str,
+    participant_ref: &str,
+    commands: &[SessionCommand],
+) -> AssessmentSession {
+    let mut session = session(session_ref, participant_ref);
+    for (index, command) in commands.iter().copied().enumerate() {
+        session
+            .apply_command(
+                &format!("command_result_binding_{}", index + 1),
+                u64::try_from(index).expect("command index fits in u64") + 1,
+                command,
+            )
+            .unwrap();
+    }
+    session
+}
+
+fn publish_error(session: &AssessmentSession) -> ResultSnapshotError {
+    let response_snapshot = completed_snapshot(session.session_ref());
+    let request = scoring_request(&response_snapshot, session.instrument_version_ref());
+    let result = scoring_result(&request);
+    ResultSnapshot::new(session, &request, &result, result_input(session.participant_ref()))
+        .unwrap_err()
 }
 
 fn completed_snapshot(session_ref: &str) -> ResponseSnapshot {
@@ -223,6 +251,45 @@ fn result_snapshot_rejects_session_rebinding() {
         error.to_string(),
         "scoring request does not belong to the supplied assessment session"
     );
+}
+
+#[test]
+fn result_snapshot_rejects_session_that_has_not_begun_scoring() {
+    let created = session("session_result_binding", "participant_authoritative");
+    assert_eq!(created.state(), SessionState::Created);
+    let error = publish_error(&created);
+    assert_eq!(error, ResultSnapshotError::SessionNotReadyForResult);
+    assert_eq!(
+        error.to_string(),
+        "result snapshots can be created only after scoring has begun for the assessment session"
+    );
+
+    for commands in [
+        [SessionCommand::Activate].as_slice(),
+        [SessionCommand::Activate, SessionCommand::Pause].as_slice(),
+        [SessionCommand::Activate, SessionCommand::Complete].as_slice(),
+        [SessionCommand::Expire].as_slice(),
+        [SessionCommand::Cancel].as_slice(),
+        [SessionCommand::Invalidate].as_slice(),
+        [
+            SessionCommand::Activate,
+            SessionCommand::Complete,
+            SessionCommand::BeginScoring,
+            SessionCommand::RecordScore,
+            SessionCommand::Release,
+        ]
+        .as_slice(),
+    ] {
+        let session = session_in(
+            "session_result_binding",
+            "participant_authoritative",
+            commands,
+        );
+        assert_eq!(
+            publish_error(&session),
+            ResultSnapshotError::SessionNotReadyForResult
+        );
+    }
 }
 
 #[test]
