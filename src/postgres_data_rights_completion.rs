@@ -172,7 +172,7 @@ fn completion_evidence(
             Some(operation_ref),
             Some(processing_started_at),
             false,
-        ) if request.kind() == DataRightsRequestKind::Deletion => (
+        ) => (
             "partially_completed",
             completion_ref,
             completed_at,

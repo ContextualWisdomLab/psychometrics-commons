@@ -577,3 +577,51 @@ fn completion_schema_rejects_invalid_evidence_and_retention_scope() {
         )
         .is_err());
 }
+
+#[test]
+fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
+    let mut client = ready_client("data_rights_completion_identity_mismatch");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_completion(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let tampers = [
+        "UPDATE data_rights_request_state SET participant_ref = 'participant_other' \
+         WHERE request_ref = 'data_rights_request_completion'",
+        "UPDATE data_rights_request_state SET scope_ref = 'scope_other' \
+         WHERE request_ref = 'data_rights_request_completion'",
+        "UPDATE data_rights_request_state SET verification_evidence_ref = 'verification_other' \
+         WHERE request_ref = 'data_rights_request_completion'",
+        "UPDATE data_rights_request_state SET verified_at_unix_ms = 1 \
+         WHERE request_ref = 'data_rights_request_completion'",
+    ];
+    let restore = "UPDATE data_rights_request_state SET \
+         participant_ref = 'participant_alpha', \
+         scope_ref = 'scope_alpha', \
+         verification_evidence_ref = 'verification_evidence_alpha', \
+         verified_at_unix_ms = 10100 \
+         WHERE request_ref = 'data_rights_request_completion'";
+    for sql in tampers {
+        client.batch_execute(sql).unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(
+            matches!(
+                persist_data_rights_completion(&mut transaction, &request),
+                Err(DataRightsPersistenceError::ConflictingReplay)
+            ),
+            "expected conflicting replay for {sql}"
+        );
+        transaction.rollback().unwrap();
+        client.batch_execute(restore).unwrap();
+    }
+}
