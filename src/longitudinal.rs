@@ -5,7 +5,7 @@
 //! implement TEPP temporal or multilevel kernels, or rewrite historical
 //! enrollment evidence after withdrawal.
 
-use crate::consent::{ConsentPurpose, ConsentSnapshot};
+use crate::consent::{ConsentDecision, ConsentLedger, ConsentPurpose, ConsentSnapshot};
 use crate::participant::ParticipantRecord;
 use crate::reference::normalized_reference;
 use std::collections::HashSet;
@@ -16,7 +16,10 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum EnrollmentState {
-    /// The participant is enrolled and Gyeot may collect observations.
+    /// The participant is enrolled in the program.
+    ///
+    /// Collection still requires [`LongitudinalEnrollment::authorize_collection`]
+    /// on the current consent ledger and the tenant-owned participant record.
     Enrolled,
     /// Collection is paused while the enrollment and membership evidence remain.
     Paused,
@@ -93,7 +96,7 @@ impl Display for LongitudinalEnrollmentError {
                 "use the consent snapshot that belongs to this participant"
             }
             Self::LongitudinalConsentRequired => {
-                "ask the participant to grant longitudinal observation consent before enrollment"
+                "ask the participant to grant or restore longitudinal observation consent before enrollment or collection"
             }
             Self::InvalidStartTime => {
                 "enroll only after the longitudinal consent grant, with a non-zero server time"
@@ -111,7 +114,7 @@ impl Display for LongitudinalEnrollmentError {
                 "this enrollment is already withdrawn; replay the same withdrawal evidence or start a new enrollment"
             }
             Self::CrossTenantDenied => {
-                "enroll this participant only under the tenant that owns the participant record"
+                "use this participant only under the tenant that owns the participant record"
             }
         })
     }
@@ -205,6 +208,9 @@ impl LongitudinalEnrollment {
     }
 
     /// Return the consent snapshot that authorized enrollment.
+    ///
+    /// This is enroll-time evidence. Collection must re-check the current
+    /// consent ledger rather than reloading this snapshot.
     #[must_use]
     pub fn consent_snapshot_ref(&self) -> &str {
         &self.consent_snapshot_ref
@@ -240,28 +246,36 @@ impl LongitudinalEnrollment {
         self.latest_event_at_unix_ms
     }
 
-    /// Authorize Gyeot collection from the current consent snapshot.
+    /// Authorize Gyeot collection from the current consent ledger.
     ///
-    /// Enrollment state alone is not enough. A later longitudinal revoke, a
-    /// snapshot for another participant, a pause, or a withdrawal fail closed.
+    /// Enrollment state and the enroll-time snapshot are not enough. A later
+    /// longitudinal revoke, a ledger or record for another participant, a
+    /// caller tenant that does not own the enrollment, a pause, or a
+    /// withdrawal fail closed.
     ///
     /// # Errors
     ///
-    /// Returns [`LongitudinalEnrollmentError`] when the snapshot belongs to
-    /// another participant, the enrollment is paused or withdrawn, or
-    /// longitudinal observation consent is missing or revoked.
+    /// Returns [`LongitudinalEnrollmentError`] when the participant record or
+    /// ledger does not match this enrollment, the caller tenant does not own
+    /// the enrollment, the enrollment is paused or withdrawn, or longitudinal
+    /// observation consent is missing or revoked on the current ledger head.
     pub fn authorize_collection(
         &self,
-        snapshot: &ConsentSnapshot,
+        participant: &ParticipantRecord,
+        ledger: &ConsentLedger,
     ) -> Result<(), LongitudinalEnrollmentError> {
-        if snapshot.participant_ref() != self.participant_ref {
+        if participant.participant_ref() != self.participant_ref
+            || ledger.participant_ref() != self.participant_ref
+        {
             return Err(LongitudinalEnrollmentError::ParticipantMismatch);
+        }
+        if participant.tenant_ref() != self.tenant_ref {
+            return Err(LongitudinalEnrollmentError::CrossTenantDenied);
         }
         match self.state {
             EnrollmentState::Withdrawn => Err(LongitudinalEnrollmentError::AlreadyWithdrawn),
             EnrollmentState::Paused => Err(LongitudinalEnrollmentError::InvalidTransition),
-            EnrollmentState::Enrolled => snapshot
-                .active_granted_at(ConsentPurpose::LongitudinalObservation)
+            EnrollmentState::Enrolled => current_longitudinal_grant(ledger)
                 .ok_or(LongitudinalEnrollmentError::LongitudinalConsentRequired)
                 .map(|_| ()),
         }
@@ -380,6 +394,17 @@ impl LongitudinalEnrollment {
         next.latest_event_at_unix_ms = event_at_unix_ms;
         next
     }
+}
+
+fn current_longitudinal_grant(ledger: &ConsentLedger) -> Option<u64> {
+    ledger
+        .events()
+        .iter()
+        .rev()
+        .find(|event| event.purpose() == ConsentPurpose::LongitudinalObservation)
+        .and_then(|event| {
+            (event.decision() == ConsentDecision::Granted).then_some(event.occurred_at_unix_ms())
+        })
 }
 
 fn required_reference(reference: &str) -> Result<&str, LongitudinalEnrollmentError> {

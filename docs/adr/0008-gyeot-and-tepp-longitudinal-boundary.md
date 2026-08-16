@@ -63,12 +63,12 @@ Sync outages leave bounded local queues and clear user state. Clock anomalies ar
 
 ## As-built versus target
 
-Active PR #199 adds the product enrollment primitive in `src/longitudinal.rs`. It is `IMPLEMENTED_ON_ACTIVE_PR`, not protected-main truth, until the exact reviewed head is merged. Do not treat #184 as the landing vehicle; that head authorized collection from enrollment state alone.
+Active successor work to #199 adds the product enrollment primitive in `src/longitudinal.rs`. It is `IMPLEMENTED_ON_ACTIVE_PR`, not protected-main truth, until the exact reviewed head is merged. Do not treat #184 as the landing vehicle; that head authorized collection from enrollment state alone. Do not treat #199 as the landing vehicle; that head still authorized collection from a caller-supplied enroll-time snapshot.
 
 As-built on this PR:
 
 - enrollment requires a tenant-owned `ParticipantRecord` plus an active `ConsentPurpose::LongitudinalObservation` grant and fails closed when that grant is missing or revoked;
-- `authorize_collection` re-checks the current consent snapshot, so a later revoke stops Gyeot collection even if the enrollment is still `Enrolled`;
+- `authorize_collection` re-checks the current consent ledger and the tenant-owned `ParticipantRecord`, so a later revoke or a second clinic fails closed even if the enrollment is still `Enrolled` and the enroll-time snapshot still looks granted;
 - research refusal does not block personal EMA/ESM enrollment;
 - work/home and other membership contexts stay distinct and reject duplicates;
 - pause, resume, and withdraw are fail-closed and do not erase enrollment evidence.

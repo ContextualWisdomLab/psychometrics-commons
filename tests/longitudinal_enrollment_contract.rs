@@ -56,6 +56,13 @@ fn enroll_seoul(snapshot: &ConsentSnapshot) -> LongitudinalEnrollment {
     LongitudinalEnrollment::enroll(seoul_mood_enrollment(), &seoul_participant(), snapshot).unwrap()
 }
 
+fn authorize_seoul(
+    enrollment: &LongitudinalEnrollment,
+    ledger: &ConsentLedger,
+) -> Result<(), LongitudinalEnrollmentError> {
+    enrollment.authorize_collection(&seoul_participant(), ledger)
+}
+
 fn seoul_mood_enrollment() -> LongitudinalEnrollmentInput<'static> {
     LongitudinalEnrollmentInput {
         enrollment_ref: "enrollment_mood_diary_seoul",
@@ -70,7 +77,7 @@ fn seoul_mood_enrollment() -> LongitudinalEnrollmentInput<'static> {
 
 #[test]
 fn seoul_clinic_ema_enrolls_after_longitudinal_consent_with_distinct_memberships() {
-    let snapshot = granted_longitudinal_snapshot();
+    let (ledger, snapshot) = granted_longitudinal_ledger();
     assert_eq!(
         snapshot.active_granted_at(ConsentPurpose::LongitudinalObservation),
         Some(1_724_000_100_000)
@@ -97,7 +104,7 @@ fn seoul_clinic_ema_enrolls_after_longitudinal_consent_with_distinct_memberships
     assert_eq!(enrollment.state(), EnrollmentState::Enrolled);
     assert_eq!(enrollment.enrolled_at_unix_ms(), 1_724_000_200_000);
     assert_eq!(enrollment.latest_event_at_unix_ms(), 1_724_000_200_000);
-    assert_eq!(enrollment.authorize_collection(&snapshot), Ok(()));
+    assert_eq!(authorize_seoul(&enrollment, &ledger), Ok(()));
 }
 
 #[test]
@@ -129,7 +136,7 @@ fn research_refusal_does_not_block_personal_ema_enrollment() {
 
     let enrollment = enroll_seoul(&snapshot);
     assert_eq!(enrollment.state(), EnrollmentState::Enrolled);
-    assert_eq!(enrollment.authorize_collection(&snapshot), Ok(()));
+    assert_eq!(authorize_seoul(&enrollment, &ledger), Ok(()));
 }
 
 #[test]
@@ -279,7 +286,7 @@ fn blank_or_numeric_enrollment_references_fail_closed() {
 
 #[test]
 fn pause_resume_and_withdraw_keep_history_and_reject_illegal_moves() {
-    let snapshot = granted_longitudinal_snapshot();
+    let (ledger, snapshot) = granted_longitudinal_ledger();
     let enrolled = enroll_seoul(&snapshot);
 
     let paused = enrolled
@@ -287,7 +294,7 @@ fn pause_resume_and_withdraw_keep_history_and_reject_illegal_moves() {
         .unwrap();
     assert_eq!(paused.state(), EnrollmentState::Paused);
     assert_eq!(
-        paused.authorize_collection(&snapshot),
+        authorize_seoul(&paused, &ledger),
         Err(LongitudinalEnrollmentError::InvalidTransition)
     );
     assert_eq!(paused.latest_event_ref(), Some("enrollment_event_pause"));
@@ -318,7 +325,7 @@ fn pause_resume_and_withdraw_keep_history_and_reject_illegal_moves() {
         .resume("enrollment_event_resume", 1_724_000_400_000)
         .unwrap();
     assert_eq!(resumed.state(), EnrollmentState::Enrolled);
-    assert_eq!(resumed.authorize_collection(&snapshot), Ok(()));
+    assert_eq!(authorize_seoul(&resumed, &ledger), Ok(()));
     assert_eq!(
         resumed.resume("enrollment_event_resume", 1_724_000_400_000),
         Ok(resumed.clone())
@@ -334,7 +341,7 @@ fn pause_resume_and_withdraw_keep_history_and_reject_illegal_moves() {
         .unwrap();
     assert_eq!(withdrawn.state(), EnrollmentState::Withdrawn);
     assert_eq!(
-        withdrawn.authorize_collection(&snapshot),
+        authorize_seoul(&withdrawn, &ledger),
         Err(LongitudinalEnrollmentError::AlreadyWithdrawn)
     );
     assert_eq!(withdrawn.program_ref(), "program_mood_diary_14_day");
@@ -368,7 +375,7 @@ fn enrollment_error_text_tells_the_operator_the_next_safe_action() {
     );
     assert_eq!(
         LongitudinalEnrollmentError::LongitudinalConsentRequired.to_string(),
-        "ask the participant to grant longitudinal observation consent before enrollment"
+        "ask the participant to grant or restore longitudinal observation consent before enrollment or collection"
     );
     assert_eq!(
         LongitudinalEnrollmentError::InvalidStartTime.to_string(),
@@ -392,7 +399,7 @@ fn enrollment_error_text_tells_the_operator_the_next_safe_action() {
     );
     assert_eq!(
         LongitudinalEnrollmentError::CrossTenantDenied.to_string(),
-        "enroll this participant only under the tenant that owns the participant record"
+        "use this participant only under the tenant that owns the participant record"
     );
 }
 
@@ -426,7 +433,7 @@ fn cross_tenant_or_unbound_participant_record_fails_closed() {
 fn revoke_after_enroll_stops_collection_even_after_resume() {
     let (mut ledger, snapshot) = granted_longitudinal_ledger();
     let enrolled = enroll_seoul(&snapshot);
-    assert_eq!(enrolled.authorize_collection(&snapshot), Ok(()));
+    assert_eq!(authorize_seoul(&enrolled, &ledger), Ok(()));
 
     let paused = enrolled
         .pause("enrollment_event_pause", 1_724_000_300_000)
@@ -441,20 +448,17 @@ fn revoke_after_enroll_stops_collection_even_after_resume() {
             occurred_at_unix_ms: 1_724_000_350_000,
         })
         .unwrap();
-    let revoked = ledger
-        .snapshot_as("consent_snapshot_revoked_after_enroll")
-        .unwrap();
 
     let resumed = paused
         .resume("enrollment_event_resume", 1_724_000_400_000)
         .unwrap();
     assert_eq!(resumed.state(), EnrollmentState::Enrolled);
     assert_eq!(
-        resumed.authorize_collection(&revoked),
+        authorize_seoul(&resumed, &ledger),
         Err(LongitudinalEnrollmentError::LongitudinalConsentRequired)
     );
     assert_eq!(
-        enrolled.authorize_collection(&revoked),
+        authorize_seoul(&enrolled, &ledger),
         Err(LongitudinalEnrollmentError::LongitudinalConsentRequired)
     );
 
@@ -469,11 +473,73 @@ fn revoke_after_enroll_stops_collection_even_after_resume() {
             occurred_at_unix_ms: 1_724_000_100_000,
         })
         .unwrap();
-    let other_snapshot = other_ledger
-        .snapshot_as("consent_snapshot_other_clinic")
-        .unwrap();
     assert_eq!(
-        enrolled.authorize_collection(&other_snapshot),
+        enrolled.authorize_collection(&seoul_participant(), &other_ledger),
         Err(LongitudinalEnrollmentError::ParticipantMismatch)
+    );
+}
+
+#[test]
+fn enroll_time_snapshot_must_not_authorize_after_later_revoke() {
+    let (mut ledger, snapshot) = granted_longitudinal_ledger();
+    let enrolled = enroll_seoul(&snapshot);
+    assert_eq!(
+        snapshot.active_granted_at(ConsentPurpose::LongitudinalObservation),
+        Some(1_724_000_100_000)
+    );
+
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "consent_event_longitudinal_revoke_stale_snapshot",
+            purpose: ConsentPurpose::LongitudinalObservation,
+            decision: ConsentDecision::Revoked,
+            consent_form_version_ref: "ema_mood_form_ko_v1",
+            research_scope_ref: None,
+            occurred_at_unix_ms: 1_724_000_350_000,
+        })
+        .unwrap();
+
+    assert_eq!(
+        snapshot.active_granted_at(ConsentPurpose::LongitudinalObservation),
+        Some(1_724_000_100_000),
+        "the enroll-time snapshot stays Granted; collection must not trust it"
+    );
+    assert_eq!(
+        enrolled.authorize_collection(&seoul_participant(), &ledger),
+        Err(LongitudinalEnrollmentError::LongitudinalConsentRequired)
+    );
+}
+
+#[test]
+fn collection_rejects_other_clinic_tenant_even_when_consent_is_granted() {
+    let (ledger, snapshot) = granted_longitudinal_ledger();
+    let enrolled = enroll_seoul(&snapshot);
+    let other_clinic = ParticipantRecord::new_anonymous(
+        "participant_clinic_seoul",
+        "tenant_other_clinic",
+        1_724_000_000_000,
+    )
+    .unwrap();
+
+    assert_eq!(
+        enrolled.authorize_collection(&other_clinic, &ledger),
+        Err(LongitudinalEnrollmentError::CrossTenantDenied)
+    );
+
+    let other_person = ParticipantRecord::new_anonymous(
+        "participant_other_clinic",
+        "tenant_clinic_seoul",
+        1_724_000_000_000,
+    )
+    .unwrap();
+    assert_eq!(
+        enrolled.authorize_collection(&other_person, &ledger),
+        Err(LongitudinalEnrollmentError::ParticipantMismatch)
+    );
+
+    let empty_ledger = ConsentLedger::new("participant_clinic_seoul").unwrap();
+    assert_eq!(
+        authorize_seoul(&enrolled, &empty_ledger),
+        Err(LongitudinalEnrollmentError::LongitudinalConsentRequired)
     );
 }
