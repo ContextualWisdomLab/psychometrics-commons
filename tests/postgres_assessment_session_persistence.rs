@@ -9,7 +9,8 @@ use psychometrics_commons_runtime::instrument::{
 };
 use psychometrics_commons_runtime::postgres_assessment_session::{
     apply_assessment_session_migration, load_assessment_session, persist_assessment_session,
-    AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
+    start_created_assessment_session, AssessmentSessionPersistenceDisposition,
+    AssessmentSessionPersistenceError, AssessmentSessionStartError,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
@@ -357,6 +358,13 @@ fn created_session_load_restores_identity_and_rejects_later_states() {
         Err(AssessmentSessionPersistenceError::InvalidReference)
     ));
     transaction.rollback().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_assessment_session(&mut transaction, " "),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
 }
 
 #[test]
@@ -560,6 +568,102 @@ fn isolation_query_failure_is_a_database_failure() {
     assert_eq!(
         error.to_string(),
         "PostgreSQL assessment-session persistence failed"
+    );
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn start_persists_published_release_and_rejects_unpublished_before_insert() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    let mut transaction = client.transaction().unwrap();
+    let (started, inserted) = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_published_persist",
+        PARTICIPANT_REF,
+        &published,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    assert_eq!(inserted, AssessmentSessionPersistenceDisposition::Inserted);
+    let (_, duplicate) = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_published_persist",
+        PARTICIPANT_REF,
+        &published,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    assert_eq!(
+        duplicate,
+        AssessmentSessionPersistenceDisposition::Duplicate
+    );
+    let loaded = load_assessment_session(&mut transaction, "ses_start_published_persist")
+        .unwrap()
+        .expect("started session must load");
+    assert_eq!(loaded.session_ref(), started.session_ref());
+    assert_eq!(loaded.participant_ref(), started.participant_ref());
+    assert_eq!(loaded.state(), SessionState::Created);
+    transaction.commit().unwrap();
+
+    let mut suspended = published;
+    suspended
+        .apply_command(
+            "publication_suspend_start_persist",
+            PublicationCommand::Suspend,
+            20_100,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_suspended_must_not_insert",
+            PARTICIPANT_REF,
+            &suspended,
+            "ko-KR",
+            21_000,
+        ),
+        Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
+    ));
+    transaction.rollback().unwrap();
+    let count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session WHERE session_ref = $1",
+            &[&"ses_start_suspended_must_not_insert"],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn start_missing_table_is_a_persistence_failure() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    let mut transaction = client.transaction().unwrap();
+    let error = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_missing_table",
+        PARTICIPANT_REF,
+        &published,
+        "ko-KR",
+        20_000,
+    )
+    .expect_err("missing table must fail closed at persist");
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        AssessmentSessionStartError::Persistence(AssessmentSessionPersistenceError::Database(_))
+    ));
+    assert_eq!(
+        error.to_string(),
+        "session start could not persist the created session; retry the exact start or repair the store"
     );
     assert!(std::error::Error::source(&error).is_some());
 }

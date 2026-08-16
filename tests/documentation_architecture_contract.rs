@@ -314,8 +314,9 @@ fn as_built_session_table_names_the_active_persist_and_load_pr() {
     );
     assert!(
         as_built.contains("PR #121 `migrations/0014_assessment_session.sql`")
-            && as_built.contains("not protected-main truth"),
-        "as-built session section must name the persist-and-load PR without promoting it to Implemented"
+            && as_built.contains("not protected-main truth")
+            && as_built.contains("start_created_assessment_session"),
+        "as-built session section must name the persist-and-load PR and the start composition without promoting it to Implemented"
     );
 }
 
