@@ -328,14 +328,16 @@ fn as_built_and_traceability_name_the_publication_persist_lock_pr() {
     let as_built = read_required(&repository_root().join("docs/architecture/AS_BUILT_SCHEMA.md"));
     assert!(
         as_built.contains("**Active PR** #196")
+            && as_built.contains("**Active PR** #227")
             && as_built.contains("FOR UPDATE")
             && as_built.contains("load_published_instrument_release")
             && as_built.contains("not protected-main truth"),
-        "as-built instrument-release section must name persist-classification lock Active PR #196 and the start-load lock without promoting them to Implemented"
+        "as-built instrument-release section must name persist-classification lock Active PR #196 and start-load lock Active PR #227 without promoting them to Implemented"
     );
     let traceability = read_required(&repository_root().join("docs/TRACEABILITY.md"));
     assert!(
         traceability.contains("**Active PR** #196")
+            && traceability.contains("**Active PR** #227")
             && traceability.contains("FOR UPDATE")
             && !traceability
                 .split("### Active implementation work that is not protected-main truth")
@@ -343,7 +345,7 @@ fn as_built_and_traceability_name_the_publication_persist_lock_pr() {
                 .and_then(|section| section.split("\n## ").next())
                 .expect("traceability must define the active implementation-work section")
                 .contains("**Implemented**"),
-        "traceability must name persist-classification lock Active PR #196 without calling it Implemented"
+        "traceability must name persist-classification lock Active PR #196 and start-load lock Active PR #227 without calling them Implemented"
     );
 }
 
