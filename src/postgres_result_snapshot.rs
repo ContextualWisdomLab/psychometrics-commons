@@ -152,7 +152,8 @@ pub fn persist_result_snapshot(
 /// After restart, call this with the session the participant is viewing. It
 /// returns the unique non-superseded snapshot so a worker can serve the stored
 /// score without calling the scoring engine. No header returns `None`. Two
-/// current tips for the same session fail closed.
+/// current tips, or stored rows whose supersession graph leaves no tip (a
+/// cycle), fail closed so a worker cannot treat corruption as "score now".
 ///
 /// # Errors
 ///
@@ -175,13 +176,21 @@ pub fn load_current_result_snapshot_for_session(
            )",
         &[&session_ref],
     )?;
-    match tips.len() {
-        0 => Ok(None),
-        1 => {
+    let session_has_snapshots = if tips.is_empty() {
+        let row = transaction.query_one(
+            "SELECT EXISTS(SELECT 1 FROM result_snapshot WHERE session_ref = $1)",
+            &[&session_ref],
+        )?;
+        row.get(0)
+    } else {
+        true
+    };
+    match classify_current_session_tips(tips.len(), session_has_snapshots)? {
+        CurrentSessionTipPlan::Absent => Ok(None),
+        CurrentSessionTipPlan::LoadUniqueTip => {
             let snapshot_ref: String = tips[0].get(0);
             load_result_snapshot(transaction, &snapshot_ref)
         }
-        _ => Err(ResultSnapshotPersistenceError::InconsistentEvidence),
     }
 }
 
@@ -489,6 +498,23 @@ fn observation_order(index: usize) -> Result<i32, ResultSnapshotPersistenceError
     i32::try_from(index).map_err(|_| ResultSnapshotPersistenceError::InvalidTimestamp)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CurrentSessionTipPlan {
+    Absent,
+    LoadUniqueTip,
+}
+
+fn classify_current_session_tips(
+    tip_count: usize,
+    session_has_snapshots: bool,
+) -> Result<CurrentSessionTipPlan, ResultSnapshotPersistenceError> {
+    match (tip_count, session_has_snapshots) {
+        (0, false) => Ok(CurrentSessionTipPlan::Absent),
+        (1, true) => Ok(CurrentSessionTipPlan::LoadUniqueTip),
+        _ => Err(ResultSnapshotPersistenceError::InconsistentEvidence),
+    }
+}
+
 fn require_contiguous_observation_order(
     expected_index: usize,
     stored_order: i32,
@@ -517,10 +543,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        durable_evidence_error, observation_disposition_name, observation_from_stored,
-        observation_order, postgres_timestamp, require_contiguous_observation_order,
-        required_reference, stored_schema_version, stored_timestamp,
-        ResultSnapshotPersistenceError,
+        classify_current_session_tips, durable_evidence_error, observation_disposition_name,
+        observation_from_stored, observation_order, postgres_timestamp,
+        require_contiguous_observation_order, required_reference, stored_schema_version,
+        stored_timestamp, CurrentSessionTipPlan, ResultSnapshotPersistenceError,
     };
     use crate::result::ResultSnapshotError;
     use crate::scoring::ObservationDisposition;
@@ -687,6 +713,30 @@ mod reference_guard_tests {
         assert!(matches!(
             durable_evidence_error(ResultSnapshotError::ScoringRequestMismatch),
             ResultSnapshotPersistenceError::InconsistentEvidence
+        ));
+    }
+
+    #[test]
+    fn session_tip_query_fails_closed_when_every_snapshot_is_superseded() {
+        assert_eq!(
+            classify_current_session_tips(0, false).unwrap(),
+            CurrentSessionTipPlan::Absent
+        );
+        assert!(matches!(
+            classify_current_session_tips(0, true),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert_eq!(
+            classify_current_session_tips(1, true).unwrap(),
+            CurrentSessionTipPlan::LoadUniqueTip
+        );
+        assert!(matches!(
+            classify_current_session_tips(1, false),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            classify_current_session_tips(2, true),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
         ));
     }
 }

@@ -784,6 +784,44 @@ fn two_current_session_results_fail_closed() {
 }
 
 #[test]
+fn cyclic_session_supersession_fails_closed_instead_of_looking_absent() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_cycle",
+            "result_snapshot_cycle_alpha",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_cycle_beta"),
+            vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+        ),
+    );
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_cycle",
+            "result_snapshot_cycle_beta",
+            OTHER_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_cycle_alpha"),
+            vec![ScoreObservation::scored("construct_big_five", 0.31, Some(0.06)).unwrap()],
+        ),
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_cycle"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn current_session_load_requires_read_committed_isolation() {
     let _guard = result_snapshot_test_guard();
     let mut client = test_client();
