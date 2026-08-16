@@ -2,26 +2,8 @@ name: SPDX SBOM evidence
 
 on:
   pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "src/**"
-      - "migrations/**"
-      - "scripts/validate_spdx_sbom.py"
-      - "tests/test_sbom_evidence.py"
-      - "tests/test_validate_spdx_sbom.py"
-      - ".github/workflows/sbom-evidence.yml"
   push:
     branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "src/**"
-      - "migrations/**"
-      - "scripts/validate_spdx_sbom.py"
-      - "tests/test_sbom_evidence.py"
-      - "tests/test_validate_spdx_sbom.py"
-      - ".github/workflows/sbom-evidence.yml"
   workflow_dispatch:
 
 concurrency:
