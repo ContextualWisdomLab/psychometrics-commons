@@ -9,6 +9,7 @@ The architecture is intentionally described through multiple stakeholder viewpoi
 - [`docs/architecture/C4.md`](docs/architecture/C4.md) — stakeholder concerns, system context, target containers, and runtime components;
 - [`docs/architecture/UML.md`](docs/architecture/UML.md) — domain class model, lifecycle state machines, and interaction sequences;
 - [`docs/architecture/ERD.md`](docs/architecture/ERD.md) — product-owned logical data model, cardinalities, immutable aggregates, restricted linkage, and persistence invariants;
+- [`docs/architecture/AS_BUILT_SCHEMA.md`](docs/architecture/AS_BUILT_SCHEMA.md) — physical PostgreSQL maturity map for migrations and adapters on the named protected-main baseline;
 - [`docs/architecture/SECURITY_AND_DATA.md`](docs/architecture/SECURITY_AND_DATA.md) — trust boundaries, data classification, identity/privacy/AI controls, and threats;
 - [`docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) — deployment profiles, capability degradation, observability, backup/restore, migration, and GA evidence;
 - [`docs/TRACEABILITY.md`](docs/TRACEABILITY.md) — intended requirements and architecture mapped to a named protected-main implementation baseline;

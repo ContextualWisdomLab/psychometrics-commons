@@ -36,10 +36,11 @@ It does **not** duplicate psychometric numerical kernels, identity credentials, 
 
 ### Architecture viewpoints and evidence
 
-- [Architecture View Index](docs/architecture/README.md) — context/container/component, UML, ERD, security/data, and deployment/operations views.
+- [Architecture View Index](docs/architecture/README.md) — context/container/component, UML, ERD, as-built schema, security/data, and deployment/operations views.
 - [C4-style Context / Container / Component Views](docs/architecture/C4.md) — stakeholders, external systems, target containers, components, and ownership.
 - [UML-Aligned Models](docs/architecture/UML.md) — domain class model, lifecycle state machines, and key interaction sequences.
 - [Logical ERD](docs/architecture/ERD.md) — product-owned entities, cardinalities, immutable boundaries, linkage restrictions, and persistence invariants.
+- [As-Built Schema Map](docs/architecture/AS_BUILT_SCHEMA.md) — which logical entities have executable PostgreSQL migrations and adapters on the named protected-main baseline.
 - [Security, Privacy, and Data Boundaries](docs/architecture/SECURITY_AND_DATA.md) — trust boundaries, classification, threats, identity, research, and AI data policies.
 - [Deployment, Operations, and Recovery](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) — deployment profiles, degraded modes, observability, backup/restore, migration, and GA recovery evidence.
 - [Requirements and Architecture Traceability](docs/TRACEABILITY.md) — PRD/TRD/ADR requirements mapped to current protected-main implementation status and future evidence.

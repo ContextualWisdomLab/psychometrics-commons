@@ -52,6 +52,7 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/architecture/C4.md",
         "docs/architecture/UML.md",
         "docs/architecture/ERD.md",
+        "docs/architecture/AS_BUILT_SCHEMA.md",
         "docs/architecture/SECURITY_AND_DATA.md",
         "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
         "docs/adr/README.md",
@@ -123,6 +124,7 @@ fn repository_entry_points_expose_traceability_and_architecture_views() {
         "docs/architecture/C4.md",
         "docs/architecture/UML.md",
         "docs/architecture/ERD.md",
+        "docs/architecture/AS_BUILT_SCHEMA.md",
         "docs/architecture/SECURITY_AND_DATA.md",
         "docs/architecture/DEPLOYMENT_AND_OPERATIONS.md",
     ] {
@@ -239,6 +241,18 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         "src/participant.rs",
         "src/authorization.rs",
         "src/integration.rs",
+        "src/account_link.rs",
+        "src/anonymous_session.rs",
+        "src/deterministic_narrative.rs",
+        "src/postgres_item_delivery.rs",
+        "src/postgres_response_snapshot.rs",
+        "src/postgres_result_snapshot.rs",
+        "src/postgres_data_rights_processing.rs",
+        "migrations/0004_item_delivery_evidence.sql",
+        "migrations/0010_response_snapshot.sql",
+        "migrations/0007_result_snapshot.sql",
+        "migrations/0018_data_rights_processing_start.sql",
+        "migrations/0019_inbox_claim_expiry_guard.sql",
     ] {
         assert!(
             traceability.contains(protected_main_module),
@@ -258,6 +272,10 @@ fn traceability_distinguishes_current_implementation_from_targets() {
     assert!(
         pr_entry.contains("not protected-main truth") && !pr_entry.contains("**Implemented**"),
         "active work must remain explicitly segregated from protected-main truth"
+    );
+    assert!(
+        !pr_entry.contains("this branch") && !pr_entry.contains("0022_assessment_session"),
+        "shipped-truth rebaseline must not bind Active PR session persist to this branch"
     );
 
     let marker = "- Evaluated protected-main implementation baseline: `";
@@ -280,6 +298,34 @@ fn traceability_distinguishes_current_implementation_from_targets() {
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
         "evaluated protected-main baseline must be lowercase hexadecimal"
+    );
+}
+
+#[test]
+fn as_built_schema_records_shipped_persist_without_session_table() {
+    let as_built = read_required(&repository_root().join("docs/architecture/AS_BUILT_SCHEMA.md"));
+
+    assert!(
+        !as_built.contains("Active PR #58"),
+        "inbox consumption is protected-main evidence and must not remain Active PR #58"
+    );
+    for shipped_object in [
+        "item_delivery_event",
+        "response_snapshot",
+        "result_snapshot",
+        "consent_ledger",
+        "scoring_request",
+        "data_rights_request_state",
+    ] {
+        assert!(
+            as_built.contains(shipped_object),
+            "as-built schema must name shipped persist object {shipped_object}"
+        );
+    }
+    assert!(
+        !as_built.contains("0022_assessment_session")
+            && !as_built.contains("| `assessment_session` |"),
+        "as-built schema rebaseline must not add a competing assessment_session table"
     );
 }
 

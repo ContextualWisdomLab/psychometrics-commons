@@ -1,8 +1,8 @@
 # Documentation Completeness Assessment
 
 - Status: Architecture baseline assessment
-- Date: 2026-08-10
-- Evaluated protected-main baseline: `748876c12f443cc3325448927271199fd98db733`
+- Date: 2026-08-16
+- Evaluated protected-main baseline: `a7637351be8f0f90c12651d3bcafd959bc52ac81`
 - Scope: product, architecture, psychometric, longitudinal, research, AI, privacy, integration, quality, risk, compliance-readiness, operations, and durable product decisions established throughout the Psychometrics Commons design discussion
 
 ## Executive assessment
@@ -11,7 +11,7 @@ The repository is **sufficient as an implementation architecture baseline**. It 
 
 The material defect was not absence of PRD/TRD/Architecture. Those artifacts are strong. The defect was **traceability and view drift after protected-main implementation advanced**: `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` were merged while `docs/TRACEABILITY.md` still described those responsibilities as Target; the logical ERD did not yet model item-delivery evidence, append-only account-link history, or the Commons-owned longitudinal orchestration records; and UML did not make the Measurement Workbench publication-evidence flow or Gyeot→Commons→TEPP sequence explicit.
 
-This reconciliation closes those architecture-definition gaps without promoting active PR work or target diagrams to shipped truth. PostgreSQL evidence persistence on PR #24 remains **Active PR**, not protected-main implementation. OpenAPI/AsyncAPI, physical DDL beyond actual migrations, deployed topology, measured SLO/RPO/RTO, certification, and instrument-release evidence remain implementation/evidence-gated and must not be fabricated.
+This reconciliation closes those architecture-definition gaps without promoting active PR work or target diagrams to shipped truth. PostgreSQL integration, scoring-job, consent, instrument-release, item-delivery, response-snapshot, result-snapshot, scoring-request, inbox-consumption, data-rights verification/processing-start, and inbox claim-expiry evidence are protected-main implementation. Session, identity-link history, response-event, research-release, data-rights completion, and HTTP transports remain Active PR or Target. OpenAPI/AsyncAPI, deployed topology, measured SLO/RPO/RTO, certification, and instrument-release evidence remain implementation/evidence-gated and must not be fabricated.
 
 ## Current artifact sufficiency
 
@@ -29,7 +29,7 @@ This reconciliation closes those architecture-definition gaps without promoting 
 | Research governance | **Sufficient as design baseline** | Purpose-specific contribution, pseudonymization/linkage boundary, privacy/scientific review and immutable release semantics are present. End-to-end release evidence remains Target. |
 | Product experience | **Sufficient as design baseline** | Quick/Deep/Reflect/Longitudinal, continuous-score interpretation, narrative UX, research opt-in, accessibility/i18n and Workbench surfaces are described. |
 | Quality / risk / compliance readiness | **Sufficient as assurance baseline** | Evidence scenarios and risk state are explicit; readiness is not certification. |
-| Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `748876…`, marks newly merged domain modules Implemented/Partial, and isolates PR #24 as Active PR. Must be updated after every material merge. |
+| Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `a7637351`, marks shipped persist/narrative/account-link modules Implemented/Partial, and isolates remaining session/HTTP/research slices as Active PR. Must be updated after every material merge. |
 | Roadmap / agent guidance / changelog | **Sufficient for continued delivery** | Must remain code-current; documentation completion is not a terminal condition for the execution loop. |
 | Machine-readable OpenAPI / AsyncAPI | **Not yet applicable as as-built evidence** | Add and validate with the first implemented HTTP/event transport. Do not publish aspirational operations as deployed. |
 | Physical schema / as-built topology | **Partial / implementation-gated** | Logical ERD is authoritative target semantics. Actual migrations/topology/rollback/restore evidence must be compared to it as those artifacts land. |
@@ -62,16 +62,18 @@ Enterprise issue prioritization/causal expected-intervention-value logic is not 
 
 ## Protected-main implementation reconciliation
 
-At exact protected-main `748876c12f443cc3325448927271199fd98db733` the domain surface includes, among other existing modules:
+At exact protected-main `a7637351be8f0f90c12651d3bcafd959bc52ac81` the domain and persistence surface includes, among other existing modules:
 
-- `src/item_delivery.rs` — sequence-aware item delivery evidence;
-- `src/participant.rs` — stable participant identity and first optional Keyverse link primitive;
+- `src/item_delivery.rs` plus `src/postgres_item_delivery.rs` — sequence-aware item delivery evidence;
+- `src/participant.rs` and `src/account_link.rs` — stable participant identity, first-link primitive, and dual-proof account-link authorization;
+- `src/anonymous_session.rs` — tenant/participant/session authorization context after proof validation;
+- `src/deterministic_narrative.rs` — AI-independent approved Personality Style fallback rendering;
 - `src/authorization.rs` — fail-closed tenant/task authorization domain gates;
-- `src/integration.rs` — outbox/inbox/retry/quarantine domain contracts.
+- `src/integration.rs` plus outbox/inbox/consumption adapters — versioned integration evidence.
 
-Those modules are now represented as protected-main evidence in `docs/TRACEABILITY.md`. Their HTTP/persistence/live-adapter layers are not inferred from the existence of the domain structs.
+Those modules are now represented as protected-main evidence in `docs/TRACEABILITY.md`. HTTP transports and remaining aggregate persistence are not inferred from the existence of the domain structs.
 
-PR #24 (`feat/postgres-integration-persistence`) remains an active implementation lane. Any PostgreSQL evidence adapter or migration that exists only on that PR remains `IMPLEMENTED_ON_ACTIVE_PR` until the exact reviewed/check-clean head is merged and protected main is refetched.
+Session creation persistence, identity-link history, response-event ledgers, research-release approval, data-rights completion, and operator-health HTTP remain Active PR or Target until an unchanged reviewed/check-clean head is integrated.
 
 ## Remaining evidence before GA
 
