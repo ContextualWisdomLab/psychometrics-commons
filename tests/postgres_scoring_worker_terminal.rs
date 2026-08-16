@@ -12,12 +12,13 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     ScoringJobCompletionDisposition, ScoringJobFailureDisposition,
 };
 use psychometrics_commons_runtime::postgres_scoring_worker::{
-    commit_scoring_worker_outcome, ScoringWorkerCommitError, ScoringWorkerOutcome,
-    ScoringWorkerPersistence,
+    commit_scoring_worker_outcome, run_scoring_worker_attempt, ScoringWorkerCommitError,
+    ScoringWorkerOutcome, ScoringWorkerPersistence,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use psychometrics_commons_runtime::scoring_worker::{
-    scoring_terminal_event_ref, ScoringTerminalIdentity, ScoringWorkerError,
+    scoring_terminal_event_ref, ScoringTerminalIdentity, ScoringWorkerEngine,
+    ScoringWorkerEngineOutcome, ScoringWorkerEnvelope, ScoringWorkerError,
 };
 use std::error::Error;
 use std::sync::{Mutex, MutexGuard};
@@ -344,6 +345,151 @@ fn minted_event_ref_cannot_add_a_second_outbox_row_after_accept() {
         .unwrap()
         .get(0);
     assert_eq!(minted_count, 0);
+}
+
+struct ScriptedScoringEngine {
+    outcome: ScoringWorkerEngineOutcome,
+}
+
+impl ScoringWorkerEngine for ScriptedScoringEngine {
+    fn score_claimed_job(
+        &self,
+        _scoring_job_ref: &str,
+        _scoring_request_ref: &str,
+    ) -> Result<ScoringWorkerEngineOutcome, ScoringWorkerError> {
+        Ok(self.outcome.clone())
+    }
+}
+
+fn worker_envelope(event_type: &'static str) -> ScoringWorkerEnvelope<'static> {
+    ScoringWorkerEnvelope {
+        event_type,
+        schema_version: "v1",
+        source: "psychometrics_commons",
+        tenant_ref: "tenant_worker_terminal",
+        occurred_at_unix_ms: 20_000,
+        correlation_ref: "correlation_worker_terminal",
+        causation_ref: Some("scoring_request_worker_terminal"),
+        payload_digest: DIGEST,
+    }
+}
+
+#[test]
+fn worker_attempt_commits_engine_completion_with_the_stable_event_ref() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_completed";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_completed",
+    );
+    let engine = ScriptedScoringEngine {
+        outcome: ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_completed".to_owned(),
+        },
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    let inserted = run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_completed",
+        &engine,
+        worker_envelope("scoring.result.completed"),
+        3,
+    )
+    .unwrap();
+    assert!(matches!(
+        inserted,
+        ScoringWorkerPersistence::Completed(persistence)
+            if persistence.completion() == ScoringJobCompletionDisposition::Completed
+                && persistence.outbox() == PersistenceDisposition::Inserted
+    ));
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let duplicate = run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_completed",
+        &engine,
+        worker_envelope("scoring.result.completed"),
+        3,
+    )
+    .unwrap();
+    assert!(matches!(
+        duplicate,
+        ScoringWorkerPersistence::Completed(persistence)
+            if persistence.completion() == ScoringJobCompletionDisposition::Duplicate
+                && persistence.outbox() == PersistenceDisposition::Duplicate
+    ));
+    transaction.commit().unwrap();
+
+    let event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_completed"),
+    )
+    .unwrap();
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "completed");
+    assert_eq!(
+        result_ref.as_deref(),
+        Some("result_worker_attempt_completed")
+    );
+    assert_eq!(cause, None);
+    assert_eq!(outbox_count(&mut client, &event_ref), 1);
+}
+
+#[test]
+fn worker_attempt_commits_engine_failure_with_the_stable_event_ref() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_failed";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_failed",
+    );
+    let engine = ScriptedScoringEngine {
+        outcome: ScoringWorkerEngineOutcome::Failed {
+            cause_code: "invalid_scientific_evidence".to_owned(),
+        },
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    let inserted = run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_failed",
+        &engine,
+        worker_envelope("scoring.result.failed"),
+        3,
+    )
+    .unwrap();
+    assert!(matches!(
+        inserted,
+        ScoringWorkerPersistence::Failed(persistence)
+            if persistence.failure() == ScoringJobFailureDisposition::Quarantined
+                && persistence.outbox() == PersistenceDisposition::Inserted
+    ));
+    transaction.commit().unwrap();
+
+    let event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Cause("invalid_scientific_evidence"),
+    )
+    .unwrap();
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "quarantined");
+    assert_eq!(result_ref, None);
+    assert_eq!(cause.as_deref(), Some("invalid_scientific_evidence"));
+    assert_eq!(outbox_count(&mut client, &event_ref), 1);
 }
 
 #[test]

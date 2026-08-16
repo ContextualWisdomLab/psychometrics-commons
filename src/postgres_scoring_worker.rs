@@ -15,7 +15,9 @@ use crate::postgres_scoring_failure::{
     ScoringFailureOutboxPersistence,
 };
 use crate::scoring_worker::{
-    require_stable_terminal_event, ScoringTerminalIdentity, ScoringWorkerError,
+    plan_scoring_worker_attempt, require_stable_terminal_event, ScoringTerminalIdentity,
+    ScoringWorkerAttempt, ScoringWorkerEngine, ScoringWorkerEngineOutcome, ScoringWorkerEnvelope,
+    ScoringWorkerError,
 };
 use postgres::Transaction;
 use std::error::Error;
@@ -141,4 +143,64 @@ pub fn commit_scoring_worker_outcome(
             .map_err(ScoringWorkerCommitError::Failure)
         }
     }
+}
+
+/// Run one fenced scoring-worker attempt through a test-double or later live engine.
+///
+/// The engine is asked first. The planner then binds the stable job-plus-result or
+/// job-plus-cause `event_ref` so this function cannot mint a second terminal identity
+/// after an accepted write. Event type, tenant, schema, correlation, causation, and
+/// payload digest stay on the caller contract. Live `fast-mlsirm` execution remains a
+/// later adapter behind [`ScoringWorkerEngine`].
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerCommitError::Identity`] when planning fails,
+/// [`ScoringWorkerCommitError::Completion`] when successful completion fails, or
+/// [`ScoringWorkerCommitError::Failure`] when permanent failure fails.
+pub fn run_scoring_worker_attempt(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    fencing_token: u64,
+    scoring_request_ref: &str,
+    engine: &impl ScoringWorkerEngine,
+    envelope: ScoringWorkerEnvelope<'_>,
+    outbox_max_attempts: usize,
+) -> Result<ScoringWorkerPersistence, ScoringWorkerCommitError> {
+    let attempt =
+        plan_scoring_worker_attempt(scoring_job_ref, scoring_request_ref, engine, envelope)
+            .map_err(ScoringWorkerCommitError::Identity)?;
+    commit_planned_scoring_worker_attempt(
+        transaction,
+        scoring_job_ref,
+        fencing_token,
+        &attempt,
+        outbox_max_attempts,
+    )
+}
+
+fn commit_planned_scoring_worker_attempt(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    fencing_token: u64,
+    attempt: &ScoringWorkerAttempt,
+    outbox_max_attempts: usize,
+) -> Result<ScoringWorkerPersistence, ScoringWorkerCommitError> {
+    let outcome = match attempt.outcome() {
+        ScoringWorkerEngineOutcome::Completed { result_ref } => {
+            ScoringWorkerOutcome::Completed { result_ref }
+        }
+        ScoringWorkerEngineOutcome::Failed { cause_code } => {
+            ScoringWorkerOutcome::Failed { cause_code }
+        }
+    };
+    commit_scoring_worker_outcome(
+        transaction,
+        scoring_job_ref,
+        fencing_token,
+        outcome,
+        attempt.event().occurred_at_unix_ms(),
+        attempt.event(),
+        outbox_max_attempts,
+    )
 }

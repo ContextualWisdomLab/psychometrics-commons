@@ -2,9 +2,11 @@
 
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::scoring_worker::{
-    require_stable_terminal_event, scoring_terminal_event_ref, ScoringTerminalIdentity,
-    ScoringWorkerError,
+    plan_scoring_worker_attempt, require_stable_terminal_event, scoring_terminal_event_ref,
+    ScoringTerminalIdentity, ScoringWorkerEngine, ScoringWorkerEngineOutcome,
+    ScoringWorkerEnvelope, ScoringWorkerError,
 };
+use std::cell::Cell;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -120,4 +122,164 @@ fn scoring_worker_errors_explain_the_next_safe_action() {
         ScoringWorkerError::UnstableEventRef.to_string(),
         "scoring worker must reuse the stable job and outcome event identity"
     );
+    assert_eq!(
+        ScoringWorkerError::InvalidEnvelope.to_string(),
+        "scoring worker envelope fields must be valid integration evidence"
+    );
+}
+
+struct ScriptedScoringEngine {
+    expected_job: &'static str,
+    expected_request: &'static str,
+    outcome: ScoringWorkerEngineOutcome,
+    calls: Cell<usize>,
+}
+
+impl ScoringWorkerEngine for ScriptedScoringEngine {
+    fn score_claimed_job(
+        &self,
+        scoring_job_ref: &str,
+        scoring_request_ref: &str,
+    ) -> Result<ScoringWorkerEngineOutcome, ScoringWorkerError> {
+        assert_eq!(scoring_job_ref, self.expected_job);
+        assert_eq!(scoring_request_ref, self.expected_request);
+        self.calls.set(self.calls.get() + 1);
+        Ok(self.outcome.clone())
+    }
+}
+
+fn worker_envelope(event_type: &str) -> ScoringWorkerEnvelope<'_> {
+    ScoringWorkerEnvelope {
+        event_type,
+        schema_version: "v1",
+        source: "psychometrics_commons",
+        tenant_ref: "tenant_scoring_worker",
+        occurred_at_unix_ms: 20_000,
+        correlation_ref: "correlation_scoring_worker",
+        causation_ref: Some("scoring_request_worker"),
+        payload_digest: DIGEST,
+    }
+}
+
+#[test]
+fn planner_binds_the_stable_result_event_and_ignores_a_minted_identity() {
+    let engine = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "scoring_request_alpha",
+        outcome: ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_alpha".to_owned(),
+        },
+        calls: Cell::new(0),
+    };
+
+    let attempt = plan_scoring_worker_attempt(
+        "scoring_job_alpha",
+        "scoring_request_alpha",
+        &engine,
+        worker_envelope("scoring.result.completed"),
+    )
+    .unwrap();
+
+    assert_eq!(engine.calls.get(), 1);
+    assert_eq!(
+        attempt.event().event_ref(),
+        "scoring_terminal:result:scoring_job_alpha:result_alpha"
+    );
+    assert_eq!(attempt.event().subject_ref(), "scoring_job_alpha");
+    assert_eq!(attempt.event().event_type(), "scoring.result.completed");
+    assert_eq!(
+        attempt.outcome(),
+        &ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_alpha".to_owned(),
+        }
+    );
+    require_stable_terminal_event(
+        "scoring_job_alpha",
+        ScoringTerminalIdentity::Result("result_alpha"),
+        attempt.event(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn planner_binds_a_permanent_scientific_failure_to_the_stable_cause_identity() {
+    let engine = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "scoring_request_unknown",
+        outcome: ScoringWorkerEngineOutcome::Failed {
+            cause_code: "invalid_scientific_evidence".to_owned(),
+        },
+        calls: Cell::new(0),
+    };
+
+    let attempt = plan_scoring_worker_attempt(
+        "scoring_job_alpha",
+        "scoring_request_unknown",
+        &engine,
+        worker_envelope("scoring.result.failed"),
+    )
+    .unwrap();
+
+    assert_eq!(engine.calls.get(), 1);
+    assert_eq!(
+        attempt.event().event_ref(),
+        "scoring_terminal:cause:scoring_job_alpha:invalid_scientific_evidence"
+    );
+    assert_eq!(attempt.event().event_type(), "scoring.result.failed");
+    require_stable_terminal_event(
+        "scoring_job_alpha",
+        ScoringTerminalIdentity::Cause("invalid_scientific_evidence"),
+        attempt.event(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn planner_rejects_blank_request_identity_before_calling_the_engine() {
+    let engine = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "unused",
+        outcome: ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_alpha".to_owned(),
+        },
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "scoring_job_alpha",
+            " ",
+            &engine,
+            worker_envelope("scoring.result.completed"),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+    assert_eq!(engine.calls.get(), 0);
+}
+
+#[test]
+fn planner_rejects_an_invalid_caller_envelope_after_the_engine_returns() {
+    let engine = ScriptedScoringEngine {
+        expected_job: "scoring_job_alpha",
+        expected_request: "scoring_request_alpha",
+        outcome: ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_alpha".to_owned(),
+        },
+        calls: Cell::new(0),
+    };
+    let mut envelope = worker_envelope("scoring.result.completed");
+    envelope.payload_digest = "not-a-digest";
+
+    assert_eq!(
+        plan_scoring_worker_attempt(
+            "scoring_job_alpha",
+            "scoring_request_alpha",
+            &engine,
+            envelope,
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidEnvelope
+    );
+    assert_eq!(engine.calls.get(), 1);
 }
