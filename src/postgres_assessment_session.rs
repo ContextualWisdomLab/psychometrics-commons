@@ -69,6 +69,8 @@ pub enum AssessmentSessionPersistenceError {
     MissingCreatedIdentity,
     /// A command sequence was reused by a different command identity.
     SequenceConflict,
+    /// A first insert was attempted after the stored release no longer accepts new sessions.
+    InstrumentReleaseUnavailable,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -102,6 +104,9 @@ impl Display for AssessmentSessionPersistenceError {
             }
             Self::SequenceConflict => {
                 "session command sequence was reused by a different command identity"
+            }
+            Self::InstrumentReleaseUnavailable => {
+                "publish the exact instrument release before persisting a new created session"
             }
             Self::Database(_) => "PostgreSQL assessment-session persistence failed",
         })
@@ -501,15 +506,19 @@ fn require_locked_published_release(
 ///
 /// Exact replay of the same session, participant, release, `instrument_version_ref`,
 /// digest, locale, state, and creation time is idempotent. Rebinding any stored
-/// field fails closed. [`AssessmentSession::new`] validates and normalizes session
-/// and participant references. This function stores those references without
-/// validating them again.
+/// field fails closed. A first insert fails closed when the stored
+/// `instrument_release` row exists and is no longer published, so reconstitution
+/// cannot mint a session after persist Suspend or Retire. Exact persist of an
+/// already stored created identity still replays after that later persist.
+/// [`AssessmentSession::new`] validates and normalizes session and participant
+/// references. This function stores those references without validating them
+/// again.
 ///
 /// # Errors
 ///
 /// Returns [`AssessmentSessionPersistenceError`] for unsupported isolation,
-/// a non-created session, conflicting replay, an out-of-range timestamp,
-/// or a database failure.
+/// a non-created session, an unpublished stored release on first insert,
+/// conflicting replay, an out-of-range timestamp, or a database failure.
 pub fn persist_assessment_session(
     transaction: &mut Transaction<'_>,
     session: &AssessmentSession,
@@ -521,6 +530,7 @@ pub fn persist_assessment_session(
     let session_ref = session.session_ref();
     let participant_ref = session.participant_ref();
     let created_at_unix_ms = postgres_bigint(session.created_at_unix_ms())?;
+    reject_unpublished_first_insert(transaction, session, session_ref)?;
     let session_state = session.state().persist_name();
     let inserted = transaction.execute(
         "INSERT INTO assessment_session (
@@ -717,6 +727,50 @@ fn classify_existing_session(
 /// Convert an unsigned millisecond timestamp into the database `BIGINT` range.
 fn postgres_bigint(value: u64) -> Result<i64, AssessmentSessionPersistenceError> {
     i64::try_from(value).map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)
+}
+
+/// Fail closed on a reconstituted first insert after stored Suspend or Retire.
+///
+/// Missing catalog rows stay load/test compatible. An already stored created
+/// session is exact persist replay and must not re-check publication.
+fn reject_unpublished_first_insert(
+    transaction: &mut Transaction<'_>,
+    session: &AssessmentSession,
+    session_ref: &str,
+) -> Result<(), AssessmentSessionPersistenceError> {
+    let existing = match transaction.query_opt(
+        "SELECT 1 FROM assessment_session WHERE session_ref = $1",
+        &[&session_ref],
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(AssessmentSessionPersistenceError::from(error)),
+    };
+    if existing.is_some() {
+        return Ok(());
+    }
+    match load_published_instrument_release(
+        transaction,
+        session.instrument_release_ref(),
+        session.locale(),
+    ) {
+        Ok(_) | Err(InstrumentReleaseQueryError::NotFound) => Ok(()),
+        Err(InstrumentReleaseQueryError::NotPublished) => {
+            Err(AssessmentSessionPersistenceError::InstrumentReleaseUnavailable)
+        }
+        Err(InstrumentReleaseQueryError::InvalidReference) => {
+            Err(AssessmentSessionPersistenceError::InvalidReference)
+        }
+        Err(
+            InstrumentReleaseQueryError::InvalidLocale
+            | InstrumentReleaseQueryError::LocaleMismatch,
+        ) => Err(AssessmentSessionPersistenceError::InstrumentReleaseUnavailable),
+        Err(InstrumentReleaseQueryError::InvalidStoredValue) => {
+            Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
+        }
+        Err(InstrumentReleaseQueryError::Database(error)) => {
+            Err(AssessmentSessionPersistenceError::from(error))
+        }
+    }
 }
 
 /// Require and lock the created-session identity row before persisting later commands.
@@ -922,6 +976,30 @@ mod tests {
                 created_at_unix_ms: 20_000,
             },
         ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "ses_start_replay_alpha",
+                participant_ref: "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: None,
+                content_digest: None,
+                requested_locale: "en-US",
+                created_at_unix_ms: 20_000,
+            },
+        ));
+        assert!(!stored_start_identity_matches(
+            &stored,
+            &StartedSessionReplayRequest {
+                session_ref: "ses_start_replay_alpha",
+                participant_ref: "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                instrument_release_ref: "release_big_five_ko_v1",
+                instrument_version_ref: None,
+                content_digest: None,
+                requested_locale: "ko-KR",
+                created_at_unix_ms: 21_000,
+            },
+        ));
     }
 
     #[test]
@@ -962,6 +1040,10 @@ mod tests {
             (
                 AssessmentSessionPersistenceError::SequenceConflict,
                 "session command sequence was reused by a different command identity",
+            ),
+            (
+                AssessmentSessionPersistenceError::InstrumentReleaseUnavailable,
+                "publish the exact instrument release before persisting a new created session",
             ),
         ] {
             assert_eq!(error.to_string(), expected);
