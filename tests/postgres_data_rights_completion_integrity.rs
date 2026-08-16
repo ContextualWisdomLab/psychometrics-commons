@@ -160,3 +160,48 @@ fn later_durable_state_is_not_reclassified_as_completion_replay() {
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn terminal_states_cannot_exist_without_completion_evidence() {
+    let mut client = client("data_rights_completion_terminal_evidence");
+    let request = persist_processing(
+        &mut client,
+        "data_rights_request_terminal_evidence",
+        DataRightsRequestKind::Deletion,
+    );
+
+    for terminal_state in ["completed", "partially_completed"] {
+        assert!(
+            client
+                .execute(
+                    "UPDATE data_rights_request_state SET current_state = $1 WHERE request_ref = $2",
+                    &[&terminal_state, &request.request_ref()],
+                )
+                .is_err(),
+            "terminal state {terminal_state} must require durable completion evidence"
+        );
+    }
+}
+
+#[test]
+fn completion_evidence_cannot_exist_before_terminal_state() {
+    let mut client = client("data_rights_completion_premature_evidence");
+    let request = persist_processing(
+        &mut client,
+        "data_rights_request_premature_evidence",
+        DataRightsRequestKind::Deletion,
+    );
+
+    assert!(
+        client
+            .execute(
+                "UPDATE data_rights_request_state
+                 SET completion_evidence_ref = 'completion_evidence_direct',
+                     completed_at_unix_ms = 10300
+                 WHERE request_ref = $1",
+                &[&request.request_ref()],
+            )
+            .is_err(),
+        "processing rows must not carry terminal completion evidence"
+    );
+}
