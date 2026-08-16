@@ -58,6 +58,18 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
+## Active PR participant identity-link physical schema
+
+PR #178 adds `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs`. Prefer this head over #173, #169, #158, #147, #133, #124, and #114. The slice is **Active PR**, not protected-main truth. It stores:
+
+- immutable `assessment_participant` identity (`participant_ref`, `tenant_ref`, `created_at_unix_ms`);
+- append-only `participant_identity_link` rows for accepted dual-proof account links;
+- append-only `participant_identity_link_end` rows that end a specific historical link without editing it;
+- derived `current_participant_identity_link` projection enforcing one current link per participant and one current issuer-scoped subject per tenant;
+- composite foreign keys so a link-end or current projection cannot point at another participant's link.
+
+Exact replay is idempotent and reconciles the derived current projection so a missing or stale unique enforcer is restored or cleared. After restore, `inspect_identity_link_current_projection_drift` reports missing or stale unique-enforcer rows without mutating them. Operators run `reconcile_identity_link_current_projections` only when that inspect reports drift; both fail-close on two unterminated holders of the same issuer-scoped subject or two unterminated links on one participant. After that path, an ended issuer-scoped subject can bind to a later participant. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from unterminated issuer-scoped history even when the derived current projection is missing. HTTP account-link transport and live Keyverse verification remain Target.
+
 ## Logical-to-physical mapping rule
 
 A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:

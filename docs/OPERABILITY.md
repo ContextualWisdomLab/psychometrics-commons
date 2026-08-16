@@ -108,10 +108,11 @@ For persistence owned by Psychometrics Commons, a GA profile must establish and 
 3. migration/schema compatibility and expected indexes/constraints;
 4. exact digest/provenance consistency for immutable snapshots/artifacts;
 5. tenant authorization and restricted-linkage protections after restore;
-6. outbox/inbox/job recovery without duplicate domain effects;
-7. data-rights and research withdrawal/eligibility state preservation;
-8. key/secret dependency recovery without embedding secrets in backup artifacts improperly;
-9. measured restore duration and recoverable data point for that exact profile.
+6. identity-link unique enforcer inspected with `inspect_identity_link_current_projection_drift` and rebuilt from unterminated history via `reconcile_identity_link_current_projections` before new account-link writes, including a later participant binding an ended issuer-scoped subject;
+7. outbox/inbox/job recovery without duplicate domain effects;
+8. data-rights and research withdrawal/eligibility state preservation;
+9. key/secret dependency recovery without embedding secrets in backup artifacts improperly;
+10. measured restore duration and recoverable data point for that exact profile.
 
 The architecture deliberately does **not** publish universal RPO/RTO numbers before these profile-specific measurements exist.
 
