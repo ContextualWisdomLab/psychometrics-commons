@@ -677,7 +677,9 @@ fn start_from_stored_release_uses_database_publication_state() {
     let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
     client
-        .batch_execute(&format!("DROP TABLE IF EXISTS {SCHEMA}.instrument_release;"))
+        .batch_execute(&format!(
+            "DROP TABLE IF EXISTS {SCHEMA}.instrument_release;"
+        ))
         .unwrap();
     apply_instrument_release_migration(&mut client).unwrap();
     apply_assessment_session_migration(&mut client).unwrap();

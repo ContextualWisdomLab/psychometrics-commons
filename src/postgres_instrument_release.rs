@@ -383,7 +383,10 @@ pub fn load_published_instrument_release(
 /// `release_ref` to a different digest, locale, item set, or other immutable
 /// field fails closed. The same manifest may advance to a reachable later
 /// publication state without rewriting historical identity. A snapshot that
-/// would rewind or skip to an unreachable lifecycle fails closed.
+/// would rewind or skip to an unreachable lifecycle fails closed. Replay
+/// classification locks the stored row with `SELECT … FOR UPDATE` so a
+/// Duplicate published result cannot lose the row to a concurrent Suspend or
+/// Retire before the caller transaction ends.
 ///
 /// # Errors
 ///
@@ -449,7 +452,8 @@ fn classify_existing_release(
                 norm_version_ref, narrative_version_ref, consent_requirement_refs, \
                 intended_use_ref, limitations_ref, content_digest, publication_state, \
                 created_at_unix_ms \
-         FROM instrument_release WHERE release_ref = $1",
+         FROM instrument_release WHERE release_ref = $1 \
+         FOR UPDATE",
         &[&manifest.release_ref()],
     )?;
     let stored_identity = ReleaseIdentity {

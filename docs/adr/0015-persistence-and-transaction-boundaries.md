@@ -110,6 +110,10 @@ The first physical inbox deduplication slice also uses an insert-then-inspect du
 
 An inbox row that merely proves receipt is never marked `completed` before the required effect is locally atomic or durably recoverable. Unknown/mismatched semantics are quarantined without applying the effect.
 
+### Instrument publication persist
+
+Persist of an existing `instrument_release` row classifies exact replay or a reachable publication-state advance under `READ COMMITTED` and locks that row with `SELECT … FOR UPDATE` until the caller transaction ends. A Duplicate published classification therefore cannot lose the row to a concurrent Suspend or Retire before the caller composes further work in the same transaction. Unreachable lifecycle rewind still fails closed after the lock is held.
+
 ### Consent and data rights
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.

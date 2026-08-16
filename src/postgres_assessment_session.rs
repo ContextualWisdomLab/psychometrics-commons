@@ -204,11 +204,12 @@ pub fn apply_assessment_session_migration(
 
 /// Build a created session that is legal to persist as a new start.
 ///
-/// HTTP `POST /v1/sessions` and any other start path must call this, or
-/// [`start_created_assessment_session`], rather than
-/// [`AssessmentSession::from_persisted_created`]. This uses
-/// [`AssessmentSession::new`], so a suspended or retired release cannot begin a
-/// new session.
+/// In-memory callers that already hold a live published release may call this
+/// or [`start_created_assessment_session`]. HTTP `POST /v1/sessions` must call
+/// [`start_created_assessment_session_from_stored_release`] rather than this
+/// helper or [`AssessmentSession::from_persisted_created`]. This uses
+/// [`AssessmentSession::new`], so a suspended or retired in-memory release
+/// cannot begin a new session. It does not lock stored publication state.
 ///
 /// # Errors
 ///
