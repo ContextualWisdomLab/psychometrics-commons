@@ -293,3 +293,57 @@ fn valid_machine_code(code: &str) -> bool {
     code.bytes()
         .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ApiProblem, ApiProblemContractError};
+
+    #[test]
+    fn contract_errors_and_uri_branches_are_instantiated_in_the_library() {
+        for error in [
+            ApiProblemContractError::InvalidTypeUri,
+            ApiProblemContractError::InvalidStatus,
+            ApiProblemContractError::EmptyTitle,
+            ApiProblemContractError::EmptyDetail,
+            ApiProblemContractError::InvalidCode,
+        ] {
+            assert!(!error.to_string().is_empty());
+        }
+
+        let problem = ApiProblem::new(
+            "https://example.test/problems/denied",
+            403,
+            "Denied",
+            "The request is outside the authorized tenant.",
+            "cross_tenant_denied",
+        )
+        .unwrap();
+        assert_eq!(problem.type_uri(), "https://example.test/problems/denied");
+        assert_eq!(problem.status(), 403);
+        assert_eq!(problem.title(), "Denied");
+        assert_eq!(
+            problem.detail(),
+            "The request is outside the authorized tenant."
+        );
+        assert_eq!(problem.code(), "cross_tenant_denied");
+        assert_eq!(ApiProblem::media_type(), "application/problem+json");
+
+        for invalid_type in [
+            "https://bad!.test/problems/denied",
+            "https://example.test/%",
+            "https://example.test/%0G",
+            "https://example.test/?%zz",
+            "https://example.test#%",
+            "urn:-a:value",
+            "urn:a-:value",
+            "urn:example:bad value",
+        ] {
+            assert_eq!(
+                ApiProblem::new(invalid_type, 403, "Denied", "Public detail.", "denied"),
+                Err(ApiProblemContractError::InvalidTypeUri),
+                "{invalid_type}"
+            );
+        }
+        assert!(ApiProblem::new("urn:ab:value", 403, "Denied", "Public detail.", "denied").is_ok());
+    }
+}
