@@ -80,16 +80,18 @@ checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             with self.assertRaisesRegex(SbomValidationError, "supported SPDX 2.x"):
                 validate_sbom(sbom, cargo_lock)
 
-    def test_malformed_spdx_two_version_fails_closed(self) -> None:
-        """A malformed SPDX 2.x-looking version must not enter retained release evidence."""
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            sbom, cargo_lock = self.write_fixture(
-                Path(temporary_directory),
-                packages=[{"name": "serde", "versionInfo": "1.0.219"}],
-                spdx_version="SPDX-2.invalid",
-            )
-            with self.assertRaisesRegex(SbomValidationError, "supported SPDX 2.x"):
-                validate_sbom(sbom, cargo_lock)
+    def test_malformed_spdx_two_versions_fail_closed(self) -> None:
+        """Incomplete or malformed SPDX 2.x-looking versions must not enter retained evidence."""
+        for spdx_version in ("SPDX-2.", "SPDX-2.invalid"):
+            with self.subTest(spdx_version=spdx_version):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    sbom, cargo_lock = self.write_fixture(
+                        Path(temporary_directory),
+                        packages=[{"name": "serde", "versionInfo": "1.0.219"}],
+                        spdx_version=spdx_version,
+                    )
+                    with self.assertRaisesRegex(SbomValidationError, "supported SPDX 2.x"):
+                        validate_sbom(sbom, cargo_lock)
 
     def test_missing_cc0_data_license_fails_closed(self) -> None:
         """The required SPDX document data license is part of retained evidence validity."""
