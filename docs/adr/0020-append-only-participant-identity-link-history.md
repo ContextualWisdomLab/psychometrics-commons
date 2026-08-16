@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: the successor of #147 `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged. Prefer that head over #147, #133, #124, and #114.
+- Active-PR persistence evidence: PR #158 `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged. Prefer that head over #147, #133, #124, and #114.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
