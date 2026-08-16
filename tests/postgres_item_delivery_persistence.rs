@@ -100,7 +100,7 @@ fn request<'a>(
 }
 
 fn empty_ledger(session_ref: &str, manifest: InstrumentReleaseManifest) -> ItemDeliveryLedger {
-    let release = published_release_from_manifest(manifest);
+    let release = published_release_from_manifest(&manifest);
     let session = session_with_ref_in_state(&release, session_ref, SessionState::Active);
     ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap()
 }
@@ -111,7 +111,7 @@ fn delivered_ledger(
     digest: &str,
     deliveries: &[(&str, &str, &str, Option<&str>)],
 ) -> ItemDeliveryLedger {
-    let release = published_release_from_manifest(manifest(release_ref, digest));
+    let release = published_release_from_manifest(&manifest(release_ref, digest));
     let session = session_with_ref_in_state(&release, session_ref, SessionState::Active);
     let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
     for (delivery_ref, item_version_ref, presentation_context_ref, selection_evidence_ref) in

@@ -35,10 +35,12 @@ pub fn manifest() -> InstrumentReleaseManifest {
 }
 
 pub fn published_release() -> InstrumentRelease {
-    published_release_from_manifest(manifest())
+    published_release_from_manifest(&manifest())
 }
 
-pub fn published_release_from_manifest(manifest: InstrumentReleaseManifest) -> InstrumentRelease {
+pub fn published_release_from_manifest(
+    manifest: &InstrumentReleaseManifest,
+) -> InstrumentRelease {
     let item_version_refs: Vec<&str> = manifest
         .item_version_refs()
         .iter()
