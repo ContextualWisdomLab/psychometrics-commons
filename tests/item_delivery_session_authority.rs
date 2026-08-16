@@ -2,14 +2,16 @@
 //!
 //! Item-delivery evidence must be bound to the exact immutable release pinned by
 //! the assessment session, and callers must not be able to forge lifecycle state
-//! by passing a detached `SessionState` value.
+//! by passing detached state evidence.
 
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::item_delivery::{ItemDeliveryLedger, ItemDeliveryRequest};
-use psychometrics_commons_runtime::session::{AssessmentSession, SessionState};
+use psychometrics_commons_runtime::item_delivery::{
+    ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRequest,
+};
+use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
 const RELEASE_A_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -133,25 +135,53 @@ fn ledger_rejects_manifest_not_pinned_by_the_assessment_session() {
         RELEASE_B_DIGEST,
     );
 
-    assert!(
-        ItemDeliveryLedger::from_manifest(session.session_ref(), &other_manifest).is_err(),
-        "a caller-controlled session reference must not bind a ledger to another release"
+    assert_eq!(
+        ItemDeliveryLedger::from_session(&session, &other_manifest),
+        Err(ItemDeliveryError::SessionReleaseMismatch),
+        "a session must not bind item delivery to another immutable release"
     );
 }
 
 #[test]
-fn caller_cannot_forge_active_state_for_a_created_session() {
+fn created_session_cannot_be_presented_as_active_by_the_caller() {
     let release = published_release();
     let session = created_session(&release);
-    let mut ledger = ItemDeliveryLedger::from_manifest(session.session_ref(), release.manifest())
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest())
         .expect("matching manifest should create the ledger");
 
     assert_eq!(session.state(), SessionState::Created);
-    assert!(
-        ledger
-            .deliver(SessionState::Active, delivery_request())
-            .is_err(),
-        "detached lifecycle state must not override the authoritative session aggregate"
+    assert_eq!(
+        ledger.deliver(&session, delivery_request()),
+        Err(ItemDeliveryError::SessionNotActive(SessionState::Created))
     );
     assert!(ledger.is_empty());
+}
+
+#[test]
+fn only_the_bound_assessment_session_can_operate_the_ledger() {
+    let release = published_release();
+    let mut session = created_session(&release);
+    session
+        .apply_command(
+            "session_activate_item_delivery_authority",
+            1,
+            SessionCommand::Activate,
+        )
+        .unwrap();
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
+    let other_session = AssessmentSession::new(
+        "session_item_delivery_other",
+        "participant_item_delivery_authority",
+        &release,
+        "ko-KR",
+        21_000,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ledger.deliver(&other_session, delivery_request()),
+        Err(ItemDeliveryError::SessionMismatch)
+    );
+    assert!(ledger.is_empty());
+    assert!(ledger.deliver(&session, delivery_request()).is_ok());
 }
