@@ -66,7 +66,7 @@ This document converts broad quality goals into **stimulus → environment → r
 
 - **Stimulus:** fast-mlsirm scoring dependency becomes unavailable after completion.
 - **Response:** completed response snapshot remains durable; scoring job waits/retries; no invented score.
-- **Evidence:** worker/job state and recovery test. Active PR #168 adds `load_scoring_request` plus `tests/postgres_scoring_request_reload.rs` so a dispatched version pin survives process restart without inventing a score; live worker composition remains Target.
+- **Evidence:** worker/job state and recovery test. Active PR #194 adds `load_scoring_request` plus `tests/postgres_scoring_request_reload.rs` so a dispatched version pin survives process restart without inventing a score; live worker composition remains Target.
 
 ## 4. Security
 
