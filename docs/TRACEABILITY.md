@@ -40,7 +40,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
 | Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
 | Durable outbox/inbox delivery semantics | PRD §7, §9 | TRD §19–20 | ADR-0014, ADR-0015 | **Partially implemented**: domain contracts in `src/integration.rs`; PostgreSQL 18 outbox/inbox identity, delivery-attempt persistence, and inbox consumption distinct from receipt; live side-effect execution remains Target |
-| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; **Active PR** successor to #111 binds GET `/live` and GET `/ready` to a TCP listener that keeps serving after a dropped probe and stops only when accept fails, answers `/live` without store I/O, and observes PostgreSQL only for `/ready` (bare `/ready` requires `postgres_operational_store`) without exposing driver errors; measured thresholds and deployment-profile evidence remain Target |
+| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; **Active PR** #117 (successor to #111) binds GET `/live` and GET `/ready` to a TCP listener that keeps serving after a dropped probe and stops only when accept fails, answers `/live` without store I/O, and observes PostgreSQL only for `/ready` (bare `/ready` requires `postgres_operational_store`) without exposing driver errors; measured thresholds and deployment-profile evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; actual English/Korean form content, rights, translation, invariance and serving are Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
 | EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/normalized-ingestion/orchestration adapter |
@@ -77,8 +77,8 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence, delivery-attempt persistence, and inbox consumption | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL inbox consumption persists pending/processing/completed and expire-and-reclaim | live adapter crash/retry tests |
-| Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** successor to #111 exposes GET `/live` independently from GET `/ready` on a bound TCP listener that keeps serving after a dropped probe and does not observe PostgreSQL for `/live` | metrics and deployment-profile acceptance |
-| Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** successor to #111 keeps `/ready?capability=` fail-closed for unknown or unsafe required capabilities | degraded-mode transport/integration tests |
+| Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** #117 (successor to #111) exposes GET `/live` independently from GET `/ready` on a bound TCP listener that keeps serving after a dropped probe and does not observe PostgreSQL for `/live` | metrics and deployment-profile acceptance |
+| Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** #117 (successor to #111) keeps `/ready?capability=` fail-closed for unknown or unsafe required capabilities | degraded-mode transport/integration tests |
 | Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Implemented** domain contract in `src/health.rs`; `src/postgres_health.rs` fails closed on unsupported/read-only PostgreSQL or a missing required relation | persistence/job backlog metrics, stronger schema probes, alerting, and failure-injection evidence |
 | No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
@@ -97,7 +97,7 @@ src/lib.rs
 ├── consent.rs        # purpose-specific consent + research contribution lifecycle
 ├── data_rights.rs    # export/deletion lifecycle and retention evidence
 ├── health.rs         # operation-scoped liveness/readiness and capability-state contract
-├── health_http.rs    # Active PR successor to #111 operator GET /live and GET /ready probes plus a bounded-timeout TCP listener that keeps serving after a dropped probe (not protected-main truth)
+├── health_http.rs    # Active PR #117 (successor to #111) operator GET /live and GET /ready probes plus a bounded-timeout TCP listener that keeps serving after a dropped probe (not protected-main truth)
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
@@ -105,8 +105,8 @@ src/lib.rs
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
-├── postgres_health.rs  # PostgreSQL major/write-readiness, relation-integrity, and Active PR successor-to-#111 operational snapshot
-├── postgres_health_http.rs  # Active PR successor to #111 observes PostgreSQL only for GET /ready; /live stays store-I/O free; serve loop keeps accepting after a dropped probe (not protected-main truth)
+├── postgres_health.rs  # PostgreSQL major/write-readiness, relation-integrity, and Active PR #117 (successor to #111) operational snapshot
+├── postgres_health_http.rs  # Active PR #117 (successor to #111) observes PostgreSQL only for GET /ready; /live stays store-I/O free; serve loop keeps accepting after a dropped probe (not protected-main truth)
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** successor to #111 PostgreSQL-backed operator health HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. GET `/live` answers process liveness without store I/O. GET `/ready` observes a live operational snapshot after accept; a bare `/ready` requires `postgres_operational_store`. `serve_health_http` and `serve_postgres_health_http` keep accepting after a dropped probe and stop only when accept fails so a load balancer can keep probing. Driver errors are not exposed. Public/admin product routes, measured backlog thresholds, TLS, and deployment-profile evidence remain outside this slice.
+**Active PR** #117 (successor to #111) PostgreSQL-backed operator health HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. GET `/live` answers process liveness without store I/O. GET `/ready` observes a live operational snapshot after accept; a bare `/ready` requires `postgres_operational_store`. `serve_health_http` and `serve_postgres_health_http` keep accepting after a dropped probe and stop only when accept fails so a load balancer can keep probing. Driver errors are not exposed. Public/admin product routes, measured backlog thresholds, TLS, and deployment-profile evidence remain outside this slice.
 
 ## 5. ADR traceability by concern
 
@@ -192,7 +192,7 @@ Whenever a durable conversation decision changes one of those boundaries, the ap
 
 The prose API/event families in TRD are architecture requirements, not evidence of an implemented transport.
 
-The first implemented HTTP surface is the operator health-probe pair. Active PR successor to #111 adds `openapi/health-probes.yaml` (OpenAPI 3.2.0) listing only GET `/live` and GET `/ready`. Probe success/unready bodies use the documented health-snapshot representation; malformed or unsupported requests use RFC 9457 `application/problem+json`. Public/admin product routes remain unimplemented and are not listed.
+The first implemented HTTP surface is the operator health-probe pair. Active PR #117 (successor to #111) adds `openapi/health-probes.yaml` (OpenAPI 3.2.0) listing only GET `/live` and GET `/ready`. Probe success/unready bodies use the documented health-snapshot representation; malformed or unsupported requests use RFC 9457 `application/problem+json`. Public/admin product routes remain unimplemented and are not listed.
 
 When durable message transport is implemented, the same PR or a prerequisite PR must add and validate an AsyncAPI 3.1.x document for actually produced/consumed event channels and message schemas. It must encode/reference ADR-0014 canonical UTF-8 payload hashing, SHA-256 payload digest semantics, tenant/resource binding, deduplication identity, pending/processing/completed consumption, replay retention, and quarantine behavior.
 
