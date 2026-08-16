@@ -304,8 +304,10 @@ sequenceDiagram
         A-->>C: accepted sequence
     end
 
-    C->>A: complete session
-    A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
+        C->>A: complete session
+        A->>DB: load assessment_participant + assessment_session
+        A->>A: authorize anonymous command from loaded records
+        A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
     W->>DB: claim scoring work

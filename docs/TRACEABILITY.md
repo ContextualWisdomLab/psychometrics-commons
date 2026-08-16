@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
 
-**Active PR** #86 anonymous-session resource authorization, plus follow-up #104 that derives the assessment-session resource from the loaded participant tenant/owner and loaded session and applies a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. HTTP transport remains outside this slice.
+**Active PR** #86 anonymous-session resource authorization, plus follow-up #104 and its successor that compare the verified actor to the loaded participant tenant/owner and loaded session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. HTTP transport remains outside this slice. Tenant still lives on `assessment_participant`; persisting and loading that row is the next Active-PR slice on this successor so a transport cannot reconstruct the participant from the proof.
 
 ## 5. ADR traceability by concern
 
