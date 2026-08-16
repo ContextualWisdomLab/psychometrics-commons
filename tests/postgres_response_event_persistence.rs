@@ -298,26 +298,20 @@ fn reused_server_sequence_by_another_event_fails_closed() {
         ),
     );
     persist_ok(&mut client, "session_ipip_ko_sequence", &first);
-    client
-        .execute(
-            "UPDATE response_event SET server_sequence = 2 \
-             WHERE response_event_ref = 'server_event_item_01'",
-            &[],
-        )
-        .unwrap();
-    let (_, other_sequence) = recorded_event(
-        "session_ipip_ko_sequence",
-        write(
-            "server_event_item_02",
-            "client_event_item_02",
-            "item_version_n2_ko",
-            DIGEST_N2,
-        ),
-    );
+    let colliding = ResponseEvent::from_persisted(
+        "server_event_item_02",
+        "client_event_item_02",
+        "item_version_n2_ko",
+        DIGEST_N2,
+        1,
+    )
+    .unwrap();
     assert!(matches!(
-        persist_err(&mut client, "session_ipip_ko_sequence", &other_sequence),
+        persist_err(&mut client, "session_ipip_ko_sequence", &colliding),
         ResponseEventPersistenceError::SequenceConflict
     ));
+    let rebuilt = load_ok(&mut client, "session_ipip_ko_sequence");
+    assert_eq!(rebuilt.events(), std::slice::from_ref(&first));
 }
 
 #[test]
