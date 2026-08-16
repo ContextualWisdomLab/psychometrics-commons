@@ -177,7 +177,7 @@ classDiagram
 
 ### Domain-model rules
 
-- `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence. Active PR reload reconstructs a persisted `ResponseSnapshot` after restart from `snapshot_sequence` so scoring dispatch sees the same frozen prefix.
+- `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence. Active PR #151 reconstructs a persisted `ResponseSnapshot` after restart from `snapshot_sequence` so scoring dispatch sees the same frozen prefix.
 - `ScoringJob` is operational state; `ResultSnapshot` is scientific/product evidence. They are not the same aggregate.
 - `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
 - `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.
@@ -339,7 +339,7 @@ sequenceDiagram
     P->>A: complete assessment
     A->>DB: commit Completed + immutable response snapshot + outbox
     A-->>P: completion durable; scoring pending
-    Note over DB: Active PR reloads the frozen prefix after restart before scoring dispatch
+    Note over DB: Active PR #151 reloads the frozen prefix after restart before scoring dispatch
 
     W->>F: submit pinned scoring request
     F--xW: unavailable / retryable transport failure

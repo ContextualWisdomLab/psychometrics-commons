@@ -116,7 +116,7 @@ Consent decisions and data-rights lifecycle events are append-only evidence. Ext
 
 ### Response snapshot reload
 
-Protected main already persists one immutable completed prefix per session. Active PR reload reconstructs that prefix after process restart under `READ COMMITTED`, taking `FOR SHARE` on the snapshot header so a concurrent writer holding the same row waits until reconstruction finishes. Entries are ordered by `snapshot_sequence`, not by opaque event identity. A missing snapshot is absent. Header counts, gapped sequences, and stored labels that cannot rebuild [`ResponseSnapshot::from_persisted`] fail closed. The slice does not add HTTP scoring transport and does not rewrite historical snapshots. PostgreSQL 18 transaction isolation remains the physical classifier (PostgreSQL Global Development Group, 2026).
+Protected main already persists one immutable completed prefix per session. Active PR #151 reconstructs that prefix after process restart under `READ COMMITTED`, taking `FOR SHARE` on the snapshot header so a concurrent writer holding the same row waits until reconstruction finishes. Entries are ordered by `snapshot_sequence`, not by opaque event identity. A missing snapshot is absent. Header counts, gapped sequences, and stored labels that cannot rebuild [`ResponseSnapshot::from_persisted`] fail closed. The slice does not add HTTP scoring transport and does not rewrite historical snapshots. PostgreSQL 18 transaction isolation remains the physical classifier (PostgreSQL Global Development Group, 2026).
 
 ## Concurrency and idempotency
 

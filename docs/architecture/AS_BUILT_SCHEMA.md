@@ -60,9 +60,9 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
-## Active PR response-snapshot reload
+## Active PR #151 response-snapshot reload
 
-`migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs` already persist one immutable completed prefix per session on protected main. This Active PR adds `load_response_snapshot` and `load_response_snapshot_for_session` and no new physical objects. After restart, a caller reconstructs the frozen prefix under `READ COMMITTED` by `snapshot_sequence`. A missing snapshot is absent. Header/entry mismatches, gapped sequences, and noncanonical stored digests fail closed. HTTP scoring transport remains outside this slice.
+`migrations/0010_response_snapshot.sql` and `src/postgres_response_snapshot.rs` already persist one immutable completed prefix per session on protected main. Active PR #151 adds `load_response_snapshot` and `load_response_snapshot_for_session` and no new physical objects. After restart, a caller reconstructs the frozen prefix under `READ COMMITTED` by `snapshot_sequence`. A missing snapshot is absent. Header/entry mismatches, gapped sequences, and noncanonical stored digests fail closed. HTTP scoring transport remains outside this slice.
 
 ## Logical-to-physical mapping rule
 
