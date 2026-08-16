@@ -210,10 +210,13 @@ fn stored_unsupported_schema_and_blank_aliases_fail_closed_on_reload() {
         )
         .unwrap();
     let mut unsupported = client.transaction().unwrap();
-    assert!(matches!(
-        load_scoring_request(&mut unsupported, "scoring_request_reload_schema"),
-        Err(ScoringRequestPersistenceError::CorruptHistory)
-    ));
+    assert!(
+        matches!(
+            load_scoring_request(&mut unsupported, "scoring_request_reload_schema"),
+            Err(ScoringRequestPersistenceError::UnsupportedStoredSchema)
+        ),
+        "a well-formed stored schema major this runtime does not implement must tell the operator to upgrade, not quarantine the row as corrupt history"
+    );
     unsupported.rollback().unwrap();
 
     let mut transaction = client.transaction().unwrap();

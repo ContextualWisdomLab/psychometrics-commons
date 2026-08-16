@@ -108,8 +108,9 @@ Product consequences:
 - scoring-request reload reconstructs the version-pinned dispatch identity under
   `READ COMMITTED` after a share lock on the request row;
 - a missing request is absent rather than an invented scoring pin;
-- unsupported stored schema versions fail closed instead of being coerced into
-  the current output contract.
+- unsupported stored schema versions fail closed as unsupported stored schema
+  instead of being coerced into the current output contract or quarantined as
+  corrupt history;
 
 ## Evidence maintenance rules
 

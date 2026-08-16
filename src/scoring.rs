@@ -105,8 +105,11 @@ impl ScoringRequest {
     /// Reconstruct one version-pinned scoring request from durable stored identity.
     ///
     /// Call this after process restart when a scoring job still names
-    /// `scoring_request_ref`. The stored session and snapshot identities are
-    /// accepted as pins; this does not reload response events and does not call
+    /// `scoring_request_ref`. Do not use this to create a new dispatch identity;
+    /// persist-time construction must stay on [`Self::from_snapshot`] so empty,
+    /// unbound, or mismatched snapshots fail closed. The stored session and
+    /// snapshot identities are accepted as pins; this does not reload response
+    /// events, does not prove session/snapshot consistency, and does not call
     /// `fast-mlsirm`. Empty-snapshot rejection remains the persist-time
     /// [`Self::from_snapshot`] check.
     ///

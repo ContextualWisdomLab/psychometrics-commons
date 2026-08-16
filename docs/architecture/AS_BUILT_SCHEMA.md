@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR #194 scoring-request reload
 
-`migrations/0011_scoring_request.sql` and `src/postgres_scoring_request.rs` already persist one immutable version-pinned dispatch identity on protected main. Active PR #194 adds `load_scoring_request` and no new physical objects. Prefer this head over #168. After restart, a caller reconstructs the stored AssessmentSpec, instrument, scoring, calibration, and optional norm pins under `READ COMMITTED` after a share lock on the request row. A missing request is absent. Unsupported stored schema and blank caller aliases fail closed. After a row is found, blank stored pins fail closed as corrupt history. HTTP scoring transport and live `fast-mlsirm` execution remain outside this slice.
+`migrations/0011_scoring_request.sql` and `src/postgres_scoring_request.rs` already persist one immutable version-pinned dispatch identity on protected main. Active PR #194 adds `load_scoring_request` and no new physical objects. Prefer this head over #168. After restart, a caller reconstructs the stored AssessmentSpec, instrument, scoring, calibration, and optional norm pins under `READ COMMITTED` after a share lock on the request row. A missing request is absent. Blank caller aliases fail closed. After a row is found, blank stored pins fail closed as corrupt history. A well-formed stored schema major this runtime does not implement fails closed as unsupported stored schema. HTTP scoring transport and live `fast-mlsirm` execution remain outside this slice.
 
 ## Logical-to-physical mapping rule
 
