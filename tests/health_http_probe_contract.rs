@@ -118,6 +118,10 @@ fn unsupported_method_or_path_returns_safe_problem_details() {
     assert!(not_allowed
         .body()
         .contains("\"title\":\"Method Not Allowed\""));
+    assert!(not_allowed
+        .body()
+        .contains("\"type\":\"urn:psychometrics-commons:problem:method-not-allowed\""));
+    assert!(!not_allowed.body().contains("about:blank"));
     assert!(!not_allowed.body().contains("postgres"));
     assert!(!not_allowed.body().contains("sql"));
 
@@ -125,6 +129,9 @@ fn unsupported_method_or_path_returns_safe_problem_details() {
     assert_eq!(missing.status(), 404);
     assert_eq!(missing.content_type(), "application/problem+json");
     assert!(missing.body().contains("\"title\":\"Not Found\""));
+    assert!(missing
+        .body()
+        .contains("\"type\":\"urn:psychometrics-commons:problem:not-found\""));
     assert!(!missing.body().contains("/v1/instruments"));
 }
 
@@ -134,7 +141,11 @@ fn malformed_request_fails_closed_without_echoing_raw_input() {
     assert_eq!(response.status(), 400);
     assert_eq!(response.content_type(), "application/problem+json");
     assert!(response.body().contains("\"title\":\"Bad Request\""));
+    assert!(response
+        .body()
+        .contains("\"type\":\"urn:psychometrics-commons:problem:bad-request\""));
     assert!(!response.body().contains("NOT-A-REQUEST"));
+    assert!(!response.body().contains("about:blank"));
 }
 
 #[test]
@@ -144,6 +155,8 @@ fn as_built_openapi_lists_only_implemented_health_probe_operations() {
     assert!(openapi.contains("openapi: 3.2.0"));
     assert!(openapi.contains(HEALTH_LIVE_PATH));
     assert!(openapi.contains(HEALTH_READY_PATH));
+    assert!(openapi.contains("urn:psychometrics-commons:problem:bad-request"));
+    assert!(!openapi.contains("about:blank"));
     assert!(!openapi.contains("/v1/sessions"));
     assert!(!openapi.contains("/v1/instruments"));
     let live_section = openapi
