@@ -59,6 +59,18 @@ fn apply_created_session_schema(client: &mut impl postgres::GenericClient) {
     apply_assessment_session_migration(client).unwrap();
 }
 
+fn prepare_created_session_store(client: &mut Client) {
+    reset_session_table(client);
+    apply_created_session_schema(client);
+    let mut transaction = client.transaction().unwrap();
+    persist_instrument_release(
+        &mut transaction,
+        &published_release("release_big_five_ko_v1", VALID_DIGEST),
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+}
+
 fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
         release_ref,
@@ -542,13 +554,89 @@ fn persist_rejects_reconstituted_first_insert_after_stored_release_is_suspended(
         new_count, 0,
         "reconstitution must not insert after later persist suspend"
     );
+
+    client
+        .execute(
+            "UPDATE instrument_release SET publication_state = 'retired' WHERE release_ref = $1",
+            &[&"release_big_five_ko_v1"],
+        )
+        .unwrap();
+    let retired = AssessmentSession::from_persisted_created(
+        "ses_reconstituted_after_retire",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        VALID_DIGEST,
+        "ko-KR",
+        23_000,
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session(&mut transaction, &retired),
+        Err(AssessmentSessionPersistenceError::InstrumentReleaseUnavailable)
+    ));
+    transaction.commit().unwrap();
+    let retired_count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session WHERE session_ref = $1",
+            &[&"ses_reconstituted_after_retire"],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(
+        retired_count, 0,
+        "reconstitution must not insert after later persist retire"
+    );
+}
+
+#[test]
+fn persist_rejects_first_insert_when_stored_release_is_missing() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_created_session_schema(&mut client);
+    let session = created_session(
+        "ses_persist_missing_release",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::InstrumentReleaseUnavailable)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn persist_rejects_first_insert_when_digest_mismatches_published_row() {
+    let (_database_test_guard, mut client) = test_client();
+    prepare_created_session_store(&mut client);
+    let mismatched = AssessmentSession::from_persisted_created(
+        "ses_persist_digest_mismatch",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        OTHER_DIGEST,
+        "ko-KR",
+        24_000,
+    )
+    .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session(&mut transaction, &mismatched),
+        Err(AssessmentSessionPersistenceError::InvalidStartRelease)
+    ));
+    transaction.rollback().unwrap();
 }
 
 #[test]
 fn created_session_persists_release_binding_and_replays_exactly() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let session = created_session(
         "ses_02fe09e373504b7986ae78491116edbd",
         PARTICIPANT_REF,
@@ -621,8 +709,7 @@ fn created_session_persists_release_binding_and_replays_exactly() {
 #[test]
 fn conflicting_session_identity_and_non_created_state_fail_closed() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let session = created_session(
         "ses_conflict_alpha",
         PARTICIPANT_REF,
@@ -723,8 +810,7 @@ fn conflicting_session_identity_and_non_created_state_fail_closed() {
 #[test]
 fn created_session_load_restores_identity_and_rejects_later_states() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let session = created_session(
         "ses_load_created_alpha",
         PARTICIPANT_REF,
@@ -851,8 +937,7 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
 #[test]
 fn classify_select_failure_after_conflict_is_a_database_failure() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let session = created_session(
         "ses_classify_hidden",
         PARTICIPANT_REF,
@@ -937,8 +1022,7 @@ fn isolation_query_failure_is_a_database_failure() {
 #[test]
 fn activated_session_survives_restart_after_command_persist() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let mut session = created_session(
         "ses_restart_active_alpha",
         PARTICIPANT_REF,
@@ -984,8 +1068,7 @@ fn activated_session_survives_restart_after_command_persist() {
 #[test]
 fn command_persist_requires_created_identity_and_rejects_conflicts() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let mut session = created_session(
         "ses_command_conflict_alpha",
         PARTICIPANT_REF,
@@ -1064,8 +1147,7 @@ fn command_persist_requires_created_identity_and_rejects_conflicts() {
 #[test]
 fn stale_shorter_command_history_cannot_rewind_paused_projection() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let mut session = created_session(
         "ses_stale_prefix_alpha",
         PARTICIPANT_REF,
@@ -1112,8 +1194,7 @@ fn stale_shorter_command_history_cannot_rewind_paused_projection() {
 #[test]
 fn command_persist_locks_session_header_until_caller_commits() {
     let (_database_test_guard, mut holder) = test_client();
-    reset_session_table(&mut holder);
-    apply_created_session_schema(&mut holder);
+    prepare_created_session_store(&mut holder);
     let created = created_session(
         "ses_header_lock_alpha",
         PARTICIPANT_REF,
@@ -1183,8 +1264,7 @@ fn command_persist_locks_session_header_until_caller_commits() {
 #[test]
 fn command_persist_rejects_identity_mismatch_and_resulting_state_rebind() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let created = created_session(
         "ses_command_identity_alpha",
         PARTICIPANT_REF,
@@ -1241,8 +1321,7 @@ fn command_persist_rejects_identity_mismatch_and_resulting_state_rebind() {
 #[test]
 fn load_replays_fail_closed_when_command_or_projection_evidence_is_corrupt() {
     let (_database_test_guard, mut client) = test_client();
-    reset_session_table(&mut client);
-    apply_created_session_schema(&mut client);
+    prepare_created_session_store(&mut client);
     let mut session = created_session(
         "ses_load_corrupt_alpha",
         PARTICIPANT_REF,
