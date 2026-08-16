@@ -237,7 +237,10 @@ fn non_research_snapshot_is_rejected_before_any_binding_is_written() {
     transaction.rollback().unwrap();
     assert_eq!(
         client
-            .query_one("SELECT count(*)::bigint FROM research_consent_snapshot", &[])
+            .query_one(
+                "SELECT count(*)::bigint FROM research_consent_snapshot",
+                &[]
+            )
             .unwrap()
             .get::<_, i64>(0),
         0
@@ -361,10 +364,14 @@ fn immutable_contribution_and_withdrawal_rebinding_fail_closed() {
         &first_snapshot,
         7_100,
     );
-    let first_withdrawal = first.withdraw("research_withdrawal_shared_eta", 7_500).unwrap();
+    let first_withdrawal = first
+        .withdraw("research_withdrawal_shared_eta", 7_500)
+        .unwrap();
     persist_ok(&mut client, &first_withdrawal);
 
-    let conflicting_withdrawal = first.withdraw("research_withdrawal_other_eta", 7_600).unwrap();
+    let conflicting_withdrawal = first
+        .withdraw("research_withdrawal_other_eta", 7_600)
+        .unwrap();
     assert!(matches!(
         persist_err(&mut client, &conflicting_withdrawal),
         ResearchContributionPersistenceError::ConflictingReplay
