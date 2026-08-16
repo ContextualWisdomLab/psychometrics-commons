@@ -120,14 +120,15 @@ pub fn apply_anonymous_credential_migration(
 ///
 /// The raw bearer proof is never accepted here. [`AnonymousCredential`] carries only its canonical
 /// SHA-256 digest plus the exact tenant, participant, session, and lifetime binding. The same issue
-/// evidence may be replayed idempotently. Reusing either the credential reference or proof digest
-/// with different evidence fails closed.
+/// evidence may be replayed idempotently, including after that durable credential has later been
+/// revoked; replay never clears revocation. Reusing either the credential reference or proof digest
+/// with different issue evidence fails closed.
 ///
 /// # Errors
 ///
 /// Returns [`AnonymousCredentialPersistenceError`] when the transaction isolation is unsupported,
-/// the supplied credential is already revoked, a timestamp cannot fit PostgreSQL, a replay
-/// conflicts with durable evidence, or PostgreSQL fails.
+/// the supplied credential itself is already revoked, a timestamp cannot fit PostgreSQL, a replay
+/// conflicts with durable issue evidence, or PostgreSQL fails.
 pub fn persist_anonymous_credential_issue(
     transaction: &mut Transaction<'_>,
     credential: &AnonymousCredential,
@@ -290,7 +291,7 @@ fn classify_issue_replay(
 ) -> Result<AnonymousCredentialPersistenceDisposition, AnonymousCredentialPersistenceError> {
     let row = transaction.query_opt(
         "SELECT tenant_ref, participant_ref, session_ref, proof_digest, issued_at_unix_ms, \
-                expires_at_unix_ms, revoked_at_unix_ms \
+                expires_at_unix_ms \
          FROM anonymous_session_credential \
          WHERE credential_ref = $1",
         &[&credential.credential_ref()],
@@ -302,14 +303,12 @@ fn classify_issue_replay(
         let stored_digest: String = row.get(3);
         let stored_issued: i64 = row.get(4);
         let stored_expires: i64 = row.get(5);
-        let stored_revoked: Option<i64> = row.get(6);
         if stored_tenant == credential.tenant_ref()
             && stored_participant == credential.participant_ref()
             && stored_session == credential.session_ref()
             && stored_digest == credential.proof_digest()
             && stored_issued == issued_at
             && stored_expires == expires_at
-            && stored_revoked.is_none()
         {
             return Ok(AnonymousCredentialPersistenceDisposition::Duplicate);
         }
