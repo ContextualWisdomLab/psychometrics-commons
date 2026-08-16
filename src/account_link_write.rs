@@ -3,9 +3,10 @@
 //! HTTP and messaging adapters validate anonymous-session and Keyverse proofs,
 //! then call these commands. This module does not parse tokens or open a socket.
 //! It authorizes the in-memory participant, persists append-only identity-link
-//! history, ends a current binding from a still-valid account proof, and recovers
+//! history, ends a current binding from a still-valid account proof, recovers
 //! the same product-owned participant from a still-valid authenticated account
-//! proof.
+//! proof, and binds any later account-linked capability to that current
+//! `link_event_ref` so unlink invalidates the grant.
 
 use crate::account_link::{
     link_authenticated_account, AccountLinkAuthorizationError, AuthenticatedAccountControl,
@@ -295,4 +296,125 @@ pub fn persist_authorized_account_unlink(
     let disposition = persist_participant_identity_history(transaction, &loaded)?;
     *participant = loaded;
     Ok(disposition)
+}
+
+/// Account-linked capability bound to one current identity-link event.
+///
+/// Recovering a `participant_ref` is not enough to keep acting as the Keyverse
+/// account after unlink. A later account-privileged command must present this
+/// grant and pass [`accept_account_linked_capability`], which re-checks that the
+/// participant's current tenant, issuer, subject, and `link_event_ref` still
+/// match. Unlink or rebound clears or replaces that event, so the old grant
+/// fails closed.
+#[allow(clippy::struct_field_names)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountLinkedCapability {
+    participant_ref: String,
+    tenant_ref: String,
+    issuer_ref: String,
+    subject_ref: String,
+    link_event_ref: String,
+}
+
+impl AccountLinkedCapability {
+    /// Return the product-owned participant this grant recovered.
+    #[must_use]
+    pub fn participant_ref(&self) -> &str {
+        &self.participant_ref
+    }
+
+    /// Return the tenant asserted when the grant was issued.
+    #[must_use]
+    pub fn tenant_ref(&self) -> &str {
+        &self.tenant_ref
+    }
+
+    /// Return the identity issuer bound into the grant.
+    #[must_use]
+    pub fn issuer_ref(&self) -> &str {
+        &self.issuer_ref
+    }
+
+    /// Return the issuer-scoped subject bound into the grant.
+    #[must_use]
+    pub fn subject_ref(&self) -> &str {
+        &self.subject_ref
+    }
+
+    /// Return the current link event the grant is valid for.
+    #[must_use]
+    pub fn link_event_ref(&self) -> &str {
+        &self.link_event_ref
+    }
+}
+
+/// Issue an account-linked capability from a still-valid current binding.
+///
+/// The proof must still be valid at `now_unix_ms`. A missing, unlinked, or
+/// rebound current binding returns `None` so a recovered `participant_ref`
+/// cannot be treated as an account grant after unlink.
+///
+/// # Errors
+///
+/// Returns [`AccountLinkWriteError::Authorization`] when the proof is expired
+/// or the grant time is unknown.
+pub fn grant_account_linked_capability(
+    participant: &ParticipantRecord,
+    authenticated_control: &AuthenticatedAccountControl,
+    now_unix_ms: u64,
+) -> Result<Option<AccountLinkedCapability>, AccountLinkWriteError> {
+    require_recoverable_account(authenticated_control, now_unix_ms)?;
+    let matches_current_binding = participant.tenant_ref() == authenticated_control.tenant_ref()
+        && participant.linked_issuer_ref() == Some(authenticated_control.issuer_ref())
+        && participant.linked_subject_ref() == Some(authenticated_control.subject_ref());
+    let Some(link_event_ref) = participant
+        .link_event_ref()
+        .filter(|_| matches_current_binding)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(AccountLinkedCapability {
+        participant_ref: participant.participant_ref().to_owned(),
+        tenant_ref: participant.tenant_ref().to_owned(),
+        issuer_ref: authenticated_control.issuer_ref().to_owned(),
+        subject_ref: authenticated_control.subject_ref().to_owned(),
+        link_event_ref: link_event_ref.to_owned(),
+    }))
+}
+
+/// Re-check a previously granted account-linked capability against current state.
+///
+/// The proof must still be valid. The participant's current tenant, issuer,
+/// subject, and `link_event_ref` must still match the grant. After unlink the
+/// current event is cleared; after rebound it is a different event. Either case
+/// returns [`AccountLinkWriteError::NoCurrentBinding`].
+///
+/// # Errors
+///
+/// Returns [`AccountLinkWriteError::Authorization`] when the proof is expired,
+/// the accept time is unknown, or the grant tenant does not match the proof.
+/// Returns [`AccountLinkWriteError::NoCurrentBinding`] when the current binding
+/// no longer matches the grant.
+pub fn accept_account_linked_capability(
+    participant: &ParticipantRecord,
+    capability: &AccountLinkedCapability,
+    authenticated_control: &AuthenticatedAccountControl,
+    now_unix_ms: u64,
+) -> Result<(), AccountLinkWriteError> {
+    require_recoverable_account(authenticated_control, now_unix_ms)?;
+    if capability.tenant_ref != authenticated_control.tenant_ref() {
+        return Err(AccountLinkAuthorizationError::CrossTenantDenied.into());
+    }
+    let current_matches = participant.participant_ref() == capability.participant_ref
+        && participant.tenant_ref() == capability.tenant_ref
+        && participant.linked_issuer_ref() == Some(capability.issuer_ref.as_str())
+        && participant.linked_subject_ref() == Some(capability.subject_ref.as_str())
+        && participant.link_event_ref() == Some(capability.link_event_ref.as_str())
+        && capability.issuer_ref == authenticated_control.issuer_ref()
+        && capability.subject_ref == authenticated_control.subject_ref();
+    if current_matches {
+        Ok(())
+    } else {
+        Err(AccountLinkWriteError::NoCurrentBinding)
+    }
 }
