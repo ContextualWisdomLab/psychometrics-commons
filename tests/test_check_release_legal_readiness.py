@@ -56,6 +56,20 @@ class ReleaseLegalReadinessTests(unittest.TestCase):
             self.assertFalse(evidence["ready"])
             self.assertIn("escapes the repository root", evidence["blockers"][-1])
 
+    def test_standard_license_symlink_cannot_escape_repository(self) -> None:
+        """A conventional filename is not evidence when its resolved file is outside the source tree."""
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = self.fixture_root(directory, ['license = "LicenseRef-Reviewed-Terms"'])
+            outside_license = Path(outside) / "LICENSE"
+            outside_license.write_text("terms outside the repository\n", encoding="utf-8")
+            (root / "LICENSE").symlink_to(outside_license)
+
+            evidence = evaluate_repository(root)
+
+            self.assertFalse(evidence["ready"])
+            self.assertEqual(evidence["standard_license_files"], [])
+            self.assertIn("no discoverable license file", evidence["blockers"][0])
+
     def test_declared_nonstandard_license_file_can_supply_explicit_file_evidence(self) -> None:
         """Cargo's reviewed license-file is acceptable even when its name is nonstandard."""
         with tempfile.TemporaryDirectory() as directory:
