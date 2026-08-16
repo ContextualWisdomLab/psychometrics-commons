@@ -8,6 +8,8 @@ use crate::health::{
     BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth, RuntimeHealthSnapshot,
 };
 use std::fmt::Write;
+use std::io::{self, Read};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 
 /// Process-liveness probe path.
 pub const HEALTH_LIVE_PATH: &str = "/live";
@@ -105,6 +107,83 @@ pub fn handle_health_http_request(
             "Not Found",
             "health probes accept GET /live and GET /ready only",
         ),
+    }
+}
+
+/// Bind a blocking TCP listener for operator health probes.
+///
+/// The caller chooses the address. Tests and local operators typically bind
+/// `127.0.0.1:0`. This function does not start accepting connections.
+///
+/// # Errors
+///
+/// Returns the I/O error if the operating system cannot bind the address.
+pub fn bind_health_http(addr: SocketAddr) -> io::Result<TcpListener> {
+    TcpListener::bind(addr)
+}
+
+/// Accept one TCP connection and serve a single health-probe request.
+///
+/// The connection is closed after the response. Keep-alive, TLS, and public
+/// product routes are outside this slice.
+///
+/// # Errors
+///
+/// Returns the I/O error if accept, read, or write fails.
+pub fn accept_one_health_http(
+    listener: &TcpListener,
+    snapshot: &RuntimeHealthSnapshot,
+) -> io::Result<()> {
+    let (stream, _) = listener.accept()?;
+    serve_health_http_connection(stream, snapshot)
+}
+
+fn serve_health_http_connection(
+    mut stream: TcpStream,
+    snapshot: &RuntimeHealthSnapshot,
+) -> io::Result<()> {
+    let request = read_http_request(&mut stream)?;
+    let response = handle_health_http_request(&request, snapshot);
+    write_http_response(&mut stream, &response)
+}
+
+fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
+    let mut buffer = Vec::new();
+    let mut chunk = [0_u8; 512];
+    loop {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+        if buffer.windows(4).any(|window| window == b"\r\n\r\n") || buffer.len() > 8_192 {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buffer).into_owned())
+}
+
+fn write_http_response(stream: &mut TcpStream, response: &HealthHttpResponse) -> io::Result<()> {
+    let body = response.body().as_bytes();
+    let header = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response.status(),
+        reason_phrase(response.status()),
+        response.content_type(),
+        body.len()
+    );
+    io::Write::write_all(stream, header.as_bytes())?;
+    io::Write::write_all(stream, body)
+}
+
+const fn reason_phrase(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        503 => "Service Unavailable",
+        _ => "Error",
     }
 }
 
@@ -216,7 +295,7 @@ fn json_string(value: &str) -> String {
 mod tests {
     use super::{
         backlog_label, capability_state_label, handle_health_http_request, integrity_label,
-        json_string, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
+        json_string, reason_phrase, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
@@ -239,6 +318,12 @@ mod tests {
         assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(json_string("a\n\r\t"), "\"a\\n\\r\\t\"");
         assert_eq!(json_string("\u{0001}"), "\"\\u0001\"");
+        assert_eq!(reason_phrase(200), "OK");
+        assert_eq!(reason_phrase(400), "Bad Request");
+        assert_eq!(reason_phrase(404), "Not Found");
+        assert_eq!(reason_phrase(405), "Method Not Allowed");
+        assert_eq!(reason_phrase(503), "Service Unavailable");
+        assert_eq!(reason_phrase(418), "Error");
     }
 
     #[test]

@@ -44,7 +44,7 @@ The implementation must distinguish at least:
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
 
-Operator HTTP probes, when implemented, are GET `/live` and GET `/ready`. `/live` answers process liveness only. `/ready` answers operation-scoped readiness and may name required capabilities as repeated `capability` query parameters. These probes do not publish measured SLO values.
+Operator HTTP probes, when implemented, are GET `/live` and GET `/ready`. `/live` answers process liveness only. `/ready` answers operation-scoped readiness and may name required capabilities as repeated `capability` query parameters. These probes do not publish measured SLO values. A bound TCP listener, when present, serves those same operations one request per accepted connection and is not a measured availability claim. When a PostgreSQL operational snapshot is wired, readiness for `postgres_operational_store` comes from live runtime and relation probes plus caller-supplied backlog health; probe failure is unknown/unready and must not expose driver errors.
 
 ## 4. Capability degradation matrix
 
