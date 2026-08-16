@@ -86,3 +86,11 @@ If consent verification is unavailable, optional research processing fails close
 ## Reversal conditions
 
 Revisit individual retention or withdrawal mechanics when a deployment's law or ethics approval imposes stricter requirements. The separation of service and research purposes remains mandatory.
+
+## References
+
+European Parliament & Council of the European Union. (2016). Regulation (EU) 2016/679 of the European Parliament and of the Council of 27 April 2016 on the protection of natural persons with regard to the processing of personal data and on the free movement of such data (General Data Protection Regulation). *Official Journal of the European Union, L 119*, 1–88. https://eur-lex.europa.eu/eli/reg/2016/679/oj
+
+National Institute of Standards and Technology. (2020). *NIST privacy framework: A tool for improving privacy through enterprise risk management, version 1.0* (NIST CSWP 01162020). https://doi.org/10.6028/NIST.CSWP.01162020
+
+World Medical Association. (2024). World Medical Association Declaration of Helsinki: Ethical principles for medical research involving human participants. *JAMA, 333*(1), 71–74. https://doi.org/10.1001/jama.2024.21972
