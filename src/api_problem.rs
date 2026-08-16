@@ -1,0 +1,160 @@
+//! Safe, transport-neutral problem details for the future public HTTP API.
+//!
+//! RFC 9457 defines a standard problem-details object for HTTP APIs. This module keeps the
+//! product-facing error contract deliberately smaller than an HTTP framework: callers choose an
+//! explicit problem type, status, title, detail, and stable machine code, while transport code can
+//! serialize those values later. Title and detail are `&'static str` so runtime provider, SQL,
+//! credential, assessment-response, or other sensitive error text cannot be forwarded by accident.
+//!
+//! The contract intentionally requires an explicit HTTPS or URN problem type instead of relying on
+//! `about:blank`. Psychometrics Commons requires stable machine-readable error semantics in
+//! addition to the generic HTTP status. An HTTP adapter may add a request-specific `instance`
+//! reference later without changing this safe core.
+
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+
+/// RFC 9457 JSON media type used by HTTP adapters that serialize [`ApiProblem`].
+pub const PROBLEM_JSON_MEDIA_TYPE: &str = "application/problem+json";
+
+/// Validation error for the public problem-details contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ApiProblemContractError {
+    /// The problem type was not an explicit HTTPS or URN identifier.
+    InvalidTypeUri,
+    /// The status was outside the HTTP 4xx or 5xx error ranges.
+    InvalidStatus,
+    /// The human-readable public title was blank.
+    EmptyTitle,
+    /// The occurrence-independent public detail was blank.
+    EmptyDetail,
+    /// The stable client machine code was not lowercase ASCII or did not start with a letter.
+    InvalidCode,
+}
+
+impl Display for ApiProblemContractError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidTypeUri => "problem type must use an explicit HTTPS or URN identifier",
+            Self::InvalidStatus => {
+                "problem status must be an HTTP client or server error status"
+            }
+            Self::EmptyTitle => "problem title must contain public-safe text",
+            Self::EmptyDetail => "problem detail must contain public-safe text",
+            Self::InvalidCode => "problem code must be lowercase ASCII and start with a letter",
+        })
+    }
+}
+
+impl Error for ApiProblemContractError {}
+
+/// One stable, public-safe API problem definition.
+///
+/// This value contains only occurrence-independent text that is safe to return to an API client.
+/// It deliberately cannot hold an arbitrary runtime error. A future HTTP adapter can combine it
+/// with a request-specific opaque `instance` reference and correlation metadata without exposing
+/// implementation details.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ApiProblem {
+    type_uri: &'static str,
+    status: u16,
+    title: &'static str,
+    detail: &'static str,
+    code: &'static str,
+}
+
+impl ApiProblem {
+    /// Create one validated public problem definition.
+    ///
+    /// `type_uri` must use an explicit `https://` or `urn:` identifier. `status` must be from 400
+    /// through 599. `title` and `detail` must contain non-whitespace static text. `code` must start
+    /// with an ASCII lowercase letter and may then contain only ASCII lowercase letters, digits,
+    /// or underscores.
+    ///
+    /// Requiring static title/detail text is intentional: transport code must map internal errors
+    /// to reviewed public wording rather than forwarding database, provider, credential, response,
+    /// or debugging messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns the matching [`ApiProblemContractError`] when any field violates this contract.
+    pub fn new(
+        type_uri: &'static str,
+        status: u16,
+        title: &'static str,
+        detail: &'static str,
+        code: &'static str,
+    ) -> Result<Self, ApiProblemContractError> {
+        if !(type_uri.starts_with("https://") || type_uri.starts_with("urn:")) {
+            return Err(ApiProblemContractError::InvalidTypeUri);
+        }
+        if !(400..=599).contains(&status) {
+            return Err(ApiProblemContractError::InvalidStatus);
+        }
+        if title.trim().is_empty() {
+            return Err(ApiProblemContractError::EmptyTitle);
+        }
+        if detail.trim().is_empty() {
+            return Err(ApiProblemContractError::EmptyDetail);
+        }
+        if !valid_machine_code(code) {
+            return Err(ApiProblemContractError::InvalidCode);
+        }
+
+        Ok(Self {
+            type_uri,
+            status,
+            title,
+            detail,
+            code,
+        })
+    }
+
+    /// Return the explicit RFC 9457 problem type identifier.
+    #[must_use]
+    pub const fn type_uri(&self) -> &'static str {
+        self.type_uri
+    }
+
+    /// Return the HTTP client/server error status associated with this problem.
+    #[must_use]
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+
+    /// Return the short reviewed human-readable title.
+    #[must_use]
+    pub const fn title(&self) -> &'static str {
+        self.title
+    }
+
+    /// Return the reviewed public explanation that does not contain runtime error text.
+    #[must_use]
+    pub const fn detail(&self) -> &'static str {
+        self.detail
+    }
+
+    /// Return the stable machine-readable extension code for client logic.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        self.code
+    }
+
+    /// Return the RFC 9457 JSON media type used when an HTTP adapter serializes the problem.
+    #[must_use]
+    pub const fn media_type() -> &'static str {
+        PROBLEM_JSON_MEDIA_TYPE
+    }
+}
+
+fn valid_machine_code(code: &str) -> bool {
+    let Some(first) = code.as_bytes().first() else {
+        return false;
+    };
+    if !first.is_ascii_lowercase() {
+        return false;
+    }
+    code.bytes()
+        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
