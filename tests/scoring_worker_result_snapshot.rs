@@ -314,3 +314,28 @@ fn planner_rejects_a_blank_retryable_cause() {
         ScoringWorkerError::InvalidReference
     );
 }
+
+#[test]
+fn planner_rejects_a_numeric_retryable_cause() {
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        expected_job: "scoring_job_reload_score",
+        expected_request: request.scoring_request_ref().to_owned(),
+        result: Ok(ScoringWorkerResultOutcome::Retryable {
+            cause_code: "123".to_owned(),
+        }),
+        calls: Cell::new(0),
+    };
+
+    assert_eq!(
+        plan_scoring_worker_result_attempt(
+            "scoring_job_reload_score",
+            &request,
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+        )
+        .unwrap_err(),
+        ScoringWorkerError::InvalidReference
+    );
+}

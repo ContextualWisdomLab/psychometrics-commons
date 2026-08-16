@@ -653,3 +653,183 @@ fn retryable_outage_releases_the_lease_without_a_snapshot_or_outbox() {
     assert_eq!(snapshot_count(&mut client), 0);
     assert_eq!(outbox_count(&mut client), 0);
 }
+
+fn persist_request_and_claim_with_budget(
+    client: &mut Client,
+    job_ref: &str,
+    max_attempts: u32,
+) -> u64 {
+    let request = loaded_request();
+    let job = ScoringJob::new(job_ref, request.scoring_request_ref(), max_attempts).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_request(&mut transaction, &request).unwrap();
+    persist_scoring_job(&mut transaction, &job).unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let lease = claim_scoring_job(
+        &mut transaction,
+        job_ref,
+        "worker_snapshot_alpha",
+        "lease_snapshot_alpha",
+        10_000,
+        30_000,
+    )
+    .unwrap();
+    let fencing_token = lease.fencing_token();
+    transaction.commit().unwrap();
+    fencing_token
+}
+
+fn envelope_at(occurred_at_unix_ms: u64) -> ScoringWorkerEnvelope<'static> {
+    let mut envelope = worker_envelope();
+    envelope.occurred_at_unix_ms = occurred_at_unix_ms;
+    envelope
+}
+
+fn snapshot_at(created_at_unix_ms: u64) -> ResultSnapshotInput<'static> {
+    let mut input = snapshot_input();
+    input.created_at_unix_ms = created_at_unix_ms;
+    input
+}
+
+#[test]
+fn later_due_claim_persists_the_snapshot_after_a_retryable_outage() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_recover";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let request = loaded_request();
+
+    let mut transaction = client.transaction().unwrap();
+    run_scoring_worker_attempt_with_result_snapshot(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        request.scoring_request_ref(),
+        &RetryableResultEngine,
+        snapshot_input(),
+        worker_envelope(),
+        3,
+        40_000,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let recovered_fence = claim_scoring_job(
+        &mut transaction,
+        job_ref,
+        "worker_snapshot_beta",
+        "lease_snapshot_beta",
+        40_000,
+        80_000,
+    )
+    .unwrap()
+    .fencing_token();
+    transaction.commit().unwrap();
+
+    let engine = completed_engine("result_worker_snapshot", &request);
+    let mut transaction = client.transaction().unwrap();
+    let inserted = run_scoring_worker_attempt_with_result_snapshot(
+        &mut transaction,
+        job_ref,
+        recovered_fence,
+        request.scoring_request_ref(),
+        &engine,
+        snapshot_at(50_000),
+        envelope_at(50_000),
+        3,
+        70_000,
+    )
+    .unwrap();
+    assert!(matches!(
+        inserted.terminal(),
+        ScoringWorkerPersistence::Completed(persistence)
+            if persistence.completion() == ScoringJobCompletionDisposition::Completed
+                && persistence.outbox() == PersistenceDisposition::Inserted
+    ));
+    assert_eq!(
+        inserted.snapshot(),
+        Some(ResultSnapshotPersistenceDisposition::Inserted)
+    );
+    transaction.commit().unwrap();
+
+    let (state, result_ref, _) = job_state(&mut client, job_ref);
+    assert_eq!(state, "completed");
+    assert_eq!(result_ref.as_deref(), Some("result_worker_snapshot"));
+    assert_eq!(snapshot_count(&mut client), 1);
+}
+
+#[test]
+fn exhausted_retry_budget_quarantines_without_a_snapshot_or_outbox() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_exhausted";
+    let fencing_token = persist_request_and_claim_with_budget(&mut client, job_ref, 1);
+    let request = loaded_request();
+
+    let mut transaction = client.transaction().unwrap();
+    let quarantined = run_scoring_worker_attempt_with_result_snapshot(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        request.scoring_request_ref(),
+        &RetryableResultEngine,
+        snapshot_input(),
+        worker_envelope(),
+        3,
+        40_000,
+    )
+    .unwrap();
+    assert_eq!(
+        quarantined.terminal(),
+        ScoringWorkerPersistence::Quarantined
+    );
+    assert_eq!(quarantined.snapshot(), None);
+    transaction.commit().unwrap();
+
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "quarantined");
+    assert_eq!(result_ref, None);
+    assert_eq!(cause.as_deref(), Some("engine_unavailable"));
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
+}
+
+#[test]
+fn retry_before_the_outage_instant_leaves_the_job_leased() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_retry_window";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let request = loaded_request();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            request.scoring_request_ref(),
+            &RetryableResultEngine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            10_000,
+        ),
+        Err(ScoringWorkerCommitError::Retry(
+            psychometrics_commons_runtime::postgres_scoring_job::ScoringJobPersistenceError::InvalidRetryWindow
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let (state, result_ref, _) = job_state(&mut client, job_ref);
+    assert_eq!(state, "leased");
+    assert_eq!(result_ref, None);
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
+}
