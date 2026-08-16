@@ -74,8 +74,30 @@ fn published_release_named(
     instrument_version_ref: &str,
     content_digest: &str,
 ) -> InstrumentRelease {
+    published_release_with_items(
+        release_ref,
+        instrument_version_ref,
+        content_digest,
+        "ko-KR",
+        &["item_version_001", "item_version_002"],
+    )
+}
+
+fn published_release_with_items(
+    release_ref: &str,
+    instrument_version_ref: &str,
+    content_digest: &str,
+    locale: &str,
+    item_version_refs: &[&str],
+) -> InstrumentRelease {
     let mut release = InstrumentRelease::new(
-        manifest(release_ref, instrument_version_ref, content_digest),
+        manifest_with_locale_and_items(
+            release_ref,
+            instrument_version_ref,
+            content_digest,
+            locale,
+            item_version_refs,
+        ),
         10_000,
     )
     .unwrap();
@@ -93,9 +115,9 @@ fn published_release_named(
                 "evidence_policy_self_reflection_v1",
                 release_ref,
                 instrument_version_ref,
-                &["item_version_001", "item_version_002"],
+                item_version_refs,
                 content_digest,
-                "ko-KR",
+                locale,
                 "intended_use_self_reflection_v1",
                 "assessment_spec_big_five_v1",
                 "scoring_version_big_five_v1",
@@ -320,5 +342,56 @@ fn deliver_rejects_same_session_ref_with_different_release_provenance() {
         Err(ItemDeliveryError::SessionMismatch),
         "exact session_ref reuse must not rebind delivery to another published release"
     );
+    assert!(ledger.is_empty());
+}
+
+#[test]
+fn deliver_rejects_same_session_ref_with_rebound_item_set() {
+    let release = published_release();
+    let mut session = created_session(&release);
+    session
+        .apply_command(
+            "session_activate_item_delivery_authority",
+            1,
+            SessionCommand::Activate,
+        )
+        .unwrap();
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
+    let rebound_cases = [
+        &["item_version_001", "item_version_002", "item_version_003"][..],
+        &["item_version_002", "item_version_001"],
+        &["item_version_001"],
+    ];
+
+    for items in rebound_cases {
+        let rebound_release = published_release_with_items(
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            RELEASE_A_DIGEST,
+            "ko-KR",
+            items,
+        );
+        let mut rebound_session = AssessmentSession::new(
+            "session_item_delivery_authority",
+            "participant_item_delivery_authority",
+            &rebound_release,
+            "ko-KR",
+            21_000,
+        )
+        .unwrap();
+        rebound_session
+            .apply_command(
+                "session_activate_rebound_item_set",
+                1,
+                SessionCommand::Activate,
+            )
+            .unwrap();
+
+        assert_eq!(
+            ledger.deliver(&rebound_session, delivery_request()),
+            Err(ItemDeliveryError::SessionMismatch),
+            "exact session_ref reuse must not rebind delivery to item set {items:?}"
+        );
+    }
     assert!(ledger.is_empty());
 }

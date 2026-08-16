@@ -240,7 +240,8 @@ impl ItemDeliveryLedger {
     /// Record one item delivery or replay an identical accepted delivery.
     ///
     /// `session` is authoritative for both ownership and current lifecycle state.
-    /// Its immutable session/release provenance must match the ledger before request
+    /// Its immutable session/release provenance, including the ordered item-version
+    /// set pinned at session creation, must match the ledger before request
     /// evidence is considered. Exact replay of a previously accepted `delivery_ref`
     /// then returns the original immutable event even after the session leaves
     /// [`SessionState::Active`]. Reuse of that identity with different evidence fails
@@ -270,6 +271,7 @@ impl ItemDeliveryLedger {
             session.instrument_version_ref(),
             session.instrument_release_content_digest(),
             session.locale(),
+            session.item_version_refs(),
         );
         let ledger_provenance = (
             self.session_ref.as_str(),
@@ -277,6 +279,7 @@ impl ItemDeliveryLedger {
             self.instrument_version_ref.as_str(),
             self.release_content_digest.as_str(),
             self.locale.as_str(),
+            self.allowed_item_version_refs.as_slice(),
         );
         if session_provenance != ledger_provenance {
             return Err(ItemDeliveryError::SessionMismatch);
