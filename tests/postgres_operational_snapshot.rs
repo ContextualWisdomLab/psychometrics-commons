@@ -1,9 +1,7 @@
-//! Compose PostgreSQL probes into one operation-scoped runtime health snapshot.
+//! Compose `PostgreSQL` probes into one operation-scoped runtime health snapshot.
 
 use postgres::{Client, NoTls};
-use psychometrics_commons_runtime::health::{
-    BacklogHealth, CapabilityState, DataIntegrityHealth,
-};
+use psychometrics_commons_runtime::health::{BacklogHealth, CapabilityState, DataIntegrityHealth};
 use psychometrics_commons_runtime::postgres_health::{
     observe_postgres_operational_snapshot, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF,
 };
@@ -58,11 +56,17 @@ fn missing_required_relation_fails_readiness_closed() {
 fn probe_failure_maps_to_unknown_unready_evidence_without_exposing_the_driver() {
     let mut client = test_client();
     let _ = client.batch_execute("SELECT pg_terminate_backend(pg_backend_pid())");
-    let snapshot =
-        observe_postgres_operational_snapshot(&mut client, &["pg_catalog.pg_class"], BacklogHealth::WithinBounds);
+    let snapshot = observe_postgres_operational_snapshot(
+        &mut client,
+        &["pg_catalog.pg_class"],
+        BacklogHealth::WithinBounds,
+    );
 
     assert!(snapshot.is_live());
-    assert_eq!(snapshot.data_integrity_health(), DataIntegrityHealth::Unknown);
+    assert_eq!(
+        snapshot.data_integrity_health(),
+        DataIntegrityHealth::Unknown
+    );
     let capability = snapshot
         .capability(POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF)
         .unwrap();
