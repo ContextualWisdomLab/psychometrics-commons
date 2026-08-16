@@ -47,6 +47,9 @@ fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
         "https://example.test/%zz",
         "https://example.test/[invalid]",
         "https://example.test/a#one#two",
+        "https://example.test:",
+        "https://example.test:abc/problems/denied",
+        "https://user@example.test/problems/denied",
         "urn:",
         "urn:x:value",
         "urn:example:",
@@ -62,8 +65,13 @@ fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
 
     for valid_type in [
         "https://example.test/problems/cross-tenant-denied",
+        "https://example.test:443/problems/denied",
         "https://example.test/problems/denied?version=2#details",
+        "https://example.test?version=2",
+        "https://example.test#details",
+        "https://example.test/problems/%2Fdenied",
         "urn:example:problem/v1",
+        "urn:ex-ample:problem:v1",
         TYPE_URI,
     ] {
         assert!(

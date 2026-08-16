@@ -235,9 +235,8 @@ fn valid_https_suffix(value: &str) -> bool {
 
     valid_percent_encoded_ascii(path, is_path_byte)
         && query.is_none_or(|query| valid_percent_encoded_ascii(query, is_query_or_fragment_byte))
-        && fragment.is_none_or(|fragment| {
-            valid_percent_encoded_ascii(fragment, is_query_or_fragment_byte)
-        })
+        && fragment
+            .is_none_or(|fragment| valid_percent_encoded_ascii(fragment, is_query_or_fragment_byte))
 }
 
 const fn is_path_byte(byte: u8) -> bool {
