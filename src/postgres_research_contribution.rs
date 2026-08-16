@@ -11,11 +11,12 @@
 //! binding rather than trusting a second in-memory snapshot. A new contribution
 //! start re-checks the latest research-purpose `consent_event` for that
 //! participant. That event must still be `granted` for the contribution's exact
-//! scope, matching [`ConsentSnapshot::is_granted`] and
-//! [`ConsentSnapshot::active_research_scope`]. Same-millisecond replacements
+//! scope and consent-form version, matching [`ConsentSnapshot::is_granted`],
+//! [`ConsentSnapshot::active_research_scope`], and
+//! [`ConsentSnapshot::active_form_version`]. Same-millisecond replacements
 //! follow persist/append order (`created_at`), not `event_ref` lexicographic
-//! order. A later grant or revoke for another scope therefore replaces the
-//! prior scope as the live write capability.
+//! order. A later grant or revoke for another scope or form therefore replaces
+//! the prior snapshot as the live write capability.
 //! Exact replay and withdrawal of already stored evidence stay allowed. The
 //! caller owns credentials and the surrounding transaction boundary.
 
@@ -195,7 +196,8 @@ pub fn persist_research_consent_snapshot(
 /// scope must equal the contribution's immutable scope and the bound operational
 /// participant must differ from the pseudonymous research participant. A new
 /// contribution start also requires the latest research-purpose `consent_event`
-/// for that participant to still be `granted` for the contribution's exact scope.
+/// for that participant to still be `granted` for the contribution's exact
+/// scope and consent-form version.
 ///
 /// The contribution start record is append-only. Withdrawal is stored as a separate
 /// event, so replaying original active evidence after withdrawal cannot reactivate
@@ -234,6 +236,7 @@ struct ValidatedEvidence<'a> {
     research_participant_ref: &'a str,
     consent_snapshot_ref: &'a str,
     research_scope_ref: &'a str,
+    consent_form_version_ref: String,
     started_at_unix_ms: i64,
     withdrawal: Option<ValidatedWithdrawal<'a>>,
 }
@@ -255,7 +258,7 @@ fn validated_contribution_evidence<'a>(
     let started_at_unix_ms = bounded_timestamp(contribution.started_at_unix_ms())?;
 
     let binding = transaction.query_opt(
-        "SELECT participant_ref, research_scope_ref \
+        "SELECT participant_ref, research_scope_ref, consent_form_version_ref \
          FROM research_consent_snapshot WHERE consent_snapshot_ref = $1",
         &[&consent_snapshot_ref],
     )?;
@@ -264,6 +267,7 @@ fn validated_contribution_evidence<'a>(
     };
     let participant_ref: String = binding.get(0);
     let bound_scope_ref: String = binding.get(1);
+    let consent_form_version_ref: String = binding.get(2);
     if bound_scope_ref != research_scope_ref {
         return Err(ResearchContributionPersistenceError::ConsentSnapshotMismatch);
     }
@@ -290,6 +294,7 @@ fn validated_contribution_evidence<'a>(
         research_participant_ref,
         consent_snapshot_ref,
         research_scope_ref,
+        consent_form_version_ref,
         started_at_unix_ms,
         withdrawal,
     })
@@ -310,6 +315,7 @@ fn persist_contribution_start(
             transaction,
             &evidence.participant_ref,
             evidence.research_scope_ref,
+            &evidence.consent_form_version_ref,
         )?;
         require_namespace_separation(
             transaction,
@@ -410,9 +416,10 @@ fn require_live_research_grant(
     transaction: &mut Transaction<'_>,
     participant_ref: &str,
     research_scope_ref: &str,
+    consent_form_version_ref: &str,
 ) -> Result<(), ResearchContributionPersistenceError> {
     let row = transaction.query_opt(
-        "SELECT consent_decision, research_scope_ref \
+        "SELECT consent_decision, research_scope_ref, consent_form_version_ref \
          FROM consent_event \
          WHERE participant_ref = $1 \
            AND consent_purpose = 'research_contribution' \
@@ -425,7 +432,11 @@ fn require_live_research_grant(
     };
     let decision: String = row.get(0);
     let live_scope_ref: String = row.get(1);
-    if decision == "granted" && live_scope_ref == research_scope_ref {
+    let live_form_version_ref: String = row.get(2);
+    if decision == "granted"
+        && live_scope_ref == research_scope_ref
+        && live_form_version_ref == consent_form_version_ref
+    {
         Ok(())
     } else {
         Err(ResearchContributionPersistenceError::ResearchConsentRequired)

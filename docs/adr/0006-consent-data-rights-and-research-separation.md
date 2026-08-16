@@ -64,7 +64,7 @@ Construct-relevant personal data remains available to authorized workflows when 
 4. Public research data contains no Keyverse subject or operational participant reference.
 5. Service denial cannot be based on refusal of optional research contribution.
 6. Data-rights operations are tenant-scoped and identity-verified.
-7. A durable research-consent snapshot projection authorizes identity binding only. A new contribution start must re-check the latest research-purpose `consent_event` for that participant in the same transaction. That event must still be `granted` for the contribution's exact scope, matching `ConsentSnapshot::is_granted` / `active_research_scope`. Same-millisecond replacements follow persist/append order (`created_at`), not `event_ref` lexicographic order. A later grant or revoke for another scope replaces the prior scope as the live write capability. Exact replay and withdrawal of already stored evidence remain allowed (`tests/postgres_research_contribution_persistence.rs`).
+7. A durable research-consent snapshot projection authorizes identity binding only. A new contribution start must re-check the latest research-purpose `consent_event` for that participant in the same transaction. That event must still be `granted` for the contribution's exact scope and consent-form version, matching `ConsentSnapshot::is_granted` / `active_research_scope` / `active_form_version`. Same-millisecond replacements follow persist/append order (`created_at`), not `event_ref` lexicographic order. A later grant or revoke for another scope or form replaces the prior snapshot as the live write capability. Exact replay and withdrawal of already stored evidence remain allowed (`tests/postgres_research_contribution_persistence.rs`).
 8. A research participant reference cannot equal the bound operational participant, cannot be reused across operational identities, and cannot later be reused as an operational `participant_ref` (`research_contribution_identity_separation_check`, `research_contribution_research_participant_ref_unique`).
 
 ## Failure behavior
@@ -74,7 +74,7 @@ If consent verification is unavailable, optional research processing fails close
 ## Validation
 
 - consent-version and revocation state-machine tests;
-- PostgreSQL tests proving a stored research-consent snapshot cannot insert a new contribution after the live grant is revoked, after a later purpose-level grant for another scope, after a same-millisecond later append whose `event_ref` sorts lower, or when no consent ledger was persisted, while exact replay and withdrawal of prior evidence still succeed;
+- PostgreSQL tests proving a stored research-consent snapshot cannot insert a new contribution after the live grant is revoked, after a later purpose-level grant for another scope, after a later same-scope grant under a new consent-form version, after a same-millisecond later append whose `event_ref` sorts lower, or when no consent ledger was persisted, while exact replay and withdrawal of prior evidence still succeed;
 - PostgreSQL tests proving a stored research participant reference cannot later become an operational participant at snapshot persist or contribution start;
 - negative tests proving research jobs reject non-opted-in participants;
 - release joinability and rare-combination privacy review;
