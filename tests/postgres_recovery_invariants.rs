@@ -101,11 +101,13 @@ fn seed_recovery_critical_state(client: &mut Client) {
              );
              INSERT INTO {SOURCE_SCHEMA}.response_event (
                 response_event_ref, session_ref, client_event_ref, item_version_ref,
-                payload_digest, server_sequence
+                payload_digest, server_sequence, observed_at, received_at
              ) VALUES (
                 'response_event_recovery_alpha', 'session_recovery_alpha',
                 'client_event_recovery_alpha', 'item_version_recovery_alpha',
-                '{DIGEST_A}', 1
+                '{DIGEST_A}', 1,
+                TIMESTAMPTZ '2023-11-14 22:13:20+00',
+                TIMESTAMPTZ '2023-11-14 22:13:20.250+00'
              );"
         ))
         .expect("recovery fixture should satisfy all protected-main persistence constraints");

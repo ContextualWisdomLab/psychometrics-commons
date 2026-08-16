@@ -41,9 +41,10 @@ CREATE TABLE IF NOT EXISTS response_event (
         ),
     server_sequence BIGINT CONSTRAINT response_event_server_sequence_not_null NOT NULL
         CONSTRAINT response_event_server_sequence_positive_check CHECK (server_sequence > 0),
-    received_at TIMESTAMPTZ CONSTRAINT response_event_received_at_not_null NOT NULL
-        DEFAULT clock_timestamp(),
+    observed_at TIMESTAMPTZ CONSTRAINT response_event_observed_at_not_null NOT NULL,
+    received_at TIMESTAMPTZ CONSTRAINT response_event_received_at_not_null NOT NULL,
     CONSTRAINT response_event_pkey PRIMARY KEY (response_event_ref),
     CONSTRAINT response_event_session_client_unique UNIQUE (session_ref, client_event_ref),
-    CONSTRAINT response_event_session_sequence_unique UNIQUE (session_ref, server_sequence)
+    CONSTRAINT response_event_session_sequence_unique UNIQUE (session_ref, server_sequence),
+    CONSTRAINT response_event_observed_not_after_received_check CHECK (observed_at <= received_at)
 );

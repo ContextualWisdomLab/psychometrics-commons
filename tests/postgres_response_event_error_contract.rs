@@ -29,6 +29,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             "response event sequence is missing, gapped, or outside the PostgreSQL bigint range",
         ),
         (
+            ResponseEventPersistenceError::InvalidTimestamp,
+            "response event observed time must be positive and not after received time",
+        ),
+        (
             ResponseEventPersistenceError::UnsupportedIsolationLevel,
             "response event persistence requires read committed isolation",
         ),

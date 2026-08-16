@@ -11,6 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 
 const DIGEST_N1: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_N2: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const OBSERVED_AT_MS: u64 = 1_700_000_000_000;
+const RECEIVED_AT_MS: u64 = 1_700_000_000_250;
 
 static RESPONSE_EVENT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -68,8 +70,25 @@ fn persist_ok(
     session_ref: &str,
     event: &ResponseEvent,
 ) -> ResponseEventPersistenceDisposition {
+    persist_ok_at(client, session_ref, event, OBSERVED_AT_MS, RECEIVED_AT_MS)
+}
+
+fn persist_ok_at(
+    client: &mut Client,
+    session_ref: &str,
+    event: &ResponseEvent,
+    observed_at_unix_ms: u64,
+    received_at_unix_ms: u64,
+) -> ResponseEventPersistenceDisposition {
     let mut transaction = client.transaction().unwrap();
-    let disposition = persist_response_event(&mut transaction, session_ref, event).unwrap();
+    let disposition = persist_response_event(
+        &mut transaction,
+        session_ref,
+        event,
+        observed_at_unix_ms,
+        received_at_unix_ms,
+    )
+    .unwrap();
     transaction.commit().unwrap();
     disposition
 }
@@ -79,8 +98,25 @@ fn persist_err(
     session_ref: &str,
     event: &ResponseEvent,
 ) -> ResponseEventPersistenceError {
+    persist_err_at(client, session_ref, event, OBSERVED_AT_MS, RECEIVED_AT_MS)
+}
+
+fn persist_err_at(
+    client: &mut Client,
+    session_ref: &str,
+    event: &ResponseEvent,
+    observed_at_unix_ms: u64,
+    received_at_unix_ms: u64,
+) -> ResponseEventPersistenceError {
     let mut transaction = client.transaction().unwrap();
-    let error = persist_response_event(&mut transaction, session_ref, event).unwrap_err();
+    let error = persist_response_event(
+        &mut transaction,
+        session_ref,
+        event,
+        observed_at_unix_ms,
+        received_at_unix_ms,
+    )
+    .unwrap_err();
     transaction.rollback().unwrap();
     error
 }
@@ -293,7 +329,13 @@ fn persist_and_load_require_read_committed_and_opaque_session() {
         .start()
         .unwrap();
     assert!(matches!(
-        persist_response_event(&mut serializable, "session_ipip_ko_isolation", &event),
+        persist_response_event(
+            &mut serializable,
+            "session_ipip_ko_isolation",
+            &event,
+            OBSERVED_AT_MS,
+            RECEIVED_AT_MS,
+        ),
         Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
     ));
     assert!(matches!(
@@ -338,10 +380,11 @@ fn missing_relation_and_gapped_history_fail_closed() {
         .execute(
             "INSERT INTO response_event (\
                  response_event_ref, session_ref, client_event_ref, item_version_ref, \
-                 payload_digest, server_sequence\
+                 payload_digest, server_sequence, observed_at, received_at\
              ) VALUES (\
                  'server_event_item_03', 'session_ipip_ko_gap', 'client_event_item_03', \
-                 'item_version_n3_ko', $1, 3\
+                 'item_version_n3_ko', $1, 3, TIMESTAMPTZ '2023-11-14 22:13:20+00', \
+                 TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
              )",
             &[&DIGEST_N2],
         )
@@ -368,10 +411,12 @@ fn stored_noncanonical_digest_fails_closed_on_reload() {
         .execute(
             "INSERT INTO response_event (\
                  response_event_ref, session_ref, client_event_ref, item_version_ref, \
-                 payload_digest, server_sequence\
+                 payload_digest, server_sequence, observed_at, received_at\
              ) VALUES (\
                  'server_event_item_01', 'session_ipip_ko_digest', 'client_event_item_01', \
-                 'item_version_n1_ko', 'not-a-digest', 1\
+                 'item_version_n1_ko', 'not-a-digest', 1, \
+                 TIMESTAMPTZ '2023-11-14 22:13:20+00', \
+                 TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
              )",
             &[],
         )
@@ -428,10 +473,12 @@ fn unexpected_unique_constraint_and_negative_sequence_fail_closed() {
         .execute(
             "INSERT INTO response_event (\
                  response_event_ref, session_ref, client_event_ref, item_version_ref, \
-                 payload_digest, server_sequence\
+                 payload_digest, server_sequence, observed_at, received_at\
              ) VALUES (\
                  'server_event_item_neg', 'session_ipip_ko_negative', 'client_event_item_neg', \
-                 'item_version_n_neg', $1, -1\
+                 'item_version_n_neg', $1, -1, \
+                 TIMESTAMPTZ '2023-11-14 22:13:20+00', \
+                 TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
              )",
             &[&DIGEST_N1],
         )
@@ -439,5 +486,54 @@ fn unexpected_unique_constraint_and_negative_sequence_fail_closed() {
     assert!(matches!(
         load_err(&mut client, "session_ipip_ko_negative"),
         ResponseEventPersistenceError::InvalidSequence
+    ));
+}
+
+#[test]
+fn inverted_or_zero_event_times_and_time_rebinding_fail_closed() {
+    let _guard = response_event_test_guard();
+    let mut client = test_client();
+    reset_response_event_table(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+
+    let (_, event) = recorded_event(
+        "session_ipip_ko_time",
+        write(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            DIGEST_N1,
+        ),
+    );
+    assert!(matches!(
+        persist_err_at(
+            &mut client,
+            "session_ipip_ko_time",
+            &event,
+            0,
+            RECEIVED_AT_MS
+        ),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    assert!(matches!(
+        persist_err_at(
+            &mut client,
+            "session_ipip_ko_time",
+            &event,
+            RECEIVED_AT_MS + 1,
+            RECEIVED_AT_MS
+        ),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    persist_ok(&mut client, "session_ipip_ko_time", &event);
+    assert!(matches!(
+        persist_err_at(
+            &mut client,
+            "session_ipip_ko_time",
+            &event,
+            OBSERVED_AT_MS,
+            RECEIVED_AT_MS + 1
+        ),
+        ResponseEventPersistenceError::ConflictingReplay
     ));
 }

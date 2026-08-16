@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR response-event physical schema
 
-This open PR adds `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` so each accepted answer is durable before snapshot freeze. The slice is **Active PR**, not protected-main truth. It stores opaque `response_event_ref` identity, session binding, client idempotency identity, item version, canonical SHA-256 payload digest, and positive `server_sequence`. Exact replay is idempotent. Client-identity, sequence, and evidence rebinding fail closed. Reload reconstructs `ResponseLedger` in `server_sequence` order under `READ COMMITTED`. HTTP response transport remains outside this slice.
+PR #182 adds `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` so each accepted answer is durable before snapshot freeze. The slice is **Active PR**, not protected-main truth. It stores opaque `response_event_ref` identity, session binding, client idempotency identity, item version, canonical SHA-256 payload digest, and positive `server_sequence`. Exact replay is idempotent. Client-identity, sequence, and evidence rebinding fail closed. Reload reconstructs `ResponseLedger` in `server_sequence` order under `READ COMMITTED`. HTTP response transport remains outside this slice.
 
 ## Logical-to-physical mapping rule
 

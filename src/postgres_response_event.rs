@@ -12,6 +12,7 @@ use crate::response::{ResponseEvent, ResponseLedger, WriteError};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0020_response_event.sql");
 
@@ -37,6 +38,8 @@ pub enum ResponseEventPersistenceError {
     SequenceConflict,
     /// A sequence cannot be represented by the bounded database column.
     InvalidSequence,
+    /// Observed time was zero, inverted after received time, or out of range.
+    InvalidTimestamp,
     /// Response-event persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
@@ -57,6 +60,9 @@ impl Display for ResponseEventPersistenceError {
             }
             Self::InvalidSequence => {
                 "response event sequence is missing, gapped, or outside the PostgreSQL bigint range"
+            }
+            Self::InvalidTimestamp => {
+                "response event observed time must be positive and not after received time"
             }
             Self::UnsupportedIsolationLevel => {
                 "response event persistence requires read committed isolation"
@@ -95,18 +101,22 @@ pub fn apply_response_event_migration(
 /// Persist one accepted response event for a session.
 ///
 /// Exact replay of the same event identity, session binding, item version,
-/// payload digest, and server sequence is idempotent. Rebinding any of those
-/// values fails closed. Historical accepted answers are never updated.
+/// payload digest, server sequence, and observed/received times is idempotent.
+/// Rebinding any of those values fails closed. Historical accepted answers are
+/// never updated. `observed_at_unix_ms` is source-valid time; `received_at_unix_ms`
+/// is platform receipt time.
 ///
 /// # Errors
 ///
 /// Returns [`ResponseEventPersistenceError`] for an unbound identity,
 /// unsupported isolation, conflicting replay, a sequence conflict, an invalid
-/// sequence, or a database failure.
+/// sequence or timestamp, or a database failure.
 pub fn persist_response_event(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
     event: &ResponseEvent,
+    observed_at_unix_ms: u64,
+    received_at_unix_ms: u64,
 ) -> Result<ResponseEventPersistenceDisposition, ResponseEventPersistenceError> {
     require_read_committed(transaction)?;
     let session_ref = required_reference(session_ref)?;
@@ -114,12 +124,17 @@ pub fn persist_response_event(
     let client_event_ref = required_reference(event.client_event_ref())?;
     let item_version_ref = required_reference(event.item_version_ref())?;
     let server_sequence = postgres_sequence(event.sequence())?;
+    let observed_at = postgres_timestamptz(observed_at_unix_ms)?;
+    let received_at = postgres_timestamptz(received_at_unix_ms)?;
+    if observed_at_unix_ms > received_at_unix_ms {
+        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
 
     let inserted = match transaction.execute(
         "INSERT INTO response_event (\
              response_event_ref, session_ref, client_event_ref, item_version_ref, \
-             payload_digest, server_sequence\
-         ) VALUES ($1, $2, $3, $4, $5, $6) \
+             payload_digest, server_sequence, observed_at, received_at\
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (response_event_ref) DO NOTHING",
         &[
             &server_event_ref,
@@ -128,6 +143,8 @@ pub fn persist_response_event(
             &item_version_ref,
             &event.payload_digest(),
             &server_sequence,
+            &observed_at,
+            &received_at,
         ],
     ) {
         Ok(count) => count,
@@ -142,6 +159,8 @@ pub fn persist_response_event(
         event,
         server_event_ref,
         server_sequence,
+        observed_at,
+        received_at,
     )
 }
 
@@ -196,9 +215,12 @@ fn classify_existing_event(
     event: &ResponseEvent,
     server_event_ref: &str,
     server_sequence: i64,
+    observed_at: SystemTime,
+    received_at: SystemTime,
 ) -> Result<ResponseEventPersistenceDisposition, ResponseEventPersistenceError> {
     let row = transaction.query_one(
-        "SELECT session_ref, client_event_ref, item_version_ref, payload_digest, server_sequence \
+        "SELECT session_ref, client_event_ref, item_version_ref, payload_digest, \
+                server_sequence, observed_at, received_at \
          FROM response_event WHERE response_event_ref = $1",
         &[&server_event_ref],
     )?;
@@ -207,11 +229,15 @@ fn classify_existing_event(
     let stored_item: String = row.get(2);
     let stored_digest: String = row.get(3);
     let stored_sequence: i64 = row.get(4);
+    let stored_observed: SystemTime = row.get(5);
+    let stored_received: SystemTime = row.get(6);
     if stored_session == session_ref
         && stored_client == event.client_event_ref()
         && stored_item == event.item_version_ref()
         && stored_digest == event.payload_digest()
         && stored_sequence == server_sequence
+        && stored_observed == observed_at
+        && stored_received == received_at
     {
         Ok(ResponseEventPersistenceDisposition::Duplicate)
     } else {
@@ -257,6 +283,15 @@ fn postgres_sequence(value: usize) -> Result<i64, ResponseEventPersistenceError>
     i64::try_from(value).map_err(|_| ResponseEventPersistenceError::InvalidSequence)
 }
 
+fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersistenceError> {
+    if unix_ms == 0 {
+        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
+    UNIX_EPOCH
+        .checked_add(Duration::from_millis(unix_ms))
+        .ok_or(ResponseEventPersistenceError::InvalidTimestamp)
+}
+
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), ResponseEventPersistenceError> {
@@ -272,7 +307,8 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        map_rebuild_error, postgres_sequence, required_reference, ResponseEventPersistenceError,
+        map_rebuild_error, postgres_sequence, postgres_timestamptz, required_reference,
+        ResponseEventPersistenceError,
     };
     use crate::response::WriteError;
     use crate::session::SessionState;
@@ -295,6 +331,15 @@ mod reference_guard_tests {
         assert!(matches!(
             postgres_sequence(usize::MAX),
             Err(ResponseEventPersistenceError::InvalidSequence)
+        ));
+        assert!(matches!(
+            postgres_timestamptz(0),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
+        assert!(matches!(
+            postgres_timestamptz(u64::MAX),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
         ));
     }
 
