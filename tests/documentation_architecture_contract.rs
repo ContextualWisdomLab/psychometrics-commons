@@ -239,6 +239,8 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         "src/participant.rs",
         "src/authorization.rs",
         "src/integration.rs",
+        "src/session_http.rs",
+        "openapi/sessions.yaml",
     ] {
         assert!(
             traceability.contains(protected_main_module),
@@ -350,6 +352,41 @@ fn uml_covers_identity_longitudinal_and_workbench_behavior() {
         assert!(
             uml.contains(behavior_marker),
             "UML architecture view must expose {behavior_marker}"
+        );
+    }
+}
+
+#[test]
+fn session_openapi_lists_only_implemented_session_operations() {
+    let openapi = read_required(&repository_root().join("openapi/sessions.yaml"));
+    assert!(
+        openapi.contains("openapi: 3.2.0"),
+        "session OpenAPI must pin OpenAPI 3.2.0"
+    );
+    assert!(
+        repository_root().join("src/session_http.rs").is_file(),
+        "session OpenAPI requires the session HTTP implementation"
+    );
+    for implemented in [
+        "/v1/sessions",
+        "/v1/sessions/{session_ref}",
+        "Idempotency-Key",
+    ] {
+        assert!(
+            openapi.contains(implemented),
+            "session OpenAPI must describe implemented contract {implemented}"
+        );
+    }
+    for unimplemented in [
+        "/v1/instruments",
+        "/v1/results",
+        "/v1/consents",
+        "/v1/research-contributions",
+        "/v1/data-rights",
+    ] {
+        assert!(
+            !openapi.contains(unimplemented),
+            "session OpenAPI must not list unimplemented family {unimplemented}"
         );
     }
 }

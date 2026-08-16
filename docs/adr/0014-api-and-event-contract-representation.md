@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral
+- Current/as-built status: `src/session_http.rs` and `openapi/sessions.yaml` implement in-process `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` with RFC 9457 problem details; remaining public/admin HTTP families and durable external event transport are not implemented on protected main
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 

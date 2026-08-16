@@ -1,0 +1,156 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public session API
+  version: 0.1.0
+  description: >
+    As-built public session create and exact-identity reload. These operations
+    mint an in-process assessment session bound to one published locale-specific
+    instrument release. They do not persist sessions across process restart and
+    do not expose response, scoring, or result families.
+paths:
+  /v1/sessions:
+    post:
+      operationId: createSession
+      summary: Create one assessment session
+      description: >
+        Creates a Created session bound to one cataloged published release and
+        the exact requested locale. The server mints the session reference.
+        Exact Idempotency-Key replay returns the original session.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque replay key for this create request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCreateRequest"
+      responses:
+        "201":
+          description: Session was minted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "200":
+          description: Exact idempotent replay of a previous create.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/sessions/{session_ref}:
+    get:
+      operationId: getSession
+      summary: Reload one minted session
+      description: >
+        Returns the in-process session for an opaque session_ref minted by
+        POST /v1/sessions in this process.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque server-minted session reference.
+      responses:
+        "200":
+          description: Session exists in this process.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    SessionCreateRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - participant_ref
+        - instrument_release_ref
+        - locale
+      properties:
+        participant_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        locale:
+          type: string
+    Session:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - participant_ref
+        - instrument_release_ref
+        - instrument_version_ref
+        - instrument_release_content_digest
+        - locale
+        - state
+        - created_at_unix_ms
+      properties:
+        session_ref:
+          type: string
+        participant_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        instrument_version_ref:
+          type: string
+        instrument_release_content_digest:
+          type: string
+        locale:
+          type: string
+        state:
+          type: string
+          enum:
+            - created
+            - active
+            - paused
+            - completed
+            - scoring
+            - scored
+            - released
+            - expired
+            - cancelled
+            - invalidated
+        created_at_unix_ms:
+          type: integer
+          minimum: 1
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

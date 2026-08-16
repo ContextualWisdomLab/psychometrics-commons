@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Public `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` mint and reload an in-process assessment session bound to one published locale-specific release, with `Idempotency-Key` replay and RFC 9457 problem details. OpenAPI 3.2 as-built contract is `openapi/sessions.yaml`. Process-restart durability remains a later persist slice.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

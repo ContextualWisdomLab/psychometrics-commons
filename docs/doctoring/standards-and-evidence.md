@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -94,6 +94,17 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## HTTP APIs and problem details
+
+The first public HTTP family uses HTTP Semantics (RFC 9110) for method, target, and status meaning, and RFC 9457 problem details for fail-closed client errors. OpenAPI 3.2.0 is the as-built contract vocabulary required by ADR-0014. These sources constrain the session create/reload wire format; they do not authorize listing unimplemented TRD families as available operations.
+
+Product consequences:
+
+- `POST /v1/sessions` is the only state-changing public operation in this slice and requires an opaque `Idempotency-Key`;
+- problem responses use `application/problem+json` with an explicit product URN type, never `about:blank` or raw request/SQL/provider text;
+- `openapi/sessions.yaml` lists only the implemented create and reload operations;
+- hosted listeners bind `0.0.0.0:$PORT`; tests bind `127.0.0.1:0`.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -124,3 +135,9 @@ Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
+Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
+
+OpenAPI Initiative. (2025). *OpenAPI Specification Version 3.2.0*. https://spec.openapis.org/oas/v3.2.0

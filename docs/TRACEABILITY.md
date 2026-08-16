@@ -20,7 +20,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Requirement | PRD source | Technical/architecture contract | ADR(s) | Evaluated-main implementation |
 |---|---|---|---|---|
-| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
+| Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; `src/session_http.rs` mints in-process `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` with RFC 9457 problems. Anonymous credential issuance, durable session persist, and remaining public families remain Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
@@ -45,14 +45,14 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
 | EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/normalized-ingestion/orchestration adapter |
 | Measurement Workbench | PRD §6 | C4/component view; UML publication-evidence sequence; Measurement Governance | ADR-0001, ADR-0002, ADR-0004, ADR-0019 | Target; fast-mlsirm/Inkspan/RankWeave are External dependencies |
-| Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Architecture established; public transport is Target |
+| Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Architecture established; `openapi/sessions.yaml` plus `src/session_http.rs` implement the first public session create/reload family. Remaining public/admin families remain Target |
 | Community/Hosted/Enterprise profiles | PRD §7, §13 | TRD deployment sections; Deployment/Operations | ADR-0011, ADR-0017 | Target deployment packaging/evidence |
 
 ## 3. Technical invariant traceability
 
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
-| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
+| Server-authoritative session state | TRD §5 | `src/session.rs` + `src/session_http.rs` create/reload over HTTP with idempotent replay | persistence/API concurrency test |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
@@ -116,7 +116,8 @@ src/lib.rs
 ├── result.rs         # immutable result provenance/supersession
 ├── scoring.rs        # version-pinned scoring dispatch contract
 ├── scoring_job.rs    # bounded retry/quarantine lifecycle with lease fencing
-└── session.rs        # server-authoritative assessment-session transitions bound to a published locale release
+├── session.rs        # server-authoritative assessment-session transitions bound to a published locale release
+└── session_http.rs   # in-process POST /v1/sessions and GET /v1/sessions/{session_ref}
 
 migrations/
 ├── 0001_integration_delivery.sql
@@ -128,7 +129,7 @@ migrations/
 └── 0012_integration_consumption.sql
 ```
 
-Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
+Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration. Session HTTP in this change set is in-process only; PostgreSQL session durability remains Active PR.
 
 ### Active implementation work that is not protected-main truth
 
@@ -190,7 +191,7 @@ Whenever a durable conversation decision changes one of those boundaries, the ap
 
 The prose API/event families in TRD are architecture requirements, not evidence of an implemented transport.
 
-When the first HTTP API is implemented, the same PR or a prerequisite PR must add and validate an OpenAPI 3.2.x document whose operations and problem responses match the actual implementation. HTTP errors use RFC 9457 problem details unless a documented domain representation is more appropriate.
+The first implemented public HTTP family is `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` in `src/session_http.rs`, described by `openapi/sessions.yaml` (OpenAPI 3.2.0). HTTP errors use RFC 9457 problem details. That document lists only those two operations. Remaining TRD families stay Target and must not be added to the as-built contract until they exist.
 
 When durable message transport is implemented, the same PR or a prerequisite PR must add and validate an AsyncAPI 3.1.x document for actually produced/consumed event channels and message schemas. It must encode/reference ADR-0014 canonical UTF-8 payload hashing, SHA-256 payload digest semantics, tenant/resource binding, deduplication identity, pending/processing/completed consumption, replay retention, and quarantine behavior.
 
@@ -220,8 +221,10 @@ CI should validate linked documentation paths and status/name consistency now an
 
 ## 10. References
 
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
 Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
 
-OpenAPI Initiative. (2025). *OpenAPI Specification, Version 3.2.0*.
+OpenAPI Initiative. (2025). *OpenAPI Specification, Version 3.2.0*. https://spec.openapis.org/oas/v3.2.0
 
 AsyncAPI Initiative. (2026). *AsyncAPI Specification, Version 3.1.0*.
