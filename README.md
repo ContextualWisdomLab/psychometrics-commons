@@ -16,7 +16,7 @@ It does **not** duplicate psychometric numerical kernels, identity credentials, 
 
 ## Instrument catalog after restart
 
-Active PR #213 — not protected-main truth until an unchanged reviewed/check-clean head is integrated. Prefer this head over #193 for catalog-from-store. After a worker restart, open a `READ COMMITTED` transaction and call `list_startable_instrument_releases`. Copy a returned `release_ref` and exact BCP 47 `locale` into the #180 session-start path (`load_published_instrument_release`). Draft, Review, Suspended, and Retired forms are omitted, including a row that was Published and later Suspended. If listing fails, repair the corrupt stored snapshot before offering any form. Do not start sessions from a partial untrusted catalog or from `load_instrument_release`, which also rebuilds unpublished states.
+Active PR #213 — not protected-main truth until an unchanged reviewed/check-clean head is integrated. Prefer this head over #193 for catalog-from-store. After a worker restart, open a `READ COMMITTED` transaction and call `list_startable_instrument_releases`. Copy a returned `release_ref` and exact BCP 47 `locale` into the #205 session-start path (`load_published_instrument_release` plus persist first-insert seal). Draft, Review, Suspended, and Retired forms are omitted, including a row that was Published and later Suspended. If listing fails, repair the corrupt stored snapshot before offering any form. Do not start sessions from a partial untrusted catalog or from `load_instrument_release`, which also rebuilds unpublished states.
 
 ## Documentation
 

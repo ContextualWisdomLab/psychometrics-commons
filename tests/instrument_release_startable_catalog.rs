@@ -3,7 +3,7 @@
 //! A reconstructed release is catalog-startable only when it is Published.
 //! The `PostgreSQL` adapter list lives in
 //! `postgres_instrument_release_persistence`. Copy the `release_ref` and
-//! exact BCP 47 `locale` into the #180 session-start path. Do not invent a
+//! exact BCP 47 `locale` into the #205 session-start path. Do not invent a
 //! fallback locale.
 
 use psychometrics_commons_runtime::instrument::{

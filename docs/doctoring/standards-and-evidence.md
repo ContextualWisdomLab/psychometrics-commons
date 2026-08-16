@@ -85,7 +85,7 @@ Product consequences:
 
 - instrument-release locale is an exact whitespace-free BCP 47-style tag;
 - `list_startable_instrument_releases` orders by that stored tag and does not collapse `ko` and `ko-KR`;
-- session start (#180) requires the same locale the catalog returned.
+- session start (#205) requires the same locale the catalog returned.
 
 ## Temporal and provenance evidence
 
