@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR consent/outbox composition
 
-The active successor to #112 (`src/postgres_consent_propagation.rs`) adds no new physical objects. It composes the existing `consent_ledger` / `consent_event` slice with `integration_outbox` in one caller-owned `READ COMMITTED` transaction. After the submitted ledger snapshot is persisted, the adapter locks the participant `consent_ledger` row and requires the durable `consent_event` tail—ordered by `occurred_at_unix_ms`, then `created_at`, then `event_ref`—to match the outbox `causation_ref` and occurrence time. A grant-only in-memory snapshot therefore cannot enqueue grant propagation after a later stored revocation, including when both events share one server timestamp. This slice is **Active PR**, not protected-main truth. Do not merge #70 or #112.
+Active PR #120 (`src/postgres_consent_propagation.rs`) adds no new physical objects. It composes the existing `consent_ledger` / `consent_event` slice with `integration_outbox` in one caller-owned `READ COMMITTED` transaction. After the submitted ledger snapshot is persisted, the adapter locks the participant `consent_ledger` row and requires the durable `consent_event` tail—ordered by `occurred_at_unix_ms`, then `created_at`, then `event_ref`—to match the outbox `causation_ref` and occurrence time. A grant-only in-memory snapshot therefore cannot enqueue grant propagation after a later stored revocation, including when both events share one server timestamp. This slice is **Active PR**, not protected-main truth. Do not merge #70 or #112.
 
 ## Logical-to-physical mapping rule
 
