@@ -715,6 +715,154 @@ fn stale_failure_fence_fails_closed_after_stable_identity_check() {
 }
 
 #[test]
+fn worker_attempt_rejects_a_conflicting_result_after_accept() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_conflict";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_conflict",
+    );
+    let accepted = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_accepted".to_owned(),
+        }),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_conflict",
+        &accepted,
+        worker_envelope("scoring.result.completed"),
+        3,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let conflicting = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_other".to_owned(),
+        }),
+    };
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            "scoring_request_worker_attempt_conflict",
+            &conflicting,
+            worker_envelope("scoring.result.completed"),
+            3,
+        ),
+        Err(ScoringWorkerCommitError::Completion(
+            ScoringCompletionOutboxError::Completion(
+                ScoringJobPersistenceError::ConflictingCompletion
+            )
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let accepted_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_accepted"),
+    )
+    .unwrap();
+    let conflicting_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_other"),
+    )
+    .unwrap();
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "completed");
+    assert_eq!(
+        result_ref.as_deref(),
+        Some("result_worker_attempt_accepted")
+    );
+    assert_eq!(cause, None);
+    assert_eq!(outbox_count(&mut client, &accepted_event_ref), 1);
+    assert_eq!(outbox_count(&mut client, &conflicting_event_ref), 0);
+}
+
+#[test]
+fn worker_attempt_rejects_a_cause_after_accepted_completion() {
+    let _guard = worker_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_attempt_cause_after";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_worker_attempt_cause_after",
+    );
+    let accepted = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Completed {
+            result_ref: "result_worker_attempt_cause_after".to_owned(),
+        }),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    run_scoring_worker_attempt(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        "scoring_request_worker_attempt_cause_after",
+        &accepted,
+        worker_envelope("scoring.result.completed"),
+        3,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let failed = ScriptedScoringEngine {
+        result: Ok(ScoringWorkerEngineOutcome::Failed {
+            cause_code: "invalid_scientific_evidence".to_owned(),
+        }),
+    };
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            "scoring_request_worker_attempt_cause_after",
+            &failed,
+            worker_envelope("scoring.result.failed"),
+            3,
+        ),
+        Err(ScoringWorkerCommitError::Failure(
+            ScoringFailureOutboxError::Failure(ScoringJobPersistenceError::NotLeased)
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let accepted_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Result("result_worker_attempt_cause_after"),
+    )
+    .unwrap();
+    let cause_event_ref = scoring_terminal_event_ref(
+        job_ref,
+        ScoringTerminalIdentity::Cause("invalid_scientific_evidence"),
+    )
+    .unwrap();
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "completed");
+    assert_eq!(
+        result_ref.as_deref(),
+        Some("result_worker_attempt_cause_after")
+    );
+    assert_eq!(cause, None);
+    assert_eq!(outbox_count(&mut client, &accepted_event_ref), 1);
+    assert_eq!(outbox_count(&mut client, &cause_event_ref), 0);
+}
+
+#[test]
 fn worker_commit_errors_retain_typed_sources() {
     let identity = ScoringWorkerCommitError::Identity(ScoringWorkerError::UnstableEventRef);
     assert_eq!(
