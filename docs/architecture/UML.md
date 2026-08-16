@@ -66,6 +66,8 @@ classDiagram
       +item_version_ref
       +payload_digest
       +server_sequence
+      +observed_at
+      +received_at
     }
     class ResponseSnapshot {
       +response_snapshot_ref

@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- PostgreSQL persistence for in-progress `response_event` rows so a two-item path reloads the same answers after restart. Exact replay is idempotent; client, server, sequence, or session rebinding fails closed. Store observed and received times with the event; completed snapshots stay on the existing snapshot adapter.
+- PostgreSQL persistence for in-progress `response_event` rows so a two-item path reloads the same answers after restart. Exact replay is idempotent; client, server, sequence, or session rebinding fails closed. Store observed and received times with the event, expose those times on reload, restore them through recovery COPY, and continue the scoring prefix after item 3. Completed snapshots stay on the existing snapshot adapter.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

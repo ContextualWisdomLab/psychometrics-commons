@@ -33,6 +33,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             "response event observed time must be positive and not after received time",
         ),
         (
+            ResponseEventPersistenceError::InvalidEventTimeArity,
+            "response event times must align one-to-one with the persisted ledger",
+        ),
+        (
             ResponseEventPersistenceError::UnsupportedIsolationLevel,
             "response event persistence requires read committed isolation",
         ),

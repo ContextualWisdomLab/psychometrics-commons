@@ -92,7 +92,11 @@ Product consequences:
 - clock skew, impossible ordering, and unknown precision are typed validation
   outcomes rather than reasons to rewrite source history;
 - analysis-set digests bind the exact observations and time semantics consumed by
-  temporal, multilevel, cross-classified, or multiple-membership analysis.
+  temporal, multilevel, cross-classified, or multiple-membership analysis;
+- in-progress `response_event` persist uses PostgreSQL `READ COMMITTED` so a
+  concurrent unique-key winner is visible to exact-replay classification, and
+  stores observed time separately from platform receipt time (Berenson et al.,
+  1995; PostgreSQL Global Development Group, 2026).
 
 ## Evidence maintenance rules
 
@@ -107,6 +111,8 @@ Product consequences:
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
 
+Berenson, H., Bernstein, P., Gray, J., Melton, J., O'Neil, E., & O'Neil, P. (1995). A critique of ANSI SQL isolation levels. *ACM SIGMOD Record, 24*(2), 1–10. https://doi.org/10.1145/568271.223785
+
 International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 
 International Organization for Standardization. (2023a). *ISO/IEC 23894:2023 Information technology—Artificial intelligence—Guidance on risk management*. https://www.iso.org/standard/77304.html
@@ -118,6 +124,8 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
 International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
+PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation: Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 

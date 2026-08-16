@@ -25,6 +25,10 @@ The protected-main integration identity is source- and tenant-scoped. A physical
 
 PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
 
+## Active PR response-event physical schema
+
+Active PR #174 `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` persist the in-progress answer ledger so a two-item path can continue after process restart. The slice is **Active PR**, not protected-main truth. It stores opaque `response_event_ref` identity, session binding, client idempotency identity, item version, canonical SHA-256 payload digest, positive `server_sequence`, and distinct `observed_at` / `received_at` timestamps. Exact replay is idempotent and keeps the original times. Client, server, sequence, or session rebinding fails closed. Reload reconstructs `ResponseLedger` in `server_sequence` order under `READ COMMITTED` and exposes stored times as a persist-side projection. HTTP response transport remains outside this slice.
+
 ## Protected-main scoring-job physical schema
 
 `migrations/0002_scoring_job_state.sql` maps a bounded physical subset of the logical `scoring_job` aggregate into `scoring_job_state`, owned by `src/postgres_scoring_job.rs`. This is an **Implemented subset** on the named protected-main baseline.

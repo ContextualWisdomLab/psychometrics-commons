@@ -40,6 +40,8 @@ pub enum ResponseEventPersistenceError {
     InvalidSequence,
     /// Observed or received time was zero, inverted, or out of range.
     InvalidTimestamp,
+    /// `event_times` was not aligned one-to-one with the ledger events.
+    InvalidEventTimeArity,
     /// Response-event persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// Stored rows could not be rebuilt into a domain ledger.
@@ -63,6 +65,9 @@ impl Display for ResponseEventPersistenceError {
             Self::InvalidSequence => "response event sequence exceeds the PostgreSQL bigint range",
             Self::InvalidTimestamp => {
                 "response event observed time must be positive and not after received time"
+            }
+            Self::InvalidEventTimeArity => {
+                "response event times must align one-to-one with the persisted ledger"
             }
             Self::UnsupportedIsolationLevel => {
                 "response event persistence requires read committed isolation"
@@ -110,8 +115,8 @@ pub fn apply_response_event_migration(
 /// # Errors
 ///
 /// Returns [`ResponseEventPersistenceError`] for invalid identity, inverted
-/// time, unsupported isolation, conflicting replay, sequence reuse, or a
-/// database failure.
+/// time, misaligned event times, unsupported isolation, conflicting replay,
+/// sequence reuse, or a database failure.
 pub fn persist_response_ledger(
     transaction: &mut Transaction<'_>,
     ledger: &ResponseLedger,
@@ -119,7 +124,7 @@ pub fn persist_response_ledger(
 ) -> Result<ResponseEventPersistenceDisposition, ResponseEventPersistenceError> {
     require_read_committed(transaction)?;
     if event_times.len() != ledger.len() {
-        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+        return Err(ResponseEventPersistenceError::InvalidEventTimeArity);
     }
     let session_ref = required_reference(ledger.session_ref())?;
     let mut inserted_any = false;
@@ -184,6 +189,44 @@ pub fn load_response_ledger(
     ResponseLedger::from_persisted(session_ref, events)
         .map(Some)
         .map_err(|_| ResponseEventPersistenceError::InvalidStoredIdentity)
+}
+
+/// Load stored observed and received unix-ms pairs in `server_sequence` order.
+///
+/// Missing sessions return [`None`]. Pairs align with [`load_response_ledger`]
+/// so HTTP and audit can show first-write provenance without putting clocks on
+/// the domain event. Exact PK replay keeps the original times.
+///
+/// # Errors
+///
+/// Returns [`ResponseEventPersistenceError`] for unsupported isolation, a
+/// malformed session reference, invalid stored time, or a database failure.
+pub fn load_response_event_times(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Option<Vec<(u64, u64)>>, ResponseEventPersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = required_reference(session_ref)?;
+    let rows = transaction.query(
+        "SELECT observed_at, received_at \
+         FROM response_event \
+         WHERE session_ref = $1 \
+         ORDER BY server_sequence",
+        &[&session_ref],
+    )?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let mut times = Vec::with_capacity(rows.len());
+    for row in rows {
+        let observed_at: SystemTime = row.get(0);
+        let received_at: SystemTime = row.get(1);
+        times.push((
+            unix_ms_from_system_time(observed_at)?,
+            unix_ms_from_system_time(received_at)?,
+        ));
+    }
+    Ok(Some(times))
 }
 
 fn persist_one_event(
@@ -301,6 +344,14 @@ fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersist
         .ok_or(ResponseEventPersistenceError::InvalidTimestamp)
 }
 
+fn unix_ms_from_system_time(value: SystemTime) -> Result<u64, ResponseEventPersistenceError> {
+    let duration = value
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ResponseEventPersistenceError::InvalidStoredIdentity)?;
+    u64::try_from(duration.as_millis())
+        .map_err(|_| ResponseEventPersistenceError::InvalidStoredIdentity)
+}
+
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), ResponseEventPersistenceError> {
@@ -316,8 +367,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        postgres_sequence, postgres_timestamptz, required_reference, ResponseEventPersistenceError,
+        postgres_sequence, postgres_timestamptz, required_reference, unix_ms_from_system_time,
+        ResponseEventPersistenceError,
     };
+    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn blank_numeric_zero_time_and_overflow_fail_closed() {
@@ -342,6 +395,15 @@ mod reference_guard_tests {
             postgres_timestamptz(0),
             Err(ResponseEventPersistenceError::InvalidTimestamp)
         ));
-        assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
+        let stored = postgres_timestamptz(1_700_000_000_000).unwrap();
+        assert_eq!(unix_ms_from_system_time(stored).unwrap(), 1_700_000_000_000);
+        assert!(matches!(
+            unix_ms_from_system_time(UNIX_EPOCH - Duration::from_secs(1)),
+            Err(ResponseEventPersistenceError::InvalidStoredIdentity)
+        ));
+        assert_eq!(
+            ResponseEventPersistenceError::InvalidEventTimeArity.to_string(),
+            "response event times must align one-to-one with the persisted ledger"
+        );
     }
 }

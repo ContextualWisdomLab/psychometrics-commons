@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #174 response-event persist/load is not protected-main truth until an unchanged reviewed/check-clean head is integrated. In-progress answers persist in `response_event` with observed/received time, exact replay, and fail-closed rebinding so a two-item path survives restart. Completed snapshot persist remains the existing protected-main adapter. HTTP response transport remains outside this slice. Protected-main `#76` data-rights processing-start persistence is already integrated and is not restated here as active work. Prefer this head over another overlapping `response_event` persist PR.
+**Active PR** #174 response-event persist/load is not protected-main truth until an unchanged reviewed/check-clean head is integrated. In-progress answers persist in `response_event` with observed/received time, exact replay, and fail-closed rebinding so a two-item path survives restart. Recovery COPY restores those rows. AS_BUILT names the physical slice. Reload exposes stored times as a persist-side projection and continues the scoring prefix after item 3. Completed snapshot persist remains the existing protected-main adapter. HTTP response transport remains outside this slice. Protected-main `#76` data-rights processing-start persistence is already integrated and is not restated here as active work. Prefer this head over another overlapping `response_event` persist PR.
 
 ## 5. ADR traceability by concern
 

@@ -2,8 +2,8 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::{
-    apply_response_event_migration, load_response_ledger, persist_response_ledger,
-    ResponseEventPersistenceDisposition, ResponseEventPersistenceError,
+    apply_response_event_migration, load_response_event_times, load_response_ledger,
+    persist_response_ledger, ResponseEventPersistenceDisposition, ResponseEventPersistenceError,
 };
 use psychometrics_commons_runtime::response::{ResponseEvent, ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
@@ -11,10 +11,13 @@ use std::sync::{Mutex, MutexGuard};
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_C: &str = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const OBSERVED_OPENNESS_MS: u64 = 1_700_000_000_000;
 const RECEIVED_OPENNESS_MS: u64 = 1_700_000_000_250;
 const OBSERVED_CONSCIENTIOUSNESS_MS: u64 = 1_700_000_030_000;
 const RECEIVED_CONSCIENTIOUSNESS_MS: u64 = 1_700_000_030_400;
+const OBSERVED_EXTRAVERSION_MS: u64 = 1_700_000_060_000;
+const RECEIVED_EXTRAVERSION_MS: u64 = 1_700_000_060_350;
 
 static RESPONSE_EVENT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -145,6 +148,70 @@ fn two_item_korean_path_survives_restart_with_exact_replay() {
         "item_version_conscientiousness_ko"
     );
     assert!(load_ok(&mut client, "session_missing_ko").is_none());
+    let mut times_transaction = client.transaction().unwrap();
+    assert_eq!(
+        load_response_event_times(&mut times_transaction, "session_big_five_ko").unwrap(),
+        Some(event_times().to_vec())
+    );
+    assert!(
+        load_response_event_times(&mut times_transaction, "session_missing_ko")
+            .unwrap()
+            .is_none()
+    );
+    times_transaction.commit().unwrap();
+}
+
+#[test]
+fn reloaded_korean_path_records_item_three_and_keeps_the_scoring_prefix() {
+    let _guard = response_event_test_guard();
+    let mut client = test_client();
+    reset_response_event_table(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+    persist_ok(&mut client, &two_item_korean_ledger(), &event_times());
+
+    let mut continued = load_ok(&mut client, "session_big_five_ko").unwrap();
+    continued
+        .record(
+            SessionState::Active,
+            write(
+                "response_event_extraversion",
+                "client_extraversion",
+                "item_version_extraversion_ko",
+                DIGEST_C,
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        persist_ok(
+            &mut client,
+            &continued,
+            &[
+                (OBSERVED_OPENNESS_MS, RECEIVED_OPENNESS_MS),
+                (OBSERVED_CONSCIENTIOUSNESS_MS, RECEIVED_CONSCIENTIOUSNESS_MS),
+                (OBSERVED_EXTRAVERSION_MS, RECEIVED_EXTRAVERSION_MS),
+            ]
+        ),
+        ResponseEventPersistenceDisposition::Inserted
+    );
+
+    let reloaded = load_ok(&mut client, "session_big_five_ko").unwrap();
+    assert_eq!(reloaded, continued);
+    assert_eq!(reloaded.events()[2].sequence(), 3);
+    assert_eq!(
+        reloaded.events()[2].item_version_ref(),
+        "item_version_extraversion_ko"
+    );
+    assert_eq!(
+        reloaded
+            .freeze_as(SessionState::Completed, "response_snapshot_big_five_ko")
+            .unwrap()
+            .event_refs(),
+        [
+            "response_event_openness",
+            "response_event_conscientiousness",
+            "response_event_extraversion"
+        ]
+    );
 }
 
 #[test]
@@ -208,7 +275,7 @@ fn inverted_time_blank_session_and_repeatable_read_fail_closed() {
 
     assert!(matches!(
         persist_err(&mut client, &live, &[(1, 2)]),
-        ResponseEventPersistenceError::InvalidTimestamp
+        ResponseEventPersistenceError::InvalidEventTimeArity
     ));
     assert!(matches!(
         persist_err(

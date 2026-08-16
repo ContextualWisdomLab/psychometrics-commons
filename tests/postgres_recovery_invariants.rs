@@ -98,6 +98,16 @@ fn seed_recovery_critical_state(client: &mut Client) {
              ) VALUES (
                 'snapshot_recovery_alpha', 1, 'response_recovery_alpha',
                 'item_version_recovery_alpha', '{DIGEST_A}'
+             );
+             INSERT INTO {SOURCE_SCHEMA}.response_event (
+                response_event_ref, session_ref, client_event_ref, item_version_ref,
+                payload_digest, server_sequence, observed_at, received_at
+             ) VALUES (
+                'response_event_recovery_alpha', 'session_recovery_alpha',
+                'client_event_recovery_alpha', 'item_version_recovery_alpha',
+                '{DIGEST_A}', 1,
+                TIMESTAMPTZ '2023-11-14 22:13:20+00',
+                TIMESTAMPTZ '2023-11-14 22:13:20.250+00'
              );"
         ))
         .expect("recovery fixture should satisfy all protected-main persistence constraints");
@@ -183,6 +193,24 @@ fn assert_restored_evidence(client: &mut Client) {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+
+    let restored_event = client
+        .query_one(
+            &format!(
+                "SELECT session_ref, client_event_ref, payload_digest, server_sequence
+                 FROM {RESTORED_SCHEMA}.response_event
+                 WHERE response_event_ref = 'response_event_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect("in-progress response events should survive restore");
+    assert_eq!(restored_event.get::<_, String>(0), "session_recovery_alpha");
+    assert_eq!(
+        restored_event.get::<_, String>(1),
+        "client_event_recovery_alpha"
+    );
+    assert_eq!(restored_event.get::<_, String>(2), DIGEST_A);
+    assert_eq!(restored_event.get::<_, i64>(3), 1);
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
@@ -246,6 +274,7 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "integration_consumption",
         "response_snapshot",
         "response_snapshot_entry",
+        "response_event",
     ];
     let backups: Vec<(&str, Vec<u8>)> = tables
         .iter()
