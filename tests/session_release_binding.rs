@@ -280,7 +280,7 @@ fn session_creation_rejects_invalid_identity_and_timestamp() {
 fn session_creation_errors_are_safe_and_specific() {
     assert_eq!(
         SessionCreationError::InvalidReference.to_string(),
-        "assessment session references must be opaque non-numeric values"
+        "assessment session references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
     assert_eq!(
         SessionCreationError::InvalidTimestamp.to_string(),

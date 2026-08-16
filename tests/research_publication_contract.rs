@@ -154,7 +154,7 @@ fn release_gate_errors_have_stable_safe_operator_messages() {
     let cases = [
         (
             ResearchReleaseGateError::InvalidReference,
-            "research release references must be opaque non-numeric values",
+            "research release references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             ResearchReleaseGateError::InvalidManifestDigest,

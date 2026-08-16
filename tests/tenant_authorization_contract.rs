@@ -361,7 +361,7 @@ fn authorization_errors_have_stable_safe_messages() {
     let cases = [
         (
             AuthorizationError::InvalidReference,
-            "authorization references must be opaque non-numeric values",
+            "authorization references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             AuthorizationError::CrossTenantDenied,

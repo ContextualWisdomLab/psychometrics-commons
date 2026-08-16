@@ -72,6 +72,6 @@ fn research_identity_rejects_whitespace_padded_aliases() {
 
     assert_eq!(
         error.to_string(),
-        "research contribution references must not be empty"
+        "research contribution references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
 }

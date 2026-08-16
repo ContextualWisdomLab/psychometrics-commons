@@ -538,7 +538,7 @@ fn instrument_release_errors_have_stable_safe_display_text() {
     let cases = [
         (
             InstrumentReleaseError::InvalidReference,
-            "instrument release references must be opaque non-numeric values",
+            "instrument release references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             InstrumentReleaseError::EmptyItemSet,

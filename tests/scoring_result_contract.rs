@@ -92,12 +92,12 @@ fn scoring_request_accepts_absent_norm_but_rejects_invalid_references_or_schema(
     );
 
     let mut blank_required = scoring_input();
-    blank_required.assessment_spec_ref = "   ";
+    blank_required.assessment_spec_ref = " assessment_spec_ref ";
     let empty_error = ScoringRequest::from_snapshot(&snapshot, blank_required).unwrap_err();
     assert_eq!(empty_error, ScoringContractError::EmptyReference);
     assert_eq!(
         empty_error.to_string(),
-        "scoring contract references must not be empty"
+        "scoring contract references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
 
     let mut blank_norm = scoring_input();
@@ -358,12 +358,12 @@ fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
     let result = scoring_result();
 
     let mut blank_ref = result_input();
-    blank_ref.participant_ref = " ";
+    blank_ref.participant_ref = " participant_ref ";
     let empty_error = ResultSnapshot::new(&request, &result, blank_ref).unwrap_err();
     assert_eq!(empty_error, ResultSnapshotError::EmptyReference);
     assert_eq!(
         empty_error.to_string(),
-        "result snapshot references must not be empty"
+        "result snapshot references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
 
     let mut no_consents = result_input();

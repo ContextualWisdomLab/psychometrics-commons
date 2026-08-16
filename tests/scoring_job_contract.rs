@@ -305,7 +305,7 @@ fn error_messages_are_stable_for_operator_classification() {
     let expectations = [
         (
             ScoringJobError::InvalidReference,
-            "scoring job references must be opaque non-numeric values",
+            "scoring job references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             ScoringJobError::InvalidAttemptLimit,

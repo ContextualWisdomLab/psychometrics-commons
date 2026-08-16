@@ -350,7 +350,7 @@ fn public_error_messages_are_stable() {
     let cases = [
         (
             DataRightsError::InvalidReference,
-            "data-rights references must be canonical opaque non-numeric values",
+            "data-rights references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             DataRightsError::InvalidTimestamp,

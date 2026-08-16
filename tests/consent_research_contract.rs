@@ -412,7 +412,7 @@ fn public_error_messages_are_stable_and_readable() {
     let consent_errors = [
         (
             ConsentWriteError::EmptyReference,
-            "consent references must not be empty",
+            "consent references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             ConsentWriteError::ResearchScopeRequired,
@@ -442,7 +442,7 @@ fn public_error_messages_are_stable_and_readable() {
     let research_errors = [
         (
             ResearchContributionError::EmptyReference,
-            "research contribution references must not be empty",
+            "research contribution references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             ResearchContributionError::ResearchConsentRequired,

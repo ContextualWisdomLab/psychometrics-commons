@@ -259,7 +259,7 @@ fn locale_requires_bcp47_subtag_structure() {
 fn identity_errors_expose_stable_operator_messages() {
     assert_eq!(
         StyleAssignmentIdentityError::InvalidReference.to_string(),
-        "style-assignment references must be opaque non-numeric values"
+        "style-assignment references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
     assert_eq!(
         StyleAssignmentIdentityError::NonCanonicalToken.to_string(),
