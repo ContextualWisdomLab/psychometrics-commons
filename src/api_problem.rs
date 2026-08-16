@@ -1,15 +1,21 @@
-//! Safe, transport-neutral problem details for the future public HTTP API.
+//! Safe problem details for the future public HTTP API without depending on an HTTP framework.
 //!
-//! RFC 9457 defines a standard problem-details object for HTTP APIs. This module keeps the
-//! product-facing error contract deliberately smaller than an HTTP framework: callers choose an
-//! explicit problem type, status, title, detail, and stable machine code, while transport code can
-//! serialize those values later. Title and detail are `&'static str` so runtime provider, SQL,
+//! RFC 9457 defines a standard problem-details object for HTTP APIs. This module is
+//! **transport-neutral**: it defines the error information without deciding how a web server sends
+//! bytes over HTTP. Product code first constructs an [`ApiProblem`] from reviewed public values.
+//! A future **HTTP adapter**—the small layer that converts domain values into HTTP responses—can
+//! then serialize those fields as `application/problem+json`.
+//!
+//! Title and detail are **occurrence-independent**: their wording describes the problem category,
+//! not private data from one failed request. They are `&'static str` so runtime provider, SQL,
 //! credential, assessment-response, or other sensitive error text cannot be forwarded by accident.
+//! The contract also requires a structurally valid explicit HTTPS or URN problem type instead of
+//! relying on `about:blank`.
 //!
-//! The contract intentionally requires a structurally valid explicit HTTPS or URN problem type
-//! instead of relying on `about:blank`. Psychometrics Commons requires stable machine-readable
-//! error semantics in addition to the generic HTTP status. An HTTP adapter may add a
-//! request-specific `instance` reference later without changing this safe core.
+//! A future adapter may add an opaque **`instance` reference**, meaning an identifier for one
+//! particular problem occurrence, and **correlation metadata**, meaning safe identifiers used to
+//! connect that occurrence to server-side logs or traces. Those request-specific values stay out
+//! of this reusable problem definition.
 
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -53,9 +59,10 @@ impl Error for ApiProblemContractError {}
 
 /// One stable, public-safe API problem definition.
 ///
-/// This value contains only occurrence-independent text that is safe to return to an API client.
-/// It deliberately cannot hold an arbitrary runtime error. A future HTTP adapter can combine it
-/// with a request-specific opaque `instance` reference and correlation metadata without exposing
+/// Product code constructs this value from reviewed text that is safe for any client. The title and
+/// detail do not describe one specific failure occurrence, so this type cannot hold an arbitrary
+/// runtime error. A future HTTP adapter can serialize the value and add an opaque `instance`
+/// reference plus safe correlation identifiers for that individual request without exposing
 /// implementation details.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ApiProblem {
@@ -176,7 +183,9 @@ fn valid_https_problem_type(remainder: &str) -> bool {
     if !valid_registered_host(host) {
         return false;
     }
-    if port.is_some_and(|port| port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit())) {
+    if port.is_some_and(|port| {
+        port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit())
+    }) {
         return false;
     }
 
@@ -194,7 +203,8 @@ fn valid_urn_problem_type(remainder: &str) -> bool {
     let Some((namespace_id, namespace_specific_string)) = remainder.split_once(':') else {
         return false;
     };
-    valid_urn_namespace_id(namespace_id) && valid_urn_namespace_specific_string(namespace_specific_string)
+    valid_urn_namespace_id(namespace_id)
+        && valid_urn_namespace_specific_string(namespace_specific_string)
 }
 
 fn valid_urn_namespace_id(namespace_id: &str) -> bool {
