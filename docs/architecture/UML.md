@@ -376,8 +376,9 @@ sequenceDiagram
     C->>A: recover request + current Keyverse assertion
     A->>A: recover_participant_for_authenticated_account
     A->>DB: load unterminated issuer-scoped subject
-    DB-->>A: same product-owned participant_ref
-    A-->>C: recovered participant
+    DB-->>A: candidate participant plus current binding
+    A->>A: keep only when current tenant/issuer/subject still match the proof
+    A-->>C: recovered participant or unused-account none
 
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
 ```

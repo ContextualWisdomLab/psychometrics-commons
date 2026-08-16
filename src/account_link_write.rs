@@ -119,10 +119,31 @@ pub fn persist_authorized_account_link(
     )?)
 }
 
+/// Keep a recovered participant only when its current binding matches the proof.
+///
+/// Subject lookup can race with unlink+relink under `READ COMMITTED`. A
+/// still-valid proof for one issuer-scoped subject must not receive a
+/// participant that is now bound to another tenant, issuer, or subject. A
+/// missing or rebound record returns `None` so the caller cannot take over
+/// another account's current identity.
+#[must_use]
+pub fn accept_recovered_participant_for_authenticated_account(
+    participant: Option<ParticipantRecord>,
+    authenticated_control: &AuthenticatedAccountControl,
+) -> Option<ParticipantRecord> {
+    let participant = participant?;
+    let matches_current_binding = participant.tenant_ref() == authenticated_control.tenant_ref()
+        && participant.linked_issuer_ref() == Some(authenticated_control.issuer_ref())
+        && participant.linked_subject_ref() == Some(authenticated_control.subject_ref());
+    matches_current_binding.then_some(participant)
+}
+
 /// Recover the participant currently bound to a still-valid authenticated account.
 ///
 /// The proof supplies tenant, issuer, and subject. A missing current link
 /// returns `None` so a valid unused account is not turned into a participant.
+/// After load, the current tenant/issuer/subject must still match the proof so
+/// a concurrent unlink+relink cannot hand back a rebound participant.
 ///
 /// # Errors
 ///
@@ -135,10 +156,14 @@ pub fn recover_participant_for_authenticated_account(
     now_unix_ms: u64,
 ) -> Result<Option<ParticipantRecord>, AccountLinkWriteError> {
     require_recoverable_account(authenticated_control, now_unix_ms)?;
-    Ok(load_participant_by_current_identity_subject(
+    let loaded = load_participant_by_current_identity_subject(
         transaction,
         authenticated_control.tenant_ref(),
         authenticated_control.issuer_ref(),
         authenticated_control.subject_ref(),
-    )?)
+    )?;
+    Ok(accept_recovered_participant_for_authenticated_account(
+        loaded,
+        authenticated_control,
+    ))
 }
