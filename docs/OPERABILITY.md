@@ -44,7 +44,7 @@ The implementation must distinguish at least:
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
 
-Operator HTTP probes, when implemented, are GET `/live` and GET `/ready`. `/live` answers process liveness only. `/ready` answers operation-scoped readiness and may name required capabilities as repeated `capability` query parameters. These probes do not publish measured SLO values. A bound TCP listener, when present, serves those same operations one request per accepted connection and is not a measured availability claim. When a PostgreSQL operational snapshot is wired, readiness for `postgres_operational_store` comes from live runtime and relation probes plus caller-supplied backlog health; probe failure is unknown/unready and must not expose driver errors.
+Operator HTTP probes, when implemented, are GET `/live` and GET `/ready`. `/live` answers process liveness only and must not perform store I/O; a hung or failed PostgreSQL connection must not restart a still-live process. `/ready` answers operation-scoped readiness and may name required capabilities as repeated `capability` query parameters. When the PostgreSQL adapter answers a bare GET `/ready` (no `capability=`), it requires `postgres_operational_store` so a read-only or unsupported store cannot advertise readiness to a load balancer. These probes do not publish measured SLO values. A bound TCP listener, when present, serves those same operations one request per accepted connection, applies a bounded read/write timeout, rejects oversized requests without echoing them, and is not a measured availability claim. PostgreSQL observation happens after accept and only for GET `/ready`. Probe failure is unknown/unready and must not expose driver errors.
 
 ## 4. Capability degradation matrix
 
@@ -231,6 +231,10 @@ Never collapse these maturity levels. SOC 2/CSAP readiness work may map evidence
 
 ## 15. References
 
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP Semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
 International Organization for Standardization & International Electrotechnical Commission. (2023). *ISO/IEC 25010:2023 Systems and software engineering—Systems and software Quality Requirements and Evaluation (SQuaRE)—Product quality model*.
+
+Kubernetes Authors. (2024). *Configure liveness, readiness and startup probes*. Kubernetes Documentation. https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 
 National Institute of Standards and Technology. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST SP 800-218). https://doi.org/10.6028/NIST.SP.800-218

@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin product HTTP transport and durable external event transport are not yet implemented on protected main; operator GET `/live` and GET `/ready` probes exist only on Active PR #91 with `openapi/health-probes.yaml`; that same PR binds a TCP listener for those listed operations and can answer them from `observe_postgres_operational_snapshot` without exposing driver errors
+- Current/as-built status: public/admin product HTTP transport and durable external event transport are not yet implemented on protected main; operator GET `/live` and GET `/ready` probes exist only on Active PR #91 with `openapi/health-probes.yaml`; that same PR binds a TCP listener with bounded I/O timeouts, answers `/live` without store I/O, and observes `observe_postgres_operational_snapshot` only for `/ready` without exposing driver errors
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 
@@ -253,6 +253,10 @@ A future major transport change may supersede this ADR if OpenAPI/AsyncAPI no lo
 ## References
 
 Bray, T. (Ed.). (2017). *The JavaScript Object Notation (JSON) Data Interchange Format* (RFC 8259). Internet Engineering Task Force. https://doi.org/10.17487/RFC8259
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP Semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
+Kubernetes Authors. (2024). *Configure liveness, readiness and startup probes*. Kubernetes Documentation. https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 
 Rundgren, A., Jordan, B., & Erdtman, S. (2020). *JSON Canonicalization Scheme (JCS)* (RFC 8785). Internet Engineering Task Force. https://doi.org/10.17487/RFC8785
 

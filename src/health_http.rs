@@ -10,11 +10,16 @@ use crate::health::{
 use std::fmt::Write;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::time::Duration;
 
 /// Process-liveness probe path.
 pub const HEALTH_LIVE_PATH: &str = "/live";
 /// Operation-readiness probe path.
 pub const HEALTH_READY_PATH: &str = "/ready";
+/// Bounded read/write timeout for one accepted probe connection.
+pub const HEALTH_HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+/// Maximum accepted probe request size, including headers.
+pub const HEALTH_HTTP_MAX_REQUEST_BYTES: usize = 8_192;
 
 /// HTTP response produced by a health probe request.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,12 +101,7 @@ pub fn handle_health_http_request(
             let status = if snapshot.is_live() { 200 } else { 503 };
             HealthHttpResponse::json(status, snapshot_body(snapshot, snapshot.is_ready_for(&[])))
         }
-        HEALTH_READY_PATH => {
-            let required = required_capabilities(query);
-            let ready = snapshot.is_ready_for(&required);
-            let status = if ready { 200 } else { 503 };
-            HealthHttpResponse::json(status, snapshot_body(snapshot, ready))
-        }
+        HEALTH_READY_PATH => health_ready_response(snapshot, &required_capabilities(query)),
         _ => HealthHttpResponse::problem(
             404,
             "Not Found",
@@ -134,39 +134,122 @@ pub fn accept_one_health_http(
     listener: &TcpListener,
     snapshot: &RuntimeHealthSnapshot,
 ) -> io::Result<()> {
-    let (stream, _) = listener.accept()?;
-    serve_health_http_connection(stream, snapshot)
+    accept_one_health_http_with(listener, |request| {
+        handle_health_http_request(request, snapshot)
+    })
 }
 
-fn serve_health_http_connection(
-    mut stream: TcpStream,
-    snapshot: &RuntimeHealthSnapshot,
-) -> io::Result<()> {
+/// Accept one TCP connection and answer it with `handler`.
+///
+/// The handler runs after a bounded read so store observation cannot start
+/// before the connection is accepted. Incomplete or oversized requests become
+/// empty request text and fail closed as HTTP 400 without echoing input.
+///
+/// # Errors
+///
+/// Returns the I/O error if accept, read, or write fails.
+pub fn accept_one_health_http_with<F>(listener: &TcpListener, handler: F) -> io::Result<()>
+where
+    F: FnOnce(&str) -> HealthHttpResponse,
+{
+    let (mut stream, _) = listener.accept()?;
+    stream.set_read_timeout(Some(HEALTH_HTTP_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(HEALTH_HTTP_IO_TIMEOUT))?;
     let request = read_http_request(&mut stream)?;
-    let response = handle_health_http_request(&request, snapshot);
+    let response = handler(&request);
     write_http_response(&mut stream, &response)
+}
+
+/// Return whether this request is GET `/ready` and must observe operational state.
+#[must_use]
+pub fn health_request_requires_readiness_snapshot(request: &str) -> bool {
+    let Some((method, target)) = parse_request_line(request) else {
+        return false;
+    };
+    method == "GET" && split_target(target).0 == HEALTH_READY_PATH
+}
+
+/// Return caller-named `capability` query values from one probe request.
+#[must_use]
+pub fn health_request_required_capabilities(request: &str) -> Vec<&str> {
+    parse_request_line(request)
+        .map(|(_, target)| required_capabilities(split_target(target).1))
+        .unwrap_or_default()
+}
+
+/// Answer readiness for caller-named required capabilities.
+#[must_use]
+pub fn health_ready_response(
+    snapshot: &RuntimeHealthSnapshot,
+    required_capabilities: &[&str],
+) -> HealthHttpResponse {
+    let ready = snapshot.is_ready_for(required_capabilities);
+    let status = if ready { 200 } else { 503 };
+    HealthHttpResponse::json(status, snapshot_body(snapshot, ready))
 }
 
 fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 512];
     loop {
-        let read = stream.read(&mut chunk)?;
-        if read == 0 {
-            break;
+        let read_result = stream.read(&mut chunk);
+        match apply_request_read(&mut buffer, &chunk, read_result)? {
+            RequestReadProgress::Continue => {}
+            RequestReadProgress::Complete => break,
         }
-        buffer.extend_from_slice(&chunk[..read]);
-        if buffer.windows(4).any(|window| window == b"\r\n\r\n") || buffer.len() > 8_192 {
-            break;
-        }
+    }
+    if buffer.len() > HEALTH_HTTP_MAX_REQUEST_BYTES
+        || !buffer.windows(4).any(|window| window == b"\r\n\r\n")
+    {
+        return Ok(String::new());
     }
     Ok(String::from_utf8_lossy(&buffer).into_owned())
 }
 
+#[derive(Debug)]
+enum RequestReadProgress {
+    Continue,
+    Complete,
+}
+
+fn apply_request_read(
+    buffer: &mut Vec<u8>,
+    chunk: &[u8],
+    read_result: io::Result<usize>,
+) -> io::Result<RequestReadProgress> {
+    match read_result {
+        Ok(0) => Ok(RequestReadProgress::Complete),
+        Ok(read) => {
+            buffer.extend_from_slice(&chunk[..read]);
+            if buffer.windows(4).any(|window| window == b"\r\n\r\n")
+                || buffer.len() > HEALTH_HTTP_MAX_REQUEST_BYTES
+            {
+                Ok(RequestReadProgress::Complete)
+            } else {
+                Ok(RequestReadProgress::Continue)
+            }
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ) =>
+        {
+            Ok(RequestReadProgress::Complete)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn write_http_response(stream: &mut TcpStream, response: &HealthHttpResponse) -> io::Result<()> {
     let body = response.body().as_bytes();
+    let allow = if response.status() == 405 {
+        "Allow: GET\r\n"
+    } else {
+        ""
+    };
     let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{allow}Connection: close\r\n\r\n",
         response.status(),
         reason_phrase(response.status()),
         response.content_type(),
@@ -294,13 +377,16 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        backlog_label, capability_state_label, handle_health_http_request, integrity_label,
-        json_string, reason_phrase, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
+        apply_request_read, backlog_label, capability_state_label, handle_health_http_request,
+        health_ready_response, health_request_required_capabilities,
+        health_request_requires_readiness_snapshot, integrity_label, json_string, reason_phrase,
+        RequestReadProgress, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
         RuntimeHealthSnapshot,
     };
+    use std::io;
 
     #[test]
     fn remaining_labels_and_json_escapes_are_stable() {
@@ -413,5 +499,97 @@ mod tests {
         );
         assert_eq!(not_ready.status(), 503);
         assert!(not_ready.body().contains("\"ready\":false"));
+    }
+
+    #[test]
+    fn readiness_helpers_classify_requests_and_required_capabilities() {
+        let snapshot = RuntimeHealthSnapshot::new(
+            true,
+            BacklogHealth::WithinBounds,
+            DataIntegrityHealth::Verified,
+            vec![
+                CapabilityHealth::new("research_registration", CapabilityState::Degraded, true)
+                    .unwrap(),
+            ],
+        )
+        .unwrap();
+        assert!(!health_request_requires_readiness_snapshot(
+            "GET /live HTTP/1.1\r\n\r\n"
+        ));
+        assert!(!health_request_requires_readiness_snapshot("NOT-A-REQUEST"));
+        assert!(!health_request_requires_readiness_snapshot(
+            "POST /ready HTTP/1.1\r\n\r\n"
+        ));
+        assert!(health_request_requires_readiness_snapshot(
+            "GET /ready?capability=scoring HTTP/1.1\r\n\r\n"
+        ));
+        assert!(health_request_required_capabilities("NOT-A-REQUEST").is_empty());
+        assert_eq!(
+            health_request_required_capabilities(
+                "GET /ready?capability=scoring&capability=research_registration HTTP/1.1\r\n\r\n"
+            ),
+            vec!["scoring", "research_registration"]
+        );
+        let ready = health_ready_response(&snapshot, &["research_registration"]);
+        assert_eq!(ready.status(), 200);
+        let unready = health_ready_response(&snapshot, &["unregistered_capability"]);
+        assert_eq!(unready.status(), 503);
+        assert!(health_request_requires_readiness_snapshot(
+            "GET /ready HTTP/1.1\r\n\r\n"
+        ));
+        assert!(health_request_required_capabilities("GET /ready HTTP/1.1\r\n\r\n").is_empty());
+    }
+
+    #[test]
+    fn request_read_progress_covers_eof_timeout_and_io_failure() {
+        let mut buffer = Vec::new();
+        assert!(matches!(
+            apply_request_read(&mut buffer, b"", Ok(0)).unwrap(),
+            RequestReadProgress::Complete
+        ));
+        buffer.clear();
+        assert!(matches!(
+            apply_request_read(&mut buffer, b"GET /l", Ok(6)).unwrap(),
+            RequestReadProgress::Continue
+        ));
+        assert_eq!(buffer, b"GET /l");
+        buffer.clear();
+        assert!(matches!(
+            apply_request_read(&mut buffer, b"GET /live HTTP/1.1\r\n\r\n", Ok(22)).unwrap(),
+            RequestReadProgress::Complete
+        ));
+        buffer.clear();
+        let oversized = vec![b'A'; HEALTH_HTTP_MAX_REQUEST_BYTES + 1];
+        assert!(matches!(
+            apply_request_read(&mut buffer, &oversized, Ok(oversized.len())).unwrap(),
+            RequestReadProgress::Complete
+        ));
+        buffer.clear();
+        assert!(matches!(
+            apply_request_read(
+                &mut buffer,
+                b"",
+                Err(io::Error::new(io::ErrorKind::TimedOut, "timeout"))
+            )
+            .unwrap(),
+            RequestReadProgress::Complete
+        ));
+        buffer.clear();
+        assert!(matches!(
+            apply_request_read(
+                &mut buffer,
+                b"",
+                Err(io::Error::new(io::ErrorKind::WouldBlock, "block"))
+            )
+            .unwrap(),
+            RequestReadProgress::Complete
+        ));
+        let error = apply_request_read(
+            &mut buffer,
+            b"",
+            Err(io::Error::new(io::ErrorKind::ConnectionReset, "reset")),
+        )
+        .expect_err("non-timeout I/O errors must propagate");
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
     }
 }
