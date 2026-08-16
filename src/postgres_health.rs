@@ -15,6 +15,9 @@ use std::fmt::{Display, Formatter};
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
 
+const BACKLOG_HEALTH_INDEX_MIGRATION: &str =
+    include_str!("../migrations/0020_backlog_health_indexes.sql");
+
 /// Capability identity used by operation-scoped runtime readiness.
 pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operational_store";
 
@@ -299,6 +302,24 @@ pub fn probe_postgres_runtime(
         server_version_num,
         transaction_read_only,
     ))
+}
+
+/// Apply partial indexes that keep operational-backlog readiness probes bounded.
+///
+/// Call this after the integration, inbox-consumption, and data-rights migrations
+/// so an existing installation receives the same readiness indexes as a newly
+/// initialized database. The statements are idempotent (`CREATE INDEX IF NOT EXISTS`).
+/// Directory-order recovery still applies `0020` as a file; this function is the
+/// product-owned apply path that callers must use instead of a private `include_str!`.
+///
+/// # Errors
+///
+/// Returns the `PostgreSQL` driver error when a required relation is missing or
+/// the index statements cannot be executed.
+pub fn apply_backlog_health_index_migration(
+    client: &mut impl GenericClient,
+) -> Result<(), postgres::Error> {
+    client.batch_execute(BACKLOG_HEALTH_INDEX_MIGRATION)
 }
 
 /// Probe aggregate outbox and inbox-consumption backlog evidence in one database snapshot.

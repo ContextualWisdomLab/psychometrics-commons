@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #82 PostgreSQL operational-backlog observation is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Aggregate outbox, inbox-consumption, and data-rights counts/ages are classified only against an explicit caller policy. HTTP probes and deployment-profile thresholds remain outside this slice.
+**Active PR** #82 PostgreSQL operational-backlog observation is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Aggregate outbox, inbox-consumption, and data-rights counts/ages are classified only against an explicit caller policy. Partial readiness indexes ship in `migrations/0020_backlog_health_indexes.sql` and must be applied through `apply_backlog_health_index_migration` after the owning table migrations; a private test `include_str!` is not a product apply path. HTTP probes and deployment-profile thresholds remain outside this slice.
 
 ## 5. ADR traceability by concern
 

@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- PostgreSQL operational-backlog probes classify aggregate outbox, inbox-consumption, and data-rights counts and ages against an explicit caller policy. They expose no payloads, tenant identities, or restricted linkage values, and they invent no universal SLO defaults.
+- PostgreSQL operational-backlog probes classify aggregate outbox, inbox-consumption, and data-rights counts and ages against an explicit caller policy. They expose no payloads, tenant identities, or restricted linkage values, and they invent no universal SLO defaults. Call `apply_backlog_health_index_migration` after the integration, inbox-consumption, and data-rights migrations so readiness indexes are created through the product apply path.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
