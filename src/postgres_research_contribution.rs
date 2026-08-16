@@ -214,7 +214,7 @@ pub fn persist_research_contribution(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ValidatedEvidence<'a> {
     contribution_ref: &'a str,
     participant_ref: String,
