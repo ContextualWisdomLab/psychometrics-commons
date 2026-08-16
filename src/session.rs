@@ -229,8 +229,9 @@ impl AssessmentSession {
     ///
     /// Use this after loading a stored created-session row. It does not re-check whether
     /// the original release still accepts new sessions, so a later suspend or retire
-    /// cannot rewrite provenance. Command history is empty until a later persist slice
-    /// stores it. Call [`AssessmentSession::new`] when starting a new session.
+    /// cannot rewrite provenance. Command history starts empty here; load replays
+    /// stored commands after this reconstitution. Call [`AssessmentSession::new`]
+    /// when starting a new session.
     ///
     /// # Errors
     ///

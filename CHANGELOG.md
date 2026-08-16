@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Assessment-session command persist locks the created-session header row until the caller transaction ends, so a concurrent Activate-only worker cannot count a shorter history and then rewind a later Pause/Resume projection.
 - Created assessment sessions can be loaded from PostgreSQL without re-checking current publication eligibility, so a later suspend or retire cannot rewrite stored provenance. Missing sessions return none; later stored states without command history fail closed.
 - Assessment-session Activate/Pause/Resume command history persists in PostgreSQL so an in-progress session reloads after restart. Exact command replay is idempotent; sequence reuse and evidence rebinding fail closed.
 - PostgreSQL persistence for created assessment sessions bound to one published locale-specific release: exact replay is idempotent, and rebinding participant, release, version, digest, locale, state, or creation time fails closed.

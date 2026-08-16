@@ -706,6 +706,77 @@ fn stale_shorter_command_history_cannot_rewind_paused_projection() {
 }
 
 #[test]
+fn command_persist_locks_session_header_until_caller_commits() {
+    let (_database_test_guard, mut holder) = test_client();
+    reset_session_table(&mut holder);
+    apply_assessment_session_migration(&mut holder).unwrap();
+    let created = created_session(
+        "ses_header_lock_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut paused = created_session(
+        "ses_header_lock_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    paused
+        .apply_command("cmd_activate_before_lock", 1, SessionCommand::Activate)
+        .unwrap();
+    paused
+        .apply_command("cmd_pause_under_lock", 2, SessionCommand::Pause)
+        .unwrap();
+    let mut stale = created_session(
+        "ses_header_lock_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    stale
+        .apply_command("cmd_activate_before_lock", 1, SessionCommand::Activate)
+        .unwrap();
+
+    let mut hold_transaction = holder.transaction().unwrap();
+    persist_assessment_session(&mut hold_transaction, &created).unwrap();
+    persist_assessment_session_commands(&mut hold_transaction, &paused).unwrap();
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut waiter = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    waiter
+        .batch_execute(&format!(
+            "SET search_path TO {SCHEMA}; SET lock_timeout = '200ms';"
+        ))
+        .unwrap();
+    let mut wait_transaction = waiter.transaction().unwrap();
+    let error = persist_assessment_session_commands(&mut wait_transaction, &stale)
+        .expect_err("a second writer must wait on the locked session header");
+    wait_transaction.rollback().unwrap();
+    assert!(
+        matches!(error, AssessmentSessionPersistenceError::Database(_)),
+        "lock timeout must surface as a database failure, not a successful rewind: {error:?}"
+    );
+    assert!(
+        error.to_string() == "PostgreSQL assessment-session persistence failed"
+            && std::error::Error::source(&error)
+                .is_some_and(|source| source.to_string().contains("lock timeout")),
+        "the waiter must fail because the header row is locked, not because the prefix check ran on stale committed state"
+    );
+
+    hold_transaction.commit().unwrap();
+    let mut load_transaction = holder.transaction().unwrap();
+    let loaded = load_assessment_session(&mut load_transaction, "ses_header_lock_alpha")
+        .unwrap()
+        .expect("paused session must load after the locking persist commits");
+    load_transaction.commit().unwrap();
+    assert_eq!(loaded.state(), SessionState::Paused);
+    assert_eq!(loaded.accepted_commands().len(), 2);
+}
+
+#[test]
 fn command_persist_rejects_identity_mismatch_and_resulting_state_rebind() {
     let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
