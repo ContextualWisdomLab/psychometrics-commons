@@ -38,12 +38,13 @@ impl HealthHttpResponse {
         }
     }
 
-    fn problem(status: u16, title: &str, detail: &str) -> Self {
+    fn problem(status: u16, type_uri: &str, title: &str, detail: &str) -> Self {
         Self {
             status,
             content_type: "application/problem+json",
             body: format!(
-                "{{\"type\":\"about:blank\",\"title\":{},\"status\":{status},\"detail\":{}}}",
+                "{{\"type\":{},\"title\":{},\"status\":{status},\"detail\":{}}}",
+                json_string(type_uri),
                 json_string(title),
                 json_string(detail)
             ),
@@ -84,6 +85,7 @@ pub fn handle_health_http_request(
     let Some((method, target)) = parse_request_line(request) else {
         return HealthHttpResponse::problem(
             400,
+            "urn:psychometrics-commons:problem:bad-request",
             "Bad Request",
             "health probe request must include an HTTP method and target",
         );
@@ -91,6 +93,7 @@ pub fn handle_health_http_request(
     if method != "GET" {
         return HealthHttpResponse::problem(
             405,
+            "urn:psychometrics-commons:problem:method-not-allowed",
             "Method Not Allowed",
             "health probes accept GET /live and GET /ready only",
         );
@@ -104,6 +107,7 @@ pub fn handle_health_http_request(
         HEALTH_READY_PATH => health_ready_response(snapshot, &required_capabilities(query)),
         _ => HealthHttpResponse::problem(
             404,
+            "urn:psychometrics-commons:problem:not-found",
             "Not Found",
             "health probes accept GET /live and GET /ready only",
         ),
@@ -546,11 +550,30 @@ mod tests {
         assert!(not_allowed
             .body()
             .contains("\"title\":\"Method Not Allowed\""));
+        assert!(
+            not_allowed
+                .body()
+                .contains("\"type\":\"urn:psychometrics-commons:problem:method-not-allowed\""),
+            "health problems must use an explicit product type, not about:blank: {}",
+            not_allowed.body()
+        );
+        assert!(!not_allowed.body().contains("about:blank"));
 
         let missing = handle_health_http_request("GET /v1/sessions HTTP/1.1\r\n\r\n", &snapshot);
         assert_eq!(missing.status(), 404);
         assert_eq!(missing.content_type(), "application/problem+json");
         assert!(missing.body().contains("\"title\":\"Not Found\""));
+        assert!(missing
+            .body()
+            .contains("\"type\":\"urn:psychometrics-commons:problem:not-found\""));
+        assert!(!missing.body().contains("about:blank"));
+
+        let bad = handle_health_http_request("NOT-A-REQUEST", &snapshot);
+        assert_eq!(bad.status(), 400);
+        assert!(bad
+            .body()
+            .contains("\"type\":\"urn:psychometrics-commons:problem:bad-request\""));
+        assert!(!bad.body().contains("about:blank"));
 
         let not_live = RuntimeHealthSnapshot::new(
             false,

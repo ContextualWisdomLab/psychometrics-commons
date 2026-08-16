@@ -111,6 +111,10 @@ components:
       properties:
         type:
           type: string
+          enum:
+            - urn:psychometrics-commons:problem:bad-request
+            - urn:psychometrics-commons:problem:not-found
+            - urn:psychometrics-commons:problem:method-not-allowed
         title:
           type: string
         status:
