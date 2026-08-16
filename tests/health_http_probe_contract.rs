@@ -58,10 +58,8 @@ fn readiness_probe_fails_closed_for_named_or_unknown_required_capabilities() {
     assert_eq!(ready.status(), 200);
     assert!(ready.body().contains("\"ready\":true"));
 
-    let scoring = handle_health_http_request(
-        &request("GET", "/ready?capability=scoring"),
-        &snapshot,
-    );
+    let scoring =
+        handle_health_http_request(&request("GET", "/ready?capability=scoring"), &snapshot);
     assert_eq!(scoring.status(), 200);
 
     let linking = handle_health_http_request(
@@ -70,7 +68,9 @@ fn readiness_probe_fails_closed_for_named_or_unknown_required_capabilities() {
     );
     assert_eq!(linking.status(), 503);
     assert!(linking.body().contains("\"ready\":false"));
-    assert!(linking.body().contains("\"capability_ref\":\"authenticated_linking\""));
+    assert!(linking
+        .body()
+        .contains("\"capability_ref\":\"authenticated_linking\""));
 
     let unknown = handle_health_http_request(
         &request("GET", "/ready?capability=unregistered_capability"),
@@ -90,7 +90,9 @@ fn stalled_backlog_or_unknown_integrity_makes_readiness_unavailable() {
     .unwrap();
     let stalled_response = handle_health_http_request(&request("GET", HEALTH_READY_PATH), &stalled);
     assert_eq!(stalled_response.status(), 503);
-    assert!(stalled_response.body().contains("\"backlog_health\":\"stalled\""));
+    assert!(stalled_response
+        .body()
+        .contains("\"backlog_health\":\"stalled\""));
 
     let unknown_integrity = RuntimeHealthSnapshot::new(
         true,
@@ -113,7 +115,9 @@ fn unsupported_method_or_path_returns_safe_problem_details() {
     let not_allowed = handle_health_http_request(&request("POST", HEALTH_LIVE_PATH), &snapshot);
     assert_eq!(not_allowed.status(), 405);
     assert_eq!(not_allowed.content_type(), "application/problem+json");
-    assert!(not_allowed.body().contains("\"title\":\"Method Not Allowed\""));
+    assert!(not_allowed
+        .body()
+        .contains("\"title\":\"Method Not Allowed\""));
     assert!(!not_allowed.body().contains("postgres"));
     assert!(!not_allowed.body().contains("sql"));
 

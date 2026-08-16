@@ -44,6 +44,8 @@ The implementation must distinguish at least:
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
 
+Operator HTTP probes, when implemented, are GET `/live` and GET `/ready`. `/live` answers process liveness only. `/ready` answers operation-scoped readiness and may name required capabilities as repeated `capability` query parameters. These probes do not publish measured SLO values.
+
 ## 4. Capability degradation matrix
 
 | Dependency/capability failure | Required product behavior |
