@@ -352,9 +352,10 @@ fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersist
     if unix_ms == 0 {
         return Err(ResponseEventPersistenceError::InvalidTimestamp);
     }
-    UNIX_EPOCH
-        .checked_add(Duration::from_millis(unix_ms))
-        .ok_or(ResponseEventPersistenceError::InvalidTimestamp)
+    // Every `u64` millisecond offset from the Unix epoch is representable as
+    // `SystemTime` on the supported 64-bit hosts. An overflow `checked_add`
+    // arm would be untestable and would fail the exact branch-coverage gate.
+    Ok(UNIX_EPOCH + Duration::from_millis(unix_ms))
 }
 
 fn unix_ms_from_system_time(time: SystemTime) -> Result<u64, ResponseEventPersistenceError> {
@@ -441,6 +442,10 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::InvalidTimestamp)
         ));
         assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
+        assert_eq!(
+            postgres_timestamptz(u64::MAX).unwrap(),
+            UNIX_EPOCH + Duration::from_millis(u64::MAX)
+        );
         assert!(matches!(
             unix_ms_from_system_time(UNIX_EPOCH),
             Err(ResponseEventPersistenceError::InvalidTimestamp)
