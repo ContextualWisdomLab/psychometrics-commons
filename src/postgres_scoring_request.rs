@@ -12,7 +12,7 @@ use crate::postgres_scoring_job::{
     persist_scoring_job, ScoringJobPersistenceDisposition, ScoringJobPersistenceError,
 };
 use crate::reference::normalized_reference;
-use crate::scoring::ScoringRequest;
+use crate::scoring::{ScoringContractError, ScoringRequest, ScoringRequestInput};
 use crate::scoring_job::ScoringJob;
 use postgres::Transaction;
 use std::error::Error;
@@ -118,6 +118,8 @@ pub enum ScoringRequestPersistenceError {
     InvalidSchemaVersion,
     /// Scoring-request persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
+    /// Stored request columns cannot reconstruct a valid version-pinned request.
+    CorruptHistory,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -136,6 +138,9 @@ impl Display for ScoringRequestPersistenceError {
             }
             Self::UnsupportedIsolationLevel => {
                 "scoring request persistence requires read committed isolation"
+            }
+            Self::CorruptHistory => {
+                "stored scoring request rows cannot reconstruct a valid version-pinned request"
             }
             Self::Database(_) => "PostgreSQL scoring-request persistence failed",
         })
@@ -166,6 +171,84 @@ pub fn apply_scoring_request_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
     client.batch_execute(SCORING_REQUEST_MIGRATION)
+}
+
+/// Reload one immutable scoring-request identity after process restart.
+///
+/// The caller owns the `READ COMMITTED` transaction. The load takes `FOR SHARE`
+/// on the request row so a concurrent writer holding that identity waits until
+/// reconstruction finishes. A missing request is absent. Stored labels that
+/// cannot rebuild the version pin fail closed. Historical requests are not
+/// rewritten. Session lookup is omitted because `session_ref` is not unique.
+///
+/// # Errors
+///
+/// Returns [`ScoringRequestPersistenceError`] for an invalid reference,
+/// unsupported isolation, stored evidence that cannot reconstruct a valid
+/// request, a schema version outside the `PostgreSQL`/`u16` range, or a
+/// database failure.
+pub fn load_scoring_request(
+    transaction: &mut Transaction<'_>,
+    scoring_request_ref: &str,
+) -> Result<Option<ScoringRequest>, ScoringRequestPersistenceError> {
+    require_read_committed(transaction)?;
+    let scoring_request_ref = required_reference(scoring_request_ref)?;
+    let Some(row) = transaction.query_opt(
+        "SELECT scoring_request_ref, session_ref, response_snapshot_ref, \
+                assessment_spec_ref, instrument_version_ref, scoring_version_ref, \
+                calibration_reference, norm_version_ref, requested_output_schema_version \
+         FROM scoring_request WHERE scoring_request_ref = $1 FOR SHARE",
+        &[&scoring_request_ref],
+    )?
+    else {
+        return Ok(None);
+    };
+    let request_ref: String = row.get(0);
+    let session_ref: String = row.get(1);
+    let response_snapshot_ref: String = row.get(2);
+    let assessment_spec_ref: String = row.get(3);
+    let instrument_version_ref: String = row.get(4);
+    let scoring_version_ref: String = row.get(5);
+    let calibration_reference: String = row.get(6);
+    let stored_norm: Option<String> = row.get(7);
+    let schema_version = stored_schema_version(row.get(8))?;
+    ScoringRequest::from_persisted(
+        &session_ref,
+        ScoringRequestInput {
+            scoring_request_ref: &request_ref,
+            response_snapshot_ref: &response_snapshot_ref,
+            assessment_spec_ref: &assessment_spec_ref,
+            instrument_version_ref: &instrument_version_ref,
+            scoring_version_ref: &scoring_version_ref,
+            calibration_reference: &calibration_reference,
+            norm_version_ref: stored_norm.as_deref(),
+            requested_output_schema_version: schema_version,
+        },
+    )
+    .map(Some)
+    .map_err(map_reconstruct_error)
+}
+
+fn stored_schema_version(value: i32) -> Result<u16, ScoringRequestPersistenceError> {
+    u16::try_from(value).map_err(|_| ScoringRequestPersistenceError::InvalidSchemaVersion)
+}
+
+fn map_reconstruct_error(error: ScoringContractError) -> ScoringRequestPersistenceError {
+    match error {
+        ScoringContractError::EmptyReference => ScoringRequestPersistenceError::InvalidReference,
+        ScoringContractError::UnsupportedOutputSchemaVersion
+        | ScoringContractError::UnboundResponseSnapshot
+        | ScoringContractError::EmptyResponseSnapshot
+        | ScoringContractError::ResponseSnapshotMismatch
+        | ScoringContractError::InvalidEngineArtifactDigest
+        | ScoringContractError::InvalidScore
+        | ScoringContractError::InvalidStandardError
+        | ScoringContractError::ScoredDispositionRequiresScore
+        | ScoringContractError::EmptyObservationSet
+        | ScoringContractError::DuplicateConstruct => {
+            ScoringRequestPersistenceError::CorruptHistory
+        }
+    }
 }
 
 /// Persist a scoring request, its fresh asynchronous job, and one outbox event atomically.
@@ -317,7 +400,11 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{required_reference, ScoringRequestPersistenceError};
+    use super::{
+        map_reconstruct_error, required_reference, stored_schema_version,
+        ScoringRequestPersistenceError,
+    };
+    use crate::scoring::ScoringContractError;
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -333,9 +420,46 @@ mod reference_guard_tests {
             required_reference("scoring_request_ko_v1").unwrap(),
             "scoring_request_ko_v1"
         );
+        assert_eq!(stored_schema_version(1).unwrap(), 1);
+        assert!(matches!(
+            stored_schema_version(-1),
+            Err(ScoringRequestPersistenceError::InvalidSchemaVersion)
+        ));
         assert_eq!(
             ScoringRequestPersistenceError::InvalidSchemaVersion.to_string(),
             "scoring request schema version exceeds the PostgreSQL integer range"
         );
+        assert_eq!(
+            ScoringRequestPersistenceError::CorruptHistory.to_string(),
+            "stored scoring request rows cannot reconstruct a valid version-pinned request"
+        );
+    }
+
+    #[test]
+    fn reconstruct_errors_map_to_fail_closed_persistence_errors() {
+        assert!(matches!(
+            map_reconstruct_error(ScoringContractError::EmptyReference),
+            ScoringRequestPersistenceError::InvalidReference
+        ));
+        for error in [
+            ScoringContractError::UnsupportedOutputSchemaVersion,
+            ScoringContractError::UnboundResponseSnapshot,
+            ScoringContractError::EmptyResponseSnapshot,
+            ScoringContractError::ResponseSnapshotMismatch,
+            ScoringContractError::InvalidEngineArtifactDigest,
+            ScoringContractError::InvalidScore,
+            ScoringContractError::InvalidStandardError,
+            ScoringContractError::ScoredDispositionRequiresScore,
+            ScoringContractError::EmptyObservationSet,
+            ScoringContractError::DuplicateConstruct,
+        ] {
+            assert!(
+                matches!(
+                    map_reconstruct_error(error),
+                    ScoringRequestPersistenceError::CorruptHistory
+                ),
+                "{error} must fail closed as corrupt stored history"
+            );
+        }
     }
 }
