@@ -465,13 +465,11 @@ mod reference_guard_tests {
             ScoringContractError::EmptyObservationSet,
             ScoringContractError::DuplicateConstruct,
         ] {
-            assert!(
-                matches!(
-                    map_reconstruct_error(error),
-                    ScoringRequestPersistenceError::CorruptHistory
-                ),
-                "{error} must fail closed as corrupt stored history"
-            );
+            let mapped = map_reconstruct_error(error);
+            assert!(matches!(
+                mapped,
+                ScoringRequestPersistenceError::CorruptHistory
+            ));
         }
     }
 }
