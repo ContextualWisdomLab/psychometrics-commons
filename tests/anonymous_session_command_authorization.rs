@@ -23,11 +23,11 @@ const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
-/// Session starts after the Big Five Korean release is published at 10_200.
+/// Session starts after the Big Five Korean release is published at `10_200`.
 const SESSION_CREATED_AT_UNIX_MS: u64 = 10_300;
 /// Trusted now sits after session creation and before exclusive proof expiry.
 const COMMAND_NOW_UNIX_MS: u64 = 11_000;
-/// Exclusive proof expiry: valid at 11_999, expired at 12_000.
+/// Exclusive proof expiry: valid at `11_999`, expired at `12_000`.
 const PROOF_VALID_UNTIL_UNIX_MS: u64 = 12_000;
 
 fn published_release() -> InstrumentRelease {
