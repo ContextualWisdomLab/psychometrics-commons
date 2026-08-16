@@ -5,7 +5,8 @@
 //! that exact loaded session. Callers do not invent the resource tenant or owner.
 
 use psychometrics_commons_runtime::anonymous_authorization::{
-    authorize_anonymous_session_command, AnonymousResourceAuthorizationError,
+    apply_anonymous_session_command, authorize_anonymous_session_command,
+    AnonymousResourceAuthorizationError, AnonymousSessionCommandError,
 };
 use psychometrics_commons_runtime::anonymous_session::AnonymousSessionContext;
 use psychometrics_commons_runtime::instrument::{
@@ -13,7 +14,9 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::participant::ParticipantRecord;
-use psychometrics_commons_runtime::session::AssessmentSession;
+use psychometrics_commons_runtime::session::{
+    AssessmentSession, SessionCommand, SessionState, TransitionErrorKind,
+};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -195,4 +198,112 @@ fn anonymous_command_authorization_rejects_compound_failures_in_time_then_owner_
         authorize_anonymous_session_command(&actor, &owner, &other_persons_session, 2_000),
         Err(AnonymousResourceAuthorizationError::Expired)
     );
+}
+
+#[test]
+fn authorized_anonymous_proof_may_activate_only_its_loaded_session() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let owner = participant("tenant_alpha", "participant_alpha");
+    let mut loaded = session("participant_alpha", "session_alpha");
+
+    assert_eq!(
+        apply_anonymous_session_command(
+            &actor,
+            &owner,
+            &mut loaded,
+            "command_activate_alpha",
+            1,
+            SessionCommand::Activate,
+            1_500,
+        ),
+        Ok(SessionState::Active)
+    );
+    assert_eq!(loaded.state(), SessionState::Active);
+}
+
+#[test]
+fn unauthorized_anonymous_command_does_not_mutate_the_loaded_session() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let owner = participant("tenant_alpha", "participant_alpha");
+    let mut other_session = session("participant_alpha", "session_beta");
+
+    assert_eq!(
+        apply_anonymous_session_command(
+            &actor,
+            &owner,
+            &mut other_session,
+            "command_activate_beta",
+            1,
+            SessionCommand::Activate,
+            1_500,
+        ),
+        Err(AnonymousSessionCommandError::Authorization(
+            AnonymousResourceAuthorizationError::SessionMismatch
+        ))
+    );
+    assert_eq!(other_session.state(), SessionState::Created);
+}
+
+#[test]
+fn expired_anonymous_proof_cannot_apply_an_otherwise_legal_session_command() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let owner = participant("tenant_alpha", "participant_alpha");
+    let mut loaded = session("participant_alpha", "session_alpha");
+
+    assert_eq!(
+        apply_anonymous_session_command(
+            &actor,
+            &owner,
+            &mut loaded,
+            "command_activate_expired",
+            1,
+            SessionCommand::Activate,
+            2_000,
+        ),
+        Err(AnonymousSessionCommandError::Authorization(
+            AnonymousResourceAuthorizationError::Expired
+        ))
+    );
+    assert_eq!(loaded.state(), SessionState::Created);
+}
+
+#[test]
+fn authorized_anonymous_command_still_fails_closed_on_illegal_lifecycle_transition() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let owner = participant("tenant_alpha", "participant_alpha");
+    let mut loaded = session("participant_alpha", "session_alpha");
+
+    let error = apply_anonymous_session_command(
+        &actor,
+        &owner,
+        &mut loaded,
+        "command_complete_too_early",
+        1,
+        SessionCommand::Complete,
+        1_500,
+    )
+    .expect_err("Created sessions cannot complete");
+    match error {
+        AnonymousSessionCommandError::Transition(transition) => {
+            assert_eq!(transition.state(), SessionState::Created);
+            assert_eq!(transition.command(), SessionCommand::Complete);
+            assert_eq!(transition.kind(), TransitionErrorKind::InvalidTransition);
+        }
+        other => panic!("expected lifecycle rejection, got {other:?}"),
+    }
+    assert_eq!(loaded.state(), SessionState::Created);
+    assert!(error.to_string().contains("Complete"));
+    assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn anonymous_session_command_errors_preserve_safe_authorization_text() {
+    let authorization = AnonymousSessionCommandError::Authorization(
+        AnonymousResourceAuthorizationError::SessionMismatch,
+    );
+    assert_eq!(
+        authorization.to_string(),
+        "anonymous session authority does not match the resource session"
+    );
+    assert!(std::error::Error::source(&authorization).is_some());
 }
