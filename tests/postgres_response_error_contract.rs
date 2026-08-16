@@ -28,6 +28,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ResponsePersistenceError::UnsupportedIsolationLevel,
             "response persistence requires read committed isolation",
         ),
+        (
+            ResponsePersistenceError::InconsistentEvidence,
+            "durable response-event evidence cannot reconstruct the session ledger",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());

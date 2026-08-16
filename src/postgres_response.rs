@@ -7,7 +7,7 @@
 //! classifier.
 
 use crate::reference::normalized_reference;
-use crate::response::{ResponseEvent, ResponseLedger};
+use crate::response::{ResponseEvent, ResponseLedger, WriteError};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -40,6 +40,8 @@ pub enum ResponsePersistenceError {
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
+    /// Durable rows cannot reconstruct the domain response ledger.
+    InconsistentEvidence,
 }
 
 impl Display for ResponsePersistenceError {
@@ -54,6 +56,9 @@ impl Display for ResponsePersistenceError {
                 "response persistence requires read committed isolation"
             }
             Self::Database(_) => "PostgreSQL response-event persistence failed",
+            Self::InconsistentEvidence => {
+                "durable response-event evidence cannot reconstruct the session ledger"
+            }
         })
     }
 }
@@ -111,6 +116,55 @@ pub fn persist_response_ledger(
     } else {
         Ok(ResponsePersistenceDisposition::Duplicate)
     }
+}
+
+/// Load one session-bound response ledger from durable evidence.
+///
+/// Returns `Ok(None)` when no ledger header exists. An empty header
+/// reconstructs as an empty [`ResponseLedger`]. Events are ordered by
+/// `server_sequence` and must form the same monotonic prefix the domain
+/// assigned. After load, [`ResponseLedger::record`] continues that prefix.
+///
+/// # Errors
+///
+/// Returns [`ResponsePersistenceError`] for unsupported isolation, an invalid
+/// session reference, inconsistent durable evidence, or a database failure.
+pub fn load_response_ledger(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Option<ResponseLedger>, ResponsePersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = required_reference(session_ref)?;
+    let header = transaction.query_opt(
+        "SELECT session_ref FROM response_event_ledger WHERE session_ref = $1",
+        &[&session_ref],
+    )?;
+    if header.is_none() {
+        return Ok(None);
+    }
+    let rows = transaction.query(
+        "SELECT server_event_ref, client_event_ref, item_version_ref, payload_digest, \
+         server_sequence FROM response_event WHERE session_ref = $1 \
+         ORDER BY server_sequence ASC",
+        &[&session_ref],
+    )?;
+    let mut events = Vec::with_capacity(rows.len());
+    for row in rows {
+        let sequence = stored_sequence(row.get(4))?;
+        events.push(
+            ResponseEvent::from_durable_evidence(
+                row.get::<_, String>(0),
+                row.get::<_, String>(1),
+                row.get::<_, String>(2),
+                row.get::<_, String>(3),
+                sequence,
+            )
+            .map_err(durable_evidence_error)?,
+        );
+    }
+    ResponseLedger::from_durable_events(session_ref, events)
+        .map(Some)
+        .map_err(durable_evidence_error)
 }
 
 fn persist_ledger_header(
@@ -190,6 +244,25 @@ fn postgres_sequence(sequence: usize) -> Result<i64, ResponsePersistenceError> {
     i64::try_from(sequence).map_err(|_| ResponsePersistenceError::InvalidSequence)
 }
 
+fn stored_sequence(sequence: i64) -> Result<usize, ResponsePersistenceError> {
+    usize::try_from(sequence).map_err(|_| ResponsePersistenceError::InvalidSequence)
+}
+
+fn durable_evidence_error(error: WriteError) -> ResponsePersistenceError {
+    match error {
+        WriteError::InvalidReference
+        | WriteError::EmptyReference
+        | WriteError::InvalidPayloadDigest => ResponsePersistenceError::InvalidReference,
+        WriteError::InconsistentSequence
+        | WriteError::IdempotencyConflict
+        | WriteError::ServerReferenceConflict
+        | WriteError::SessionNotActive(_)
+        | WriteError::SnapshotRequiresCompleted(_) => {
+            ResponsePersistenceError::InconsistentEvidence
+        }
+    }
+}
+
 fn required_reference(reference: &str) -> Result<&str, ResponsePersistenceError> {
     normalized_reference(reference).ok_or(ResponsePersistenceError::InvalidReference)
 }
@@ -209,9 +282,11 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        is_response_uniqueness_conflict, postgres_sequence, required_reference,
-        ResponsePersistenceError,
+        durable_evidence_error, is_response_uniqueness_conflict, postgres_sequence,
+        required_reference, stored_sequence, ResponsePersistenceError,
     };
+    use crate::response::WriteError;
+    use crate::session::SessionState;
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -232,6 +307,47 @@ mod reference_guard_tests {
             Err(ResponsePersistenceError::InvalidSequence)
         ));
         assert_eq!(postgres_sequence(1).unwrap(), 1);
+        assert_eq!(stored_sequence(1).unwrap(), 1);
+        assert!(matches!(
+            stored_sequence(-1),
+            Err(ResponsePersistenceError::InvalidSequence)
+        ));
+    }
+
+    #[test]
+    fn durable_reconstruction_errors_map_to_persistence_failures() {
+        assert!(matches!(
+            durable_evidence_error(WriteError::InvalidReference),
+            ResponsePersistenceError::InvalidReference
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::EmptyReference),
+            ResponsePersistenceError::InvalidReference
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::InvalidPayloadDigest),
+            ResponsePersistenceError::InvalidReference
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::InconsistentSequence),
+            ResponsePersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::IdempotencyConflict),
+            ResponsePersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::ServerReferenceConflict),
+            ResponsePersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::SessionNotActive(SessionState::Paused)),
+            ResponsePersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(WriteError::SnapshotRequiresCompleted(SessionState::Active)),
+            ResponsePersistenceError::InconsistentEvidence
+        ));
     }
 
     #[test]

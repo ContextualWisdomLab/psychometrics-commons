@@ -90,6 +90,15 @@ fn seed_recovery_critical_state(client: &mut Client) {
                 'event_dependency_alpha', 'consumption_recovery_alpha', 'effect_recovery_alpha',
                 'processing', 7, 12000, 13000, TIMESTAMPTZ '1970-01-01 00:00:13+00', NULL, NULL
              );
+             INSERT INTO {SOURCE_SCHEMA}.response_event_ledger (session_ref)
+             VALUES ('session_recovery_alpha');
+             INSERT INTO {SOURCE_SCHEMA}.response_event (
+                session_ref, server_event_ref, client_event_ref, item_version_ref,
+                payload_digest, server_sequence
+             ) VALUES (
+                'session_recovery_alpha', 'response_recovery_alpha',
+                'client_recovery_alpha', 'item_version_recovery_alpha', '{DIGEST_A}', 1
+             );
              INSERT INTO {SOURCE_SCHEMA}.response_snapshot (
                 snapshot_ref, session_ref, event_count, last_sequence
              ) VALUES ('snapshot_recovery_alpha', 'session_recovery_alpha', 1, 1);
@@ -188,6 +197,26 @@ fn assert_restored_evidence(client: &mut Client) {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+
+    let restored_event = client
+        .query_one(
+            &format!(
+                "SELECT response_event.server_event_ref, response_event.client_event_ref,
+                        response_event.payload_digest, response_event.server_sequence
+                 FROM {RESTORED_SCHEMA}.response_event
+                 JOIN {RESTORED_SCHEMA}.response_event_ledger USING (session_ref)
+                 WHERE response_event.session_ref = 'session_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect("response-event identity should survive restore");
+    assert_eq!(
+        restored_event.get::<_, String>(0),
+        "response_recovery_alpha"
+    );
+    assert_eq!(restored_event.get::<_, String>(1), "client_recovery_alpha");
+    assert_eq!(restored_event.get::<_, String>(2), DIGEST_A);
+    assert_eq!(restored_event.get::<_, i64>(3), 1);
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
@@ -214,6 +243,28 @@ fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
         .expect("conflicting restored outbox replay must fail at the database constraint boundary");
     assert_eq!(database_error.code(), &SqlState::UNIQUE_VIOLATION);
     assert_eq!(database_error.constraint(), Some("integration_outbox_pkey"));
+
+    let duplicate_response = client
+        .execute(
+            &format!(
+                "INSERT INTO {RESTORED_SCHEMA}.response_event (
+                    session_ref, server_event_ref, client_event_ref, item_version_ref,
+                    payload_digest, server_sequence
+                 ) VALUES (
+                    'session_recovery_alpha', 'response_recovery_alpha',
+                    'client_recovery_beta', 'item_version_recovery_beta', '{DIGEST_B}', 2
+                 )"
+            ),
+            &[],
+        )
+        .expect_err(
+            "restore must preserve response-event server identity instead of permitting a conflicting replay",
+        );
+    let response_error = duplicate_response.as_db_error().expect(
+        "conflicting restored response replay must fail at the database constraint boundary",
+    );
+    assert_eq!(response_error.code(), &SqlState::UNIQUE_VIOLATION);
+    assert_eq!(response_error.constraint(), Some("response_event_pkey"));
 
     let independent_tenant = client
         .execute(
@@ -249,6 +300,8 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "integration_outbox",
         "integration_inbox",
         "integration_consumption",
+        "response_event_ledger",
+        "response_event",
         "response_snapshot",
         "response_snapshot_entry",
     ];

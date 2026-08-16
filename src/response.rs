@@ -65,6 +65,51 @@ impl ResponseEvent {
     pub const fn sequence(&self) -> usize {
         self.sequence
     }
+
+    /// Rebuild one accepted event from durable identity and digest evidence.
+    ///
+    /// Use this after process restart so the original server identity and
+    /// sequence are preserved. Do not use it to accept a new participant
+    /// response; that path remains [`ResponseLedger::record`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] for blank or numeric-like
+    /// identity references, [`WriteError::EmptyReference`] for a blank payload
+    /// digest, [`WriteError::InvalidPayloadDigest`] for a noncanonical digest,
+    /// or [`WriteError::InconsistentSequence`] when the stored sequence is not
+    /// a positive server sequence.
+    pub fn from_durable_evidence(
+        server_event_ref: impl AsRef<str>,
+        client_event_ref: impl AsRef<str>,
+        item_version_ref: impl AsRef<str>,
+        payload_digest: impl AsRef<str>,
+        sequence: usize,
+    ) -> Result<Self, WriteError> {
+        let server_event_ref =
+            normalized_reference(server_event_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let client_event_ref =
+            normalized_reference(client_event_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let item_version_ref =
+            normalized_reference(item_version_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let payload_digest = payload_digest.as_ref();
+        if payload_digest.trim().is_empty() {
+            return Err(WriteError::EmptyReference);
+        }
+        if !is_canonical_sha256(payload_digest) {
+            return Err(WriteError::InvalidPayloadDigest);
+        }
+        if sequence == 0 {
+            return Err(WriteError::InconsistentSequence);
+        }
+        Ok(Self {
+            server_event_ref: server_event_ref.to_owned(),
+            client_event_ref: client_event_ref.to_owned(),
+            item_version_ref: item_version_ref.to_owned(),
+            payload_digest: payload_digest.to_owned(),
+            sequence,
+        })
+    }
 }
 
 /// Immutable response snapshot frozen when collection completes.
@@ -140,6 +185,8 @@ pub enum WriteError {
     ServerReferenceConflict,
     /// A response snapshot was requested before the session reached completion.
     SnapshotRequiresCompleted(SessionState),
+    /// Durable events cannot reconstruct a positive monotonic sequence prefix.
+    InconsistentSequence,
 }
 
 impl Display for WriteError {
@@ -163,6 +210,9 @@ impl Display for WriteError {
             Self::SnapshotRequiresCompleted(state) => write!(
                 formatter,
                 "response snapshot requires Completed session state, found {state:?}"
+            ),
+            Self::InconsistentSequence => formatter.write_str(
+                "durable response events must form a positive monotonic sequence prefix",
             ),
         }
     }
@@ -222,6 +272,48 @@ impl ResponseLedger {
     #[must_use]
     pub fn events(&self) -> &[ResponseEvent] {
         &self.events
+    }
+
+    /// Rebuild a session ledger from durable event evidence after restart.
+    ///
+    /// Events must already be in server-authoritative order and use the same
+    /// identities the original [`Self::record`] calls accepted. The next new
+    /// logical response then continues the stored sequence prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] for a blank or numeric-like
+    /// session reference, [`WriteError::InconsistentSequence`] when stored
+    /// sequences are not `1..=n`, [`WriteError::IdempotencyConflict`] when a
+    /// client identity repeats, or [`WriteError::ServerReferenceConflict`]
+    /// when a server identity repeats.
+    pub fn from_durable_events(
+        session_ref: impl AsRef<str>,
+        events: Vec<ResponseEvent>,
+    ) -> Result<Self, WriteError> {
+        let session_ref =
+            normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        for (index, event) in events.iter().enumerate() {
+            if event.sequence != index + 1 {
+                return Err(WriteError::InconsistentSequence);
+            }
+            if events[..index]
+                .iter()
+                .any(|prior| prior.client_event_ref == event.client_event_ref)
+            {
+                return Err(WriteError::IdempotencyConflict);
+            }
+            if events[..index]
+                .iter()
+                .any(|prior| prior.server_event_ref == event.server_event_ref)
+            {
+                return Err(WriteError::ServerReferenceConflict);
+            }
+        }
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            events,
+        })
     }
 
     /// Record one response event or replay an identical prior event.

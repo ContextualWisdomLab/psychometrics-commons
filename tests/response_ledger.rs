@@ -1,6 +1,8 @@
 //! Integration tests for response-event idempotency and immutable snapshots.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
+use psychometrics_commons_runtime::response::{
+    ResponseEvent, ResponseLedger, ResponseWrite, WriteError,
+};
 use psychometrics_commons_runtime::session::SessionState;
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -334,5 +336,116 @@ fn write_errors_have_stable_human_readable_context() {
     assert_eq!(
         WriteError::SnapshotRequiresCompleted(SessionState::Active).to_string(),
         "response snapshot requires Completed session state, found Active"
+    );
+    assert_eq!(
+        WriteError::InconsistentSequence.to_string(),
+        "durable response events must form a positive monotonic sequence prefix"
+    );
+}
+
+#[test]
+fn durable_events_rebuild_the_same_ledger_after_restart() {
+    let mut recorded = ResponseLedger::new("session_restart_alpha").unwrap();
+    recorded
+        .record(
+            SessionState::Active,
+            write("event_a", "client_a", "item_v1", DIGEST_A),
+        )
+        .unwrap();
+    recorded
+        .record(
+            SessionState::Active,
+            write("event_b", "client_b", "item_v2", DIGEST_B),
+        )
+        .unwrap();
+
+    let rebuilt = ResponseLedger::from_durable_events(
+        "session_restart_alpha",
+        recorded
+            .events()
+            .iter()
+            .map(|event| {
+                ResponseEvent::from_durable_evidence(
+                    event.server_event_ref(),
+                    event.client_event_ref(),
+                    event.item_version_ref(),
+                    event.payload_digest(),
+                    event.sequence(),
+                )
+                .unwrap()
+            })
+            .collect(),
+    )
+    .unwrap();
+
+    assert_eq!(rebuilt, recorded);
+
+    let mut continued = rebuilt;
+    let third = continued
+        .record(
+            SessionState::Active,
+            write("event_c", "client_c", "item_v3", DIGEST_CHANGED),
+        )
+        .unwrap();
+    assert_eq!(third.sequence(), 3);
+}
+
+#[test]
+fn durable_event_reconstruction_fails_closed_on_invalid_or_gapped_evidence() {
+    assert!(matches!(
+        ResponseEvent::from_durable_evidence(" ", "client_a", "item_v1", DIGEST_A, 1),
+        Err(WriteError::InvalidReference)
+    ));
+    assert!(matches!(
+        ResponseEvent::from_durable_evidence("event_a", "client_a", "item_v1", "   ", 1),
+        Err(WriteError::EmptyReference)
+    ));
+    assert!(matches!(
+        ResponseEvent::from_durable_evidence("event_a", "client_a", "item_v1", "sha256:nope", 1),
+        Err(WriteError::InvalidPayloadDigest)
+    ));
+    assert!(matches!(
+        ResponseEvent::from_durable_evidence("event_a", "client_a", "item_v1", DIGEST_A, 0),
+        Err(WriteError::InconsistentSequence)
+    ));
+
+    let first = ResponseEvent::from_durable_evidence("event_a", "client_a", "item_v1", DIGEST_A, 1)
+        .unwrap();
+    let gapped =
+        ResponseEvent::from_durable_evidence("event_b", "client_b", "item_v2", DIGEST_B, 3)
+            .unwrap();
+    assert_eq!(
+        ResponseLedger::from_durable_events("session_restart_gap", vec![first.clone(), gapped])
+            .unwrap_err(),
+        WriteError::InconsistentSequence
+    );
+
+    let duplicate_client =
+        ResponseEvent::from_durable_evidence("event_b", "client_a", "item_v2", DIGEST_B, 2)
+            .unwrap();
+    assert_eq!(
+        ResponseLedger::from_durable_events(
+            "session_restart_client",
+            vec![first.clone(), duplicate_client]
+        )
+        .unwrap_err(),
+        WriteError::IdempotencyConflict
+    );
+
+    let duplicate_server =
+        ResponseEvent::from_durable_evidence("event_a", "client_b", "item_v2", DIGEST_B, 2)
+            .unwrap();
+    assert_eq!(
+        ResponseLedger::from_durable_events(
+            "session_restart_server",
+            vec![first, duplicate_server]
+        )
+        .unwrap_err(),
+        WriteError::ServerReferenceConflict
+    );
+
+    assert_eq!(
+        ResponseLedger::from_durable_events("12", Vec::new()).unwrap_err(),
+        WriteError::InvalidReference
     );
 }

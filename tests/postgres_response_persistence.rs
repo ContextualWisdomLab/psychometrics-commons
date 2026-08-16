@@ -2,8 +2,8 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_response::{
-    apply_response_event_migration, persist_response_ledger, ResponsePersistenceDisposition,
-    ResponsePersistenceError,
+    apply_response_event_migration, load_response_ledger, persist_response_ledger,
+    ResponsePersistenceDisposition, ResponsePersistenceError,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
@@ -50,6 +50,13 @@ fn persist_ok(client: &mut Client, ledger: &ResponseLedger) -> ResponsePersisten
     let disposition = persist_response_ledger(&mut transaction, ledger).unwrap();
     transaction.commit().unwrap();
     disposition
+}
+
+fn load_ok(client: &mut Client, session_ref: &str) -> Option<ResponseLedger> {
+    let mut transaction = client.transaction().unwrap();
+    let ledger = load_response_ledger(&mut transaction, session_ref).unwrap();
+    transaction.commit().unwrap();
+    ledger
 }
 
 fn persist_err(client: &mut Client, ledger: &ResponseLedger) -> ResponsePersistenceError {
@@ -106,7 +113,7 @@ fn accepted_events_are_idempotent_and_digest_rebinding_fails_closed() {
     reset_response_tables(&mut client);
     apply_response_event_migration(&mut client).unwrap();
 
-    let ledger = recorded_ledger(
+    let mut ledger = recorded_ledger(
         "session_response_beta",
         &[write(
             "server_event_001",
@@ -123,6 +130,32 @@ fn accepted_events_are_idempotent_and_digest_rebinding_fails_closed() {
         persist_ok(&mut client, &ledger),
         ResponsePersistenceDisposition::Duplicate
     );
+
+    let replayed = ledger
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_ignored",
+                "client_event_001",
+                "item_version_001",
+                PAYLOAD_DIGEST,
+            ),
+        )
+        .unwrap();
+    assert_eq!(replayed.server_event_ref(), "server_event_001");
+    assert_eq!(
+        persist_ok(&mut client, &ledger),
+        ResponsePersistenceDisposition::Duplicate
+    );
+    let stored_server: String = client
+        .query_one(
+            "SELECT server_event_ref FROM response_event \
+             WHERE session_ref = 'session_response_beta'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(stored_server, "server_event_001");
 
     client
         .execute(
@@ -332,4 +365,210 @@ fn replay_select_failure_is_a_database_failure() {
              DROP SCHEMA IF EXISTS response_event_select_failure_sink CASCADE;",
         )
         .unwrap();
+}
+
+#[test]
+fn persisted_ledger_reloads_and_continues_the_stored_sequence() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+
+    let original = recorded_ledger(
+        "session_response_reload",
+        &[
+            write(
+                "server_event_001",
+                "client_event_001",
+                "item_version_001",
+                PAYLOAD_DIGEST,
+            ),
+            write(
+                "server_event_002",
+                "client_event_002",
+                "item_version_002",
+                OTHER_DIGEST,
+            ),
+        ],
+    );
+    persist_ok(&mut client, &original);
+
+    let mut reloaded = load_ok(&mut client, "session_response_reload").expect("stored ledger");
+    assert_eq!(reloaded, original);
+    assert_eq!(
+        persist_ok(&mut client, &reloaded),
+        ResponsePersistenceDisposition::Duplicate
+    );
+
+    let third = reloaded
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_003",
+                "client_event_003",
+                "item_version_003",
+                PAYLOAD_DIGEST,
+            ),
+        )
+        .unwrap();
+    assert_eq!(third.sequence(), 3);
+    assert_eq!(
+        persist_ok(&mut client, &reloaded),
+        ResponsePersistenceDisposition::Inserted
+    );
+    assert_eq!(
+        load_ok(&mut client, "session_response_reload").expect("appended ledger"),
+        reloaded
+    );
+}
+
+#[test]
+fn missing_or_empty_ledgers_load_without_inventing_events() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+
+    assert!(load_ok(&mut client, "session_response_absent").is_none());
+    persist_ok(
+        &mut client,
+        &ResponseLedger::new("session_response_empty_load").unwrap(),
+    );
+    let empty = load_ok(&mut client, "session_response_empty_load").expect("empty header");
+    assert!(empty.is_empty());
+    assert_eq!(empty.session_ref(), "session_response_empty_load");
+}
+
+#[test]
+fn load_requires_read_committed_and_opaque_session_identity() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_response_ledger(&mut transaction, "session_serializable_load"),
+        Err(ResponsePersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_response_ledger(&mut transaction, "12"),
+        Err(ResponsePersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn gapped_durable_sequences_fail_closed_on_load() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &recorded_ledger(
+            "session_response_gap",
+            &[write(
+                "server_event_001",
+                "client_event_001",
+                "item_version_001",
+                PAYLOAD_DIGEST,
+            )],
+        ),
+    );
+    client
+        .execute(
+            "INSERT INTO response_event (\
+                 session_ref, server_event_ref, client_event_ref, item_version_ref, \
+                 payload_digest, server_sequence\
+             ) VALUES (\
+                 'session_response_gap', 'server_event_003', 'client_event_003', \
+                 'item_version_003', $1, 3\
+             )",
+            &[&OTHER_DIGEST],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_response_ledger(&mut transaction, "session_response_gap"),
+        Err(ResponsePersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn noncanonical_durable_digest_fails_closed_on_load() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &ResponseLedger::new("session_response_corrupt_digest").unwrap(),
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE response_event \
+             DROP CONSTRAINT response_event_payload_digest_format_check;",
+        )
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO response_event (\
+                 session_ref, server_event_ref, client_event_ref, item_version_ref, \
+                 payload_digest, server_sequence\
+             ) VALUES (\
+                 'session_response_corrupt_digest', 'server_event_001', 'client_event_001', \
+                 'item_version_001', 'sha256:placeholder', 1\
+             )",
+            &[],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_response_ledger(&mut transaction, "session_response_corrupt_digest"),
+        Err(ResponsePersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_ledger_relation_on_load_is_a_database_failure() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_response_ledger(&mut transaction, "session_missing_header"),
+        Err(ResponsePersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_event_relation_on_load_is_a_database_failure() {
+    let _guard = response_test_guard();
+    let mut client = test_client();
+    reset_response_tables(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &ResponseLedger::new("session_missing_load").unwrap(),
+    );
+    client.batch_execute("DROP TABLE response_event;").unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_response_ledger(&mut transaction, "session_missing_load"),
+        Err(ResponsePersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
 }

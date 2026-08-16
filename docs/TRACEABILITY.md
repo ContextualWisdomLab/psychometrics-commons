@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #53 response-event persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Session-bound response identity and payload digests persist under READ COMMITTED with exact replay and fail-closed rebinding. Response bodies stay out of the product database.
+**Active PR** #53 response-event persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Session-bound response identity and payload-digest evidence persist under READ COMMITTED with exact replay, fail-closed rebinding, post-restart ledger reload, and recovery COPY/restore of `response_event_ledger` / `response_event`. Response bodies stay out of the product database.
 
 ## 5. ADR traceability by concern
 
