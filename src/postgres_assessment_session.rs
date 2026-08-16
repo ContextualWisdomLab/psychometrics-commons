@@ -253,4 +253,25 @@ mod tests {
         assert_eq!(session_state_name(SessionState::Cancelled), "cancelled");
         assert_eq!(session_state_name(SessionState::Invalidated), "invalidated");
     }
+
+    #[test]
+    fn database_error_wrap_is_instantiated_in_the_library() {
+        let source = match postgres::Config::new()
+            .host("/no/such/psychometrics-commons.socket")
+            .port(1)
+            .user("postgres")
+            .dbname("psychometrics_commons_test")
+            .connect_timeout(std::time::Duration::from_millis(50))
+            .connect(postgres::NoTls)
+        {
+            Ok(_) => panic!("missing local socket must fail closed"),
+            Err(error) => error,
+        };
+        let error = AssessmentSessionPersistenceError::from(source);
+        assert_eq!(
+            error.to_string(),
+            "PostgreSQL assessment-session persistence failed"
+        );
+        assert!(std::error::Error::source(&error).is_some());
+    }
 }
