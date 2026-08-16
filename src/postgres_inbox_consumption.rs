@@ -12,6 +12,8 @@ use std::fmt::{Display, Formatter};
 
 const INBOX_CONSUMPTION_MIGRATION: &str =
     include_str!("../migrations/0012_integration_consumption.sql");
+const INBOX_CLAIM_EXPIRY_GUARD_MIGRATION: &str =
+    include_str!("../migrations/0019_inbox_claim_expiry_guard.sql");
 
 /// Outcome of persisting one pending inbox consumption identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -128,15 +130,21 @@ impl From<postgres::Error> for InboxConsumptionPersistenceError {
     }
 }
 
-/// Apply the idempotent inbox-consumption migration to a `PostgreSQL` connection.
+/// Apply the idempotent inbox-consumption migrations to a `PostgreSQL` connection.
+///
+/// The shipped base migration remains immutable; forward-only hardening is
+/// applied afterwards so existing installations receive the same guard as a
+/// newly initialized database.
 ///
 /// # Errors
 ///
-/// Returns the `PostgreSQL` error if the migration cannot be applied.
+/// Returns the `PostgreSQL` error if either migration cannot be applied.
 pub fn apply_inbox_consumption_migration(
     client: &mut impl GenericClient,
 ) -> Result<(), postgres::Error> {
-    client.batch_execute(INBOX_CONSUMPTION_MIGRATION)
+    let migration_batch =
+        format!("{INBOX_CONSUMPTION_MIGRATION}\n{INBOX_CLAIM_EXPIRY_GUARD_MIGRATION}");
+    client.batch_execute(&migration_batch)
 }
 
 /// Persist one pending consumption identity for an existing inbox receipt.
