@@ -60,20 +60,23 @@ class SbomEvidenceContract(unittest.TestCase):
     def test_pull_request_lane_is_read_only_and_does_not_publish(self) -> None:
         """Untrusted pull-request code must not obtain release or dependency-write authority."""
         text = self.workflow_text()
-        generate_job = mapping_block(mapping_block(text, "jobs", 0), "generate", 2)
-        permissions = mapping_block(generate_job, "permissions", 4)
-        self.assertEqual(
-            [line.strip() for line in permissions.splitlines() if line.strip()],
-            ["contents: read"],
-        )
-        for forbidden_permission in [
-            "contents: write",
-            "id-token:",
-            "attestations:",
-            "artifact-metadata:",
-            "packages: write",
-        ]:
-            self.assertNotIn(forbidden_permission, generate_job)
+        jobs = mapping_block(text, "jobs", 0)
+        for job_name in ["generate", "verify-evidence"]:
+            job = mapping_block(jobs, job_name, 2)
+            permissions = mapping_block(job, "permissions", 4)
+            self.assertEqual(
+                [line.strip() for line in permissions.splitlines() if line.strip()],
+                ["contents: read"],
+            )
+            for forbidden_permission in [
+                "contents: write",
+                "id-token:",
+                "attestations:",
+                "artifact-metadata:",
+                "packages: write",
+            ]:
+                self.assertNotIn(forbidden_permission, job)
+        generate_job = mapping_block(jobs, "generate", 2)
         self.assertIn("dependency-snapshot: false", generate_job)
         self.assertIn("upload-artifact: false", generate_job)
         self.assertIn("upload-release-assets: false", generate_job)
@@ -93,6 +96,31 @@ class SbomEvidenceContract(unittest.TestCase):
         self.assertIn("sbom.spdx.json", generate_job)
         self.assertIn(
             "sbom-spdx-${{ github.event.pull_request.head.sha || github.sha }}", generate_job
+        )
+
+    def test_preserved_sbom_is_reverified_after_artifact_handoff(self) -> None:
+        """A separate job must prove checksum and lock coverage survive artifact storage."""
+        text = self.workflow_text()
+        jobs = mapping_block(text, "jobs", 0)
+        verify_job = mapping_block(jobs, "verify-evidence", 2)
+        self.assertIn("needs: generate", verify_job)
+        self.assertIn(
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            verify_job,
+        )
+        self.assertIn(
+            "name: sbom-spdx-${{ github.event.pull_request.head.sha || github.sha }}",
+            verify_job,
+        )
+        self.assertIn("sha256sum --check sbom.spdx.json.sha256", verify_job)
+        self.assertIn(
+            "python3 scripts/validate_spdx_sbom.py evidence/sbom.spdx.json Cargo.lock",
+            verify_job,
+        )
+        self.assertGreaterEqual(
+            verify_job.count("github.event.pull_request.head.sha || github.sha"),
+            2,
+            "verification must bind checkout and artifact identity to the exact revision",
         )
 
 
