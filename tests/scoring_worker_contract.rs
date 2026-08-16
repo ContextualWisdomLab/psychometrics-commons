@@ -141,6 +141,14 @@ fn scoring_worker_errors_explain_the_next_safe_action() {
         ScoringWorkerError::InvalidEnvelope.to_string(),
         "scoring worker envelope fields must be valid integration evidence"
     );
+    assert_eq!(
+        ScoringWorkerError::MismatchedScoringResult.to_string(),
+        "scoring worker must persist a result bound to the loaded scoring request"
+    );
+    assert_eq!(
+        ScoringWorkerError::InvalidResultSnapshot.to_string(),
+        "scoring worker must persist a valid immutable result snapshot before completing the job"
+    );
 }
 
 struct ScriptedScoringEngine {
@@ -298,7 +306,7 @@ fn planner_rejects_numeric_job_identity_before_calling_the_engine() {
 }
 
 #[test]
-fn planner_rejects_an_invalid_caller_envelope_after_the_engine_returns() {
+fn planner_rejects_an_invalid_caller_envelope_before_calling_the_engine() {
     let engine = ScriptedScoringEngine {
         expected_job: "scoring_job_alpha",
         expected_request: "scoring_request_alpha",
@@ -320,7 +328,7 @@ fn planner_rejects_an_invalid_caller_envelope_after_the_engine_returns() {
         .unwrap_err(),
         ScoringWorkerError::InvalidEnvelope
     );
-    assert_eq!(engine.calls.get(), 1);
+    assert_eq!(engine.calls.get(), 0);
 }
 
 #[test]

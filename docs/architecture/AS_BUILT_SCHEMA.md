@@ -58,6 +58,8 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
+`migrations/0011_scoring_request.sql` and `src/postgres_scoring_request.rs` already persist one immutable version-pinned dispatch identity on protected main. This successor adds `load_scoring_request` and no new physical objects. After restart, a worker reconstructs the stored AssessmentSpec, instrument, scoring, calibration, and optional norm pins under `READ COMMITTED` after a share lock on the request row, then persists the existing `result_snapshot` row in the same caller-owned transaction as the fenced job and outbox evidence. A missing request is absent. Unsupported stored schema and blank aliases fail closed. HTTP scoring transport and live `fast-mlsirm` execution remain outside this slice.
+
 ## Logical-to-physical mapping rule
 
 A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:

@@ -6,6 +6,9 @@
 //! caller-owned transaction. A minted `event_ref` is rejected before any write.
 
 use crate::integration::IntegrationEvent;
+use crate::postgres_result_snapshot::{
+    persist_result_snapshot, ResultSnapshotPersistenceDisposition, ResultSnapshotPersistenceError,
+};
 use crate::postgres_scoring_completion::{
     record_successful_scoring_completion_with_outbox, ScoringCompletionOutboxError,
     ScoringCompletionOutboxPersistence,
@@ -14,10 +17,12 @@ use crate::postgres_scoring_failure::{
     record_permanent_scoring_failure_with_outbox, ScoringFailureOutboxError,
     ScoringFailureOutboxPersistence,
 };
+use crate::postgres_scoring_request::{load_scoring_request, ScoringRequestPersistenceError};
+use crate::result::ResultSnapshotInput;
 use crate::scoring_worker::{
-    plan_scoring_worker_attempt, require_stable_terminal_event, ScoringTerminalIdentity,
-    ScoringWorkerAttempt, ScoringWorkerEngine, ScoringWorkerEngineOutcome, ScoringWorkerEnvelope,
-    ScoringWorkerError,
+    plan_scoring_worker_attempt, plan_scoring_worker_result_attempt, require_stable_terminal_event,
+    ScoringTerminalIdentity, ScoringWorkerAttempt, ScoringWorkerEngine, ScoringWorkerEngineOutcome,
+    ScoringWorkerEnvelope, ScoringWorkerError, ScoringWorkerResultEngine,
 };
 use postgres::Transaction;
 use std::error::Error;
@@ -47,6 +52,27 @@ pub enum ScoringWorkerPersistence {
     Failed(ScoringFailureOutboxPersistence),
 }
 
+/// Durable dispositions produced by one request-load plus result-snapshot worker attempt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScoringWorkerSnapshotPersistence {
+    terminal: ScoringWorkerPersistence,
+    snapshot: Option<ResultSnapshotPersistenceDisposition>,
+}
+
+impl ScoringWorkerSnapshotPersistence {
+    /// Return the terminal job and outbox disposition.
+    #[must_use]
+    pub const fn terminal(self) -> ScoringWorkerPersistence {
+        self.terminal
+    }
+
+    /// Return whether the immutable result snapshot was inserted or exactly replayed.
+    #[must_use]
+    pub const fn snapshot(self) -> Option<ResultSnapshotPersistenceDisposition> {
+        self.snapshot
+    }
+}
+
 /// Fail-closed error for a scoring-worker terminal commit.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -55,6 +81,12 @@ pub enum ScoringWorkerCommitError {
     Identity(ScoringWorkerError),
     /// The engine or planner could not produce a typed terminal attempt.
     Planning(ScoringWorkerError),
+    /// The persisted scoring request could not be reconstructed.
+    Request(ScoringRequestPersistenceError),
+    /// The scoring job named a request that is not stored after restart.
+    MissingRequest,
+    /// Immutable result-snapshot persistence failed.
+    Snapshot(ResultSnapshotPersistenceError),
     /// Fenced successful completion or its outbox evidence failed.
     Completion(ScoringCompletionOutboxError),
     /// Fenced permanent failure or its outbox evidence failed.
@@ -70,6 +102,15 @@ impl Display for ScoringWorkerCommitError {
             Self::Planning(_) => {
                 "scoring worker could not plan a terminal attempt; keep the job leased and retry after a typed engine outcome"
             }
+            Self::Request(_) => {
+                "scoring worker could not reconstruct the persisted scoring request; keep the job leased"
+            }
+            Self::MissingRequest => {
+                "reload the persisted scoring request before completing the job; do not invent a score"
+            }
+            Self::Snapshot(_) => {
+                "scoring worker could not persist the immutable result snapshot; keep the job leased"
+            }
             Self::Completion(_) => "scoring worker completion persistence failed",
             Self::Failure(_) => "scoring worker failure persistence failed",
         })
@@ -80,6 +121,9 @@ impl Error for ScoringWorkerCommitError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Identity(error) | Self::Planning(error) => Some(error),
+            Self::Request(error) => Some(error),
+            Self::MissingRequest => None,
+            Self::Snapshot(error) => Some(error),
             Self::Completion(error) => Some(error),
             Self::Failure(error) => Some(error),
         }
@@ -211,4 +255,59 @@ fn commit_planned_scoring_worker_attempt(
         attempt.event(),
         outbox_max_attempts,
     )
+}
+
+/// Load the persisted scoring request, persist the result snapshot, then commit.
+///
+/// After restart, the worker reconstructs the version pin from `scoring_request`
+/// and asks a request-bound engine. A completed result and its product snapshot
+/// commit in the same caller-owned transaction as the fenced job and outbox
+/// evidence. A missing request, planner failure, or snapshot conflict leaves the
+/// leased job untouched when the caller rolls back. Live `fast-mlsirm` execution
+/// remains a later adapter behind [`ScoringWorkerResultEngine`].
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
+/// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
+/// [`ScoringWorkerCommitError::Planning`] when the engine or planner cannot
+/// produce a typed attempt, [`ScoringWorkerCommitError::Snapshot`] when the
+/// immutable snapshot cannot persist, or the existing completion/failure error.
+#[allow(clippy::too_many_arguments)]
+pub fn run_scoring_worker_attempt_with_result_snapshot(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    fencing_token: u64,
+    scoring_request_ref: &str,
+    engine: &impl ScoringWorkerResultEngine,
+    snapshot_input: ResultSnapshotInput<'_>,
+    envelope: ScoringWorkerEnvelope<'_>,
+    outbox_max_attempts: usize,
+) -> Result<ScoringWorkerSnapshotPersistence, ScoringWorkerCommitError> {
+    let request = load_scoring_request(transaction, scoring_request_ref)
+        .map_err(ScoringWorkerCommitError::Request)?
+        .ok_or(ScoringWorkerCommitError::MissingRequest)?;
+    let attempt = plan_scoring_worker_result_attempt(
+        scoring_job_ref,
+        &request,
+        engine,
+        snapshot_input,
+        envelope,
+    )
+    .map_err(ScoringWorkerCommitError::Planning)?;
+    let snapshot = match attempt.snapshot() {
+        Some(snapshot) => Some(
+            persist_result_snapshot(transaction, snapshot)
+                .map_err(ScoringWorkerCommitError::Snapshot)?,
+        ),
+        None => None,
+    };
+    let terminal = commit_planned_scoring_worker_attempt(
+        transaction,
+        scoring_job_ref,
+        fencing_token,
+        &ScoringWorkerAttempt::from_planned(attempt.outcome().clone(), attempt.event().clone()),
+        outbox_max_attempts,
+    )?;
+    Ok(ScoringWorkerSnapshotPersistence { terminal, snapshot })
 }

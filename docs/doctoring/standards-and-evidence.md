@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -94,6 +94,25 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## Scoring-request reload and result-snapshot composition
+
+PostgreSQL 18 documents `READ COMMITTED` as the default isolation level in which
+each statement sees only rows committed before that statement began (PostgreSQL
+Global Development Group, 2026). A worker that still has `scoring_request_ref`
+must reconstruct the version-pinned dispatch identity and persist the immutable
+result snapshot in the same local transaction as the fenced job and outbox
+evidence (Hohpe & Woolf, 2003; Richardson, 2018).
+
+Product consequences:
+
+- scoring-request reload reconstructs the version-pinned dispatch identity under
+  `READ COMMITTED` after a share lock on the request row;
+- a missing request is absent rather than an invented scoring pin;
+- unsupported stored schema versions fail closed instead of being coerced into
+  the current output contract;
+- a completed job cannot commit without the immutable result snapshot a buyer
+  later retrieves.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -124,3 +143,9 @@ Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
+
+PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+
+Richardson, C. (2018). *Microservices patterns: With examples in Java*. Manning.

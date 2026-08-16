@@ -109,7 +109,7 @@ src/lib.rs
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
-├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
+├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request persist and restart reload
 ├── reference.rs      # internal opaque-reference normalization
 ├── research_release.rs  # product-side Research Commons release-evidence gate
 ├── response.rs       # idempotent response ledger + immutable response snapshots
@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #172 scoring-worker attempt planning is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/scoring_worker.rs` asks a `ScoringWorkerEngine` (test double first) and binds one stable `event_ref` for the job plus accepted result, or the job plus permanent cause. `src/postgres_scoring_worker.rs` then commits that planned attempt. A minted identity cannot be introduced after the engine returns. Engine or planner failure stays `ScoringWorkerCommitError::Planning` and leaves the leased job and outbox untouched; a stale fence after a stable identity check surfaces `Completion` or `Failure` without writing a terminal row. This successor carries #155 attempt planning, #136 terminal-identity binding, #115 completion/failure outbox composition, and #69 completion-only work; those predecessors should not land separately. Live `fast-mlsirm` execution remains a later adapter behind the same engine trait.
+**Active PR** scoring-worker result-snapshot composition (successor of #172 and #168) is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ScoringRequest::from_persisted` and `load_scoring_request` reconstruct the version pin after restart. `plan_scoring_worker_result_attempt` validates the caller envelope before asking a request-bound engine, then binds one immutable `ResultSnapshot` to that pin. `run_scoring_worker_attempt_with_result_snapshot` persists the snapshot, fenced job, and stable outbox event in one caller-owned transaction. A missing request, planner failure, or snapshot conflict leaves the leased job untouched. Prefer this head over #172, #168, #167, #155, #136, #115, and #69; those predecessors should not land separately. Live `fast-mlsirm` execution remains a later adapter behind the same engine trait.
 
 ## 5. ADR traceability by concern
 

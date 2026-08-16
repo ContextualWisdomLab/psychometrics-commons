@@ -89,7 +89,7 @@ impl ScoringRequest {
         if requested_snapshot_ref != snapshot_ref {
             return Err(ScoringContractError::ResponseSnapshotMismatch);
         }
-        Self::from_validated_pins(ValidatedScoringPins {
+        Self::from_validated_pins(&ValidatedScoringPins {
             session_ref: snapshot.session_ref(),
             request_ref,
             response_snapshot_ref: requested_snapshot_ref,
@@ -128,7 +128,7 @@ impl ScoringRequest {
         let scoring_version_ref = required_reference(input.scoring_version_ref)?;
         let calibration_reference = required_reference(input.calibration_reference)?;
         let norm_version_ref = input.norm_version_ref.map(required_reference).transpose()?;
-        Self::from_validated_pins(ValidatedScoringPins {
+        Self::from_validated_pins(&ValidatedScoringPins {
             session_ref,
             request_ref,
             response_snapshot_ref: requested_snapshot_ref,
@@ -141,7 +141,7 @@ impl ScoringRequest {
         })
     }
 
-    fn from_validated_pins(pins: ValidatedScoringPins<'_>) -> Result<Self, ScoringContractError> {
+    fn from_validated_pins(pins: &ValidatedScoringPins<'_>) -> Result<Self, ScoringContractError> {
         if pins.requested_output_schema_version != SUPPORTED_OUTPUT_SCHEMA_VERSION {
             return Err(ScoringContractError::UnsupportedOutputSchemaVersion);
         }

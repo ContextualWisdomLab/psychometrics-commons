@@ -7,6 +7,8 @@
 
 use crate::integration::IntegrationEvent;
 use crate::reference::normalized_reference;
+use crate::result::{ResultSnapshot, ResultSnapshotError, ResultSnapshotInput};
+use crate::scoring::{ScoringRequest, ScoringResult};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -29,6 +31,10 @@ pub enum ScoringWorkerError {
     UnstableEventRef,
     /// Caller envelope fields failed integration-event validation.
     InvalidEnvelope,
+    /// The engine result is bound to a different scoring request than the loaded pin.
+    MismatchedScoringResult,
+    /// The product result snapshot cannot be built from the loaded request and engine result.
+    InvalidResultSnapshot,
 }
 
 impl Display for ScoringWorkerError {
@@ -40,6 +46,12 @@ impl Display for ScoringWorkerError {
             }
             Self::InvalidEnvelope => {
                 "scoring worker envelope fields must be valid integration evidence"
+            }
+            Self::MismatchedScoringResult => {
+                "scoring worker must persist a result bound to the loaded scoring request"
+            }
+            Self::InvalidResultSnapshot => {
+                "scoring worker must persist a valid immutable result snapshot before completing the job"
             }
         })
     }
@@ -163,6 +175,15 @@ pub struct ScoringWorkerAttempt {
 }
 
 impl ScoringWorkerAttempt {
+    /// Bind a planned engine outcome to its already-stable outbox envelope.
+    #[must_use]
+    pub(crate) fn from_planned(
+        outcome: ScoringWorkerEngineOutcome,
+        event: IntegrationEvent,
+    ) -> Self {
+        Self { outcome, event }
+    }
+
     /// Return the engine outcome that must be committed.
     #[must_use]
     pub const fn outcome(&self) -> &ScoringWorkerEngineOutcome {
@@ -196,6 +217,7 @@ pub fn plan_scoring_worker_attempt(
 ) -> Result<ScoringWorkerAttempt, ScoringWorkerError> {
     let scoring_job_ref = required_reference(scoring_job_ref)?;
     let scoring_request_ref = required_reference(scoring_request_ref)?;
+    require_valid_worker_envelope(scoring_job_ref, envelope)?;
     let outcome = engine.score_claimed_job(scoring_job_ref, scoring_request_ref)?;
     let identity = match &outcome {
         ScoringWorkerEngineOutcome::Completed { result_ref } => {
@@ -220,4 +242,180 @@ pub fn plan_scoring_worker_attempt(
     )
     .map_err(|_| ScoringWorkerError::InvalidEnvelope)?;
     Ok(ScoringWorkerAttempt { outcome, event })
+}
+
+const ENVELOPE_PROBE_EVENT_REF: &str = "scoring_worker_envelope_probe";
+
+fn require_valid_worker_envelope(
+    scoring_job_ref: &str,
+    envelope: ScoringWorkerEnvelope<'_>,
+) -> Result<(), ScoringWorkerError> {
+    IntegrationEvent::new(
+        ENVELOPE_PROBE_EVENT_REF,
+        envelope.event_type,
+        envelope.schema_version,
+        envelope.source,
+        envelope.tenant_ref,
+        scoring_job_ref,
+        envelope.occurred_at_unix_ms,
+        envelope.correlation_ref,
+        envelope.causation_ref,
+        envelope.payload_digest,
+    )
+    .map(|_| ())
+    .map_err(|_| ScoringWorkerError::InvalidEnvelope)
+}
+
+/// Terminal outcome returned by one request-bound scoring-engine attempt.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScoringWorkerResultOutcome {
+    /// The engine accepted one immutable scoring result that can become a snapshot.
+    Completed {
+        /// Typed engine result bound to the loaded scoring request.
+        result: Box<ScoringResult>,
+    },
+    /// The engine recorded one permanent scientific failure cause.
+    Failed {
+        /// Typed cause retained for quarantine and exact replay.
+        cause_code: String,
+    },
+}
+
+/// Scoring engine that receives the reconstructed version-pinned request.
+///
+/// Implementations must not persist product state or mint an outbox identity.
+pub trait ScoringWorkerResultEngine {
+    /// Score one claimed job using the reconstructed scoring request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScoringWorkerError`] when the engine cannot produce a typed
+    /// terminal outcome for this claimed job and request.
+    fn score_claimed_request(
+        &self,
+        scoring_job_ref: &str,
+        request: &ScoringRequest,
+    ) -> Result<ScoringWorkerResultOutcome, ScoringWorkerError>;
+}
+
+/// Planned terminal write that also carries the immutable product result snapshot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoringWorkerResultAttempt {
+    outcome: ScoringWorkerEngineOutcome,
+    event: IntegrationEvent,
+    snapshot: Option<ResultSnapshot>,
+}
+
+impl ScoringWorkerResultAttempt {
+    /// Return the engine outcome that must be committed.
+    #[must_use]
+    pub const fn outcome(&self) -> &ScoringWorkerEngineOutcome {
+        &self.outcome
+    }
+
+    /// Return the outbox envelope bound to the stable job and outcome identity.
+    #[must_use]
+    pub const fn event(&self) -> &IntegrationEvent {
+        &self.event
+    }
+
+    /// Return the immutable result snapshot that must persist with successful completion.
+    #[must_use]
+    pub const fn snapshot(&self) -> Option<&ResultSnapshot> {
+        self.snapshot.as_ref()
+    }
+}
+
+/// Ask the request-bound engine, then bind the snapshot and stable outbox identity.
+///
+/// Caller envelope fields are validated before the engine runs so an invalid
+/// digest or tenant cannot spend scientific compute. A completed result must
+/// match the loaded request. The product snapshot identity must reuse the
+/// engine result identity so the job, snapshot, and outbox name one result.
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerError::InvalidReference`] when the job is invalid,
+/// [`ScoringWorkerError::InvalidEnvelope`] when caller envelope fields cannot
+/// form an integration event, [`ScoringWorkerError::MismatchedScoringResult`]
+/// when the engine result is bound to another request,
+/// [`ScoringWorkerError::InvalidResultSnapshot`] when the snapshot cannot be
+/// built, or the engine's own identity error.
+pub fn plan_scoring_worker_result_attempt(
+    scoring_job_ref: &str,
+    request: &ScoringRequest,
+    engine: &impl ScoringWorkerResultEngine,
+    snapshot_input: ResultSnapshotInput<'_>,
+    envelope: ScoringWorkerEnvelope<'_>,
+) -> Result<ScoringWorkerResultAttempt, ScoringWorkerError> {
+    let scoring_job_ref = required_reference(scoring_job_ref)?;
+    require_valid_worker_envelope(scoring_job_ref, envelope)?;
+    let outcome = engine.score_claimed_request(scoring_job_ref, request)?;
+    match outcome {
+        ScoringWorkerResultOutcome::Completed { result } => {
+            if !result.matches_request(request) {
+                return Err(ScoringWorkerError::MismatchedScoringResult);
+            }
+            if snapshot_input.result_snapshot_ref != result.scoring_result_ref() {
+                return Err(ScoringWorkerError::MismatchedScoringResult);
+            }
+            let snapshot = ResultSnapshot::new(request, result.as_ref(), snapshot_input)
+                .map_err(map_snapshot_error)?;
+            let event_ref = scoring_terminal_event_ref(
+                scoring_job_ref,
+                ScoringTerminalIdentity::Result(result.scoring_result_ref()),
+            )?;
+            let event = bind_worker_event(scoring_job_ref, &event_ref, envelope)?;
+            Ok(ScoringWorkerResultAttempt {
+                outcome: ScoringWorkerEngineOutcome::Completed {
+                    result_ref: result.scoring_result_ref().to_owned(),
+                },
+                event,
+                snapshot: Some(snapshot),
+            })
+        }
+        ScoringWorkerResultOutcome::Failed { cause_code } => {
+            let event_ref = scoring_terminal_event_ref(
+                scoring_job_ref,
+                ScoringTerminalIdentity::Cause(&cause_code),
+            )?;
+            let event = bind_worker_event(scoring_job_ref, &event_ref, envelope)?;
+            Ok(ScoringWorkerResultAttempt {
+                outcome: ScoringWorkerEngineOutcome::Failed { cause_code },
+                event,
+                snapshot: None,
+            })
+        }
+    }
+}
+
+fn bind_worker_event(
+    scoring_job_ref: &str,
+    event_ref: &str,
+    envelope: ScoringWorkerEnvelope<'_>,
+) -> Result<IntegrationEvent, ScoringWorkerError> {
+    IntegrationEvent::new(
+        event_ref,
+        envelope.event_type,
+        envelope.schema_version,
+        envelope.source,
+        envelope.tenant_ref,
+        scoring_job_ref,
+        envelope.occurred_at_unix_ms,
+        envelope.correlation_ref,
+        envelope.causation_ref,
+        envelope.payload_digest,
+    )
+    .map_err(|_| ScoringWorkerError::InvalidEnvelope)
+}
+
+fn map_snapshot_error(error: ResultSnapshotError) -> ScoringWorkerError {
+    match error {
+        ResultSnapshotError::ScoringRequestMismatch => ScoringWorkerError::MismatchedScoringResult,
+        ResultSnapshotError::EmptyReference
+        | ResultSnapshotError::MissingConsentSnapshot
+        | ResultSnapshotError::DuplicateConsentSnapshot
+        | ResultSnapshotError::InvalidCreationTime
+        | ResultSnapshotError::SelfSupersession => ScoringWorkerError::InvalidResultSnapshot,
+    }
 }

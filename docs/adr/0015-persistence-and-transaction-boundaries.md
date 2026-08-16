@@ -93,7 +93,7 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
-A scoring worker that records a terminal outcome must ask a `ScoringWorkerEngine` first, then reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018). `ScoringWorkerEnvelope` has no caller-supplied event identity, so the planner binds the stable key after the engine returns and cannot accept a minted `event_ref`. An engine or planner failure stays a distinct planning error, leaves the leased job untouched, and does not write outbox evidence. Live `fast-mlsirm` execution remains a later adapter behind that engine trait.
+A scoring worker that records a terminal outcome must validate caller envelope fields, reconstruct the persisted `ScoringRequest` under `READ COMMITTED` after `FOR SHARE`, ask a request-bound engine, persist the immutable `ResultSnapshot`, then reuse one stable `event_ref` derived from the scoring job and the accepted result identity or permanent cause (Hohpe & Woolf, 2003; Richardson, 2018; PostgreSQL Global Development Group, 2026). `ScoringWorkerEnvelope` has no caller-supplied event identity, so the planner binds the stable key after the engine returns and cannot accept a minted `event_ref`. A missing request, engine or planner failure, or snapshot conflict stays a distinct error, leaves the leased job untouched, and does not write outbox evidence. Live `fast-mlsirm` execution remains a later adapter behind that engine trait.
 
 ### Integration outbox enqueue
 
@@ -310,5 +310,7 @@ Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, buil
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+
+PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Richardson, C. (2018). *Microservices patterns: With examples in Java*. Manning.

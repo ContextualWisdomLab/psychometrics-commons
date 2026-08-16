@@ -894,4 +894,11 @@ fn worker_commit_errors_retain_typed_sources() {
         "scoring worker failure persistence failed"
     );
     assert!(failure.source().is_some());
+
+    let missing = ScoringWorkerCommitError::MissingRequest;
+    assert_eq!(
+        missing.to_string(),
+        "reload the persisted scoring request before completing the job; do not invent a score"
+    );
+    assert!(missing.source().is_none());
 }

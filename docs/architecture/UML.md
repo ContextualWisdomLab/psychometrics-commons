@@ -309,12 +309,12 @@ sequenceDiagram
     A-->>C: completion accepted / scoring pending
 
     W->>DB: claim scoring work
+    W->>DB: load persisted ScoringRequest FOR SHARE
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance
-    W->>DB: commit terminal job + outbox using the stable job/outcome event_ref
+    W->>DB: atomically persist ResultSnapshot + terminal job + stable job/outcome outbox event_ref
     W->>N: resolve deterministic style/narrative from pinned ScoreProfile + mapping/rules/locale
     N-->>W: finalized deterministic or validated optional-AI narrative artifact/provenance
-    W->>DB: atomically persist immutable ResultSnapshot binding scoring + narrative provenance, then release
 
     C->>A: GET result
     A->>DB: authorize participant-owned result
