@@ -167,9 +167,7 @@ fn valid_problem_type_uri(type_uri: &str) -> bool {
 }
 
 fn valid_https_problem_type(remainder: &str) -> bool {
-    let authority_end = remainder
-        .find(|character| matches!(character, '/' | '?' | '#'))
-        .unwrap_or(remainder.len());
+    let authority_end = remainder.find(['/', '?', '#']).unwrap_or(remainder.len());
     let authority = &remainder[..authority_end];
     if authority.is_empty() || authority.contains('@') {
         return false;
