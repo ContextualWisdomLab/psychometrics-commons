@@ -7,7 +7,9 @@
 //! [`created_session_for_start_from_published_snapshot`], or
 //! [`start_created_assessment_session_from_stored_release`]. Start locks the
 //! stored `instrument_release` row in the same transaction so a stale in-memory
-//! Published object cannot insert after persist Suspend or Retire. Exact replay
+//! Published object cannot insert after persist Suspend or Retire. First insert
+//! through [`persist_assessment_session`] takes the same lock, so a reconstituted
+//! Created aggregate cannot insert after that later persist. Exact replay
 //! of an already stored start still returns the original session after a later
 //! persist Suspend or Retire, so a buyer who already started can retry. Created
 //! identity is inserted only for
@@ -69,6 +71,10 @@ pub enum AssessmentSessionPersistenceError {
     MissingCreatedIdentity,
     /// A command sequence was reused by a different command identity.
     SequenceConflict,
+    /// First insert requires a currently published stored release locked in this transaction.
+    UnpublishedStart,
+    /// Stored publication evidence does not match the created-session identity.
+    InvalidStartRelease,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -103,6 +109,12 @@ impl Display for AssessmentSessionPersistenceError {
             Self::SequenceConflict => {
                 "session command sequence was reused by a different command identity"
             }
+            Self::UnpublishedStart => {
+                "start the session from a currently published stored release; do not persist a reconstituted Created row after suspend or retire"
+            }
+            Self::InvalidStartRelease => {
+                "repair the stored instrument release before persisting a new session"
+            }
             Self::Database(_) => "PostgreSQL assessment-session persistence failed",
         })
     }
@@ -120,6 +132,21 @@ impl Error for AssessmentSessionPersistenceError {
 impl From<postgres::Error> for AssessmentSessionPersistenceError {
     fn from(error: postgres::Error) -> Self {
         Self::Database(error)
+    }
+}
+
+impl From<InstrumentReleaseQueryError> for AssessmentSessionPersistenceError {
+    fn from(error: InstrumentReleaseQueryError) -> Self {
+        match error {
+            InstrumentReleaseQueryError::NotFound | InstrumentReleaseQueryError::NotPublished => {
+                Self::UnpublishedStart
+            }
+            InstrumentReleaseQueryError::InvalidLocale
+            | InstrumentReleaseQueryError::LocaleMismatch
+            | InstrumentReleaseQueryError::InvalidStoredValue
+            | InstrumentReleaseQueryError::InvalidReference => Self::InvalidStartRelease,
+            InstrumentReleaseQueryError::Database(error) => Self::Database(error),
+        }
     }
 }
 
@@ -488,28 +515,54 @@ fn require_locked_published_release(
         session.instrument_release_ref(),
         requested_locale,
     )?;
-    if snapshot.manifest().content_digest() != session.instrument_release_content_digest()
-        || snapshot.manifest().instrument_version_ref() != session.instrument_version_ref()
-        || snapshot.manifest().locale() != session.locale()
-    {
+    if !published_snapshot_matches_session(&snapshot, session) {
         return Err(AssessmentSessionStartError::InvalidStoredRelease);
     }
     Ok(())
 }
 
+/// Lock stored publication evidence before the first created-session insert.
+fn require_published_release_for_first_insert(
+    transaction: &mut Transaction<'_>,
+    session: &AssessmentSession,
+) -> Result<(), AssessmentSessionPersistenceError> {
+    let snapshot = load_published_instrument_release(
+        transaction,
+        session.instrument_release_ref(),
+        session.locale(),
+    )?;
+    if published_snapshot_matches_session(&snapshot, session) {
+        Ok(())
+    } else {
+        Err(AssessmentSessionPersistenceError::InvalidStartRelease)
+    }
+}
+
+/// Compare locked publication evidence with the created-session identity.
+fn published_snapshot_matches_session(
+    snapshot: &PublishedInstrumentReleaseSnapshot,
+    session: &AssessmentSession,
+) -> bool {
+    snapshot.manifest().content_digest() == session.instrument_release_content_digest()
+        && snapshot.manifest().instrument_version_ref() == session.instrument_version_ref()
+        && snapshot.manifest().locale() == session.locale()
+}
+
 /// Persist one created assessment-session identity bound to a published release.
 ///
-/// Exact replay of the same session, participant, release, `instrument_version_ref`,
-/// digest, locale, state, and creation time is idempotent. Rebinding any stored
-/// field fails closed. [`AssessmentSession::new`] validates and normalizes session
-/// and participant references. This function stores those references without
-/// validating them again.
+/// A first insert locks the stored `instrument_release` row and fails closed
+/// when that row is missing, unpublished, or digest/version/locale-mismatched.
+/// Exact replay of an already stored Created row stays legal after a later
+/// persist Suspend or Retire. Rebinding any stored field fails closed.
+/// [`AssessmentSession::new`] validates and normalizes session and participant
+/// references. This function stores those references without validating them
+/// again.
 ///
 /// # Errors
 ///
 /// Returns [`AssessmentSessionPersistenceError`] for unsupported isolation,
-/// a non-created session, conflicting replay, an out-of-range timestamp,
-/// or a database failure.
+/// a non-created session, an unpublished first insert, conflicting replay,
+/// an out-of-range timestamp, or a database failure.
 pub fn persist_assessment_session(
     transaction: &mut Transaction<'_>,
     session: &AssessmentSession,
@@ -522,6 +575,13 @@ pub fn persist_assessment_session(
     let participant_ref = session.participant_ref();
     let created_at_unix_ms = postgres_bigint(session.created_at_unix_ms())?;
     let session_state = session.state().persist_name();
+    let existing = transaction.query_opt(
+        "SELECT 1 FROM assessment_session WHERE session_ref = $1",
+        &[&session_ref],
+    )?;
+    if existing.is_none() {
+        require_published_release_for_first_insert(transaction, session)?;
+    }
     let inserted = transaction.execute(
         "INSERT INTO assessment_session (
              session_ref, participant_ref, instrument_release_ref,
@@ -963,6 +1023,14 @@ mod tests {
                 AssessmentSessionPersistenceError::SequenceConflict,
                 "session command sequence was reused by a different command identity",
             ),
+            (
+                AssessmentSessionPersistenceError::UnpublishedStart,
+                "start the session from a currently published stored release; do not persist a reconstituted Created row after suspend or retire",
+            ),
+            (
+                AssessmentSessionPersistenceError::InvalidStartRelease,
+                "repair the stored instrument release before persisting a new session",
+            ),
         ] {
             assert_eq!(error.to_string(), expected);
             assert!(std::error::Error::source(&error).is_none());
@@ -1110,5 +1178,49 @@ mod tests {
             ))
         ));
         assert!(std::error::Error::source(&mapped).is_some());
+    }
+
+    #[test]
+    fn persist_maps_unpublished_stored_release_to_first_insert_seal() {
+        assert!(matches!(
+            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::NotPublished),
+            AssessmentSessionPersistenceError::UnpublishedStart
+        ));
+        assert!(matches!(
+            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::NotFound),
+            AssessmentSessionPersistenceError::UnpublishedStart
+        ));
+        for error in [
+            InstrumentReleaseQueryError::InvalidLocale,
+            InstrumentReleaseQueryError::LocaleMismatch,
+            InstrumentReleaseQueryError::InvalidStoredValue,
+            InstrumentReleaseQueryError::InvalidReference,
+        ] {
+            assert!(matches!(
+                AssessmentSessionPersistenceError::from(error),
+                AssessmentSessionPersistenceError::InvalidStartRelease
+            ));
+        }
+        assert!(
+            std::error::Error::source(&AssessmentSessionPersistenceError::UnpublishedStart)
+                .is_none()
+        );
+        assert!(
+            std::error::Error::source(&AssessmentSessionPersistenceError::InvalidStartRelease)
+                .is_none()
+        );
+
+        let persistence =
+            AssessmentSessionStartError::from(AssessmentSessionPersistenceError::UnpublishedStart);
+        assert!(matches!(
+            persistence,
+            AssessmentSessionStartError::Persistence(
+                AssessmentSessionPersistenceError::UnpublishedStart
+            )
+        ));
+        assert_eq!(
+            persistence.to_string(),
+            "session start could not persist the created session; retry the exact start or repair the store"
+        );
     }
 }
