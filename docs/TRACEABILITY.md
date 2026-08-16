@@ -23,7 +23,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
-| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; **Active PR** on this branch persists and reloads `response_event` under `READ COMMITTED`; HTTP response transport remains Target |
+| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; **Active PR** #174 persists and reloads `response_event` under `READ COMMITTED`; HTTP response transport remains Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
@@ -55,7 +55,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
-| Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs`; **Active PR** `migrations/0020_response_event.sql` unique `(session_ref, client_event_ref)` and `(session_ref, server_sequence)` | HTTP transport rejection test |
+| Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs`; **Active PR** #174 `migrations/0020_response_event.sql` unique `(session_ref, client_event_ref)` and `(session_ref, server_sequence)` | HTTP transport rejection test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
 | Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, claim, retry, terminal outcomes, expired-lease recovery, and cancellation without transferring a fence | live adapter evidence |
@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** response-event persist/load on this branch is not protected-main truth until an unchanged reviewed/check-clean head is integrated. In-progress answers persist in `response_event` with observed/received time, exact replay, and fail-closed rebinding so a two-item path survives restart. Completed snapshot persist remains the existing protected-main adapter. HTTP response transport remains outside this slice. Protected-main `#76` data-rights processing-start persistence is already integrated and is not restated here as active work.
+**Active PR** #174 response-event persist/load is not protected-main truth until an unchanged reviewed/check-clean head is integrated. In-progress answers persist in `response_event` with observed/received time, exact replay, and fail-closed rebinding so a two-item path survives restart. Completed snapshot persist remains the existing protected-main adapter. HTTP response transport remains outside this slice. Protected-main `#76` data-rights processing-start persistence is already integrated and is not restated here as active work. Prefer this head over another overlapping `response_event` persist PR.
 
 ## 5. ADR traceability by concern
 

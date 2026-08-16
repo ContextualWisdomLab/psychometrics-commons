@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main persists integration, scoring-job, data-rights, item-delivery, consent, instrument-release, result-snapshot, response-snapshot, scoring-request, and inbox-consumption slices; in-progress `response_event` persist/load is Active PR work on this branch and is not protected-main truth until merged
+- Current/as-built status: protected main persists integration, scoring-job, data-rights, item-delivery, consent, instrument-release, result-snapshot, response-snapshot, scoring-request, and inbox-consumption slices; in-progress `response_event` persist/load is Active PR #174 and is not protected-main truth until merged
 - Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
 - Migration status: `migrations/0020_response_event.sql` adds the in-progress event ledger with observed/received timestamps; remaining session HTTP and response HTTP families still must be established from the logical ERD without synthetic provenance backfills
 
