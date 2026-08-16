@@ -67,7 +67,7 @@ fn vanished_conflict_is_a_distinct_fail_closed_error() {
 
     client
         .batch_execute(
-            r#"
+            r"
             ALTER TABLE research_release_approval
                 DISABLE TRIGGER research_release_approval_immutable_guard;
             CREATE OR REPLACE FUNCTION delete_conflicting_research_release_after_insert()
@@ -82,7 +82,7 @@ fn vanished_conflict_is_a_distinct_fail_closed_error() {
                 AFTER INSERT ON research_release_approval
                 FOR EACH STATEMENT
                 EXECUTE FUNCTION delete_conflicting_research_release_after_insert();
-            "#,
+            ",
         )
         .unwrap();
 
