@@ -131,8 +131,18 @@ impl ConsentSnapshot {
     /// Return whether the latest decision for `purpose` is an active grant.
     #[must_use]
     pub fn is_granted(&self, purpose: ConsentPurpose) -> bool {
-        self.latest_event(purpose)
-            .is_some_and(|event| event.decision == ConsentDecision::Granted)
+        self.active_granted_at(purpose).is_some()
+    }
+
+    /// Return the server time of the latest active grant for `purpose`.
+    ///
+    /// A revoked or never-granted purpose returns `None` so enrollment and
+    /// other purpose-bound commands can fail closed before they start work.
+    #[must_use]
+    pub fn active_granted_at(&self, purpose: ConsentPurpose) -> Option<u64> {
+        self.latest_event(purpose).and_then(|event| {
+            (event.decision == ConsentDecision::Granted).then_some(event.occurred_at_unix_ms)
+        })
     }
 
     /// Return the consent-form version for an active grant, if present.
