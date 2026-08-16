@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #95 PostgreSQL-backed operator health HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It observes a live operational snapshot and answers GET `/live` and GET `/ready` without exposing driver errors. Public/admin product routes, measured backlog thresholds, TLS, and deployment-profile evidence remain outside this slice.
+**Active PR** #91 PostgreSQL-backed operator health HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It observes a live operational snapshot and answers GET `/live` and GET `/ready` without exposing driver errors. Public/admin product routes, measured backlog thresholds, TLS, and deployment-profile evidence remain outside this slice.
 
 ## 5. ADR traceability by concern
 
