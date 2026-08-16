@@ -44,56 +44,91 @@ fn persisted_created_identity_restores_without_a_live_release() {
     );
 }
 
+#[derive(Clone, Copy)]
+struct StoredCreatedIdentity<'a> {
+    session_ref: &'a str,
+    participant_ref: &'a str,
+    instrument_release_ref: &'a str,
+    instrument_version_ref: &'a str,
+    digest: &'a str,
+    locale: &'a str,
+    created_at_unix_ms: u64,
+}
+
+fn valid_stored_identity() -> StoredCreatedIdentity<'static> {
+    StoredCreatedIdentity {
+        session_ref: SESSION_REF,
+        participant_ref: PARTICIPANT_REF,
+        instrument_release_ref: RELEASE_REF,
+        instrument_version_ref: VERSION_REF,
+        digest: VALID_DIGEST,
+        locale: "ko-KR",
+        created_at_unix_ms: 20_000,
+    }
+}
+
+fn assert_reconstitution_error(
+    identity: StoredCreatedIdentity<'_>,
+    expected: SessionReconstitutionError,
+) {
+    assert_eq!(
+        AssessmentSession::from_persisted_created(
+            identity.session_ref,
+            identity.participant_ref,
+            identity.instrument_release_ref,
+            identity.instrument_version_ref,
+            identity.digest,
+            identity.locale,
+            identity.created_at_unix_ms,
+        ),
+        Err(expected)
+    );
+}
+
 #[test]
-fn persisted_created_identity_rejects_invalid_stored_fields() {
-    assert_eq!(
-        AssessmentSession::from_persisted_created(
-            "12345",
-            PARTICIPANT_REF,
-            RELEASE_REF,
-            VERSION_REF,
-            VALID_DIGEST,
-            "ko-KR",
-            20_000,
-        ),
-        Err(SessionReconstitutionError::InvalidReference)
-    );
-    assert_eq!(
-        AssessmentSession::from_persisted_created(
-            SESSION_REF,
-            PARTICIPANT_REF,
-            RELEASE_REF,
-            VERSION_REF,
-            "sha256:not-a-digest",
-            "ko-KR",
-            20_000,
-        ),
-        Err(SessionReconstitutionError::InvalidContentDigest)
-    );
-    assert_eq!(
-        AssessmentSession::from_persisted_created(
-            SESSION_REF,
-            PARTICIPANT_REF,
-            RELEASE_REF,
-            VERSION_REF,
-            VALID_DIGEST,
-            " ko-KR",
-            20_000,
-        ),
-        Err(SessionReconstitutionError::InvalidLocale)
-    );
-    assert_eq!(
-        AssessmentSession::from_persisted_created(
-            SESSION_REF,
-            PARTICIPANT_REF,
-            RELEASE_REF,
-            VERSION_REF,
-            VALID_DIGEST,
-            "ko-KR",
-            0,
-        ),
-        Err(SessionReconstitutionError::InvalidTimestamp)
-    );
+fn persisted_created_identity_rejects_numeric_or_blank_references() {
+    let mut identity = valid_stored_identity();
+    identity.session_ref = "12345";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+
+    identity = valid_stored_identity();
+    identity.participant_ref = "12345";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+
+    identity = valid_stored_identity();
+    identity.participant_ref = " ";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+
+    identity = valid_stored_identity();
+    identity.instrument_release_ref = "12345";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+
+    identity = valid_stored_identity();
+    identity.instrument_release_ref = "";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+
+    identity = valid_stored_identity();
+    identity.instrument_version_ref = "12345";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+
+    identity = valid_stored_identity();
+    identity.instrument_version_ref = " ";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidReference);
+}
+
+#[test]
+fn persisted_created_identity_rejects_invalid_digest_locale_and_timestamp() {
+    let mut identity = valid_stored_identity();
+    identity.digest = "sha256:not-a-digest";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidContentDigest);
+
+    identity = valid_stored_identity();
+    identity.locale = " ko-KR";
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidLocale);
+
+    identity = valid_stored_identity();
+    identity.created_at_unix_ms = 0;
+    assert_reconstitution_error(identity, SessionReconstitutionError::InvalidTimestamp);
 }
 
 #[test]

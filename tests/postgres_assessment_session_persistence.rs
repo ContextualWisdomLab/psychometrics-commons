@@ -360,6 +360,72 @@ fn created_session_load_restores_identity_and_rejects_later_states() {
 }
 
 #[test]
+fn created_session_load_rejects_corrupt_identity_and_database_failure() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let session = created_session(
+        "ses_load_corrupt_identity",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &session).unwrap();
+    transaction.commit().unwrap();
+
+    client
+        .batch_execute(
+            "ALTER TABLE assessment_session
+             DROP CONSTRAINT assessment_session_instrument_release_content_digest_check;
+             UPDATE assessment_session
+             SET instrument_release_content_digest = 'sha256:not-a-digest'
+             WHERE session_ref = 'ses_load_corrupt_identity';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_assessment_session(&mut transaction, "ses_load_corrupt_identity"),
+        Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "ALTER TABLE assessment_session
+             DROP CONSTRAINT IF EXISTS assessment_session_created_at_unix_ms_check;",
+        )
+        .unwrap();
+    client
+        .execute(
+            "UPDATE assessment_session
+             SET instrument_release_content_digest = $1,
+                 created_at_unix_ms = -1
+             WHERE session_ref = $2",
+            &[&VALID_DIGEST, &"ses_load_corrupt_identity"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_assessment_session(&mut transaction, "ses_load_corrupt_identity"),
+        Err(AssessmentSessionPersistenceError::ValueOutOfRange)
+    ));
+    transaction.rollback().unwrap();
+
+    reset_session_table(&mut client);
+    let mut transaction = client.transaction().unwrap();
+    let missing_table =
+        load_assessment_session(&mut transaction, "ses_load_missing_table").unwrap_err();
+    assert_eq!(
+        missing_table.to_string(),
+        "PostgreSQL assessment-session persistence failed"
+    );
+    assert!(std::error::Error::source(&missing_table).is_some());
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn session_persist_requires_read_committed_and_surfaces_database_failure() {
     let (_database_test_guard, mut client) = test_client();
     reset_session_table(&mut client);
