@@ -28,7 +28,7 @@ pub enum ResponseSnapshotPersistenceDisposition {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ResponseSnapshotPersistenceError {
-    /// A snapshot or session identity was blank, numeric-like, or unbound.
+    /// A snapshot or session identity was not an exact safe opaque durable reference.
     InvalidReference,
     /// Snapshot identity was replayed with different immutable evidence.
     ConflictingReplay,
@@ -44,7 +44,7 @@ impl Display for ResponseSnapshotPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "response snapshot persistence references must be opaque durable values"
+                "response snapshot persistence references must be exact safe opaque durable values"
             }
             Self::ConflictingReplay => {
                 "response snapshot identity was replayed with conflicting evidence"
@@ -237,15 +237,21 @@ mod reference_guard_tests {
     use super::{postgres_sequence, required_reference, ResponseSnapshotPersistenceError};
 
     #[test]
-    fn blank_numeric_and_overflow_sequences_fail_closed() {
-        assert!(matches!(
-            required_reference(" "),
-            Err(ResponseSnapshotPersistenceError::InvalidReference)
-        ));
-        assert!(matches!(
-            required_reference("12"),
-            Err(ResponseSnapshotPersistenceError::InvalidReference)
-        ));
+    fn noncanonical_references_and_overflow_sequences_fail_closed() {
+        for invalid_reference in [
+            " ",
+            "12",
+            " response_snapshot_ko_v1",
+            "response_snapshot_ko_v1 ",
+            "response\n_snapshot_ko_v1",
+            "response\u{200b}snapshot_ko_v1",
+            "response\u{202e}snapshot_ko_v1",
+        ] {
+            assert!(matches!(
+                required_reference(invalid_reference),
+                Err(ResponseSnapshotPersistenceError::InvalidReference)
+            ));
+        }
         assert_eq!(
             required_reference("response_snapshot_ko_v1").unwrap(),
             "response_snapshot_ko_v1"
