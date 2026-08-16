@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: Successor of PR #176 adds hosted dual-proof write/recover/unlink commands in `src/account_link_write.rs` on the append-only persist/reload path, keeps a recovered participant only when the current tenant/issuer/subject still match the proof, and ends that binding from a still-valid current proof. PR #158 adds store-wide restore reconcile of the derived current projection. Prefer this successor over #176 for write/recover/unlink and #158 for restore reconcile. Do not merge #176, #160, #147, #133, #124, or #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #206 adds hosted dual-proof write/recover/unlink commands in `src/account_link_write.rs` on the append-only persist/reload path, keeps a recovered participant only when the current tenant/issuer/subject still match the proof, and ends that binding from a still-valid current proof. PR #158 adds store-wide restore reconcile of the derived current projection. Prefer #206 over #176 for write/recover/unlink and #158 for restore reconcile. Keep #202 as the inspect-line unlink vehicle. Do not merge #176, #160, #147, #133, #124, or #114.
 - `PLANNED`: durable HTTP transport, unlink/relink HTTP commands, concurrency arbitration beyond the participant row lock, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
@@ -205,7 +205,7 @@ Until persistence/transport are implemented, protected main provides only the st
 ## Follow-up work
 
 - Psychometrics Commons: implement the physical append-only identity-link migration and repository transaction boundary.
-- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence. Dual-proof persist, returning-account recover, and hosted unlink commands exist on the Active PR successor of #176, including post-load current-binding rejection and fail-closed rebound unlink; HTTP unlink/relink transport remains open.
+- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence. Dual-proof persist, returning-account recover, and hosted unlink commands exist on Active PR #206, including post-load current-binding rejection and fail-closed rebound unlink; HTTP unlink/relink transport remains open.
 - Psychometrics Commons: add Keyverse adapter contract without direct database coupling.
 - Psychometrics Commons: integrate data-rights propagation and restricted research-linkage separation tests.
 - Psychometrics Commons: add transaction/concurrency/crash/backup/restore and public-release leakage tests.
@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: successor of PR #176 `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
+- Active-PR persistence evidence: PR #206 `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
