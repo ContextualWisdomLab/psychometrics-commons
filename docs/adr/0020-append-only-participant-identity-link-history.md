@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: PR #133 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, and exact-replay reconciliation of a missing or stale current projection through `src/postgres_participant_identity_link.rs`. Prefer #133 over #124 and #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #158 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay reconciliation of a missing or stale current projection, store-wide restore rebuild, and a read-only drift inspect that tells operators to run reconcile before new account-link writes through `src/postgres_participant_identity_link.rs`. Prefer #158 over #147, #133, #124, and #114.
 - `PLANNED`: durable HTTP transport, unlink/relink/recovery operator commands, concurrency arbitration beyond the participant row lock, data-rights execution, full dump/restore drill evidence, and live Keyverse verification.
 
 ## Decision
@@ -160,7 +160,7 @@ Before account-link persistence is considered GA-complete, exact-head evidence m
 - security tests for account-link/recovery takeover and cross-tenant access;
 - exact deployment-profile recovery evidence before any GA/SLO/RPO/RTO claim involving this persistence.
 
-Protected main satisfies the domain-level issuer-scoped first-link portion of this decision, including dual-proof authorization. Active PR persist must apply each link and then its matching ends in one transaction so a restart can write a complete unlink+relink aggregate. After restore, the operator must rebuild the derived current projection from unterminated history before accepting new account-link writes. HTTP transport, live Keyverse verification, and full dump/restore drill evidence remain target work until separately implemented, reviewed, and merged.
+Protected main satisfies the domain-level issuer-scoped first-link portion of this decision, including dual-proof authorization. Active PR persist must apply each link and then its matching ends in one transaction so a restart can write a complete unlink+relink aggregate. After restore, the operator inspects projection drift and rebuilds the derived current projection from unterminated history before accepting new account-link writes. HTTP transport, live Keyverse verification, and full dump/restore drill evidence remain target work until separately implemented, reviewed, and merged.
 
 ## Alternatives considered
 
@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: PR #158 `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged. Prefer that head over #147, #133, #124, and #114.
+- Active-PR persistence evidence: PR #158 `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged. Prefer that restore-reconcile head over #147, #133, #124, and #114. This successor adds `inspect_identity_link_current_projection_drift` so operators can see missing or stale unique-enforcer rows before they run reconcile.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.

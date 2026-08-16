@@ -15,6 +15,47 @@ use std::fmt::{Display, Formatter};
 const IDENTITY_LINK_MIGRATION: &str =
     include_str!("../migrations/0022_participant_identity_link.sql");
 
+/// Count of derived current-projection rows that do not match unterminated history.
+///
+/// After a dump restore, operators inspect this before accepting new account-link
+/// writes. History remains the lookup source of truth; this count tells the
+/// operator to run [`reconcile_identity_link_current_projections`] so the unique
+/// enforcer matches that history.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IdentityLinkProjectionDrift {
+    missing_current_rows: u64,
+    stale_current_rows: u64,
+}
+
+impl IdentityLinkProjectionDrift {
+    /// Number of unterminated history rows that have no matching current projection.
+    #[must_use]
+    pub const fn missing_current_rows(self) -> u64 {
+        self.missing_current_rows
+    }
+
+    /// Number of current-projection rows that do not match unterminated history.
+    #[must_use]
+    pub const fn stale_current_rows(self) -> u64 {
+        self.stale_current_rows
+    }
+
+    /// Return whether the unique enforcer is missing or stale after restore.
+    #[must_use]
+    pub const fn has_drift(self) -> bool {
+        self.missing_current_rows > 0 || self.stale_current_rows > 0
+    }
+
+    /// Return whether new account-link writes may use the derived unique enforcer.
+    ///
+    /// A returning login can still resolve from unterminated history. New first
+    /// inserts must wait until restore reconcile rebuilds the unique constraint.
+    #[must_use]
+    pub const fn accepts_new_account_link_writes(self) -> bool {
+        !self.has_drift()
+    }
+}
+
 /// Outcome of persisting one participant identity-link history.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -293,6 +334,59 @@ pub fn reconcile_identity_link_current_projections(
         &[],
     )?;
     Ok(inserted)
+}
+
+/// Inspect whether the derived current projection matches unterminated history.
+///
+/// This does not mutate rows. After restore, a missing or stale unique enforcer
+/// means operators must run [`reconcile_identity_link_current_projections`]
+/// before accepting new account-link writes. Two unterminated holders of the
+/// same issuer-scoped subject, or two current links on one participant, fail
+/// closed.
+///
+/// # Errors
+///
+/// Returns [`IdentityLinkPersistenceError`] for unsupported isolation, corrupt
+/// unterminated history, or a database failure.
+pub fn inspect_identity_link_current_projection_drift(
+    transaction: &mut Transaction<'_>,
+) -> Result<IdentityLinkProjectionDrift, IdentityLinkPersistenceError> {
+    require_read_committed(transaction)?;
+    reject_corrupt_unterminated_history(transaction)?;
+    Ok(IdentityLinkProjectionDrift {
+        missing_current_rows: count_sql_rows(
+            transaction,
+            "SELECT COUNT(*)::bigint FROM participant_identity_link history_link \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM participant_identity_link_end link_end \
+                 WHERE link_end.linked_event_ref = history_link.identity_link_ref \
+             ) \
+             AND NOT EXISTS ( \
+                 SELECT 1 FROM current_participant_identity_link current_link \
+                 WHERE current_link.participant_ref = history_link.participant_ref \
+                   AND current_link.identity_link_ref = history_link.identity_link_ref \
+                   AND current_link.tenant_ref = history_link.tenant_ref \
+                   AND current_link.identity_issuer = history_link.identity_issuer \
+                   AND current_link.identity_subject_ref = history_link.identity_subject_ref \
+             )",
+        )?,
+        stale_current_rows: count_sql_rows(
+            transaction,
+            "SELECT COUNT(*)::bigint FROM current_participant_identity_link current_link \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM participant_identity_link history_link \
+                 WHERE history_link.participant_ref = current_link.participant_ref \
+                   AND history_link.identity_link_ref = current_link.identity_link_ref \
+                   AND history_link.tenant_ref = current_link.tenant_ref \
+                   AND history_link.identity_issuer = current_link.identity_issuer \
+                   AND history_link.identity_subject_ref = current_link.identity_subject_ref \
+                   AND NOT EXISTS ( \
+                       SELECT 1 FROM participant_identity_link_end link_end \
+                       WHERE link_end.linked_event_ref = history_link.identity_link_ref \
+                   ) \
+             )",
+        )?,
+    })
 }
 
 fn persist_participant_header(
@@ -714,6 +808,14 @@ fn i64_to_unix_ms(value: i64) -> Result<u64, IdentityLinkPersistenceError> {
     u64::try_from(value).map_err(|_| IdentityLinkPersistenceError::InvalidTimestamp)
 }
 
+fn count_sql_rows(
+    transaction: &mut Transaction<'_>,
+    sql: &str,
+) -> Result<u64, IdentityLinkPersistenceError> {
+    let count: i64 = transaction.query_one(sql, &[])?.get(0);
+    u64::try_from(count).map_err(|_| IdentityLinkPersistenceError::CorruptHistory)
+}
+
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), IdentityLinkPersistenceError> {
@@ -728,7 +830,10 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod tests {
-    use super::{required_reference, unix_ms_to_i64, IdentityLinkPersistenceError};
+    use super::{
+        required_reference, unix_ms_to_i64, IdentityLinkPersistenceError,
+        IdentityLinkProjectionDrift,
+    };
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -777,6 +882,25 @@ mod tests {
             assert_eq!(error.to_string(), expected);
             assert!(std::error::Error::source(&error).is_none());
         }
+    }
+
+    #[test]
+    fn projection_drift_blocks_new_writes_until_reconcile() {
+        let drifted = IdentityLinkProjectionDrift {
+            missing_current_rows: 2,
+            stale_current_rows: 1,
+        };
+        assert_eq!(drifted.missing_current_rows(), 2);
+        assert_eq!(drifted.stale_current_rows(), 1);
+        assert!(drifted.has_drift());
+        assert!(!drifted.accepts_new_account_link_writes());
+
+        let reconciled = IdentityLinkProjectionDrift {
+            missing_current_rows: 0,
+            stale_current_rows: 0,
+        };
+        assert!(!reconciled.has_drift());
+        assert!(reconciled.accepts_new_account_link_writes());
     }
 
     #[test]

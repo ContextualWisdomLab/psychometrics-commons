@@ -7,10 +7,10 @@
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_participant_identity_link::{
-    apply_participant_identity_link_migration, load_participant_by_current_identity_subject,
-    load_participant_identity_history, persist_participant_identity_history,
-    reconcile_identity_link_current_projections, IdentityLinkPersistenceDisposition,
-    IdentityLinkPersistenceError,
+    apply_participant_identity_link_migration, inspect_identity_link_current_projection_drift,
+    load_participant_by_current_identity_subject, load_participant_identity_history,
+    persist_participant_identity_history, reconcile_identity_link_current_projections,
+    IdentityLinkPersistenceDisposition, IdentityLinkPersistenceError, IdentityLinkProjectionDrift,
 };
 use std::sync::{Mutex, MutexGuard};
 
@@ -875,6 +875,117 @@ fn restore_reconcile_fails_closed_on_two_unterminated_subjects() {
     assert!(matches!(
         error,
         IdentityLinkPersistenceError::CorruptHistory
+    ));
+}
+
+fn inspect_ok(client: &mut Client) -> IdentityLinkProjectionDrift {
+    let mut transaction = client.transaction().unwrap();
+    let drift = inspect_identity_link_current_projection_drift(&mut transaction)
+        .expect("restore inspect must classify projection drift from unterminated history");
+    transaction.commit().unwrap();
+    drift
+}
+
+#[test]
+fn restore_inspect_reports_missing_and_stale_projections_before_reconcile() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &relinked_participant());
+    persist_ok(&mut client, &linked_participant_beta());
+    drop_current_projection(&mut client);
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.current_participant_identity_link (\
+                 participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref\
+             ) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &"participant_identity_alpha",
+                &"link_event_identity_alpha",
+                &"tenant_identity_alpha",
+                &"keyverse_issuer_alpha",
+                &"keyverse_subject_alpha",
+            ],
+        )
+        .unwrap();
+
+    let drift = inspect_ok(&mut client);
+    assert_eq!(drift.missing_current_rows(), 2);
+    assert_eq!(drift.stale_current_rows(), 1);
+    assert!(drift.has_drift());
+    assert!(
+        !drift.accepts_new_account_link_writes(),
+        "operators must run restore reconcile before accepting new account-link writes"
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    reconcile_identity_link_current_projections(&mut transaction).unwrap();
+    transaction.commit().unwrap();
+
+    let reconciled = inspect_ok(&mut client);
+    assert_eq!(reconciled.missing_current_rows(), 0);
+    assert_eq!(reconciled.stale_current_rows(), 0);
+    assert!(!reconciled.has_drift());
+    assert!(reconciled.accepts_new_account_link_writes());
+}
+
+#[test]
+fn restore_inspect_fails_closed_on_two_unterminated_links_for_one_participant() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.participant_identity_link (\
+                 identity_link_ref, participant_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref, anonymous_proof_ref, authenticated_proof_ref, \
+                 linked_at_unix_ms\
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            &[
+                &"link_event_identity_corrupt",
+                &"participant_identity_alpha",
+                &"tenant_identity_alpha",
+                &"keyverse_issuer_delta",
+                &"keyverse_subject_delta",
+                &"anonymous_proof_identity_corrupt",
+                &"authenticated_proof_identity_corrupt",
+                &10_150_i64,
+            ],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = inspect_identity_link_current_projection_drift(&mut transaction).unwrap_err();
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        IdentityLinkPersistenceError::CorruptHistory
+    ));
+}
+
+#[test]
+fn restore_inspect_rejects_serializable_isolation() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    let error = inspect_identity_link_current_projection_drift(&mut transaction).unwrap_err();
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        IdentityLinkPersistenceError::UnsupportedIsolationLevel
     ));
 }
 
