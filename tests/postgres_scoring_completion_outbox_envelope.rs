@@ -88,8 +88,7 @@ fn unrelated_source_subject_or_time_is_rejected_before_completion_write() {
         ),
     ];
 
-    for (index, (source, subject, occurred_at_unix_ms)) in
-        invalid_envelopes.into_iter().enumerate()
+    for (index, (source, subject, occurred_at_unix_ms)) in invalid_envelopes.into_iter().enumerate()
     {
         let mut client = ready_client();
         let job_ref = "scoring_job_envelope_alpha";
@@ -122,8 +121,14 @@ fn unrelated_source_subject_or_time_is_rejected_before_completion_write() {
             .query_one("SELECT count(*) FROM integration_outbox", &[])
             .unwrap()
             .get(0);
-        assert_eq!(state, "leased", "invalid envelope case {index} must not complete");
-        assert_eq!(outbox_count, 0, "invalid envelope case {index} must not enqueue");
+        assert_eq!(
+            state, "leased",
+            "invalid envelope case {index} must not complete"
+        );
+        assert_eq!(
+            outbox_count, 0,
+            "invalid envelope case {index} must not enqueue"
+        );
     }
 
     let mut client = ready_client();
