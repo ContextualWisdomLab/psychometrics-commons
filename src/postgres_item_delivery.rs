@@ -139,8 +139,9 @@ pub fn persist_item_delivery_ledger(
 /// # Errors
 ///
 /// Returns [`ItemDeliveryPersistenceError`] for an invalid tenant or session
-/// reference, unsupported isolation, stored rows that cannot reconstruct a
-/// valid ledger, or a database failure.
+/// reference, [`ItemDeliveryPersistenceError::ConflictingReplay`] when the
+/// stored header belongs to another tenant, unsupported isolation, stored rows
+/// that cannot reconstruct a valid ledger, or a database failure.
 pub fn load_item_delivery_ledger(
     transaction: &mut Transaction<'_>,
     tenant_ref: &str,

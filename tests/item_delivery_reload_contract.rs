@@ -332,3 +332,121 @@ fn restore_rejects_repeated_identity_or_malformed_evidence() {
         Err(ItemDeliveryError::InvalidReference)
     );
 }
+
+#[test]
+fn persisted_reconstruction_rejects_padded_identities_instead_of_trimming() {
+    assert_eq!(
+        ItemDeliveryLedger::from_persisted(
+            " session_item_reload_padded",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &["item_version_001"],
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_persisted(
+            "session_item_reload_padded_release",
+            " release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &["item_version_001"],
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_persisted(
+            "session_item_reload_padded_item",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &[" item_version_001"],
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+
+    let mut restored = ItemDeliveryLedger::from_persisted(
+        "session_item_reload_padded_event",
+        "release_big_five_ko_v1",
+        RELEASE_DIGEST,
+        "ko-KR",
+        &["item_version_001", "item_version_002"],
+    )
+    .unwrap();
+    assert_eq!(
+        restored.restore_persisted_event(
+            request(
+                " delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                None,
+            ),
+            1,
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        restored.restore_persisted_event(
+            request(
+                "delivery_event_001",
+                "item_version_001",
+                " presentation_standard_v1",
+                None,
+            ),
+            1,
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert!(restored.is_empty());
+}
+
+#[test]
+fn restored_ledger_continues_delivery_without_re_presenting_shown_items() {
+    let mut restored = ItemDeliveryLedger::from_persisted(
+        "session_item_reload_continue",
+        "release_big_five_ko_v1",
+        RELEASE_DIGEST,
+        "ko-KR",
+        &["item_version_001", "item_version_002"],
+    )
+    .unwrap();
+    restored
+        .restore_persisted_event(
+            request(
+                "delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                None,
+            ),
+            1,
+        )
+        .unwrap();
+
+    assert_eq!(
+        restored.deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_repeat",
+                "item_version_001",
+                "presentation_standard_v1",
+                None,
+            ),
+        ),
+        Err(ItemDeliveryError::DuplicateItemDelivery)
+    );
+    let next = restored
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_002",
+                "item_version_002",
+                "presentation_standard_v1",
+                None,
+            ),
+        )
+        .unwrap();
+    assert_eq!(next.item_version_ref(), "item_version_002");
+    assert_eq!(next.sequence(), 2);
+    assert_eq!(restored.len(), 2);
+}

@@ -281,6 +281,68 @@ fn sequence_gap_reload_fails_closed_instead_of_skipping_an_item() {
 }
 
 #[test]
+fn stored_item_outside_allowed_set_fails_closed_on_reload() {
+    let _guard = item_delivery_reload_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let live = delivered_ledger(
+        "session_item_delivery_reload_foreign_item",
+        &[(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+        )],
+    );
+    persist_ok(&mut client, &live);
+    client
+        .execute(
+            "UPDATE item_delivery_event SET item_version_ref = $1 \
+             WHERE session_ref = $2 AND delivery_event_ref = $3",
+            &[
+                &"item_version_003",
+                &"session_item_delivery_reload_foreign_item",
+                &"delivery_event_001",
+            ],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            load_err(
+                &mut transaction,
+                TENANT_REF,
+                "session_item_delivery_reload_foreign_item",
+            ),
+            ItemDeliveryPersistenceError::CorruptHistory
+        ),
+        "a stored item outside the allowed set must not reload as a new presentation"
+    );
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn padded_tenant_alias_fails_closed_on_reload() {
+    let _guard = item_delivery_reload_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_err(
+            &mut transaction,
+            " tenant_item_delivery_reload",
+            "session_item_delivery_reload_tenant_pad",
+        ),
+        ItemDeliveryPersistenceError::InvalidReference
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn padded_session_alias_fails_closed_on_reload() {
     let _guard = item_delivery_reload_guard();
     let mut client = test_client();

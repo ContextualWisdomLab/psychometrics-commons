@@ -159,13 +159,14 @@ impl ItemDeliveryLedger {
     /// Reconstruct an empty ledger from stored header evidence after restart.
     ///
     /// Callers use this when the in-memory release manifest is gone and only the
-    /// durable header remains. The stored digest, locale, and allowed item set
-    /// must already be exact; this constructor never trims or reorders them.
+    /// durable header remains. Stored identities, digest, locale, and allowed
+    /// item set must already be exact; this constructor never trims, aliases, or
+    /// reorders them.
     ///
     /// # Errors
     ///
     /// Returns [`ItemDeliveryError::InvalidReference`] when a session, release, or
-    /// item identity is blank or numeric-like. Returns
+    /// item identity is blank, numeric-like, or whitespace-padded. Returns
     /// [`ItemDeliveryError::CorruptHistory`] when the digest, locale, or allowed
     /// item set cannot form a valid ledger.
     pub fn from_persisted(
@@ -175,8 +176,8 @@ impl ItemDeliveryLedger {
         locale: &str,
         allowed_item_version_refs: &[&str],
     ) -> Result<Self, ItemDeliveryError> {
-        let session_ref = required_reference(session_ref)?;
-        let instrument_release_ref = required_reference(instrument_release_ref)?;
+        let session_ref = exact_reference(session_ref)?;
+        let instrument_release_ref = exact_reference(instrument_release_ref)?;
         if !valid_sha256_digest(release_content_digest)
             || locale.trim() != locale
             || !valid_locale(locale)
@@ -186,7 +187,7 @@ impl ItemDeliveryLedger {
         }
         let mut allowed = Vec::with_capacity(allowed_item_version_refs.len());
         for item_version_ref in allowed_item_version_refs {
-            let item_version_ref = required_reference(item_version_ref)?;
+            let item_version_ref = exact_reference(item_version_ref)?;
             if allowed.iter().any(|existing| existing == item_version_ref) {
                 return Err(ItemDeliveryError::CorruptHistory);
             }
@@ -211,23 +212,23 @@ impl ItemDeliveryLedger {
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed evidence,
-    /// [`ItemDeliveryError::CorruptHistory`] when the stored sequence is not the
-    /// next contiguous value or a delivery identity is repeated,
-    /// [`ItemDeliveryError::ItemNotInRelease`] when the stored item is not in the
-    /// bound allowed set, or [`ItemDeliveryError::DuplicateItemDelivery`] when
-    /// the same item version appears under another delivery identity.
+    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed or
+    /// whitespace-padded evidence, [`ItemDeliveryError::CorruptHistory`] when the
+    /// stored sequence is not the next contiguous value or a delivery identity is
+    /// repeated, [`ItemDeliveryError::ItemNotInRelease`] when the stored item is
+    /// not in the bound allowed set, or [`ItemDeliveryError::DuplicateItemDelivery`]
+    /// when the same item version appears under another delivery identity.
     pub fn restore_persisted_event(
         &mut self,
         request: ItemDeliveryRequest<'_>,
         sequence: usize,
     ) -> Result<ItemDeliveryEvent, ItemDeliveryError> {
-        let delivery_ref = required_reference(request.delivery_ref)?;
-        let item_version_ref = required_reference(request.item_version_ref)?;
-        let presentation_context_ref = required_reference(request.presentation_context_ref)?;
+        let delivery_ref = exact_reference(request.delivery_ref)?;
+        let item_version_ref = exact_reference(request.item_version_ref)?;
+        let presentation_context_ref = exact_reference(request.presentation_context_ref)?;
         let selection_evidence_ref = request
             .selection_evidence_ref
-            .map(required_reference)
+            .map(exact_reference)
             .transpose()?;
 
         if sequence != self.events.len() + 1 {
@@ -394,6 +395,13 @@ impl ItemDeliveryLedger {
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
     normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)
+}
+
+fn exact_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(normalized),
+        _ => Err(ItemDeliveryError::InvalidReference),
+    }
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {

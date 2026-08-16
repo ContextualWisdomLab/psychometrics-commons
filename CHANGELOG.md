@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- PostgreSQL item-delivery reload reconstructs a tenant-bound ledger after process restart in stored `delivery_sequence` order, keeps already-shown items, and fails closed on a sequence gap, a foreign tenant, or a padded session alias so a mid-assessment restart cannot skip or re-present items. Logical backup/restore now copies `item_delivery_ledger` / `item_delivery_event` and keeps delivery identity unique after restore.
+- PostgreSQL item-delivery reload reconstructs a tenant-bound ledger after process restart in stored `delivery_sequence` order, keeps already-shown items, and fails closed on a sequence gap, a foreign tenant, or a padded tenant/session/release/item/event alias so a mid-assessment restart cannot skip, trim into another identity, or re-present items. Domain reconstruction uses exact stored spelling. Logical backup/restore now copies `item_delivery_ledger` / `item_delivery_event` and keeps delivery identity unique after restore.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
