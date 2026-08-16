@@ -114,6 +114,8 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
 
+A consent-change write that must propagate shares the caller-owned transaction with its bound outbox row. After the submitted ledger snapshot is persisted, the same transaction locks `consent_ledger` and requires the durable `consent_event` tail to equal the envelope `causation_ref` and occurrence time. Callers roll back when either adapter fails so newly accepted consent evidence cannot survive without its outbox record.
+
 ## Concurrency and idempotency
 
 Physical constraints must enforce equivalents of:

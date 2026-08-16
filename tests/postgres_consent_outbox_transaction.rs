@@ -6,7 +6,8 @@ use psychometrics_commons_runtime::consent::{
 };
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_consent::{
-    apply_consent_migration, ConsentPersistenceDisposition, ConsentPersistenceError,
+    apply_consent_migration, persist_consent_ledger, ConsentPersistenceDisposition,
+    ConsentPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_consent_propagation::{
     persist_consent_ledger_with_outbox, ConsentOutboxPersistenceError,
@@ -125,6 +126,46 @@ fn consent_and_outbox_commit_and_replay_together() {
         ConsentPersistenceDisposition::Duplicate
     );
     assert_eq!(duplicate.outbox(), PersistenceDisposition::Duplicate);
+    transaction.commit().unwrap();
+
+    let consent_count: i64 = client
+        .query_one("SELECT count(*) FROM consent_event", &[])
+        .unwrap()
+        .get(0);
+    let outbox_count: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(consent_count, 1);
+    assert_eq!(outbox_count, 1);
+}
+
+#[test]
+fn existing_consent_can_enqueue_a_new_bound_outbox() {
+    let _guard = consent_outbox_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let ledger = research_ledger("consent_event_legacy_grant", ConsentDecision::Granted);
+    let mut persist_transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_consent_ledger(&mut persist_transaction, &ledger).unwrap(),
+        ConsentPersistenceDisposition::Inserted
+    );
+    persist_transaction.commit().unwrap();
+
+    let event = propagation_event(
+        "event_consent_legacy_grant",
+        "consent_event_legacy_grant",
+        TENANT_REF,
+        ledger.participant_ref(),
+        DIGEST_A,
+    );
+    let mut transaction = client.transaction().unwrap();
+    let mixed =
+        persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &event, 3)
+            .unwrap();
+    assert_eq!(mixed.consent(), ConsentPersistenceDisposition::Duplicate);
+    assert_eq!(mixed.outbox(), PersistenceDisposition::Inserted);
     transaction.commit().unwrap();
 
     let consent_count: i64 = client

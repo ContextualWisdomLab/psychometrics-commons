@@ -5,7 +5,9 @@ use psychometrics_commons_runtime::consent::{
     ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose,
 };
 use psychometrics_commons_runtime::integration::IntegrationEvent;
-use psychometrics_commons_runtime::postgres_consent::apply_consent_migration;
+use psychometrics_commons_runtime::postgres_consent::{
+    apply_consent_migration, persist_consent_ledger,
+};
 use psychometrics_commons_runtime::postgres_consent_propagation::{
     persist_consent_ledger_with_outbox, ConsentOutboxPersistenceError,
 };
@@ -36,18 +38,25 @@ fn ready_client() -> Client {
     client
 }
 
-fn ledger_with_revocation() -> ConsentLedger {
+fn grant_event_input() -> ConsentEventInput<'static> {
+    ConsentEventInput {
+        event_ref: "consent_event_grant_alpha",
+        purpose: ConsentPurpose::ResearchContribution,
+        decision: ConsentDecision::Granted,
+        consent_form_version_ref: "consent_form_latest_v1",
+        research_scope_ref: Some("research_scope_latest_alpha"),
+        occurred_at_unix_ms: 30_000,
+    }
+}
+
+fn ledger_with_grant_only() -> ConsentLedger {
     let mut ledger = ConsentLedger::new("participant_consent_latest_alpha").unwrap();
+    ledger.record(grant_event_input()).unwrap();
     ledger
-        .record(ConsentEventInput {
-            event_ref: "consent_event_grant_alpha",
-            purpose: ConsentPurpose::ResearchContribution,
-            decision: ConsentDecision::Granted,
-            consent_form_version_ref: "consent_form_latest_v1",
-            research_scope_ref: Some("research_scope_latest_alpha"),
-            occurred_at_unix_ms: 30_000,
-        })
-        .unwrap();
+}
+
+fn ledger_with_revocation() -> ConsentLedger {
+    let mut ledger = ledger_with_grant_only();
     ledger
         .record(ConsentEventInput {
             event_ref: "consent_event_revoke_alpha",
@@ -118,6 +127,51 @@ fn stale_grant_cannot_be_propagated_after_a_later_revocation() {
 }
 
 #[test]
+fn durable_revoke_rejects_grant_only_snapshot_propagation() {
+    let mut client = ready_client();
+    let mut persist_transaction = client.transaction().unwrap();
+    persist_consent_ledger(&mut persist_transaction, &ledger_with_revocation())
+        .expect("grant then revoke should persist as append-only consent evidence");
+    persist_transaction.commit().unwrap();
+
+    let stale_event = propagation_event(
+        "event_consent_stale_grant_after_durable_revoke",
+        "consent_event_grant_alpha",
+        30_000,
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger_with_grant_only(),
+            &stale_event,
+            3,
+        ),
+        Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+    ));
+    transaction.rollback().unwrap();
+
+    let consent_count: i64 = client
+        .query_one("SELECT count(*) FROM consent_event", &[])
+        .unwrap()
+        .get(0);
+    let outbox_count: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(consent_count, 2);
+    assert_eq!(outbox_count, 0);
+
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public;
+             DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
 fn latest_revocation_can_be_persisted_with_its_propagation_event() {
     let mut client = ready_client();
     let ledger = ledger_with_revocation();
@@ -136,12 +190,24 @@ fn latest_revocation_can_be_persisted_with_its_propagation_event() {
         .query_one("SELECT count(*) FROM consent_event", &[])
         .unwrap()
         .get(0);
-    let outbox_count: i64 = client
-        .query_one("SELECT count(*) FROM integration_outbox", &[])
-        .unwrap()
-        .get(0);
+    let outbox = client
+        .query_one(
+            "SELECT source_ref, tenant_ref, subject_ref, causation_ref, occurred_at_unix_ms \
+             FROM integration_outbox",
+            &[],
+        )
+        .unwrap();
+    let source_ref: String = outbox.get(0);
+    let tenant_ref: String = outbox.get(1);
+    let subject_ref: String = outbox.get(2);
+    let causation_ref: Option<String> = outbox.get(3);
+    let occurred_at_unix_ms: i64 = outbox.get(4);
     assert_eq!(consent_count, 2);
-    assert_eq!(outbox_count, 1);
+    assert_eq!(source_ref, "psychometrics_commons");
+    assert_eq!(tenant_ref, TENANT_REF);
+    assert_eq!(subject_ref, "participant_consent_latest_alpha");
+    assert_eq!(causation_ref.as_deref(), Some("consent_event_revoke_alpha"));
+    assert_eq!(occurred_at_unix_ms, 31_000);
 
     client
         .batch_execute(&format!(

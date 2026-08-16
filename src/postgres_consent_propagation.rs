@@ -3,7 +3,10 @@
 //! Consent remains purpose-specific, append-only product evidence. This module composes the
 //! existing consent adapter with the existing transactional outbox and verifies that the emitted
 //! event is bound to the authorized tenant, same participant, and latest accepted consent event
-//! before any durable write.
+//! before any durable write. After the ledger snapshot is persisted, the same transaction locks
+//! the participant ledger and requires the durable event tail to match the envelope, so a
+//! grant-only in-memory snapshot cannot pair a later stored revocation with stale grant
+//! propagation.
 
 use crate::consent::ConsentLedger;
 use crate::integration::IntegrationEvent;
@@ -82,10 +85,14 @@ impl Error for ConsentOutboxPersistenceError {
 /// `causation_ref`, and use that consent event's server-authoritative occurrence time. Binding
 /// propagation to tenant, participant, and ledger tail prevents cross-tenant dispatch and prevents
 /// a later revocation or grant from being durably paired with stale historical propagation evidence.
-/// These checks run before persistence, preventing a valid consent decision from being durably
-/// paired with unrelated, cross-tenant, or superseded propagation evidence. Event type,
-/// correlation reference, schema version, and payload digest remain owned by the caller's
-/// versioned integration contract.
+/// In-memory envelope checks run before persistence. After the submitted snapshot is written, the
+/// same transaction locks `consent_ledger` and requires the durable `consent_event` tail—ordered by
+/// occurrence time, then event identity—to equal that causation reference and time. A caller that
+/// omits a later stored revocation or grant therefore fails closed before an outbox row is created.
+/// Callers should persist one new consent event per composition so an earlier purpose change is not
+/// hidden behind a later event that becomes the only bound outbox. Event type, correlation
+/// reference, schema version, and payload digest remain owned by the caller's versioned
+/// integration contract.
 ///
 /// The caller owns the `READ COMMITTED` transaction and final commit/rollback decision. If either
 /// durable adapter fails, callers must roll the transaction back so newly accepted consent evidence
@@ -95,8 +102,9 @@ impl Error for ConsentOutboxPersistenceError {
 ///
 /// Returns [`ConsentOutboxPersistenceError::InvalidPropagationEnvelope`] before writes for an
 /// invalid, non-canonical, or mismatched authorized tenant, unrelated source or participant, stale
-/// or missing causation reference, or timestamp. Consent and outbox failures are preserved in typed
-/// error variants.
+/// or missing causation reference, or timestamp, and after ledger persistence when the durable
+/// tail does not match the envelope. Consent and outbox failures are preserved in typed error
+/// variants.
 pub fn persist_consent_ledger_with_outbox(
     transaction: &mut Transaction<'_>,
     authorized_tenant_ref: &str,
@@ -107,6 +115,7 @@ pub fn persist_consent_ledger_with_outbox(
     validate_propagation_envelope(authorized_tenant_ref, ledger, propagation_event)?;
     let consent = persist_consent_ledger(transaction, ledger)
         .map_err(ConsentOutboxPersistenceError::Consent)?;
+    require_durable_ledger_tail(transaction, ledger, propagation_event)?;
     let outbox = enqueue_outbox_event(transaction, propagation_event, outbox_max_attempts)
         .map_err(ConsentOutboxPersistenceError::Outbox)?;
     Ok(ConsentOutboxPersistence { consent, outbox })
@@ -138,6 +147,48 @@ fn validate_propagation_envelope(
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     };
     if consent_event.occurred_at_unix_ms() != propagation_event.occurred_at_unix_ms() {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    }
+    Ok(())
+}
+
+fn require_durable_ledger_tail(
+    transaction: &mut Transaction<'_>,
+    ledger: &ConsentLedger,
+    propagation_event: &IntegrationEvent,
+) -> Result<(), ConsentOutboxPersistenceError> {
+    let Some(causation_ref) = propagation_event.causation_ref() else {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    };
+    if transaction
+        .query_opt(
+            "SELECT participant_ref FROM consent_ledger WHERE participant_ref = $1 FOR UPDATE",
+            &[&ledger.participant_ref()],
+        )
+        .map_err(|error| ConsentOutboxPersistenceError::Consent(error.into()))?
+        .is_none()
+    {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    }
+    let Some(row) = transaction
+        .query_opt(
+            "SELECT event_ref, occurred_at_unix_ms \
+             FROM consent_event \
+             WHERE participant_ref = $1 \
+             ORDER BY occurred_at_unix_ms DESC, event_ref DESC \
+             LIMIT 1",
+            &[&ledger.participant_ref()],
+        )
+        .map_err(|error| ConsentOutboxPersistenceError::Consent(error.into()))?
+    else {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    };
+    let stored_event_ref: String = row.get(0);
+    let stored_occurred: i64 = row.get(1);
+    let Ok(expected_occurred) = i64::try_from(propagation_event.occurred_at_unix_ms()) else {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    };
+    if stored_event_ref != causation_ref || stored_occurred != expected_occurred {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     }
     Ok(())
