@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main includes PostgreSQL 18 integration, scoring-job, scoring-request, result-snapshot, consent, inbox, data-rights, instrument-release, and health persistence; Active PR claim-next successor of #203 composes oldest-due job selection with the request-bound snapshot worker and is not protected-main truth until merged
+- Current/as-built status: protected main includes PostgreSQL 18 integration, scoring-job, scoring-request, result-snapshot, consent, inbox, data-rights, instrument-release, and health persistence; Active PR #234 claim-next successor of #203 composes oldest-due job selection with the request-bound snapshot worker and is not protected-main truth until merged
 - Target status: remaining product aggregates, live side-effect execution, crash/restart restore acceptance, and measured Hosted/Enterprise recovery evidence
-- Migration status: later aggregates still must be established from the logical ERD and this ADR without synthetic provenance backfills; claim-next composition must not land in parallel with #203, #217, #214, #207, #200, or #190
+- Migration status: later aggregates still must be established from the logical ERD and this ADR without synthetic provenance backfills; claim-next composition on #234 must not land in parallel with #203, #217, #214, #207, #200, or #190
 
 ## Context
 
@@ -151,7 +151,7 @@ The adapter must bind payload/reference to digest and preserve authorization, en
 
 ## Data and persistence impact
 
-Protected main already persists integration evidence, scoring jobs and requests, result snapshots, consent, inbox consumption, data-rights, and instrument releases. Active PR claim-next successor of #203 composes oldest-due selection with the scoring-worker snapshot+job+outbox (or retryable outage) transaction and is not protected-main truth until merged. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
+Protected main already persists integration evidence, scoring jobs and requests, result snapshots, consent, inbox consumption, data-rights, and instrument releases. Active PR #234 claim-next successor of #203 composes oldest-due selection with the scoring-worker snapshot+job+outbox (or retryable outage) transaction and is not protected-main truth until merged. Every subsequently persisted entity must map to a named module owner, tenant scope where applicable, immutable/supersession semantics, and database constraints. A schema optimization may differ from the logical ERD layout but cannot weaken the documented cardinality, uniqueness, restricted-linkage, or transaction invariants.
 
 ## Migration policy
 
