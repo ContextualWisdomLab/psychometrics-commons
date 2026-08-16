@@ -220,3 +220,29 @@ fn public_projection_rejects_blank_padded_numeric_or_collapsed_identities() {
         assert_eq!(error, expected);
     }
 }
+
+#[test]
+fn public_release_adapter_does_not_load_by_restricted_linkage_ref() {
+    let source = include_str!("../src/postgres_research_identity_linkage.rs");
+    assert!(
+        !source.contains("pub fn load_public_research_release_projection"),
+        "a public-release fixture must load public_research_identity by program, not by restricted linkage_ref"
+    );
+    let public_load = source
+        .split("pub fn load_public_research_identities_for_program")
+        .nth(1)
+        .and_then(|rest| rest.split("\nfn ").next())
+        .expect("program-scoped public load must exist");
+    assert!(
+        public_load.contains("FROM public_research_identity"),
+        "public load must select the public view"
+    );
+    assert!(
+        !public_load.contains("research_identity_linkage"),
+        "public load must not read the restricted linkage table"
+    );
+    assert!(
+        !public_load.contains("linkage_key_version") && !public_load.contains("linkage_ref"),
+        "public load must not project linkage-key or restricted-linkage columns"
+    );
+}

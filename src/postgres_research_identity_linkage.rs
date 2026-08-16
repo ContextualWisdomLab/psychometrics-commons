@@ -171,33 +171,13 @@ pub fn load_restricted_identity_linkage(
     .map(Some)
 }
 
-/// Load the public-release projection for one stored linkage.
-///
-/// The returned value contains only research identities. It cannot carry the
-/// operational participant or the linkage-key version. A public-release role
-/// that can select only `public_research_identity` should call
-/// [`load_public_research_identities_for_program`] instead; this lookup still
-/// needs the restricted linkage identity.
-///
-/// # Errors
-///
-/// Returns [`RestrictedIdentityLinkagePersistenceError`] when the linkage
-/// identity is invalid or the database operation fails.
-pub fn load_public_research_release_projection(
-    client: &mut impl postgres::GenericClient,
-    linkage_ref: &str,
-) -> Result<Option<PublicResearchReleaseProjection>, RestrictedIdentityLinkagePersistenceError> {
-    let linkage_ref = required_reference(linkage_ref)?;
-    let Some(linkage) = load_restricted_identity_linkage(client, linkage_ref)? else {
-        return Ok(None);
-    };
-    Ok(Some(linkage.public_release_projection()))
-}
-
 /// Load public-release identities for one research program from the public view.
 ///
 /// The query selects only `public_research_identity` columns. It cannot return
-/// an operational participant or linkage-key version.
+/// an operational participant or linkage-key version. Call this for a release
+/// fixture. Authorized research that already has a restricted linkage should
+/// call [`load_restricted_identity_linkage`] and then
+/// [`RestrictedIdentityLinkage::public_release_projection`].
 ///
 /// # Errors
 ///

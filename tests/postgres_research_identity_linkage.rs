@@ -3,9 +3,8 @@
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_research_identity_linkage::{
     apply_research_identity_linkage_migration, load_public_research_identities_for_program,
-    load_public_research_release_projection, load_restricted_identity_linkage,
-    persist_restricted_identity_linkage, RestrictedIdentityLinkagePersistenceDisposition,
-    RestrictedIdentityLinkagePersistenceError,
+    load_restricted_identity_linkage, persist_restricted_identity_linkage,
+    RestrictedIdentityLinkagePersistenceDisposition, RestrictedIdentityLinkagePersistenceError,
 };
 use psychometrics_commons_runtime::research_identity_linkage::RestrictedIdentityLinkage;
 use std::sync::{Mutex, MutexGuard};
@@ -76,10 +75,7 @@ fn persist_and_load_keeps_authorized_linkage_and_omits_it_from_public_projection
         .expect("authorized load must return the stored linkage");
     assert_eq!(loaded, linkage);
 
-    let projection =
-        load_public_research_release_projection(&mut transaction, linkage.linkage_ref())
-            .unwrap()
-            .expect("public projection must exist after persist");
+    let projection = loaded.public_release_projection();
     assert_eq!(
         projection.research_participant_ref(),
         linkage.research_participant_ref()
@@ -235,11 +231,12 @@ fn serializable_isolation_is_rejected_and_missing_rows_stay_absent() {
             .unwrap()
             .is_none()
     );
-    assert!(
-        load_public_research_release_projection(&mut transaction, "linkage_missing_one")
-            .unwrap()
-            .is_none()
-    );
+    assert!(load_public_research_identities_for_program(
+        &mut transaction,
+        "research_program_missing_one"
+    )
+    .unwrap()
+    .is_empty());
 }
 
 #[test]
