@@ -117,6 +117,64 @@ fn foreign_participant_cannot_persist_another_consent_ledger() {
 }
 
 #[test]
+fn cross_tenant_actor_cannot_persist_a_consent_ledger() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_consent_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+
+    let actor = AuthorizationContext::new(
+        "tenant_consent_authorized_other",
+        "subject_consent_authorized_persist",
+        Some(PARTICIPANT_REF),
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let ledger = research_grant_ledger();
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_authorized_consent_ledger(&actor, &ledger, TENANT_REF, &mut transaction)
+        .expect_err("foreign tenant must not persist this ledger");
+    assert!(matches!(
+        error,
+        AuthorizedConsentPersistenceError::Authorization(AuthorizationError::CrossTenantDenied)
+    ));
+    transaction.commit().unwrap();
+
+    assert_eq!(ledger_count(&mut client), 0);
+    assert_eq!(event_count(&mut client), 0);
+}
+
+#[test]
+fn actor_without_participant_identity_cannot_persist_a_consent_ledger() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_consent_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+
+    let actor = AuthorizationContext::new(
+        TENANT_REF,
+        "subject_consent_authorized_persist",
+        None,
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let ledger = research_grant_ledger();
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_authorized_consent_ledger(&actor, &ledger, TENANT_REF, &mut transaction)
+        .expect_err("missing participant identity must not persist");
+    assert!(matches!(
+        error,
+        AuthorizedConsentPersistenceError::Authorization(
+            AuthorizationError::ParticipantIdentityRequired
+        )
+    ));
+    transaction.commit().unwrap();
+
+    assert_eq!(ledger_count(&mut client), 0);
+    assert_eq!(event_count(&mut client), 0);
+}
+
+#[test]
 fn owner_persist_inserts_the_authorized_research_grant() {
     let _guard = test_guard();
     let mut client = test_client();
