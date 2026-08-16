@@ -1,5 +1,7 @@
 //! Shared fixtures for item-delivery integration contracts.
 
+#![allow(dead_code)]
+
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
