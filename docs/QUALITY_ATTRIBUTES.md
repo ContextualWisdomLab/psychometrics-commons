@@ -80,6 +80,12 @@ This document converts broad quality goals into **stimulus → environment → r
 - **Response:** completed response snapshot remains durable; scoring job waits/retries; no invented score.
 - **Evidence:** worker/job state and recovery test.
 
+### QA-AVL-04 — Operational store down during health probes
+
+- **Stimulus:** `DATABASE_URL` is configured and the operational store refuses connections while the health-probe process is running.
+- **Response:** GET `/live` remains HTTP 200 without store I/O or driver text; GET `/ready` returns HTTP 503 without echoing the URL or driver error.
+- **Evidence:** `tests/health_process_contract.rs` unreachable-store listener contract.
+
 ## 4. Security
 
 ### QA-SEC-01 — Cross-tenant object reference
