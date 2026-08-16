@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Operator health probes can start from `HEALTH_LISTEN_ADDR` or platform `PORT`, optionally observe `DATABASE_URL` only for GET `/ready`, and keep GET `/live` free of store I/O when the store is down. Blank, padded, or unknown listen/store/backlog values fail closed. Caller-measured `HEALTH_BACKLOG_HEALTH` is required before readiness can be true; the process does not invent a backlog threshold.
 - Operator health probes can observe a live PostgreSQL operational snapshot and answer GET `/live` and GET `/ready` without exposing driver errors. GET `/live` does not perform store I/O. Bare GET `/ready` on the PostgreSQL adapter requires `postgres_operational_store`. The bound listener applies a 2-second I/O timeout and rejects oversized requests without echoing them. Measured backlog thresholds remain caller-supplied.
 - PostgreSQL operational health snapshot composes runtime and relation probes with caller-supplied backlog into one fail-closed `RuntimeHealthSnapshot` without exposing driver errors.
 - A bound TCP listener can serve operator GET `/live` and GET `/ready` probes in a blocking accept loop until accept fails, or one HTTP/1.1 request per accepted connection. Accept retries Interrupted, ConnectionAborted, and ConnectionReset. A dropped probe connection does not stop later probes on either the in-memory or PostgreSQL-backed serve loop. It does not add public product routes, TLS, keep-alive, or measured SLO values.
