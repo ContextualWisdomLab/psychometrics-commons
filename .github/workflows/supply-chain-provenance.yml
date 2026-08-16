@@ -1,0 +1,88 @@
+name: Supply chain provenance
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "src/**"
+      - "migrations/**"
+      - "tests/test_supply_chain_provenance.py"
+      - ".github/workflows/supply-chain-provenance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "src/**"
+      - "migrations/**"
+      - "tests/test_supply_chain_provenance.py"
+      - ".github/workflows/supply-chain-provenance.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: psychometrics-commons-provenance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package exact source artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Verify provenance workflow contract
+        run: python3 tests/test_supply_chain_provenance.py
+      - name: Package locked source
+        run: cargo package --locked
+      - name: Record package checksum
+        shell: bash
+        run: |
+          cd target/package
+          sha256sum *.crate > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Preserve exact package evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: source-package-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            target/package/*.crate
+            target/package/SHA256SUMS
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  attest:
+    name: Attest protected-main package provenance
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download exact package evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: source-package-${{ github.sha }}
+          path: package
+      - name: Verify package checksum after artifact handoff
+        working-directory: package
+        run: sha256sum --check SHA256SUMS
+      - name: Generate SLSA build provenance attestation
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: package/*.crate
