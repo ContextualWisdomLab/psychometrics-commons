@@ -19,13 +19,13 @@ Active PR #29 (`fix: scope participant account links by identity issuer`) adds t
 
 A nullable current subject link on a participant projection is therefore useful as an application view, but it is insufficient as the future physical persistence model. In-place replacement would lose who linked or unlinked an account, when the relationship changed, why it changed, and which historical sessions/results were valid under which operational identity context. It would also make identity recovery vulnerable to accidental historical rewrites and would encourage coupling product records to an identity-provider object lifecycle.
 
-This ADR is a mixture of current and target state. Protected main provides stable participant identity plus an issuer-scoped fail-closed first-link primitive, including dual-proof authorization at the application boundary. Append-only persistence is Active PR work. HTTP unlink/relink/recovery transport, live Keyverse token verification, and backup/restore evidence remain target behavior until corresponding source, migrations, tests, and release evidence are merged.
+This ADR is a mixture of current and target state. Protected main provides stable participant identity plus an issuer-scoped fail-closed first-link primitive, including dual-proof authorization at the application boundary. Append-only persistence is Active PR #210. Hosted HTTP persist/recover/unlink on that write path is Active PR work in `src/account_link_http.rs`. Live Keyverse token verification and backup/restore evidence remain target behavior until corresponding source, migrations, tests, and release evidence are merged.
 
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: PR #210 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay reconciliation of a missing or stale current projection, store-wide restore rebuild, a read-only drift inspect that tells operators to run reconcile before new account-link writes, the inspect-then-reconcile path that frees an ended issuer-scoped subject for a later participant through `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` so hosted adapters authorize both current proofs, refuse new links while inspect reports drift, persist an authorized unlink from unterminated history, recover the same `participant_ref` from a later valid account proof, and keep that record only when the reconstructed current tenant/issuer/subject still match the proof. Prefer #210 over #202, #192, #183, #178, #176, #173, #169, #160, #158, #147, #133, #124, and #114.
-- `PLANNED`: durable HTTP transport, concurrency arbitration beyond the participant row lock, data-rights execution, full dump/restore drill evidence, and live Keyverse verification.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #210 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay reconciliation of a missing or stale current projection, store-wide restore rebuild, a read-only drift inspect that tells operators to run reconcile before new account-link writes, the inspect-then-reconcile path that frees an ended issuer-scoped subject for a later participant through `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` so hosted adapters authorize both current proofs, refuse new links while inspect reports drift, persist an authorized unlink from unterminated history, recover the same `participant_ref` from a later valid account proof, and keep that record only when the reconstructed current tenant/issuer/subject still match the proof. Prefer #210 over #202, #192, #183, #178, #176, #173, #169, #160, #158, #147, #133, #124, and #114. This HTTP successor adds `src/account_link_http.rs` and `openapi/account-links.yaml` so persist, recover, and unlink run over HTTP/1.1 with RFC 9457 problems; unlink recovers from the current proof and rejects a client `participant_ref`. Prefer that HTTP head over #215.
+- `PLANNED`: live Keyverse verification, concurrency arbitration beyond the participant row lock, data-rights execution, and full dump/restore drill evidence.
 
 ## Decision
 
@@ -205,7 +205,7 @@ Until persistence/transport are implemented, protected main provides only the st
 ## Follow-up work
 
 - Psychometrics Commons: implement the physical append-only identity-link migration and repository transaction boundary.
-- Psychometrics Commons: add hosted HTTP unlink/relink/recovery transport with explicit idempotency, authority, and audit evidence.
+- Psychometrics Commons: rebase or replace #215 onto the #210 write path if that older HTTP persist/recover head is still open; live Keyverse verification remains the next identity-link transport gap.
 - Psychometrics Commons: add Keyverse adapter contract without direct database coupling.
 - Psychometrics Commons: integrate data-rights propagation and restricted research-linkage separation tests.
 - Psychometrics Commons: add transaction/concurrency/crash/backup/restore and public-release leakage tests.
@@ -229,12 +229,13 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
 - Active-PR persistence evidence: PR #210 `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged. Prefer that inspect-then-write-unlink-and-recover-binding head over #202, #192, #183, #178, #176, #173, #169, #160, #158, #147, #133, #124, and #114.
+- Active-PR HTTP evidence: `src/account_link_http.rs` and `openapi/account-links.yaml` persist, recover, and unlink on the #210 write path. Unlink recovers from the current proof and rejects a client `participant_ref`. Prefer that HTTP head over #215.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
 - Operations/recovery: ADR-0017 and `docs/OPERABILITY.md`.
 - Maturity/status mapping: `docs/TRACEABILITY.md` and `docs/ROADMAP.md`.
-- Machine-readable transport artifacts: none claimed until a hosted identity-link API exists.
+- Machine-readable transport artifacts: Active PR `openapi/account-links.yaml` (OpenAPI 3.2.0) describes the as-built persist/recover/unlink HTTP surface.
 - Physical-schema artifacts: Active PR `migrations/0022_participant_identity_link.sql` is not protected-main truth.
 
 ## References

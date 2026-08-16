@@ -55,6 +55,7 @@ Product consequences:
 - identity-link restore inspects projection drift and rebuilds the derived current projection from unterminated history before `persist_authorized_account_link` accepts a new dual-proof write, including a later participant binding an ended issuer-scoped subject, following NIST SP 800-53 Rev. 5 CP-9/CP-10 and NIST SP 800-34 Rev. 1 contingency-planning evidence rather than assuming a dump alone restored uniqueness;
 - a returning authenticated account may unlink through `persist_authorized_account_unlink` after the anonymous session expired, matching NIST SP 800-63-4 federation-binding termination without rewriting historical participant identifiers (Temoshok et al., 2025);
 - recover after unlink+relink keeps a loaded participant only when the reconstructed current tenant, issuer, and subject still match the still-valid federation proof, so a stale `READ COMMITTED` reconstruct cannot grant another account's current binding (Temoshok et al., 2025);
+- hosted account-link HTTP persist, recover, and unlink use OpenAPI 3.2.0 as the as-built contract and RFC 9457 problem details, and unlink recovers from the current proof instead of accepting a client `participant_ref` as a capability grant (OpenAPI Initiative, 2025; Nottingham, 2023; Temoshok et al., 2025);
 - release gates include secret scanning, static analysis, dependency/supply-chain evidence, SBOM/provenance, migration/rollback, and recovery tests;
 - cross-service database access and ambient credentials are prohibited by architecture, not merely discouraged by documentation.
 
@@ -127,6 +128,10 @@ Joint Task Force. (2020). *Security and privacy controls for information systems
 Swanson, M., Bowen, P., Phillips, A. W., Gallup, D., & Lynes, D. (2010). *Contingency planning guide for federal information systems* (NIST Special Publication 800-34 Rev. 1). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-34r1
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
+
+Nottingham, M. (2023). *Problem details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://www.rfc-editor.org/rfc/rfc9457
+
+OpenAPI Initiative. (2025). *OpenAPI Specification v3.2.0*. https://spec.openapis.org/oas/v3.2.0
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 

@@ -227,7 +227,8 @@ When account linking is offered:
 - explain benefit (cross-device/history) separately from research;
 - require authentication through Keyverse;
 - preserve historical assessment/result IDs;
-- show link/unlink/merge conflict state honestly.
+- show link/unlink/merge conflict state honestly;
+- after both proofs are current, `POST /v1/account-links`; to disconnect, `POST /v1/account-links/unlink` with the same account proof and do not reuse a saved `participant_ref`.
 
 Data-rights surface shows export/deletion request lifecycle rather than a fake instant-delete button when processing/retention exceptions are durable asynchronous operations.
 

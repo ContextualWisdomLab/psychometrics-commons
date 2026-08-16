@@ -1,0 +1,265 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public account-link API
+  version: 0.1.0
+  description: >
+    As-built public dual-proof account-link persist, recover, and unlink. These
+    operations authorize already-validated anonymous-session and Keyverse
+    proofs, persist append-only identity-link history, recover the same
+    product-owned participant from a still-valid account proof, and end that
+    current binding from the same proof. They do not parse live identity
+    tokens. Unlink rejects a client-supplied participant_ref so a previously
+    recovered identifier is not a capability grant.
+paths:
+  /v1/account-links:
+    post:
+      operationId: persistAccountLink
+      summary: Persist one dual-proof account link
+      description: >
+        Inspects current-projection drift, authorizes both current proofs, then
+        persists identity-link history. The server clock is the link time.
+        Exact Idempotency-Key replay returns the original body.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque replay key for this persist request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLinkPersistRequest"
+      responses:
+        "201":
+          description: Account link was inserted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "200":
+          description: Exact idempotent replay or exact durable duplicate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+        "503":
+          $ref: "#/components/responses/Problem"
+  /v1/account-links/recover:
+    post:
+      operationId: recoverAccountLink
+      summary: Recover the participant for a still-valid account
+      description: >
+        Returns the participant currently bound to a still-valid authenticated
+        account proof after the current tenant, issuer, and subject still
+        match. A valid unused or rebound account does not invent or hand back
+        a participant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLinkRecoverRequest"
+      responses:
+        "200":
+          description: The account currently binds one participant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/account-links/unlink:
+    post:
+      operationId: unlinkAccountLink
+      summary: End the current binding from the authenticated proof
+      description: >
+        Recovers the current participant from the still-valid Keyverse proof,
+        then appends a link-end. The request must not include participant_ref.
+        Exact Idempotency-Key replay returns the original body.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque replay key for this unlink request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountLinkUnlinkRequest"
+      responses:
+        "200":
+          description: Current binding ended, or exact idempotent replay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountLink"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    AccountLinkPersistRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - participant_ref
+        - tenant_ref
+        - anonymous_session_ref
+        - anonymous_proof_ref
+        - anonymous_valid_until_unix_ms
+        - identity_issuer
+        - identity_subject_ref
+        - authenticated_proof_ref
+        - authenticated_valid_until_unix_ms
+        - link_event_ref
+      properties:
+        participant_ref:
+          type: string
+        tenant_ref:
+          type: string
+        anonymous_session_ref:
+          type: string
+        anonymous_proof_ref:
+          type: string
+        anonymous_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        authenticated_proof_ref:
+          type: string
+        authenticated_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+        link_event_ref:
+          type: string
+    AccountLinkRecoverRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - tenant_ref
+        - identity_issuer
+        - identity_subject_ref
+        - authenticated_proof_ref
+        - authenticated_valid_until_unix_ms
+      properties:
+        tenant_ref:
+          type: string
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        authenticated_proof_ref:
+          type: string
+        authenticated_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+    AccountLinkUnlinkRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - tenant_ref
+        - identity_issuer
+        - identity_subject_ref
+        - authenticated_proof_ref
+        - authenticated_valid_until_unix_ms
+        - link_end_event_ref
+      properties:
+        tenant_ref:
+          type: string
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        authenticated_proof_ref:
+          type: string
+        authenticated_valid_until_unix_ms:
+          type: integer
+          minimum: 1
+        link_end_event_ref:
+          type: string
+    AccountLink:
+      type: object
+      additionalProperties: false
+      required:
+        - participant_ref
+        - tenant_ref
+        - identity_issuer
+        - identity_subject_ref
+        - link_event_ref
+        - disposition
+      properties:
+        participant_ref:
+          type: string
+        tenant_ref:
+          type: string
+        identity_issuer:
+          type: string
+        identity_subject_ref:
+          type: string
+        link_event_ref:
+          type: string
+        disposition:
+          type: string
+          enum:
+            - inserted
+            - duplicate
+            - current
+            - ended
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

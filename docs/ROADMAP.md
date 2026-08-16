@@ -107,7 +107,7 @@ Deliverables:
 
 - optional Keyverse token validation adapter;
 - anonymous-session credential design;
-- secure anonymous-to-account linking;
+- secure anonymous-to-account linking (Active PR HTTP persist/recover/unlink on the #210 write path; live Keyverse verification remains);
 - resource- and tenant-level authorization;
 - purpose-specific consent API;
 - export/deletion durable workers and dependent-system propagation;

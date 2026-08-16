@@ -365,6 +365,9 @@ POST   /v1/research-contributions
 POST   /v1/research-contributions/{contribution_ref}/withdrawals
 POST   /v1/data-rights/exports
 POST   /v1/data-rights/deletions
+POST   /v1/account-links
+POST   /v1/account-links/recover
+POST   /v1/account-links/unlink
 ```
 
 All state-changing public requests require an idempotency key or a resource-specific equivalent.
