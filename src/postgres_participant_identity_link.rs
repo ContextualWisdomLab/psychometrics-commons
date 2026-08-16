@@ -104,10 +104,11 @@ pub fn apply_participant_identity_link_migration(
 
 /// Persist one participant and its append-only identity-link history.
 ///
-/// Exact replay of the same participant, link, and link-end evidence is
-/// idempotent. Reusing an event identity with different issuer, subject, proof,
-/// or time fails closed. A current issuer-scoped subject cannot belong to two
-/// participants at once.
+/// History is applied in the same lifecycle order as reload: each link, then
+/// the ends that close that link. Exact replay of the same participant, link,
+/// and link-end evidence is idempotent. Reusing an event identity with
+/// different issuer, subject, proof, or time fails closed. A current
+/// issuer-scoped subject cannot belong to two participants at once.
 ///
 /// # Errors
 ///
@@ -125,14 +126,26 @@ pub fn persist_participant_identity_history(
     let mut inserted_any =
         persist_participant_header(transaction, participant_ref, tenant_ref, created_at)?;
     lock_participant(transaction, participant_ref)?;
+    if participant.link_end_history().iter().any(|end| {
+        participant
+            .link_history()
+            .iter()
+            .all(|link| link.link_event_ref() != end.linked_event_ref())
+    }) {
+        return Err(IdentityLinkPersistenceError::CorruptHistory);
+    }
     for event in participant.link_history() {
         if persist_one_link(transaction, participant_ref, tenant_ref, event)? {
             inserted_any = true;
         }
-    }
-    for event in participant.link_end_history() {
-        if persist_one_link_end(transaction, participant_ref, event)? {
-            inserted_any = true;
+        for end in participant
+            .link_end_history()
+            .iter()
+            .filter(|end| end.linked_event_ref() == event.link_event_ref())
+        {
+            if persist_one_link_end(transaction, participant_ref, end)? {
+                inserted_any = true;
+            }
         }
     }
     if inserted_any {
@@ -397,7 +410,7 @@ fn load_participant_header(
 ) -> Result<Option<u64>, IdentityLinkPersistenceError> {
     let row = transaction.query_opt(
         "SELECT created_at_unix_ms FROM assessment_participant \
-         WHERE participant_ref = $1 AND tenant_ref = $2",
+         WHERE participant_ref = $1 AND tenant_ref = $2 FOR SHARE",
         &[&participant_ref, &tenant_ref],
     )?;
     row.map(|row| i64_to_unix_ms(row.get(0))).transpose()

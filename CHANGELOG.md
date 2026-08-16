@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- PostgreSQL 18 append-only participant identity-link persistence so a dual-proof account link, unlink, and relink survive process restart without rewriting the product-owned participant reference. Exact replay is idempotent, conflicting evidence fails closed, and one issuer-scoped subject cannot be current on two participants.
+- PostgreSQL 18 append-only participant identity-link persistence so a dual-proof account link, unlink, and relink survive process restart without rewriting the product-owned participant reference. Persist applies each link and then its matching ends in one transaction, exact replay is idempotent, conflicting evidence fails closed, and one issuer-scoped subject cannot be current on two participants.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

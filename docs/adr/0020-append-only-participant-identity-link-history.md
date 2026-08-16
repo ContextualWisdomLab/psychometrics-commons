@@ -160,7 +160,7 @@ Before account-link persistence is considered GA-complete, exact-head evidence m
 - security tests for account-link/recovery takeover and cross-tenant access;
 - exact deployment-profile recovery evidence before any GA/SLO/RPO/RTO claim involving this persistence.
 
-Protected main satisfies only the domain-level stable first-link portion of this decision and does not yet bind issuer. PR #29 implements issuer-scoped first-link validation/storage/replay on an active branch. Persistence, transport, recovery, unlink/relink, concurrency, and audit evidence remain target work until separately implemented, reviewed, and merged.
+Protected main satisfies the domain-level issuer-scoped first-link portion of this decision, including dual-proof authorization. Active PR persist must apply each link and then its matching ends in one transaction so a restart can write a complete unlink+relink aggregate. HTTP transport, live Keyverse verification, operator recovery commands, and backup/restore evidence remain target work until separately implemented, reviewed, and merged.
 
 ## Alternatives considered
 

@@ -70,6 +70,28 @@ fn linked_participant() -> ParticipantRecord {
     participant
 }
 
+fn relinked_participant() -> ParticipantRecord {
+    let mut participant = linked_participant();
+    participant
+        .record_link_end(
+            "link_end_event_identity_alpha",
+            "unlink_evidence_identity_alpha",
+            10_200,
+        )
+        .unwrap();
+    participant
+        .link_account(
+            "link_event_identity_gamma",
+            "keyverse_issuer_gamma",
+            "keyverse_subject_gamma",
+            "anonymous_proof_identity_gamma",
+            "authenticated_proof_identity_gamma",
+            10_300,
+        )
+        .unwrap();
+    participant
+}
+
 fn persist_ok(
     client: &mut Client,
     participant: &ParticipantRecord,
@@ -208,59 +230,93 @@ fn unlink_and_relink_reload_as_append_only_history() {
     reset_identity_link_tables(&mut client);
     apply_participant_identity_link_migration(&mut client).unwrap();
 
-    let mut participant = linked_participant();
-    persist_ok(&mut client, &participant);
-
-    participant
-        .record_link_end(
-            "link_end_event_identity_alpha",
-            "unlink_evidence_identity_alpha",
-            10_200,
-        )
-        .unwrap();
+    let participant = relinked_participant();
     assert_eq!(
         persist_ok(&mut client, &participant),
         IdentityLinkPersistenceDisposition::Inserted
     );
-
-    let unlinked = load_ok(
-        &mut client,
-        participant.participant_ref(),
-        participant.tenant_ref(),
-    );
-    assert_eq!(unlinked.participant_ref(), "participant_identity_alpha");
-    assert!(unlinked.linked_subject_ref().is_none());
-    assert_eq!(unlinked.link_history().len(), 1);
-    assert_eq!(unlinked.link_end_history().len(), 1);
     assert_eq!(
-        unlinked.link_end_history()[0].linked_event_ref(),
-        "link_event_identity_alpha"
+        persist_ok(&mut client, &participant),
+        IdentityLinkPersistenceDisposition::Duplicate
     );
-
-    participant
-        .link_account(
-            "link_event_identity_gamma",
-            "keyverse_issuer_gamma",
-            "keyverse_subject_gamma",
-            "anonymous_proof_identity_gamma",
-            "authenticated_proof_identity_gamma",
-            10_300,
-        )
-        .unwrap();
-    persist_ok(&mut client, &participant);
 
     let relinked = load_ok(
         &mut client,
         participant.participant_ref(),
         participant.tenant_ref(),
     );
+    assert_eq!(relinked.participant_ref(), "participant_identity_alpha");
     assert_eq!(
         relinked.linked_subject_ref(),
         Some("keyverse_subject_gamma")
     );
+    assert_eq!(relinked.linked_issuer_ref(), Some("keyverse_issuer_gamma"));
+    assert_eq!(relinked.link_event_ref(), Some("link_event_identity_gamma"));
     assert_eq!(relinked.link_history().len(), 2);
     assert_eq!(relinked.link_end_history().len(), 1);
-    assert_eq!(relinked.participant_ref(), "participant_identity_alpha");
+    assert_eq!(
+        relinked.link_end_history()[0].linked_event_ref(),
+        "link_event_identity_alpha"
+    );
+    assert_eq!(
+        relinked.link_end_history()[0].evidence_ref(),
+        "unlink_evidence_identity_alpha"
+    );
+}
+
+#[test]
+fn unlinked_subject_can_become_current_on_another_participant() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut previous = linked_participant();
+    previous
+        .record_link_end(
+            "link_end_event_identity_alpha",
+            "unlink_evidence_identity_alpha",
+            10_200,
+        )
+        .unwrap();
+    persist_ok(&mut client, &previous);
+
+    let mut next = ParticipantRecord::new_anonymous(
+        "participant_identity_beta",
+        "tenant_identity_alpha",
+        10_000,
+    )
+    .unwrap();
+    next.link_account(
+        "link_event_identity_beta",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+        "anonymous_proof_identity_beta",
+        "authenticated_proof_identity_beta",
+        10_250,
+    )
+    .unwrap();
+    assert_eq!(
+        persist_ok(&mut client, &next),
+        IdentityLinkPersistenceDisposition::Inserted
+    );
+
+    let previous_loaded = load_ok(
+        &mut client,
+        previous.participant_ref(),
+        previous.tenant_ref(),
+    );
+    let next_loaded = load_ok(&mut client, next.participant_ref(), next.tenant_ref());
+    assert!(previous_loaded.linked_subject_ref().is_none());
+    assert_eq!(
+        next_loaded.linked_subject_ref(),
+        Some("keyverse_subject_alpha")
+    );
+    assert_eq!(
+        previous_loaded.participant_ref(),
+        "participant_identity_alpha"
+    );
+    assert_eq!(next_loaded.participant_ref(), "participant_identity_beta");
 }
 
 #[test]
