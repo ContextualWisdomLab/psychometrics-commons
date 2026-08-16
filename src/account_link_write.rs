@@ -1,10 +1,11 @@
-//! Hosted dual-proof account-link write and returning-account recovery.
+//! Hosted dual-proof account-link write, unlink, and returning-account recovery.
 //!
 //! HTTP and messaging adapters validate anonymous-session and Keyverse proofs,
 //! then call these commands. This module does not parse tokens or open a socket.
 //! It authorizes the in-memory participant, persists append-only identity-link
-//! history, and recovers the same product-owned participant from a still-valid
-//! authenticated account proof.
+//! history, ends a current binding from a still-valid account proof, and recovers
+//! the same product-owned participant from a still-valid authenticated account
+//! proof.
 
 use crate::account_link::{
     link_authenticated_account, AccountLinkAuthorizationError, AuthenticatedAccountControl,
@@ -12,21 +13,28 @@ use crate::account_link::{
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::participant::ParticipantRecord;
 use crate::postgres_participant_identity_link::{
-    load_participant_by_current_identity_subject, persist_participant_identity_history,
-    IdentityLinkPersistenceDisposition, IdentityLinkPersistenceError,
+    load_participant_by_current_identity_subject, load_participant_identity_history,
+    persist_participant_identity_history, IdentityLinkPersistenceDisposition,
+    IdentityLinkPersistenceError,
 };
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-/// Fail-closed error for the hosted account-link write and recover commands.
+/// Fail-closed error for the hosted account-link write, unlink, and recover commands.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum AccountLinkWriteError {
-    /// Dual-proof authorization rejected the link or recover attempt.
+    /// Dual-proof authorization rejected the link, unlink, or recover attempt.
     Authorization(AccountLinkAuthorizationError),
     /// Durable identity-link persistence or reload rejected the command.
     Persistence(IdentityLinkPersistenceError),
+    /// The authenticated proof is not the participant's current identity link.
+    ///
+    /// A rebound or unused account must not end another subject's current
+    /// binding. Exact replay of an already-recorded unlink for this proof is
+    /// accepted separately.
+    NoCurrentBinding,
 }
 
 impl Display for AccountLinkWriteError {
@@ -34,6 +42,9 @@ impl Display for AccountLinkWriteError {
         match self {
             Self::Authorization(error) => error.fmt(formatter),
             Self::Persistence(error) => error.fmt(formatter),
+            Self::NoCurrentBinding => formatter.write_str(
+                "this authenticated account is not the participant's current identity link",
+            ),
         }
     }
 }
@@ -43,6 +54,7 @@ impl Error for AccountLinkWriteError {
         match self {
             Self::Authorization(error) => Some(error),
             Self::Persistence(error) => Some(error),
+            Self::NoCurrentBinding => None,
         }
     }
 }
@@ -166,4 +178,121 @@ pub fn recover_participant_for_authenticated_account(
         loaded,
         authenticated_control,
     ))
+}
+
+fn ended_link_matches_authenticated_account(
+    participant: &ParticipantRecord,
+    authenticated_control: &AuthenticatedAccountControl,
+    link_end_event_ref: &str,
+) -> bool {
+    let Some(end) = participant
+        .link_end_history()
+        .iter()
+        .find(|event| event.link_end_event_ref() == link_end_event_ref)
+    else {
+        return false;
+    };
+    participant.link_history().iter().any(|link| {
+        link.link_event_ref() == end.linked_event_ref()
+            && link.issuer_ref() == authenticated_control.issuer_ref()
+            && link.subject_ref() == authenticated_control.subject_ref()
+    })
+}
+
+/// End the current identity link when the authenticated proof still matches it.
+///
+/// A buyer who is signed in with the current Keyverse account can disconnect
+/// that account. The command first rejects expired or unknown-time proofs. A
+/// participant currently bound to another tenant, issuer, or subject fails
+/// closed so unlink cannot take over a rebound identity. After a successful
+/// unlink, exact replay of the same end event is idempotent.
+///
+/// # Errors
+///
+/// Returns [`AccountLinkWriteError::Authorization`] when the proof is expired,
+/// the unlink time is unknown, the proof belongs to another tenant, or the
+/// participant lifecycle rejects the end event.
+/// Returns [`AccountLinkWriteError::NoCurrentBinding`] when the proof is not
+/// the current binding and the event is not an exact historical replay of that
+/// proof's ended link.
+pub fn authorize_account_unlink(
+    participant: &mut ParticipantRecord,
+    authenticated_control: &AuthenticatedAccountControl,
+    link_end_event_ref: &str,
+    ended_at_unix_ms: u64,
+) -> Result<(), AccountLinkWriteError> {
+    if ended_at_unix_ms == 0 {
+        return Err(AccountLinkAuthorizationError::InvalidTimestamp.into());
+    }
+    require_recoverable_account(authenticated_control, ended_at_unix_ms)?;
+    if participant.tenant_ref() != authenticated_control.tenant_ref() {
+        return Err(AccountLinkAuthorizationError::CrossTenantDenied.into());
+    }
+
+    let currently_matches = participant.linked_issuer_ref()
+        == Some(authenticated_control.issuer_ref())
+        && participant.linked_subject_ref() == Some(authenticated_control.subject_ref());
+    if participant.linked_subject_ref().is_some() && !currently_matches {
+        return Err(AccountLinkWriteError::NoCurrentBinding);
+    }
+
+    participant
+        .record_link_end(
+            link_end_event_ref,
+            authenticated_control.proof_evidence_ref(),
+            ended_at_unix_ms,
+        )
+        .map_err(AccountLinkAuthorizationError::Participant)?;
+
+    if !ended_link_matches_authenticated_account(
+        participant,
+        authenticated_control,
+        link_end_event_ref,
+    ) {
+        return Err(AccountLinkWriteError::NoCurrentBinding);
+    }
+    Ok(())
+}
+
+/// Reload stored history, authorize unlink, and persist the append-only end.
+///
+/// The caller-owned participant is replaced with the stored history before
+/// authorization so a stale in-memory record cannot end a rebound current
+/// binding. After persist, recover with the same proof returns `None`.
+///
+/// # Errors
+///
+/// Returns [`AccountLinkWriteError::Authorization`] or
+/// [`AccountLinkWriteError::NoCurrentBinding`] from
+/// [`authorize_account_unlink`], and [`AccountLinkWriteError::Persistence`]
+/// when stored history cannot be loaded or written. A participant that was
+/// never persisted returns [`AccountLinkWriteError::NoCurrentBinding`].
+pub fn persist_authorized_account_unlink(
+    transaction: &mut Transaction<'_>,
+    participant: &mut ParticipantRecord,
+    authenticated_control: &AuthenticatedAccountControl,
+    link_end_event_ref: &str,
+    ended_at_unix_ms: u64,
+) -> Result<IdentityLinkPersistenceDisposition, AccountLinkWriteError> {
+    if ended_at_unix_ms == 0 {
+        return Err(AccountLinkAuthorizationError::InvalidTimestamp.into());
+    }
+    require_recoverable_account(authenticated_control, ended_at_unix_ms)?;
+    let Some(mut loaded) = load_participant_identity_history(
+        transaction,
+        participant.participant_ref(),
+        participant.tenant_ref(),
+    )?
+    else {
+        return Err(AccountLinkWriteError::NoCurrentBinding);
+    };
+    authorize_account_unlink(
+        &mut loaded,
+        authenticated_control,
+        link_end_event_ref,
+        ended_at_unix_ms,
+    )?;
+    let disposition = persist_participant_identity_history(transaction, &loaded)?;
+    *participant = loaded;
+    Ok(disposition)
 }

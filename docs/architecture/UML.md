@@ -379,6 +379,12 @@ sequenceDiagram
     DB-->>A: candidate participant plus current binding
     A->>A: keep only when current tenant/issuer/subject still match the proof
     A-->>C: recovered participant or unused-account none
+    P->>C: choose to unlink the current Keyverse account
+    C->>A: unlink request + current Keyverse assertion
+    A->>A: persist_authorized_account_unlink
+    A->>DB: reload history and append link-end when current binding still matches
+    DB-->>A: immutable unlink evidence / cleared current-link projection
+    A-->>C: unlink complete; later recover with the same proof returns none
 
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
 ```

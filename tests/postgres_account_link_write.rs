@@ -7,8 +7,8 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::account_link::AuthenticatedAccountControl;
 use psychometrics_commons_runtime::account_link_write::{
-    persist_authorized_account_link, recover_participant_for_authenticated_account,
-    AccountLinkWriteError,
+    persist_authorized_account_link, persist_authorized_account_unlink,
+    recover_participant_for_authenticated_account, AccountLinkWriteError,
 };
 use psychometrics_commons_runtime::anonymous_session::AnonymousSessionContext;
 use psychometrics_commons_runtime::participant::ParticipantRecord;
@@ -328,12 +328,9 @@ fn other_tenant_or_ended_subject_cannot_recover_the_linked_participant() {
     )
     .unwrap();
     let mut transaction = client.transaction().unwrap();
-    let missing = recover_participant_for_authenticated_account(
-        &mut transaction,
-        &foreign_tenant,
-        10_600,
-    )
-    .unwrap();
+    let missing =
+        recover_participant_for_authenticated_account(&mut transaction, &foreign_tenant, 10_600)
+            .unwrap();
     transaction.commit().unwrap();
     assert!(
         missing.is_none(),
@@ -387,11 +384,212 @@ fn other_tenant_or_ended_subject_cannot_recover_the_linked_participant() {
     )
     .unwrap();
     let mut transaction = client.transaction().unwrap();
-    let recovered = recover_participant_for_authenticated_account(&mut transaction, &rebound, 10_600)
-        .unwrap()
-        .expect("the current rebound subject must recover the same participant");
+    let recovered =
+        recover_participant_for_authenticated_account(&mut transaction, &rebound, 10_600)
+            .unwrap()
+            .expect("the current rebound subject must recover the same participant");
     transaction.commit().unwrap();
     assert_eq!(recovered.participant_ref(), "participant_identity_write");
+    assert_eq!(
+        recovered.linked_subject_ref(),
+        Some("keyverse_subject_rebound")
+    );
+}
+
+#[test]
+fn authorized_unlink_survives_restart_and_ended_subject_cannot_recover() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let disposition = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert_eq!(disposition, IdentityLinkPersistenceDisposition::Inserted);
+    assert!(participant.linked_subject_ref().is_none());
+
+    let mut replay = anonymous_participant();
+    replay
+        .link_account(
+            "link_event_identity_write",
+            "keyverse_issuer_write",
+            "keyverse_subject_write",
+            "anonymous_proof_write",
+            "authenticated_proof_write",
+            10_400,
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let replayed = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut replay,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert_eq!(replayed, IdentityLinkPersistenceDisposition::Duplicate);
+    assert!(replay.linked_subject_ref().is_none());
+
+    let mut transaction = client.transaction().unwrap();
+    let ended = recover_participant_for_authenticated_account(
+        &mut transaction,
+        &authenticated_control(),
+        10_600,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert!(
+        ended.is_none(),
+        "a still-valid proof must not recover a participant after authorized unlink"
+    );
+}
+
+#[test]
+fn expired_proof_cannot_unlink_a_persisted_current_binding() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let expired = AuthenticatedAccountControl::new(
+        "tenant_identity_write",
+        "keyverse_issuer_write",
+        "keyverse_subject_write",
+        "authenticated_proof_write",
+        10_500,
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &expired,
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .expect_err("an expired account proof must not persist an unlink");
+    transaction.rollback().unwrap();
+    assert!(matches!(
+        error,
+        AccountLinkWriteError::Authorization(
+            psychometrics_commons_runtime::account_link::AccountLinkAuthorizationError::AuthenticatedProofExpired
+        )
+    ));
+
+    let mut transaction = client.transaction().unwrap();
+    let recovered = recover_participant_for_authenticated_account(
+        &mut transaction,
+        &authenticated_control(),
+        10_600,
+    )
+    .unwrap()
+    .expect("a rejected unlink must leave the current binding recoverable");
+    transaction.commit().unwrap();
+    assert_eq!(recovered.participant_ref(), "participant_identity_write");
+}
+
+#[test]
+fn ended_subject_proof_cannot_unlink_a_rebound_current_binding() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let rebound = AuthenticatedAccountControl::new(
+        "tenant_identity_write",
+        "keyverse_issuer_write",
+        "keyverse_subject_rebound",
+        "authenticated_proof_rebound",
+        11_000,
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &rebound,
+        "link_event_identity_rebound",
+        10_550,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_stale",
+        10_600,
+    )
+    .expect_err("an ended subject's proof must not unlink the rebound current binding");
+    transaction.rollback().unwrap();
+    assert!(matches!(error, AccountLinkWriteError::NoCurrentBinding));
+
+    let mut transaction = client.transaction().unwrap();
+    let recovered =
+        recover_participant_for_authenticated_account(&mut transaction, &rebound, 10_700)
+            .unwrap()
+            .expect("the rebound current binding must remain recoverable");
+    transaction.commit().unwrap();
     assert_eq!(
         recovered.linked_subject_ref(),
         Some("keyverse_subject_rebound")
