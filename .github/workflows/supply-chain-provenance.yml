@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: psychometrics-commons-provenance-${{ github.event.pull_request.number || github.ref }}
+  group: psychometrics-commons-provenance-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
