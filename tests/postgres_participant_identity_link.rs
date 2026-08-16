@@ -596,11 +596,6 @@ fn link_end_cannot_attach_to_another_participants_link() {
     assert!(error.as_db_error().is_some());
 }
 
-fn anonymous_participant_beta() -> ParticipantRecord {
-    ParticipantRecord::new_anonymous("participant_identity_beta", "tenant_identity_alpha", 10_000)
-        .unwrap()
-}
-
 #[test]
 fn other_tenant_cannot_load_or_rebind_participant_identity() {
     let _guard = identity_link_test_guard();
