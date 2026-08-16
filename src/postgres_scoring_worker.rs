@@ -272,24 +272,26 @@ fn commit_planned_scoring_worker_attempt(
 /// Load the persisted scoring request, persist the result snapshot, then commit.
 ///
 /// After restart, the worker reconstructs the version pin from `scoring_request`
-/// and asks a request-bound engine. A completed result and its product snapshot
-/// commit in the same caller-owned transaction as the fenced job and outbox
-/// evidence. A retryable engine or transport outage records the existing job
-/// retry schedule, writes no terminal outbox row, and does not invent a score.
-/// A later due claim can then persist the real snapshot. Exhausted retry budget
-/// quarantines without an outbox row. A missing request, planner failure, or
-/// snapshot conflict leaves the leased job untouched when the caller rolls back.
-/// Live `fast-mlsirm` execution remains a later adapter behind
-/// [`ScoringWorkerResultEngine`].
+/// and asks a request-bound engine. The job row must name the same request; a
+/// mismatched pair fails closed before the engine runs. A completed result and
+/// its product snapshot commit in the same caller-owned transaction as the
+/// fenced job and outbox evidence. A retryable engine or transport outage
+/// records the existing job retry schedule, writes no terminal outbox row, and
+/// does not invent a score. A later due claim can then persist the real
+/// snapshot. Exhausted retry budget quarantines without an outbox row. A
+/// missing request, planner failure, or snapshot conflict leaves the leased
+/// job untouched when the caller rolls back. Live `fast-mlsirm` execution
+/// remains a later adapter behind [`ScoringWorkerResultEngine`].
 ///
 /// # Errors
 ///
 /// Returns [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
 /// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
-/// [`ScoringWorkerCommitError::Planning`] when the engine or planner cannot
-/// produce a typed attempt, [`ScoringWorkerCommitError::Retry`] when retry
-/// evidence cannot persist, [`ScoringWorkerCommitError::Snapshot`] when the
-/// immutable snapshot cannot persist, or the existing completion/failure error.
+/// [`ScoringWorkerCommitError::Planning`] when the job names a different
+/// request or the engine/planner cannot produce a typed attempt,
+/// [`ScoringWorkerCommitError::Retry`] when retry evidence cannot persist,
+/// [`ScoringWorkerCommitError::Snapshot`] when the immutable snapshot cannot
+/// persist, or the existing completion/failure error.
 #[allow(clippy::too_many_arguments)]
 pub fn run_scoring_worker_attempt_with_result_snapshot(
     transaction: &mut Transaction<'_>,
@@ -302,6 +304,21 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
     outbox_max_attempts: usize,
     retry_at_unix_ms: u64,
 ) -> Result<ScoringWorkerSnapshotPersistence, ScoringWorkerCommitError> {
+    let stored_request = transaction
+        .query_opt(
+            "SELECT scoring_request_ref FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&scoring_job_ref],
+        )
+        .map_err(ScoringRequestPersistenceError::from)
+        .map_err(ScoringWorkerCommitError::Request)?;
+    if let Some(row) = stored_request {
+        let stored_request_ref: String = row.get(0);
+        if stored_request_ref != scoring_request_ref {
+            return Err(ScoringWorkerCommitError::Planning(
+                ScoringWorkerError::MismatchedScoringResult,
+            ));
+        }
+    }
     let request = load_scoring_request(transaction, scoring_request_ref)
         .map_err(ScoringWorkerCommitError::Request)?
         .ok_or(ScoringWorkerCommitError::MissingRequest)?;
