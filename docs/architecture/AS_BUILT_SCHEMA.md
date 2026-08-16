@@ -18,8 +18,25 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
+| `research_consent_snapshot` | research contribution | **Active PR** #150 (not protected-main truth) |
+| `research_contribution` | research contribution | **Active PR** #150 (not protected-main truth) |
+| `research_withdrawal_event` | research contribution | **Active PR** #150 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
+
+## Active PR research-contribution physical schema
+
+`migrations/0017_research_contribution.sql` and `src/postgres_research_contribution.rs` persist a 3NF physical split of logical research-contribution evidence. The slice is **Active PR**, not protected-main truth. Do not land #74 at `3243f97`, #116 at `4475f60`, #126 at `1430cff`, #128 at `925d157`, or #130 at `270ce21`.
+
+The physical objects are:
+
+- `research_consent_snapshot` — immutable identity binding of one snapshot reference to operational participant, research scope, and consent-form version;
+- `research_contribution` — append-only start record whose operational participant is read only from that binding;
+- `research_withdrawal_event` — one-to-one append-only withdrawal so replaying Active evidence cannot erase a stored withdrawal.
+
+A new contribution start re-checks the latest research-purpose `consent_event` for that participant. Latest means last-appended (`occurred_at_unix_ms`, then `created_at`), matching `ConsentSnapshot::is_granted` / `active_research_scope` / `active_form_version`. That event must still be `granted` for the contribution's exact scope and consent-form version. A later grant or revoke, including a same-millisecond later append whose `event_ref` sorts lower or a later same-scope grant under a new form, replaces the prior snapshot as the live write capability. Exact replay and withdrawal of already stored evidence stay allowed.
+
+This slice does **not** persist public research release, semantic-data-portal registration, restricted pseudonym linkage, or HTTP consent transport.
 
 ## Active PR inbox-consumption physical schema
 

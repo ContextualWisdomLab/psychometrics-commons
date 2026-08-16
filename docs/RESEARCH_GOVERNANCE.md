@@ -53,6 +53,8 @@ withdrawal state/evidence
 
 A broad “improve services and research” checkbox is insufficient to authorize arbitrary future public release. Scope must be machine-readable enough that snapshot construction can fail closed when a requested variable/use is outside the participant's grant.
 
+Withdrawal of research consent stops future contribution writes. A stored research-consent snapshot projection remains an immutable identity binding; it is not a standing write capability. New contribution starts re-check the latest research-purpose consent-ledger event for that participant and require that event to still be granted for the contribution's exact scope and consent-form version. Same-millisecond replacements follow persist/append order, not event-reference sort order. A later grant or revoke for another scope or form replaces the prior snapshot as the live write capability. A stored research participant reference cannot later become an operational participant. Exact replay and withdrawal of already stored contribution evidence stay allowed so revoke cannot erase history (European Parliament & Council of the European Union, 2016; International Organization for Standardization, 2024).
+
 The consent user experience explains, as applicable:
 
 - what types of data may be contributed;
@@ -322,3 +324,9 @@ A release is blocked until the exact snapshot has:
 - `docs/adr/0006-consent-data-rights-and-research-separation.md`
 - `docs/adr/0007-semantic-data-portal-research-release-boundary.md`
 - `docs/adr/0010-versioned-provenance-and-immutable-results.md`
+
+## 21. References
+
+European Parliament & Council of the European Union. (2016). Regulation (EU) 2016/679 of the European Parliament and of the Council of 27 April 2016 on the protection of natural persons with regard to the processing of personal data and on the free movement of such data (General Data Protection Regulation). *Official Journal of the European Union, L 119*, 1–88.
+
+International Organization for Standardization. (2024). *Information technology — Security techniques — Privacy framework* (ISO/IEC 29100:2024).

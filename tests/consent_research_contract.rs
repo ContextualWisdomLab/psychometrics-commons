@@ -357,6 +357,11 @@ fn contribution_withdrawal_is_monotonic_idempotent_and_irreversible() {
     assert_eq!(withdrawn.withdrawal_event_ref(), Some("withdrawal_event"));
     assert_eq!(withdrawn.withdrawn_at_unix_ms(), Some(8_200));
     assert_eq!(
+        withdrawn.withdrawal_evidence(),
+        Some(("withdrawal_event", 8_200))
+    );
+    assert_eq!(contribution.withdrawal_evidence(), None);
+    assert_eq!(
         withdrawn.withdraw("different_event", 8_300),
         Err(ResearchContributionError::AlreadyWithdrawn)
     );

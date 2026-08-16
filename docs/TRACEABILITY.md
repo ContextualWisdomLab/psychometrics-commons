@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** #150 research-contribution persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Consent-bound contribution lifecycle evidence is persisted with purpose-latest live-grant re-check, persist/append-order same-millisecond tie-break, exact consent-form version match, reverse namespace rejection, exact replay, and the `0017` 3NF physical split mapped in AS_BUILT/ERD/UML. Do not land #74 at `3243f97`, #116 at `4475f60`, #126 at `1430cff`, #128 at `925d157`, or #130 at `270ce21`. Research release packaging remains outside this slice.
 
 ## 5. ADR traceability by concern
 

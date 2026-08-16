@@ -99,12 +99,23 @@ classDiagram
       +decision
       +effective_at
     }
+    class ResearchConsentSnapshot {
+      +consent_snapshot_ref
+      +participant_ref
+      +research_scope_ref
+      +consent_form_version_ref
+    }
     class ResearchContribution {
       +contribution_ref
-      +participant_ref
       +research_participant_ref
-      +scope_ref
+      +consent_snapshot_ref
+      +research_scope_ref
       +state
+    }
+    class ResearchWithdrawalEvent {
+      +contribution_ref
+      +withdrawal_event_ref
+      +withdrawn_at_unix_ms
     }
     class DataRightsRequest {
       +request_ref
@@ -166,7 +177,10 @@ classDiagram
     ResponseSnapshot "1" --> "0..*" ScoringJob : scored by
     ScoringJob "1" --> "0..1" ResultSnapshot : produces
     AssessmentParticipant "1" --> "0..*" ConsentSnapshot : decisions
+    AssessmentParticipant "1" --> "0..*" ResearchConsentSnapshot : binds research grant
     AssessmentParticipant "1" --> "0..*" ResearchContribution : opts into
+    ResearchConsentSnapshot "1" --> "0..*" ResearchContribution : authorizes start
+    ResearchContribution "0..1" --> "0..1" ResearchWithdrawalEvent : withdraws as
     AssessmentParticipant "1" --> "0..*" DataRightsRequest : requests
     ResearchContribution "0..*" --> "0..*" DatasetSnapshot : eligible input
     DatasetSnapshot "1" --> "0..*" ResearchRelease : released as
@@ -180,7 +194,7 @@ classDiagram
 - `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence.
 - `ScoringJob` is operational state; `ResultSnapshot` is scientific/product evidence. They are not the same aggregate.
 - `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
-- `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.
+- `ResearchContribution` is a product-domain participation record that does not carry operational participant identity. Persistence resolves that identity from the durable `research_consent_snapshot` binding. Physical withdrawal evidence lives on `ResearchWithdrawalEvent` so replaying Active evidence cannot erase a stored withdrawal. Public research data uses a separate research participant namespace behind the restricted linkage boundary.
 - `ParticipantIdentityLink` is product-owned append-only account-attachment history. It is neither the participant primary key nor a research pseudonym.
 - Longitudinal records preserve collection and temporal-analysis references without duplicating the Gyeot application database or TEPP analytical kernel.
 - Associations involving external scientific artifacts are references, not cross-service foreign keys into another service database.

@@ -337,6 +337,52 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
 }
 
 #[test]
+fn research_contribution_physical_split_is_mapped() {
+    let root = repository_root();
+    let as_built = read_required(&root.join("docs/architecture/AS_BUILT_SCHEMA.md"));
+    let erd = read_required(&root.join("docs/architecture/ERD.md"));
+    let uml = read_required(&root.join("docs/architecture/UML.md"));
+
+    for marker in [
+        "0017_research_contribution.sql",
+        "research_consent_snapshot",
+        "research_withdrawal_event",
+        "**Active PR**",
+    ] {
+        assert!(
+            as_built.contains(marker),
+            "as-built schema must name the research-contribution physical split marker {marker}"
+        );
+    }
+    assert!(
+        as_built.contains("consent-form version") && as_built.contains("not protected-main truth"),
+        "as-built research slice must keep form-version live-grant maturity off protected main"
+    );
+
+    for marker in [
+        "research_consent_snapshot",
+        "research_withdrawal_event",
+        "0017_research_contribution.sql",
+    ] {
+        assert!(
+            erd.contains(marker),
+            "logical ERD must name the 3NF research-contribution physical split marker {marker}"
+        );
+    }
+
+    for marker in [
+        "ResearchConsentSnapshot",
+        "ResearchWithdrawalEvent",
+        "research_consent_snapshot",
+    ] {
+        assert!(
+            uml.contains(marker),
+            "UML must name the durable research-contribution binding marker {marker}"
+        );
+    }
+}
+
+#[test]
 fn uml_covers_identity_longitudinal_and_workbench_behavior() {
     let uml = read_required(&repository_root().join("docs/architecture/UML.md"));
 

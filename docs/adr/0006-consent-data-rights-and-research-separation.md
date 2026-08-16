@@ -64,6 +64,8 @@ Construct-relevant personal data remains available to authorized workflows when 
 4. Public research data contains no Keyverse subject or operational participant reference.
 5. Service denial cannot be based on refusal of optional research contribution.
 6. Data-rights operations are tenant-scoped and identity-verified.
+7. A durable research-consent snapshot projection authorizes identity binding only. A new contribution start must re-check the latest research-purpose `consent_event` for that participant in the same transaction. That event must still be `granted` for the contribution's exact scope and consent-form version, matching `ConsentSnapshot::is_granted` / `active_research_scope` / `active_form_version`. Same-millisecond replacements follow persist/append order (`created_at`), not `event_ref` lexicographic order. A later grant or revoke for another scope or form replaces the prior snapshot as the live write capability. Exact replay and withdrawal of already stored evidence remain allowed (`tests/postgres_research_contribution_persistence.rs`).
+8. A research participant reference cannot equal the bound operational participant, cannot be reused across operational identities, and cannot later be reused as an operational `participant_ref` (`research_contribution_identity_separation_check`, `research_contribution_research_participant_ref_unique`).
 
 ## Failure behavior
 
@@ -72,6 +74,8 @@ If consent verification is unavailable, optional research processing fails close
 ## Validation
 
 - consent-version and revocation state-machine tests;
+- PostgreSQL tests proving a stored research-consent snapshot cannot insert a new contribution after the live grant is revoked, after a later purpose-level grant for another scope, after a later same-scope grant under a new consent-form version, after a same-millisecond later append whose `event_ref` sorts lower, or when no consent ledger was persisted, while exact replay and withdrawal of prior evidence still succeed;
+- PostgreSQL tests proving a stored research participant reference cannot later become an operational participant at snapshot persist or contribution start;
 - negative tests proving research jobs reject non-opted-in participants;
 - release joinability and rare-combination privacy review;
 - export completeness and deletion propagation tests;
@@ -86,3 +90,11 @@ If consent verification is unavailable, optional research processing fails close
 ## Reversal conditions
 
 Revisit individual retention or withdrawal mechanics when a deployment's law or ethics approval imposes stricter requirements. The separation of service and research purposes remains mandatory.
+
+## References
+
+European Parliament & Council of the European Union. (2016). Regulation (EU) 2016/679 of the European Parliament and of the Council of 27 April 2016 on the protection of natural persons with regard to the processing of personal data and on the free movement of such data (General Data Protection Regulation). *Official Journal of the European Union, L 119*, 1–88.
+
+International Organization for Standardization. (2024). *Information technology — Security techniques — Privacy framework* (ISO/IEC 29100:2024).
+
+National Institute of Standards and Technology. (2020). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53, Rev. 5). https://doi.org/10.6028/NIST.SP.800-53r5
