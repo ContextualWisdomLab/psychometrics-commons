@@ -9,6 +9,7 @@ on:
       - "migrations/**"
       - "scripts/validate_spdx_sbom.py"
       - "tests/test_sbom_evidence.py"
+      - "tests/test_validate_spdx_sbom.py"
       - ".github/workflows/sbom-evidence.yml"
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - "migrations/**"
       - "scripts/validate_spdx_sbom.py"
       - "tests/test_sbom_evidence.py"
+      - "tests/test_validate_spdx_sbom.py"
       - ".github/workflows/sbom-evidence.yml"
   workflow_dispatch:
 
@@ -39,8 +41,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify SBOM workflow contract
-        run: python3 tests/test_sbom_evidence.py
+      - name: Verify SBOM workflow and validator contracts
+        run: |
+          python3 tests/test_sbom_evidence.py
+          python3 tests/test_validate_spdx_sbom.py
       - name: Generate local SPDX JSON
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
         with:
