@@ -36,23 +36,39 @@ fn problem_status_must_be_an_http_client_or_server_error() {
 }
 
 #[test]
-fn problem_type_requires_an_explicit_absolute_product_identifier() {
-    for invalid_type in ["", "about:blank", "/problems/denied", "http://example.test/problem"] {
+fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
+    for invalid_type in [
+        "",
+        "about:blank",
+        "/problems/denied",
+        "http://example.test/problem",
+        "https://",
+        "https:///problem",
+        "https://example.test/%zz",
+        "urn:",
+        "urn:x:value",
+        "urn:example:",
+        "urn:example:bad value",
+        "urn:example:%zz",
+    ] {
         assert_eq!(
             ApiProblem::new(invalid_type, 403, TITLE, DETAIL, CODE),
-            Err(ApiProblemContractError::InvalidTypeUri)
+            Err(ApiProblemContractError::InvalidTypeUri),
+            "type URI {invalid_type:?} must fail closed"
         );
     }
 
-    assert!(ApiProblem::new(
+    for valid_type in [
         "https://example.test/problems/cross-tenant-denied",
-        403,
-        TITLE,
-        DETAIL,
-        CODE,
-    )
-    .is_ok());
-    assert!(ApiProblem::new(TYPE_URI, 403, TITLE, DETAIL, CODE).is_ok());
+        "https://example.test/problems/denied?version=2#details",
+        "urn:example:problem/v1",
+        TYPE_URI,
+    ] {
+        assert!(
+            ApiProblem::new(valid_type, 403, TITLE, DETAIL, CODE).is_ok(),
+            "type URI {valid_type:?} must be accepted"
+        );
+    }
 }
 
 #[test]
@@ -84,7 +100,7 @@ fn contract_errors_are_stable_and_do_not_echo_rejected_input() {
     let cases = [
         (
             ApiProblemContractError::InvalidTypeUri,
-            "problem type must use an explicit HTTPS or URN identifier",
+            "problem type must use a structurally valid explicit HTTPS or URN identifier",
         ),
         (
             ApiProblemContractError::InvalidStatus,
