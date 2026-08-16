@@ -2,24 +2,8 @@ name: Supply chain provenance
 
 on:
   pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "src/**"
-      - "migrations/**"
-      - "tests/test_supply_chain_provenance.py"
-      - ".github/workflows/supply-chain-provenance.yml"
   push:
     branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "src/**"
-      - "migrations/**"
-      - "tests/test_supply_chain_provenance.py"
-      - ".github/workflows/supply-chain-provenance.yml"
   workflow_dispatch:
 
 concurrency:
