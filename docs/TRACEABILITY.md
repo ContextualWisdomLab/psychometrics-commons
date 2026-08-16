@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
 
-**Active PR** longitudinal observation-time ingest (`src/longitudinal_observation.rs`) is not protected-main truth. It records validity, recorded, received, and ingested clocks with explicit membership shares and fail-closed source-identity replay. Enrollment state, PostgreSQL persistence, HTTP, Gyeot collection, and TEPP kernels remain outside this slice. Prefer this head over folding observation clocks onto #226, #199, or #184.
+**Active PR** #235 longitudinal observation-time ingest (`src/longitudinal_observation.rs`) is not protected-main truth. It records validity, recorded, received, and ingested clocks with explicit membership shares and fail-closed source-identity replay. Enrollment state, PostgreSQL persistence, HTTP, Gyeot collection, and TEPP kernels remain outside this slice. Prefer this head over folding observation clocks onto #226, #199, or #184.
 
 ## 5. ADR traceability by concern
 
