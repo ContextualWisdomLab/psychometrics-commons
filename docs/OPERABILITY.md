@@ -39,7 +39,7 @@ The implementation must distinguish at least:
 - **liveness** — process can make progress / is not irrecoverably wedged;
 - **readiness** — mandatory dependencies for the selected profile are available enough to accept new work safely;
 - **capability health** — optional/independent capabilities such as authenticated linking, scoring, AI narrative, research registration, or temporal analysis;
-- **backlog health** — durable work is within measured operating bounds and not silently stalled;
+- **backlog health** — durable work is within measured operating bounds and not silently stalled. When a PostgreSQL operational-backlog probe is present, it classifies aggregate outbox, inbox-consumption, and data-rights counts/ages against caller-supplied policy only and must not expose payloads, tenant identities, or restricted linkage values;
 - **data integrity health** — migrations/schema/digests/reconciliation do not indicate incompatible or corrupt state.
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
