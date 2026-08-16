@@ -97,8 +97,9 @@ impl Display for ItemDeliveryError {
             }
             Self::SessionReleaseMismatch => formatter
                 .write_str("item delivery manifest does not match assessment session provenance"),
-            Self::SessionMismatch => formatter
-                .write_str("item delivery ledger does not belong to the supplied assessment session"),
+            Self::SessionMismatch => formatter.write_str(
+                "item delivery ledger does not belong to the supplied assessment session",
+            ),
             Self::SessionNotActive(state) => {
                 write!(
                     formatter,

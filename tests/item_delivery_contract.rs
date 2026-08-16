@@ -140,8 +140,7 @@ fn exact_delivery_replay_is_idempotent_but_conflicting_reuse_fails_closed() {
 fn exact_replay_remains_idempotent_after_session_stops_accepting_new_deliveries() {
     let release = published_release();
     let active_session = session_in_state(&release, SessionState::Active);
-    let mut ledger =
-        ItemDeliveryLedger::from_session(&active_session, release.manifest()).unwrap();
+    let mut ledger = ItemDeliveryLedger::from_session(&active_session, release.manifest()).unwrap();
     let original = request(
         "delivery_event_001",
         "item_version_001",
