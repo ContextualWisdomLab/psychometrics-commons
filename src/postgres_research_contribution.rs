@@ -12,8 +12,10 @@
 //! start re-checks the latest research-purpose `consent_event` for that
 //! participant. That event must still be `granted` for the contribution's exact
 //! scope, matching [`ConsentSnapshot::is_granted`] and
-//! [`ConsentSnapshot::active_research_scope`]. A later grant or revoke for
-//! another scope therefore replaces the prior scope as the live write capability.
+//! [`ConsentSnapshot::active_research_scope`]. Same-millisecond replacements
+//! follow persist/append order (`created_at`), not `event_ref` lexicographic
+//! order. A later grant or revoke for another scope therefore replaces the
+//! prior scope as the live write capability.
 //! Exact replay and withdrawal of already stored evidence stay allowed. The
 //! caller owns credentials and the surrounding transaction boundary.
 
@@ -131,8 +133,9 @@ pub fn apply_research_contribution_migration(
 /// # Errors
 ///
 /// Returns [`ResearchContributionPersistenceError`] when the snapshot lacks an
-/// active research grant, contains an invalid reference, conflicts with an existing
-/// immutable binding, uses unsupported transaction isolation, or the database fails.
+/// active research grant, contains an invalid reference, reuses a stored research
+/// participant as an operational identity, conflicts with an existing immutable
+/// binding, uses unsupported transaction isolation, or the database fails.
 pub fn persist_research_consent_snapshot(
     transaction: &mut Transaction<'_>,
     consent_snapshot: &ConsentSnapshot,
@@ -148,6 +151,7 @@ pub fn persist_research_consent_snapshot(
         .active_form_version(ConsentPurpose::ResearchContribution)
         .and_then(normalized_reference)
         .ok_or(ResearchContributionPersistenceError::ResearchConsentRequired)?;
+    require_operational_namespace_available(transaction, participant_ref)?;
 
     let inserted = transaction.execute(
         "INSERT INTO research_consent_snapshot (\
@@ -201,8 +205,9 @@ pub fn persist_research_consent_snapshot(
 /// # Errors
 ///
 /// Returns [`ResearchContributionPersistenceError`] for a missing/mismatched
-/// consent binding, namespace reuse, invalid references/timestamps, conflicting
-/// replay, unsupported isolation, or a database failure.
+/// consent binding, namespace reuse in either direction, invalid
+/// references/timestamps, conflicting replay, unsupported isolation, or a
+/// database failure.
 pub fn persist_research_contribution(
     transaction: &mut Transaction<'_>,
     contribution: &ResearchContribution,
@@ -306,7 +311,11 @@ fn persist_contribution_start(
             &evidence.participant_ref,
             evidence.research_scope_ref,
         )?;
-        require_namespace_separation(transaction, evidence.research_participant_ref)?;
+        require_namespace_separation(
+            transaction,
+            &evidence.participant_ref,
+            evidence.research_participant_ref,
+        )?;
     }
 
     let inserted = transaction.execute(
@@ -407,7 +416,7 @@ fn require_live_research_grant(
          FROM consent_event \
          WHERE participant_ref = $1 \
            AND consent_purpose = 'research_contribution' \
-         ORDER BY occurred_at_unix_ms DESC, event_ref DESC \
+         ORDER BY occurred_at_unix_ms DESC, created_at DESC \
          LIMIT 1",
         &[&participant_ref],
     )?;
@@ -423,10 +432,26 @@ fn require_live_research_grant(
     }
 }
 
+fn require_operational_namespace_available(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+) -> Result<(), ResearchContributionPersistenceError> {
+    let collision = transaction.query_opt(
+        "SELECT 1 FROM research_contribution WHERE research_participant_ref = $1 LIMIT 1",
+        &[&participant_ref],
+    )?;
+    if collision.is_some() {
+        return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
+    }
+    Ok(())
+}
+
 fn require_namespace_separation(
     transaction: &mut Transaction<'_>,
+    participant_ref: &str,
     research_participant_ref: &str,
 ) -> Result<(), ResearchContributionPersistenceError> {
+    require_operational_namespace_available(transaction, participant_ref)?;
     let collision = transaction.query_opt(
         "SELECT 1 FROM research_consent_snapshot WHERE participant_ref = $1 \
          UNION ALL \
