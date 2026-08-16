@@ -2,12 +2,10 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migration;
+use psychometrics_commons_runtime::postgres_health::apply_backlog_health_index_migration;
 use psychometrics_commons_runtime::postgres_inbox_consumption::apply_inbox_consumption_migration;
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-const BACKLOG_HEALTH_INDEX_MIGRATION: &str =
-    include_str!("../migrations/0020_backlog_health_indexes.sql");
 
 static SCHEMA_NONCE: AtomicU64 = AtomicU64::new(1);
 
@@ -30,9 +28,8 @@ fn isolated_client() -> (Client, String) {
     apply_inbox_consumption_migration(&mut client)
         .expect("inbox-consumption migration should apply");
     apply_data_rights_migration(&mut client).expect("data-rights migration should apply");
-    client
-        .batch_execute(BACKLOG_HEALTH_INDEX_MIGRATION)
-        .expect("backlog-health index migration should apply");
+    apply_backlog_health_index_migration(&mut client)
+        .expect("product backlog-health index migration should apply");
     (client, schema)
 }
 
@@ -139,6 +136,32 @@ fn readiness_backlog_queries_have_state_selective_indexes() {
         propagation_index.contains("current_state")
             && propagation_index.contains("latest_event_at_unix_ms"),
         "the existing propagation state/time index must continue covering propagation health probes: {propagation_index}"
+    );
+
+    apply_backlog_health_index_migration(&mut client)
+        .expect("readiness index apply must be idempotent for existing installations");
+
+    cleanup(client, &schema);
+}
+
+#[test]
+fn product_apply_path_fails_closed_when_required_backlog_relations_are_missing() {
+    let mut client = test_client();
+    let nonce = SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed);
+    let schema = format!(
+        "backlog_health_index_missing_{}_{}",
+        std::process::id(),
+        nonce
+    );
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+        ))
+        .expect("isolated missing-relation schema should be created");
+
+    assert!(
+        apply_backlog_health_index_migration(&mut client).is_err(),
+        "readiness indexes must not be claimed when the owned backlog tables are absent"
     );
 
     cleanup(client, &schema);
