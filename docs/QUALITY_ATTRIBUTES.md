@@ -54,6 +54,12 @@ This document converts broad quality goals into **stimulus → environment → r
 - **Response:** the original created session is returned; a new `session_ref` or rebound participant fails closed and does not insert.
 - **Evidence:** `start_replays_exact_session_after_stored_release_is_suspended` against real PostgreSQL and `exact_start_identity_matches_stored_session_and_rejects_rebind`.
 
+### QA-REL-05 — Persist first-insert after later suspend
+
+- **Stimulus:** a caller persists a reconstituted or stale in-memory Created aggregate after the stored release is suspended or retired, and no session row exists yet.
+- **Response:** persist fails closed and inserts nothing; exact replay of an already stored Created row still returns duplicate.
+- **Evidence:** `persist_rejects_reconstituted_first_insert_after_stored_suspend`, `persist_replays_exact_created_row_after_stored_suspend`, and `persist_rejects_first_insert_when_stored_release_is_missing` against real PostgreSQL plus `persist_maps_unpublished_stored_release_to_first_insert_seal`.
+
 ## 3. Availability and graceful degradation
 
 ### QA-AVL-01 — AI unavailable
