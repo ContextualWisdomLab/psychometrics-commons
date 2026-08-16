@@ -231,22 +231,29 @@ impl Display for PublicReleaseLeakageError {
 impl Error for PublicReleaseLeakageError {}
 
 const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
-    "participant_ref",
-    "participant_id",
-    "operational_participant_ref",
+    "assessment_participant_ref",
+    "identity_subject_ref",
     "keyverse_subject",
     "keyverse_subject_ref",
-    "linkage_ref",
     "linkage_key",
     "linkage_key_version",
+    "linkage_ref",
+    "linked_subject_ref",
+    "operational_participant_ref",
+    "participant_id",
+    "participant_ref",
+    "pseudonym_key_version",
+    "subject_ref",
 ];
 
 /// Reject a public-release fixture that still carries restricted identity.
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
 /// research that needs the restricted mapping keeps those values outside this
-/// fixture. A column named `research_participant_ref` is allowed; a column
-/// named `participant_ref` is not.
+/// fixture. A column named `research_participant_ref` is allowed; columns
+/// named `participant_ref`, `assessment_participant_ref`, `subject_ref`,
+/// `identity_subject_ref`, `linked_subject_ref`, or `pseudonym_key_version`
+/// are not.
 ///
 /// # Errors
 ///
@@ -279,7 +286,29 @@ pub fn scan_public_release_fixture(
 }
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
-    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.contains(&column_name.trim())
+    let normalized = normalize_public_release_column(column_name);
+    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.contains(&normalized.as_str())
+}
+
+/// Fold ASCII case and camelCase so CSV/JSON export aliases match the denylist.
+///
+/// `researchParticipantRef` becomes `research_participant_ref` and stays
+/// allowed. `assessmentParticipantRef` becomes `assessment_participant_ref`
+/// and is rejected.
+fn normalize_public_release_column(column_name: &str) -> String {
+    let trimmed = column_name.trim();
+    let mut normalized = String::with_capacity(trimmed.len() + 4);
+    let mut previous: Option<char> = None;
+    for current in trimmed.chars() {
+        if current.is_ascii_uppercase()
+            && previous.is_some_and(|prior| prior.is_ascii_lowercase() || prior.is_ascii_digit())
+        {
+            normalized.push('_');
+        }
+        normalized.push(current.to_ascii_lowercase());
+        previous = Some(current);
+    }
+    normalized
 }
 
 fn matches_restricted_identity(cell: &str, restricted_identities: &[&str]) -> bool {

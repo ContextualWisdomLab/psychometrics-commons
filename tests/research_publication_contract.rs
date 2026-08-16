@@ -231,6 +231,9 @@ fn keyverse_and_linkage_columns_cannot_enter_a_public_fixture() {
         "linkage_ref",
         "linkage_key_version",
         "operational_participant_ref",
+        "participant_id",
+        "keyverse_subject",
+        "linkage_key",
     ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
@@ -242,6 +245,45 @@ fn keyverse_and_linkage_columns_cannot_enter_a_public_fixture() {
             "{column_name} must not appear in a public release fixture"
         );
     }
+}
+
+#[test]
+fn governance_and_product_identity_columns_cannot_enter_a_public_fixture() {
+    for column_name in [
+        "assessment_participant_ref",
+        "pseudonym_key_version",
+        "identity_subject_ref",
+        "subject_ref",
+        "linked_subject_ref",
+        "Assessment_Participant_Ref",
+        "assessmentParticipantRef",
+        "SUBJECT_REF",
+        "linkedSubjectRef",
+        "pseudonymKeyVersion",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+        assert_eq!(
+            scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} is a governance or product identity column and must not appear in a public release fixture"
+        );
+    }
+}
+
+#[test]
+fn camel_case_research_participant_column_stays_allowed() {
+    let columns = [PublicReleaseFixtureColumn {
+        column_name: "researchParticipantRef",
+        cell_values: &["research_participant_program_alpha_one"],
+    }];
+
+    assert_eq!(
+        scan_public_release_fixture(&columns, seoul_clinic_restricted_identities()),
+        Ok(())
+    );
 }
 
 #[test]
