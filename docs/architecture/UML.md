@@ -452,7 +452,7 @@ sequenceDiagram
 
     P->>A: explicit research opt-in for versioned scope
     A->>DB: append consent evidence + bound outbox + research contribution
-    Note over A,DB: Successor of #120/#123 commits the consent ledger change with its causally bound outbox row after locking the insertion-order durable ledger tail and failing closed on an ambiguous physical tail
+    Note over A,DB: Active PR #134 commits the consent ledger change with its causally bound outbox row after locking the insertion-order durable ledger tail and failing closed on an ambiguous physical tail
     DB-->>A: contribution_ref
     A->>L: create/reuse scoped research pseudonym
     L-->>A: research_participant_ref
