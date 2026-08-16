@@ -74,6 +74,34 @@ fn anonymous_authority_never_crosses_tenant_or_participant_ownership() {
 }
 
 #[test]
+fn anonymous_authorization_rejects_multiple_mismatches_in_documented_order() {
+    let context = anonymous_context();
+    let foreign_tenant_result = ResourceScope::participant_owned(
+        ResourceKind::Result,
+        "tenant_beta",
+        "participant_alpha",
+        "result_alpha",
+    )
+    .unwrap();
+    let wrong_kind_and_owner = ResourceScope::participant_owned(
+        ResourceKind::Result,
+        "tenant_alpha",
+        "participant_beta",
+        "result_alpha",
+    )
+    .unwrap();
+
+    assert_eq!(
+        authorize_anonymous_session(&context, &foreign_tenant_result, 1_500),
+        Err(AnonymousResourceAuthorizationError::CrossTenantDenied)
+    );
+    assert_eq!(
+        authorize_anonymous_session(&context, &wrong_kind_and_owner, 1_500),
+        Err(AnonymousResourceAuthorizationError::ResourceKindMismatch)
+    );
+}
+
+#[test]
 fn anonymous_authority_is_bound_to_one_exact_assessment_session() {
     let context = anonymous_context();
     let other_session = session_resource("tenant_alpha", "participant_alpha", "session_beta");
