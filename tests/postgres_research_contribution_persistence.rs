@@ -157,6 +157,76 @@ fn persist_err(
     error
 }
 
+fn granted_snapshot_with_form(
+    participant_ref: &str,
+    snapshot_ref: &str,
+    consent_form_version_ref: &str,
+    research_scope_ref: &str,
+    occurred_at_unix_ms: u64,
+) -> ConsentSnapshot {
+    let mut ledger = ConsentLedger::new(participant_ref).unwrap();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_grant",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref,
+            research_scope_ref: Some(research_scope_ref),
+            occurred_at_unix_ms,
+        })
+        .unwrap();
+    ledger.snapshot_as(snapshot_ref).unwrap()
+}
+
+fn assert_snapshot_conflicts(client: &mut Client, snapshot: &ConsentSnapshot) {
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_research_consent_snapshot(&mut transaction, snapshot),
+        Err(ResearchContributionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+fn tamper_research_contribution(
+    client: &mut Client,
+    sql: &str,
+    params: &[&(dyn postgres::types::ToSql + Sync)],
+) {
+    client
+        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
+        .unwrap();
+    client.execute(sql, params).unwrap();
+    client
+        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
+        .unwrap();
+}
+
+fn persist_xi_grant(client: &mut Client) -> (ConsentSnapshot, ResearchContribution) {
+    let (ledger, snapshot) = granted_research(
+        "participant_research_xi",
+        "consent_snapshot_research_xi",
+        "research_scope_xi",
+        14_000,
+    );
+    persist_grant(client, &ledger);
+    persist_snapshot_ok(client, &snapshot);
+    let stored = contribution(
+        "research_contribution_xi",
+        "research_participant_xi",
+        &snapshot,
+        14_100,
+    );
+    persist_ok(client, &stored);
+    (snapshot, stored)
+}
+
+fn assert_conflicting_replay(error: &ResearchContributionPersistenceError) {
+    assert!(matches!(
+        error,
+        ResearchContributionPersistenceError::ConflictingReplay
+    ));
+}
+
 #[test]
 fn active_contribution_and_withdrawal_are_append_only_and_idempotent() {
     let _guard = test_guard();
@@ -689,145 +759,79 @@ fn snapshot_and_contribution_replay_rejects_each_field_mismatch() {
     reset_tables(&mut client);
     apply_consent_migration(&mut client).unwrap();
     apply_research_contribution_migration(&mut client).unwrap();
+    let (snapshot, stored) = persist_xi_grant(&mut client);
 
-    let (ledger, snapshot) = granted_research(
-        "participant_research_xi",
-        "consent_snapshot_research_xi",
-        "research_scope_xi",
-        14_000,
+    assert_snapshot_conflicts(
+        &mut client,
+        &granted_snapshot_with_form(
+            "participant_research_xi",
+            "consent_snapshot_research_xi",
+            "research_consent_form_v1",
+            "research_scope_xi_other",
+            14_000,
+        ),
     );
-    persist_grant(&mut client, &ledger);
-    persist_snapshot_ok(&mut client, &snapshot);
-
-    let mut scope_mismatch_ledger = ConsentLedger::new("participant_research_xi").unwrap();
-    scope_mismatch_ledger
-        .record(ConsentEventInput {
-            event_ref: "research_consent_grant",
-            purpose: ConsentPurpose::ResearchContribution,
-            decision: ConsentDecision::Granted,
-            consent_form_version_ref: "research_consent_form_v1",
-            research_scope_ref: Some("research_scope_xi_other"),
-            occurred_at_unix_ms: 14_000,
-        })
-        .unwrap();
-    let scope_mismatch = scope_mismatch_ledger
-        .snapshot_as("consent_snapshot_research_xi")
-        .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_research_consent_snapshot(&mut transaction, &scope_mismatch),
-        Err(ResearchContributionPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
-
-    let mut form_mismatch_ledger = ConsentLedger::new("participant_research_xi").unwrap();
-    form_mismatch_ledger
-        .record(ConsentEventInput {
-            event_ref: "research_consent_grant",
-            purpose: ConsentPurpose::ResearchContribution,
-            decision: ConsentDecision::Granted,
-            consent_form_version_ref: "research_consent_form_v2",
-            research_scope_ref: Some("research_scope_xi"),
-            occurred_at_unix_ms: 14_000,
-        })
-        .unwrap();
-    let form_mismatch = form_mismatch_ledger
-        .snapshot_as("consent_snapshot_research_xi")
-        .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_research_consent_snapshot(&mut transaction, &form_mismatch),
-        Err(ResearchContributionPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
-
-    let stored = contribution(
-        "research_contribution_xi",
-        "research_participant_xi",
-        &snapshot,
-        14_100,
+    assert_snapshot_conflicts(
+        &mut client,
+        &granted_snapshot_with_form(
+            "participant_research_xi",
+            "consent_snapshot_research_xi",
+            "research_consent_form_v2",
+            "research_scope_xi",
+            14_000,
+        ),
     );
-    persist_ok(&mut client, &stored);
+    assert_conflicting_replay(&persist_err(
+        &mut client,
+        &contribution(
+            "research_contribution_xi",
+            "research_participant_xi_other",
+            &snapshot,
+            14_100,
+        ),
+    ));
 
-    let research_identity_mismatch = contribution(
-        "research_contribution_xi",
-        "research_participant_xi_other",
-        &snapshot,
-        14_100,
+    tamper_research_contribution(
+        &mut client,
+        "UPDATE research_contribution SET consent_snapshot_ref = $1 WHERE contribution_ref = $2",
+        &[
+            &"consent_snapshot_research_xi_tampered",
+            &stored.contribution_ref(),
+        ],
     );
-    assert!(matches!(
-        persist_err(&mut client, &research_identity_mismatch),
-        ResearchContributionPersistenceError::ConflictingReplay
-    ));
+    assert_conflicting_replay(&persist_err(&mut client, &stored));
 
-    client
-        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
-        .unwrap();
-    client
-        .execute(
-            "UPDATE research_contribution SET consent_snapshot_ref = $1 \
-             WHERE contribution_ref = $2",
-            &[
-                &"consent_snapshot_research_xi_tampered",
-                &stored.contribution_ref(),
-            ],
-        )
-        .unwrap();
-    client
-        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
-        .unwrap();
-    assert!(matches!(
-        persist_err(&mut client, &stored),
-        ResearchContributionPersistenceError::ConflictingReplay
-    ));
+    tamper_research_contribution(
+        &mut client,
+        "UPDATE research_contribution SET consent_snapshot_ref = $1, \
+                research_scope_ref = $2 \
+         WHERE contribution_ref = $3",
+        &[
+            &snapshot.snapshot_ref(),
+            &"research_scope_xi_tampered",
+            &stored.contribution_ref(),
+        ],
+    );
+    assert_conflicting_replay(&persist_err(&mut client, &stored));
 
-    client
-        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
-        .unwrap();
-    client
-        .execute(
-            "UPDATE research_contribution SET consent_snapshot_ref = $1, \
-                    research_scope_ref = $2 \
-             WHERE contribution_ref = $3",
-            &[
-                &snapshot.snapshot_ref(),
-                &"research_scope_xi_tampered",
-                &stored.contribution_ref(),
-            ],
-        )
-        .unwrap();
-    client
-        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
-        .unwrap();
-    assert!(matches!(
-        persist_err(&mut client, &stored),
-        ResearchContributionPersistenceError::ConflictingReplay
-    ));
-
-    let withdrawn = stored.withdraw("research_withdrawal_xi", 14_500).unwrap();
-    client
-        .batch_execute("ALTER TABLE research_contribution DISABLE TRIGGER ALL;")
-        .unwrap();
-    client
-        .execute(
-            "UPDATE research_contribution SET consent_snapshot_ref = $1, \
-                    research_scope_ref = $2 \
-             WHERE contribution_ref = $3",
-            &[
-                &snapshot.snapshot_ref(),
-                &snapshot.active_research_scope().unwrap(),
-                &stored.contribution_ref(),
-            ],
-        )
-        .unwrap();
-    client
-        .batch_execute("ALTER TABLE research_contribution ENABLE TRIGGER ALL;")
-        .unwrap();
-    persist_ok(&mut client, &withdrawn);
-    let later_time = stored.withdraw("research_withdrawal_xi", 14_600).unwrap();
-    assert!(matches!(
-        persist_err(&mut client, &later_time),
-        ResearchContributionPersistenceError::ConflictingReplay
+    tamper_research_contribution(
+        &mut client,
+        "UPDATE research_contribution SET consent_snapshot_ref = $1, \
+                research_scope_ref = $2 \
+         WHERE contribution_ref = $3",
+        &[
+            &snapshot.snapshot_ref(),
+            &snapshot.active_research_scope().unwrap(),
+            &stored.contribution_ref(),
+        ],
+    );
+    persist_ok(
+        &mut client,
+        &stored.withdraw("research_withdrawal_xi", 14_500).unwrap(),
+    );
+    assert_conflicting_replay(&persist_err(
+        &mut client,
+        &stored.withdraw("research_withdrawal_xi", 14_600).unwrap(),
     ));
 }
 
