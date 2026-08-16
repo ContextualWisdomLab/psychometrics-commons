@@ -82,6 +82,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - pause/resume and offline replay tests;
 - stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);
 - concurrent stale shorter command-history persist tests (`concurrent_stale_shorter_persist_cannot_rewind_paused_projection`);
+- header-row lock-hold tests (`command_persist_locks_session_header_until_caller_commits`);
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests.
 

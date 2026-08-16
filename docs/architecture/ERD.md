@@ -479,6 +479,9 @@ A physical schema must enforce equivalents of the following constraints:
 
 | Constraint | Purpose |
 |---|---|
+| unique `session_ref` | one assessment-session identity |
+| unique `(session_ref, command_ref)` | no session-command identity reuse |
+| unique `(session_ref, command_sequence)` | authoritative session-command order |
 | unique `(session_ref, delivery_sequence)` | authoritative item-presentation order |
 | unique `delivery_event_ref` | no delivery evidence identity reuse |
 | unique `(session_ref, client_event_ref)` | response replay idempotency |
