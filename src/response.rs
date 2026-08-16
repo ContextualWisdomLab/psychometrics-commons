@@ -128,7 +128,7 @@ impl ResponseSnapshot {
 pub enum WriteError {
     /// A new logical response was offered while the session was not active.
     SessionNotActive(SessionState),
-    /// An identity-bearing response or snapshot reference was blank or numeric-like.
+    /// An identity-bearing reference was not an exact safe opaque product identifier.
     InvalidReference,
     /// A required response-payload digest was blank.
     EmptyReference,
@@ -148,8 +148,9 @@ impl Display for WriteError {
             Self::SessionNotActive(state) => {
                 write!(formatter, "session {state:?} cannot accept response events")
             }
-            Self::InvalidReference => formatter
-                .write_str("response identity references must be opaque non-numeric values"),
+            Self::InvalidReference => formatter.write_str(
+                "response identity references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
+            ),
             Self::EmptyReference => {
                 formatter.write_str("response payload digest must not be empty")
             }
@@ -184,13 +185,15 @@ pub struct ResponseLedger {
 impl ResponseLedger {
     /// Create an empty response ledger for one assessment session.
     ///
-    /// Leading and trailing whitespace is removed before the session reference
-    /// becomes identity-bearing state.
+    /// The caller must provide the session reference exactly as issued. Leading or
+    /// trailing whitespace, unsafe control/format characters, blank values, and
+    /// numeric-like values are rejected rather than silently normalized into another
+    /// identity.
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::InvalidReference`] when the session reference is blank
-    /// or numeric-like instead of an opaque product identifier.
+    /// Returns [`WriteError::InvalidReference`] when the session reference is not an
+    /// exact safe opaque product identifier.
     pub fn new(session_ref: impl AsRef<str>) -> Result<Self, WriteError> {
         let session_ref =
             normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
@@ -218,15 +221,17 @@ impl ResponseLedger {
     /// even after the session leaves [`SessionState::Active`]. The supplied
     /// server event reference is ignored for that replay because the original
     /// immutable event identity is returned. Every genuinely new logical response
-    /// still requires an active session. Identity-bearing references are normalized
-    /// before replay/conflict checks so surrounding whitespace cannot create aliases.
-    /// Response-payload identity must use exact `sha256:` plus 64 lowercase hexadecimal
-    /// characters, matching the durable `PostgreSQL` digest constraint.
+    /// still requires an active session. Identity-bearing references must already
+    /// use their exact safe opaque spelling; whitespace-padded, control-bearing,
+    /// invisible-format, blank, and numeric-like aliases are rejected before any
+    /// replay or conflict decision. Response-payload identity must use exact
+    /// `sha256:` plus 64 lowercase hexadecimal characters, matching the durable
+    /// `PostgreSQL` digest constraint.
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::InvalidReference`] for blank or numeric-like identity
-    /// references, [`WriteError::EmptyReference`] for a blank payload digest,
+    /// Returns [`WriteError::InvalidReference`] for a noncanonical identity reference,
+    /// [`WriteError::EmptyReference`] for a blank payload digest,
     /// [`WriteError::InvalidPayloadDigest`] for a noncanonical digest,
     /// [`WriteError::IdempotencyConflict`] when a client event reference is reused
     /// with different item or payload content, [`WriteError::SessionNotActive`]
@@ -304,14 +309,15 @@ impl ResponseLedger {
 
     /// Freeze the accepted event prefix with its durable opaque snapshot identity.
     ///
-    /// Leading and trailing whitespace is removed before the reference becomes
-    /// identity-bearing state.
+    /// The snapshot reference must already use the exact spelling issued by the
+    /// persistence boundary. Leading/trailing whitespace and unsafe controls are
+    /// rejected instead of being trimmed into another snapshot identity.
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::InvalidReference`] for a blank or numeric-like snapshot
-    /// reference or [`WriteError::SnapshotRequiresCompleted`] unless `state` is
-    /// exactly [`SessionState::Completed`].
+    /// Returns [`WriteError::InvalidReference`] when `snapshot_ref` is not an exact
+    /// safe opaque product identifier, or [`WriteError::SnapshotRequiresCompleted`]
+    /// unless `state` is exactly [`SessionState::Completed`].
     pub fn freeze_as(
         &self,
         state: SessionState,
