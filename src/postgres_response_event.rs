@@ -222,7 +222,7 @@ pub fn load_response_event_receipts(
         &[&session_ref],
     )?;
     let mut receipts = Vec::with_capacity(rows.len());
-    for row in rows {
+    for (index, row) in rows.into_iter().enumerate() {
         let server_event_ref: String = row.get(0);
         let client_event_ref: String = row.get(1);
         let item_version_ref: String = row.get(2);
@@ -232,6 +232,7 @@ pub fn load_response_event_receipts(
         let received_at: SystemTime = row.get(6);
         let sequence = usize::try_from(server_sequence)
             .map_err(|_| ResponseEventPersistenceError::InvalidSequence)?;
+        require_contiguous_server_sequence(index, sequence)?;
         let observed_at_unix_ms = unix_ms_from_system_time(observed_at)?;
         let received_at_unix_ms = unix_ms_from_system_time(received_at)?;
         if observed_at_unix_ms > received_at_unix_ms {
@@ -269,10 +270,7 @@ pub fn load_response_ledger(
     session_ref: &str,
 ) -> Result<ResponseLedger, ResponseEventPersistenceError> {
     let receipts = load_response_event_receipts(transaction, session_ref)?;
-    let events = receipts
-        .into_iter()
-        .map(|receipt| receipt.event)
-        .collect();
+    let events = receipts.into_iter().map(|receipt| receipt.event).collect();
     ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)
 }
 
@@ -374,6 +372,17 @@ fn unix_ms_from_system_time(time: SystemTime) -> Result<u64, ResponseEventPersis
     Ok(unix_ms)
 }
 
+fn require_contiguous_server_sequence(
+    index: usize,
+    sequence: usize,
+) -> Result<(), ResponseEventPersistenceError> {
+    if sequence == index + 1 {
+        Ok(())
+    } else {
+        Err(ResponseEventPersistenceError::InvalidSequence)
+    }
+}
+
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), ResponseEventPersistenceError> {
@@ -389,13 +398,14 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        map_rebuild_error, postgres_sequence, postgres_timestamptz, required_reference,
-        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
+        map_rebuild_error, postgres_sequence, postgres_timestamptz,
+        require_contiguous_server_sequence, required_reference, unix_ms_from_system_time,
+        ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
-    use std::time::{Duration, UNIX_EPOCH};
     use crate::response::WriteError;
     use crate::session::SessionState;
+    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn blank_numeric_and_overflow_sequences_fail_closed() {
@@ -412,6 +422,16 @@ mod reference_guard_tests {
             "session_ipip_ko_quick"
         );
         assert_eq!(postgres_sequence(1).unwrap(), 1);
+        assert!(require_contiguous_server_sequence(0, 1).is_ok());
+        assert!(require_contiguous_server_sequence(1, 2).is_ok());
+        assert!(matches!(
+            require_contiguous_server_sequence(1, 3),
+            Err(ResponseEventPersistenceError::InvalidSequence)
+        ));
+        assert!(matches!(
+            require_contiguous_server_sequence(0, 2),
+            Err(ResponseEventPersistenceError::InvalidSequence)
+        ));
         assert!(matches!(
             postgres_sequence(usize::MAX),
             Err(ResponseEventPersistenceError::InvalidSequence)

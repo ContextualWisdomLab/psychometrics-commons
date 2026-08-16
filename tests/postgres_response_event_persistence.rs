@@ -7,6 +7,7 @@ use psychometrics_commons_runtime::postgres_response_event::{
     ResponseEventReceipt,
 };
 use psychometrics_commons_runtime::response::{ResponseEvent, ResponseLedger, ResponseWrite};
+use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{Mutex, MutexGuard};
 
@@ -143,6 +144,26 @@ fn load_err(client: &mut Client, session_ref: &str) -> ResponseEventPersistenceE
     error
 }
 
+fn load_receipts_err(client: &mut Client, session_ref: &str) -> ResponseEventPersistenceError {
+    let mut transaction = client.transaction().unwrap();
+    let error = load_response_event_receipts(&mut transaction, session_ref).unwrap_err();
+    transaction.rollback().unwrap();
+    error
+}
+
+fn scoring_input<'a>() -> ScoringRequestInput<'a> {
+    ScoringRequestInput {
+        scoring_request_ref: "scoring_request_ipip_ko_quick",
+        response_snapshot_ref: "response_snapshot_ipip_ko_quick",
+        assessment_spec_ref: "assessment_spec_ipip_bf_ko_quick",
+        instrument_version_ref: "instrument_version_ipip_bf_ko_quick",
+        scoring_version_ref: "scoring_version_ipip_mlsirm_v1",
+        calibration_reference: "calibration_ipip_bf_ko_quick",
+        norm_version_ref: Some("norm_ipip_bf_ko_quick"),
+        requested_output_schema_version: 1,
+    }
+}
+
 fn rebound_event(
     client_event_ref: &str,
     item_version_ref: &str,
@@ -166,8 +187,8 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
     reset_response_event_table(&mut client);
     apply_response_event_migration(&mut client).unwrap();
 
-    let mut live = ResponseLedger::new("session_ipip_ko_quick").unwrap();
-    let first = live
+    let mut control = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    let control_first = control
         .record(
             SessionState::Active,
             write(
@@ -178,6 +199,36 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
             ),
         )
         .unwrap();
+    control
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_02",
+                "client_event_item_02",
+                "item_version_n2_ko",
+                DIGEST_N2,
+            ),
+        )
+        .unwrap();
+    let expected_snapshot = control
+        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .unwrap();
+    let expected_request =
+        ScoringRequest::from_snapshot(&expected_snapshot, scoring_input()).unwrap();
+
+    let mut first_only = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    let first = first_only
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_01",
+                "client_event_item_01",
+                "item_version_n1_ko",
+                DIGEST_N1,
+            ),
+        )
+        .unwrap();
+    assert_eq!(first, control_first);
     assert_eq!(
         persist_ok(&mut client, "session_ipip_ko_quick", &first),
         ResponseEventPersistenceDisposition::Inserted
@@ -187,15 +238,15 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
         ResponseEventPersistenceDisposition::Duplicate
     );
 
-    let after_first = load_ok(&mut client, "session_ipip_ko_quick");
-    assert_eq!(after_first.events(), std::slice::from_ref(&first));
+    let mut after_restart = load_ok(&mut client, "session_ipip_ko_quick");
+    assert_eq!(after_restart.events(), std::slice::from_ref(&first));
     let first_receipts = load_receipts_ok(&mut client, "session_ipip_ko_quick");
     assert_eq!(first_receipts.len(), 1);
     assert_eq!(first_receipts[0].event(), &first);
     assert_eq!(first_receipts[0].observed_at_unix_ms(), OBSERVED_AT_MS);
     assert_eq!(first_receipts[0].received_at_unix_ms(), RECEIVED_AT_MS);
 
-    let second = live
+    let second = after_restart
         .record(
             SessionState::Active,
             write(
@@ -212,10 +263,14 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
     );
 
     let rebuilt = load_ok(&mut client, "session_ipip_ko_quick");
-    assert_eq!(rebuilt, live);
+    assert_eq!(rebuilt, after_restart);
+    assert_eq!(rebuilt, control);
     let snapshot = rebuilt
         .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
         .unwrap();
+    let request = ScoringRequest::from_snapshot(&snapshot, scoring_input()).unwrap();
+    assert_eq!(snapshot, expected_snapshot);
+    assert_eq!(request, expected_request);
     assert_eq!(snapshot.event_count(), 2);
     assert_eq!(snapshot.last_sequence(), Some(2));
 }
@@ -230,6 +285,48 @@ fn empty_session_reload_is_an_empty_ledger() {
     let rebuilt = load_ok(&mut client, "session_ipip_ko_empty");
     assert!(rebuilt.is_empty());
     assert_eq!(rebuilt.session_ref(), "session_ipip_ko_empty");
+}
+
+#[test]
+fn reload_keeps_neighbor_session_prefixes_isolated() {
+    let _guard = response_event_test_guard();
+    let mut client = test_client();
+    reset_response_event_table(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+
+    let (_, alpha) = recorded_event(
+        "session_ipip_ko_alpha",
+        write(
+            "server_event_alpha_01",
+            "client_event_alpha_01",
+            "item_version_n1_ko",
+            DIGEST_N1,
+        ),
+    );
+    let (_, beta) = recorded_event(
+        "session_ipip_ko_beta",
+        write(
+            "server_event_beta_01",
+            "client_event_beta_01",
+            "item_version_n1_ko",
+            DIGEST_N2,
+        ),
+    );
+    persist_ok(&mut client, "session_ipip_ko_alpha", &alpha);
+    persist_ok(&mut client, "session_ipip_ko_beta", &beta);
+
+    let loaded_alpha = load_ok(&mut client, "session_ipip_ko_alpha");
+    let loaded_beta = load_ok(&mut client, "session_ipip_ko_beta");
+    assert_eq!(loaded_alpha.events(), std::slice::from_ref(&alpha));
+    assert_eq!(loaded_beta.events(), std::slice::from_ref(&beta));
+    assert_eq!(
+        loaded_alpha.events()[0].server_event_ref(),
+        "server_event_alpha_01"
+    );
+    assert_eq!(
+        loaded_beta.events()[0].server_event_ref(),
+        "server_event_beta_01"
+    );
 }
 
 #[test]
@@ -398,6 +495,10 @@ fn missing_relation_and_gapped_history_fail_closed() {
         .unwrap();
     assert!(matches!(
         load_err(&mut client, "session_ipip_ko_gap"),
+        ResponseEventPersistenceError::InvalidSequence
+    ));
+    assert!(matches!(
+        load_receipts_err(&mut client, "session_ipip_ko_gap"),
         ResponseEventPersistenceError::InvalidSequence
     ));
 }

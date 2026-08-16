@@ -106,6 +106,71 @@ fn reconstructed_two_item_korean_path_pins_the_same_scoring_request() {
 }
 
 #[test]
+fn restarted_korean_path_records_item_two_and_keeps_the_scoring_prefix() {
+    let mut control = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    control
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_01",
+                "client_event_item_01",
+                "item_version_n1_ko",
+                DIGEST_N1,
+            ),
+        )
+        .unwrap();
+    control
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_02",
+                "client_event_item_02",
+                "item_version_n2_ko",
+                DIGEST_N2,
+            ),
+        )
+        .unwrap();
+    let expected_snapshot = control
+        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .unwrap();
+    let expected_request =
+        ScoringRequest::from_snapshot(&expected_snapshot, scoring_input()).unwrap();
+
+    let mut after_restart = ResponseLedger::from_persisted(
+        "session_ipip_ko_quick",
+        vec![ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            DIGEST_N1,
+            1,
+        )
+        .unwrap()],
+    )
+    .unwrap();
+    after_restart
+        .record(
+            SessionState::Active,
+            write(
+                "server_event_item_02",
+                "client_event_item_02",
+                "item_version_n2_ko",
+                DIGEST_N2,
+            ),
+        )
+        .unwrap();
+    let rebuilt_snapshot = after_restart
+        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .unwrap();
+    let rebuilt_request =
+        ScoringRequest::from_snapshot(&rebuilt_snapshot, scoring_input()).unwrap();
+
+    assert_eq!(after_restart.events(), control.events());
+    assert_eq!(rebuilt_snapshot, expected_snapshot);
+    assert_eq!(rebuilt_request, expected_request);
+}
+
+#[test]
 fn persisted_event_reconstruction_fails_closed_on_identity_and_sequence() {
     assert!(matches!(
         ResponseEvent::from_persisted(
