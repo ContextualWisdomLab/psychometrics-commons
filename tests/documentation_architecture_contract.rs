@@ -337,6 +337,44 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
 }
 
 #[test]
+fn session_command_http_contract_is_mapped() {
+    let root = repository_root();
+    let openapi = read_required(&root.join("openapi/session-commands.yaml"));
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+    let changelog = read_required(&root.join("CHANGELOG.md"));
+    let doctoring = read_required(&root.join("docs/doctoring/standards-and-evidence.md"));
+
+    for marker in [
+        "openapi: 3.2.0",
+        "/v1/sessions/{session_ref}/commands",
+        "applySessionCommand",
+        "application/problem+json",
+        "Idempotency-Key",
+        "anonymous/unauthenticated",
+    ] {
+        assert!(
+            openapi.contains(marker),
+            "session-command OpenAPI must name as-built marker {marker}"
+        );
+    }
+    assert!(
+        traceability.contains("POST /v1/sessions/{session_ref}/commands")
+            && traceability.contains("not protected-main truth"),
+        "traceability must keep session-command HTTP off protected main until integrated"
+    );
+    assert!(
+        changelog.contains("POST /v1/sessions/{session_ref}/commands"),
+        "changelog must tell a purchaser the session-command write path"
+    );
+    assert!(
+        doctoring.contains("RFC 9457")
+            && doctoring.contains("RFC 9110")
+            && doctoring.contains("OpenAPI Specification Version 3.2.0"),
+        "doctoring must cite HTTP, problem-detail, and OpenAPI sources in APA 7th"
+    );
+}
+
+#[test]
 fn uml_covers_identity_longitudinal_and_workbench_behavior() {
     let uml = read_required(&repository_root().join("docs/architecture/UML.md"));
 

@@ -1,0 +1,123 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public session-command API
+  version: 0.1.0
+  description: >
+    As-built public write of one purchaser lifecycle command on an
+    in-process assessment session. A purchaser posts Activate, Pause,
+    Resume, Complete, or Cancel. Exact Idempotency-Key replay returns
+    the original command outcome. This family does not create sessions,
+    record answers, or persist ledgers across restart. Authority is
+    anonymous/unauthenticated in-process transport scoped to session_ref;
+    Keyverse is not added on this slice.
+paths:
+  /v1/sessions/{session_ref}/commands:
+    post:
+      operationId: applySessionCommand
+      summary: Apply one purchaser lifecycle command
+      description: >
+        Accepts Activate, Pause, Resume, Complete, or Cancel. Send the
+        same Idempotency-Key to replay the original outcome. After
+        Activate, POST /v1/sessions/{session_ref}/responses for each
+        item, then Complete. Do not reopen Completed, Cancelled, Expired,
+        or Invalidated sessions.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque assessment-session reference minted at create time.
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque command reference used for exact replay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCommandWrite"
+      responses:
+        "200":
+          description: Exact idempotent replay of an already accepted command.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppliedSessionCommand"
+        "201":
+          description: Newly accepted lifecycle command.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppliedSessionCommand"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    SessionCommandWrite:
+      type: object
+      additionalProperties: false
+      required:
+        - command
+      properties:
+        command:
+          type: string
+          enum:
+            - Activate
+            - Pause
+            - Resume
+            - Complete
+            - Cancel
+    AppliedSessionCommand:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - command_ref
+        - command
+        - sequence
+        - state
+        - next_action
+      properties:
+        session_ref:
+          type: string
+        command_ref:
+          type: string
+        command:
+          type: string
+        sequence:
+          type: integer
+          minimum: 1
+        state:
+          type: string
+        next_action:
+          type: string
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

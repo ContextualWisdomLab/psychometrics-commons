@@ -53,6 +53,23 @@ impl SessionState {
     pub const fn accepts_responses(self) -> bool {
         matches!(self, Self::Active)
     }
+
+    /// Return the stable wire name for this lifecycle state.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Created => "Created",
+            Self::Active => "Active",
+            Self::Paused => "Paused",
+            Self::Completed => "Completed",
+            Self::Scoring => "Scoring",
+            Self::Scored => "Scored",
+            Self::Released => "Released",
+            Self::Expired => "Expired",
+            Self::Cancelled => "Cancelled",
+            Self::Invalidated => "Invalidated",
+        }
+    }
 }
 
 /// Fail-closed error returned while creating a session from a published release.
@@ -209,6 +226,23 @@ impl AssessmentSession {
     #[must_use]
     pub const fn state(&self) -> SessionState {
         self.state
+    }
+
+    /// Return the next unused server-assigned command sequence.
+    #[must_use]
+    pub fn next_command_sequence(&self) -> u64 {
+        self.accepted_commands
+            .last()
+            .map_or(1, |accepted| accepted.sequence + 1)
+    }
+
+    /// Return the sequence previously accepted for `command_ref`, if any.
+    #[must_use]
+    pub fn accepted_command_sequence(&self, command_ref: &str) -> Option<u64> {
+        self.accepted_commands
+            .iter()
+            .find(|accepted| accepted.command_ref == command_ref)
+            .map(|accepted| accepted.sequence)
     }
 
     /// Apply one identified lifecycle command to this aggregate's server-authoritative state.
