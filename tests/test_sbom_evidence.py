@@ -60,6 +60,12 @@ class SbomEvidenceContract(unittest.TestCase):
     def test_pull_request_lane_is_read_only_and_does_not_publish(self) -> None:
         """Untrusted pull-request code must not obtain release or dependency-write authority."""
         text = self.workflow_text()
+        top_level_permissions = mapping_block(text, "permissions", 0)
+        self.assertEqual(
+            [line.strip() for line in top_level_permissions.splitlines() if line.strip()],
+            ["contents: read"],
+            "workflow token authority must fail closed at the top level",
+        )
         jobs = mapping_block(text, "jobs", 0)
         for job_name in ["generate", "verify-evidence"]:
             job = mapping_block(jobs, job_name, 2)
