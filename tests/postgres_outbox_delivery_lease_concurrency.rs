@@ -1,7 +1,7 @@
 //! Concurrency acceptance for exclusive outbox delivery claims and fencing tokens.
 //!
 //! This fixture holds the winning claim transaction open long enough to prove that the
-//! competing worker is actually blocked by PostgreSQL. Only after the winner commits may the
+//! competing worker is actually blocked by `PostgreSQL`. Only after the winner commits may the
 //! loser classify the row as non-claimable. Recovery must then issue a strictly newer fence.
 
 use postgres::{Client, NoTls};
@@ -57,38 +57,19 @@ fn identity() -> OutboxPersistenceIdentity<'static> {
     )
 }
 
-#[test]
-fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
-    let mut database_guard = database_test_guard();
-    let mut primary = connect_client();
-    primary
+fn reset_concurrency_schema(client: &mut Client) {
+    client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
              CREATE SCHEMA {SCHEMA};
              SET search_path TO {SCHEMA};"
         ))
         .expect("isolated concurrency schema should be reset");
-    apply_integration_migration(&mut primary)
+    apply_integration_migration(client)
         .expect("integration migration should install the outbox schema");
-    assert_eq!(
-        enqueue_outbox_event(&mut primary, &event(), 3).expect("pending event should be enqueued"),
-        PersistenceDisposition::Inserted,
-    );
+}
 
-    let mut first_transaction = primary
-        .transaction()
-        .expect("winning claim transaction should begin");
-    let first_lease = claim_outbox_delivery(
-        &mut first_transaction,
-        identity(),
-        "worker_concurrent_alpha",
-        "outbox_lease_concurrent_alpha",
-        10_000,
-        11_000,
-    )
-    .expect("first worker should claim the pending event");
-    assert_eq!(first_lease.fencing_token(), 1);
-
+fn spawn_competing_claim() -> (thread::JoinHandle<bool>, mpsc::Receiver<i32>) {
     let (pid_sender, pid_receiver) = mpsc::channel();
     let second_worker = thread::spawn(move || {
         let mut second = connect_client();
@@ -123,41 +104,28 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
             Err(error) => panic!("competing claim failed unexpectedly: {error:?}"),
         }
     });
+    (second_worker, pid_receiver)
+}
 
-    let second_pid = pid_receiver
-        .recv_timeout(Duration::from_secs(2))
-        .expect("competing worker should reach the claim boundary");
-    let mut observed_blocking_lock = false;
+fn wait_until_blocked(observer: &mut Client, backend_pid: i32) -> bool {
     for _ in 0..200 {
-        let blocked: bool = database_guard
+        let blocked: bool = observer
             .query_one(
                 "SELECT cardinality(pg_blocking_pids($1)) > 0",
-                &[&second_pid],
+                &[&backend_pid],
             )
             .expect("observer should inspect the competing PostgreSQL backend")
             .get(0);
         if blocked {
-            observed_blocking_lock = true;
-            break;
+            return true;
         }
         thread::sleep(Duration::from_millis(10));
     }
-    assert!(
-        observed_blocking_lock,
-        "the second worker must contend on the first uncommitted claim instead of bypassing exclusivity",
-    );
+    false
+}
 
-    first_transaction
-        .commit()
-        .expect("winning delivery claim should commit");
-    assert!(
-        second_worker
-            .join()
-            .expect("competing claim worker should not panic"),
-        "after the winner commits, the competing worker must observe NotLeaseable",
-    );
-
-    let mut expiry_transaction = primary
+fn expire_and_reclaim(client: &mut Client) {
+    let mut expiry_transaction = client
         .transaction()
         .expect("expiry transaction should begin");
     expire_outbox_delivery_lease(&mut expiry_transaction, identity(), 11_000)
@@ -166,7 +134,7 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
         .commit()
         .expect("expiry recovery should commit");
 
-    let mut reclaim_transaction = primary
+    let mut reclaim_transaction = client
         .transaction()
         .expect("reclaim transaction should begin");
     let reclaimed = claim_outbox_delivery(
@@ -182,7 +150,52 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
     reclaim_transaction
         .commit()
         .expect("recovered claim should commit");
+}
 
+#[test]
+fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
+    let mut database_guard = database_test_guard();
+    let mut primary = connect_client();
+    reset_concurrency_schema(&mut primary);
+    assert_eq!(
+        enqueue_outbox_event(&mut primary, &event(), 3).expect("pending event should be enqueued"),
+        PersistenceDisposition::Inserted,
+    );
+
+    let mut first_transaction = primary
+        .transaction()
+        .expect("winning claim transaction should begin");
+    let first_lease = claim_outbox_delivery(
+        &mut first_transaction,
+        identity(),
+        "worker_concurrent_alpha",
+        "outbox_lease_concurrent_alpha",
+        10_000,
+        11_000,
+    )
+    .expect("first worker should claim the pending event");
+    assert_eq!(first_lease.fencing_token(), 1);
+
+    let (second_worker, pid_receiver) = spawn_competing_claim();
+    let second_pid = pid_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("competing worker should reach the claim boundary");
+    assert!(
+        wait_until_blocked(&mut database_guard, second_pid),
+        "the second worker must contend on the first uncommitted claim instead of bypassing exclusivity",
+    );
+
+    first_transaction
+        .commit()
+        .expect("winning delivery claim should commit");
+    assert!(
+        second_worker
+            .join()
+            .expect("competing claim worker should not panic"),
+        "after the winner commits, the competing worker must observe NotLeaseable",
+    );
+
+    expire_and_reclaim(&mut primary);
     primary
         .batch_execute(&format!(
             "SET search_path TO public; DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"
