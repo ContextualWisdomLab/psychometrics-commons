@@ -308,7 +308,7 @@ sequenceDiagram
     A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
-    W->>DB: claim scoring work
+    W->>DB: claim due scoring job + load stored request pin
     W->>DB: load persisted ScoringRequest FOR SHARE
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance
@@ -339,11 +339,13 @@ sequenceDiagram
     A->>DB: commit Completed + immutable response snapshot + outbox
     A-->>P: completion durable; scoring pending
 
+    W->>DB: claim due scoring job
     W->>F: submit pinned scoring request
     F--xW: unavailable / retryable transport failure
     W->>DB: record typed retryable job failure + bounded retry schedule
-    Note over DB: Response snapshot remains immutable and durable
+    Note over DB: Response snapshot remains immutable and durable; no terminal outbox row
 
+    W->>DB: claim the same job after next_attempt_at
     W->>F: retry same version-pinned request
     F-->>W: valid scoring result
     W->>DB: persist scoring evidence with the same stable job-plus-result event identity; result finalization proceeds only after required presentation provenance is resolved

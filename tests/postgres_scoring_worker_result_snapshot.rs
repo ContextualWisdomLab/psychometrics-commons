@@ -9,7 +9,7 @@ use psychometrics_commons_runtime::postgres_result_snapshot::{
 };
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
-    ScoringJobCompletionDisposition, ScoringJobFailureDisposition,
+    ScoringJobCompletionDisposition, ScoringJobFailureDisposition, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_scoring_request::{
     apply_scoring_request_migration, persist_scoring_request, ScoringRequestPersistenceError,
@@ -27,6 +27,7 @@ use psychometrics_commons_runtime::scoring_worker::{
     ScoringWorkerEnvelope, ScoringWorkerError, ScoringWorkerResultEngine,
     ScoringWorkerResultOutcome,
 };
+use std::cell::Cell;
 use std::sync::{Mutex, MutexGuard};
 
 const ENGINE_DIGEST: &str =
@@ -711,6 +712,110 @@ fn exhausted_retryable_outage_quarantines_without_a_snapshot_or_outbox() {
     assert_eq!(state, "quarantined");
     assert_eq!(result_ref, None);
     assert_eq!(cause.as_deref(), Some("engine_unavailable"));
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
+}
+
+struct CountingResultEngine {
+    outcome: ScoringWorkerResultOutcome,
+    calls: Cell<u32>,
+}
+
+impl ScoringWorkerResultEngine for CountingResultEngine {
+    fn score_claimed_request(
+        &self,
+        _scoring_job_ref: &str,
+        _request: &ScoringRequest,
+    ) -> Result<ScoringWorkerResultOutcome, ScoringWorkerError> {
+        self.calls.set(self.calls.get() + 1);
+        Ok(self.outcome.clone())
+    }
+}
+
+#[test]
+fn missing_job_row_fails_closed_before_the_engine_runs() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let request = loaded_request();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_request(&mut transaction, &request).unwrap();
+    transaction.commit().unwrap();
+    let engine = CountingResultEngine {
+        outcome: ScoringWorkerResultOutcome::Completed {
+            result: Box::new(
+                ScoringResult::new(
+                    "result_worker_snapshot",
+                    &request,
+                    ENGINE_DIGEST,
+                    vec![ScoreObservation::scored("big_five_openness", 1.2, Some(0.15)).unwrap()],
+                )
+                .unwrap(),
+            ),
+        },
+        calls: Cell::new(0),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            "scoring_job_worker_snapshot_absent",
+            1,
+            request.scoring_request_ref(),
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            25_000,
+        ),
+        Err(ScoringWorkerCommitError::MissingJob)
+    ));
+    transaction.rollback().unwrap();
+
+    assert_eq!(engine.calls.get(), 0);
+    assert_eq!(snapshot_count(&mut client), 0);
+    assert_eq!(outbox_count(&mut client), 0);
+}
+
+#[test]
+fn retry_before_the_outage_instant_keeps_the_job_leased() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_retry_window";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let engine = CountingResultEngine {
+        outcome: ScoringWorkerResultOutcome::Retryable {
+            cause_code: "engine_unavailable".to_owned(),
+        },
+        calls: Cell::new(0),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            loaded_request().scoring_request_ref(),
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            15_000,
+        ),
+        Err(ScoringWorkerCommitError::Retry(
+            ScoringJobPersistenceError::InvalidRetryWindow
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    assert_eq!(engine.calls.get(), 1);
+    let (state, result_ref, cause) = job_state(&mut client, job_ref);
+    assert_eq!(state, "leased");
+    assert_eq!(result_ref, None);
+    assert_eq!(cause, None);
     assert_eq!(snapshot_count(&mut client), 0);
     assert_eq!(outbox_count(&mut client), 0);
 }

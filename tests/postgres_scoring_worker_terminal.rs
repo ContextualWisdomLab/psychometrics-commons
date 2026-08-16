@@ -925,4 +925,33 @@ fn worker_commit_errors_retain_typed_sources() {
         "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
     );
     assert!(retry.source().is_some());
+
+    let missing_job = ScoringWorkerCommitError::MissingJob;
+    assert_eq!(
+        missing_job.to_string(),
+        "reload the scoring job before running the engine; do not invent a score"
+    );
+    assert!(missing_job.source().is_none());
+
+    let claim = ScoringWorkerCommitError::Claim(ScoringJobPersistenceError::LeaseNotDue);
+    assert_eq!(
+        claim.to_string(),
+        "scoring worker could not claim a due job; leave the job unleased and do not invent a score"
+    );
+    assert!(claim.source().is_some());
+
+    let mismatched =
+        ScoringWorkerCommitError::Planning(ScoringWorkerError::MismatchedScoringResult);
+    assert_eq!(
+        mismatched.to_string(),
+        "scoring worker job names a different request; keep the job leased and do not invent a score"
+    );
+    assert!(mismatched.source().is_some());
+
+    let invalid_cause = ScoringWorkerCommitError::Planning(ScoringWorkerError::InvalidReference);
+    assert_eq!(
+        invalid_cause.to_string(),
+        "scoring worker received an invalid identity or retry cause; keep the job leased and do not invent a score"
+    );
+    assert!(invalid_cause.source().is_some());
 }

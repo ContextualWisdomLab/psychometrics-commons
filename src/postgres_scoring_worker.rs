@@ -17,7 +17,9 @@ use crate::postgres_scoring_failure::{
     record_permanent_scoring_failure_with_outbox, ScoringFailureOutboxError,
     ScoringFailureOutboxPersistence,
 };
-use crate::postgres_scoring_job::{record_retryable_scoring_failure, ScoringJobPersistenceError};
+use crate::postgres_scoring_job::{
+    claim_scoring_job, record_retryable_scoring_failure, ScoringJobPersistenceError,
+};
 use crate::postgres_scoring_request::{load_scoring_request, ScoringRequestPersistenceError};
 use crate::result::ResultSnapshotInput;
 use crate::scoring_job::ScoringJobState;
@@ -91,6 +93,10 @@ pub enum ScoringWorkerCommitError {
     Request(ScoringRequestPersistenceError),
     /// The scoring job named a request that is not stored after restart.
     MissingRequest,
+    /// The scoring job row is absent; do not run the engine or invent a score.
+    MissingJob,
+    /// Claiming a due job failed; leave the job unleased.
+    Claim(ScoringJobPersistenceError),
     /// Immutable result-snapshot persistence failed.
     Snapshot(ResultSnapshotPersistenceError),
     /// Fenced successful completion or its outbox evidence failed.
@@ -107,6 +113,12 @@ impl Display for ScoringWorkerCommitError {
             Self::Identity(_) => {
                 "scoring worker must reuse the stable job and outcome event identity"
             }
+            Self::Planning(ScoringWorkerError::MismatchedScoringResult) => {
+                "scoring worker job names a different request; keep the job leased and do not invent a score"
+            }
+            Self::Planning(ScoringWorkerError::InvalidReference) => {
+                "scoring worker received an invalid identity or retry cause; keep the job leased and do not invent a score"
+            }
             Self::Planning(_) => {
                 "scoring worker could not plan a terminal attempt; keep the job leased and retry after a typed engine outcome"
             }
@@ -115,6 +127,12 @@ impl Display for ScoringWorkerCommitError {
             }
             Self::MissingRequest => {
                 "reload the persisted scoring request before completing the job; do not invent a score"
+            }
+            Self::MissingJob => {
+                "reload the scoring job before running the engine; do not invent a score"
+            }
+            Self::Claim(_) => {
+                "scoring worker could not claim a due job; leave the job unleased and do not invent a score"
             }
             Self::Snapshot(_) => {
                 "scoring worker could not persist the immutable result snapshot; keep the job leased"
@@ -133,11 +151,11 @@ impl Error for ScoringWorkerCommitError {
         match self {
             Self::Identity(error) | Self::Planning(error) => Some(error),
             Self::Request(error) => Some(error),
-            Self::MissingRequest => None,
+            Self::MissingRequest | Self::MissingJob => None,
+            Self::Claim(error) | Self::Retry(error) => Some(error),
             Self::Snapshot(error) => Some(error),
             Self::Completion(error) => Some(error),
             Self::Failure(error) => Some(error),
-            Self::Retry(error) => Some(error),
         }
     }
 }
@@ -286,8 +304,9 @@ fn commit_planned_scoring_worker_attempt(
 ///
 /// # Errors
 ///
-/// Returns [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
-/// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
+/// Returns [`ScoringWorkerCommitError::MissingJob`] when the job row is
+/// absent, [`ScoringWorkerCommitError::MissingRequest`] when the pin is
+/// absent, [`ScoringWorkerCommitError::Request`] when reconstruction fails,
 /// [`ScoringWorkerCommitError::Planning`] when the job names a different
 /// request or the engine/planner cannot produce a typed attempt,
 /// [`ScoringWorkerCommitError::Retry`] when retry evidence cannot persist,
@@ -312,13 +331,14 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
         )
         .map_err(ScoringRequestPersistenceError::from)
         .map_err(ScoringWorkerCommitError::Request)?;
-    if let Some(row) = stored_request {
-        let stored_request_ref: String = row.get(0);
-        if stored_request_ref != scoring_request_ref {
-            return Err(ScoringWorkerCommitError::Planning(
-                ScoringWorkerError::MismatchedScoringResult,
-            ));
-        }
+    let Some(row) = stored_request else {
+        return Err(ScoringWorkerCommitError::MissingJob);
+    };
+    let stored_request_ref: String = row.get(0);
+    if stored_request_ref != scoring_request_ref {
+        return Err(ScoringWorkerCommitError::Planning(
+            ScoringWorkerError::MismatchedScoringResult,
+        ));
     }
     let request = load_scoring_request(transaction, scoring_request_ref)
         .map_err(ScoringWorkerCommitError::Request)?
@@ -369,6 +389,68 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
             Ok(ScoringWorkerSnapshotPersistence { terminal, snapshot })
         }
     }
+}
+
+/// Claim one due scoring job, then drive the request-bound snapshot worker.
+///
+/// The stored job pin is the only request identity this function will score.
+/// A missing job, a job that is not yet due, or a job that is not leaseable
+/// fails closed before the engine runs. A retryable outage, permanent failure,
+/// or completed snapshot then follows
+/// [`run_scoring_worker_attempt_with_result_snapshot`]. Live `fast-mlsirm`
+/// execution remains a later adapter behind [`ScoringWorkerResultEngine`].
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerCommitError::Claim`] when the job cannot be leased,
+/// [`ScoringWorkerCommitError::MissingJob`] when the claimed row disappears,
+/// or the existing request, planning, retry, snapshot, completion, or failure
+/// error from the request-bound worker.
+#[allow(clippy::too_many_arguments)]
+pub fn claim_and_run_scoring_worker_attempt_with_result_snapshot(
+    transaction: &mut Transaction<'_>,
+    scoring_job_ref: &str,
+    worker_ref: &str,
+    lease_ref: &str,
+    claimed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+    engine: &impl ScoringWorkerResultEngine,
+    snapshot_input: ResultSnapshotInput<'_>,
+    envelope: ScoringWorkerEnvelope<'_>,
+    outbox_max_attempts: usize,
+    retry_at_unix_ms: u64,
+) -> Result<ScoringWorkerSnapshotPersistence, ScoringWorkerCommitError> {
+    let lease = claim_scoring_job(
+        transaction,
+        scoring_job_ref,
+        worker_ref,
+        lease_ref,
+        claimed_at_unix_ms,
+        expires_at_unix_ms,
+    )
+    .map_err(ScoringWorkerCommitError::Claim)?;
+    let stored_request = transaction
+        .query_opt(
+            "SELECT scoring_request_ref FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&scoring_job_ref],
+        )
+        .map_err(ScoringRequestPersistenceError::from)
+        .map_err(ScoringWorkerCommitError::Request)?;
+    let Some(row) = stored_request else {
+        return Err(ScoringWorkerCommitError::MissingJob);
+    };
+    let scoring_request_ref: String = row.get(0);
+    run_scoring_worker_attempt_with_result_snapshot(
+        transaction,
+        scoring_job_ref,
+        lease.fencing_token(),
+        &scoring_request_ref,
+        engine,
+        snapshot_input,
+        envelope,
+        outbox_max_attempts,
+        retry_at_unix_ms,
+    )
 }
 
 fn persistence_for_retry_state(
