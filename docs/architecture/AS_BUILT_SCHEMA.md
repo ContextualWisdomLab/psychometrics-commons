@@ -18,13 +18,13 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
-| `assessment_session` | session | **Active PR** #121 (not protected-main truth) |
+| `assessment_session` | session | **Active PR** #138 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
 ## Active PR assessment-session physical schema
 
-PR #121 `migrations/0014_assessment_session.sql` and `src/postgres_assessment_session.rs` persist and load one created assessment-session identity bound to a published locale-specific release. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, `created` state, and creation time. Exact replay is idempotent. Rebinding any stored field fails closed. Load restores that identity without asking whether the release still accepts new sessions. New sessions start through `created_session_for_start` / `start_created_assessment_session` (`AssessmentSession::new` then persist). Isolation is the global opaque `session_ref` primary key; this first slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. The slice does not persist command history, later lifecycle states, or HTTP session transport.
+PR #138 `migrations/0014_assessment_session.sql` and `src/postgres_assessment_session.rs` persist and load one created assessment-session identity bound to a published locale-specific release. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, `created` state, and creation time. Exact replay is idempotent. Rebinding any stored field fails closed. Load restores that identity without asking whether the release still accepts new sessions. New sessions start through `created_session_for_start` / `start_created_assessment_session` (`AssessmentSession::new` then persist). Isolation is the global opaque `session_ref` primary key; this first slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. The slice does not persist command history, later lifecycle states, or HTTP session transport.
 
 ## Active PR inbox-consumption physical schema
 
