@@ -8,6 +8,7 @@
 //! contracts rather than reimplemented here.
 
 pub mod anonymous_session;
+pub mod api_problem;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
