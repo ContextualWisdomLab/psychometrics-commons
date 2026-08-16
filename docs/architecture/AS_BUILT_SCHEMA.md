@@ -60,7 +60,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR assessment-participant physical schema
 
-This successor to #104 persists anonymous `assessment_participant` identity in `migrations/0021_assessment_participant.sql` and `src/postgres_participant.rs`. The slice is **Active PR**, not protected-main truth. It stores opaque `participant_ref`, `tenant_ref`, anonymous `participant_status`, and `created_at_unix_ms`. Exact replay is idempotent. Rebinding tenant or creation time fails closed. Load requires both stored tenant and participant references. Linked participants are rejected. Account-link history, HTTP transport, and session persistence remain outside this slice.
+PR #118 persists anonymous `assessment_participant` identity in `migrations/0021_assessment_participant.sql` and `src/postgres_participant.rs`. The slice is **Active PR**, not protected-main truth. It stores opaque `participant_ref`, `tenant_ref`, anonymous `participant_status`, and `created_at_unix_ms`. Exact replay is idempotent. Rebinding tenant or creation time fails closed. Load requires both stored tenant and participant references. Linked participants are rejected. Account-link history, HTTP transport, and session persistence remain outside this slice.
 
 ## Logical-to-physical mapping rule
 
