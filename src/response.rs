@@ -7,7 +7,7 @@
 //! Completing a session freezes the accepted response prefix into an immutable
 //! snapshot value.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::session::SessionState;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -196,7 +196,7 @@ impl ResponseLedger {
     /// exact safe opaque product identifier.
     pub fn new(session_ref: impl AsRef<str>) -> Result<Self, WriteError> {
         let session_ref =
-            normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+            canonical_opaque_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
         Ok(Self {
             session_ref: session_ref.to_owned(),
             events: Vec::new(),
@@ -243,12 +243,12 @@ impl ResponseLedger {
         state: SessionState,
         request: ResponseWrite<'_>,
     ) -> Result<ResponseEvent, WriteError> {
-        let server_event_ref =
-            normalized_reference(request.server_event_ref).ok_or(WriteError::InvalidReference)?;
-        let client_event_ref =
-            normalized_reference(request.client_event_ref).ok_or(WriteError::InvalidReference)?;
-        let item_version_ref =
-            normalized_reference(request.item_version_ref).ok_or(WriteError::InvalidReference)?;
+        let server_event_ref = canonical_opaque_reference(request.server_event_ref)
+            .ok_or(WriteError::InvalidReference)?;
+        let client_event_ref = canonical_opaque_reference(request.client_event_ref)
+            .ok_or(WriteError::InvalidReference)?;
+        let item_version_ref = canonical_opaque_reference(request.item_version_ref)
+            .ok_or(WriteError::InvalidReference)?;
         let payload_digest = request.payload_digest;
         if payload_digest.trim().is_empty() {
             return Err(WriteError::EmptyReference);
@@ -324,7 +324,7 @@ impl ResponseLedger {
         snapshot_ref: &str,
     ) -> Result<ResponseSnapshot, WriteError> {
         let snapshot_ref =
-            normalized_reference(snapshot_ref).ok_or(WriteError::InvalidReference)?;
+            canonical_opaque_reference(snapshot_ref).ok_or(WriteError::InvalidReference)?;
         self.freeze_internal(state, Some(snapshot_ref))
     }
 

@@ -5,7 +5,7 @@
 //! not make unrelated work unavailable, while unknown integrity or a stalled durable
 //! backlog fails closed for new state-changing work.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -75,7 +75,7 @@ impl Display for HealthContractError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "health capability references must be opaque non-numeric values"
+                "health capability references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::DuplicateCapabilityReference => {
                 "health capability references must be unique within one snapshot"
@@ -116,8 +116,8 @@ impl CapabilityHealth {
         state: CapabilityState,
         accepts_new_work: bool,
     ) -> Result<Self, HealthContractError> {
-        let capability_ref =
-            normalized_reference(capability_ref).ok_or(HealthContractError::InvalidReference)?;
+        let capability_ref = canonical_opaque_reference(capability_ref)
+            .ok_or(HealthContractError::InvalidReference)?;
         if accepts_new_work
             && matches!(
                 state,

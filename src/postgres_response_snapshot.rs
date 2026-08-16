@@ -6,7 +6,7 @@
 //! Replay requires `READ COMMITTED` so a concurrent insert that wins a unique-key
 //! race is visible to the exact-replay classifier.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::response::ResponseSnapshot;
 use postgres::Transaction;
 use std::error::Error;
@@ -213,7 +213,7 @@ fn classify_existing_snapshot(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResponseSnapshotPersistenceError> {
-    normalized_reference(reference).ok_or(ResponseSnapshotPersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ResponseSnapshotPersistenceError::InvalidReference)
 }
 
 fn postgres_sequence(value: usize) -> Result<i64, ResponseSnapshotPersistenceError> {

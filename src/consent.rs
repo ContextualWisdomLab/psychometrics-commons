@@ -5,7 +5,7 @@
 //! research contribution can begin only from a snapshot containing an explicit
 //! active research grant with a versioned research scope.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -182,7 +182,7 @@ impl ConsentLedger {
     /// # Errors
     ///
     /// Returns [`ConsentWriteError::EmptyReference`] when `participant_ref` is
-    /// blank after normalization.
+    /// blank, whitespace-padded, control-bearing, or numeric-like.
     pub fn new(participant_ref: &str) -> Result<Self, ConsentWriteError> {
         let participant_ref = required_reference(participant_ref)?;
         Ok(Self {
@@ -300,7 +300,7 @@ impl ConsentLedger {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ConsentWriteError {
-    /// A required reference is blank after normalization.
+    /// A required reference is blank, noncanonical, or numeric-like.
     EmptyReference,
     /// Research consent did not declare a research scope.
     ResearchScopeRequired,
@@ -317,7 +317,7 @@ pub enum ConsentWriteError {
 impl Display for ConsentWriteError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::EmptyReference => "consent references must not be empty",
+            Self::EmptyReference => "consent references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::ResearchScopeRequired => "research consent requires a research scope",
             Self::ResearchScopeNotAllowed => {
                 "research scope is allowed only for research-contribution consent"
@@ -489,7 +489,7 @@ impl ResearchContribution {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResearchContributionError {
-    /// A required contribution or research-participant reference is blank.
+    /// A required contribution or research-participant reference is blank, noncanonical, or numeric-like.
     EmptyReference,
     /// The supplied consent snapshot has no active explicit research grant.
     ResearchConsentRequired,
@@ -506,7 +506,7 @@ pub enum ResearchContributionError {
 impl Display for ResearchContributionError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::EmptyReference => "research contribution references must not be empty",
+            Self::EmptyReference => "research contribution references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::ResearchConsentRequired => {
                 "research contribution requires active explicit research consent"
             }
@@ -527,9 +527,9 @@ impl Display for ResearchContributionError {
 impl Error for ResearchContributionError {}
 
 fn required_reference(reference: &str) -> Result<&str, ConsentWriteError> {
-    normalized_reference(reference).ok_or(ConsentWriteError::EmptyReference)
+    canonical_opaque_reference(reference).ok_or(ConsentWriteError::EmptyReference)
 }
 
 fn research_reference(reference: &str) -> Result<&str, ResearchContributionError> {
-    normalized_reference(reference).ok_or(ResearchContributionError::EmptyReference)
+    canonical_opaque_reference(reference).ok_or(ResearchContributionError::EmptyReference)
 }

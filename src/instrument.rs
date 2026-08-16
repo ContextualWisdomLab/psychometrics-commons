@@ -6,7 +6,7 @@
 //! locale, or intended-use change requires a new release manifest rather than a
 //! mutation of an already published artifact.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -110,7 +110,7 @@ impl Display for InstrumentReleaseError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "instrument release references must be opaque non-numeric values"
+                "instrument release references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::EmptyItemSet => "instrument release must contain at least one item version",
             Self::DuplicateItemReference => {
@@ -913,7 +913,7 @@ fn normalize_unique_references(
 }
 
 fn required_reference(reference: &str) -> Result<&str, InstrumentReleaseError> {
-    normalized_reference(reference).ok_or(InstrumentReleaseError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(InstrumentReleaseError::InvalidReference)
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {

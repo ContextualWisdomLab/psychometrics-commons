@@ -8,7 +8,7 @@
 //! instrument release, content digest, and locale before lifecycle transitions begin.
 
 use crate::instrument::InstrumentRelease;
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -73,7 +73,7 @@ impl Display for SessionCreationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "assessment session references must be opaque non-numeric values"
+                "assessment session references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidTimestamp => "assessment session creation time must be greater than zero",
             Self::InstrumentReleaseUnavailable => {
@@ -136,10 +136,10 @@ impl AssessmentSession {
         requested_locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
-        let session_ref =
-            normalized_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
-        let participant_ref =
-            normalized_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let session_ref = canonical_opaque_reference(session_ref)
+            .ok_or(SessionCreationError::InvalidReference)?;
+        let participant_ref = canonical_opaque_reference(participant_ref)
+            .ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
             return Err(SessionCreationError::InvalidTimestamp);
         }
@@ -229,7 +229,7 @@ impl AssessmentSession {
         sequence: u64,
         command: SessionCommand,
     ) -> Result<SessionState, TransitionError> {
-        let command_ref = normalized_reference(command_ref).ok_or_else(|| {
+        let command_ref = canonical_opaque_reference(command_ref).ok_or_else(|| {
             TransitionError::new(self.state, command, TransitionErrorKind::InvalidReference)
         })?;
 

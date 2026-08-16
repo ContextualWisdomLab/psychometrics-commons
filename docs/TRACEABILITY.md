@@ -110,7 +110,7 @@ src/lib.rs
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
-├── reference.rs      # internal opaque-reference normalization
+├── reference.rs      # internal exact opaque-reference validation
 ├── research_release.rs  # product-side Research Commons release-evidence gate
 ├── response.rs       # idempotent response ledger + immutable response snapshots
 ├── result.rs         # immutable result provenance/supersession

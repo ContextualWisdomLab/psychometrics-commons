@@ -5,7 +5,7 @@
 //! versioned `fast-mlsirm`-compatible scoring implementation and to accept a
 //! typed immutable result without collapsing missing outcomes into numeric zero.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::response::ResponseSnapshot;
 use std::collections::HashSet;
 use std::error::Error;
@@ -53,14 +53,15 @@ pub struct ScoringRequest {
 impl ScoringRequest {
     /// Build a scoring request from a non-empty durable response snapshot.
     ///
-    /// References are trimmed before becoming identity-bearing state. The
-    /// caller-supplied snapshot reference must exactly match the durable
-    /// reference embedded in `snapshot` after normalization.
+    /// Identity-bearing references must already use their exact opaque spelling.
+    /// The caller-supplied snapshot reference must exactly match the durable
+    /// reference embedded in `snapshot`; aliases are not trimmed into a match.
     ///
     /// # Errors
     ///
     /// Returns [`ScoringContractError::EmptyReference`] when a required or
-    /// supplied optional reference is blank,
+    /// supplied optional reference is blank, whitespace-padded, control-bearing,
+    /// default-ignorable, or numeric-like,
     /// [`ScoringContractError::UnboundResponseSnapshot`] when the snapshot has
     /// no durable identity, [`ScoringContractError::EmptyResponseSnapshot`] when
     /// the snapshot contains no response events,
@@ -189,7 +190,7 @@ impl ScoreObservation {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for a blank construct,
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or noncanonical construct,
     /// [`ScoringContractError::InvalidScore`] for a non-finite score, or
     /// [`ScoringContractError::InvalidStandardError`] for a supplied standard
     /// error that is negative or non-finite.
@@ -228,7 +229,7 @@ impl ScoreObservation {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for a blank construct or
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or noncanonical construct or
     /// [`ScoringContractError::ScoredDispositionRequiresScore`] if `Scored` is
     /// supplied without a numeric score.
     pub fn without_score(
@@ -291,11 +292,11 @@ impl ScoringResult {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for a blank result identity,
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or noncanonical result identity,
     /// [`ScoringContractError::InvalidEngineArtifactDigest`] when engine provenance is not a
     /// canonical SHA-256 digest, [`ScoringContractError::EmptyObservationSet`] when no construct
     /// observation exists, or [`ScoringContractError::DuplicateConstruct`] when a construct
-    /// appears more than once after reference normalization.
+    /// appears more than once.
     pub fn new(
         scoring_result_ref: impl Into<String>,
         request: &ScoringRequest,
@@ -367,7 +368,7 @@ impl ScoringResult {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ScoringContractError {
-    /// A required or supplied optional reference is blank.
+    /// A required or supplied optional reference is blank, noncanonical, or numeric-like.
     EmptyReference,
     /// The response snapshot has not been assigned durable identity.
     UnboundResponseSnapshot,
@@ -395,7 +396,7 @@ impl Display for ScoringContractError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyReference => {
-                formatter.write_str("scoring contract references must not be empty")
+                formatter.write_str("scoring contract references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters")
             }
             Self::UnboundResponseSnapshot => {
                 formatter.write_str("scoring requires a durable response snapshot reference")
@@ -430,7 +431,7 @@ impl Display for ScoringContractError {
 impl Error for ScoringContractError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
-    normalized_reference(reference).ok_or(ScoringContractError::EmptyReference)
+    canonical_opaque_reference(reference).ok_or(ScoringContractError::EmptyReference)
 }
 
 fn required_sha256_digest(digest: &str) -> Result<&str, ScoringContractError> {

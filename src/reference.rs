@@ -12,7 +12,7 @@
 /// rejects ordinary numbers as well as signed, decimal, scientific-notation, and Unicode-numeric
 /// spellings instead of accepting them as opaque identifiers.
 #[must_use]
-pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
+pub(crate) fn canonical_opaque_reference(reference: &str) -> Option<&str> {
     let normalized = reference.trim();
     if normalized != reference
         || reference.chars().any(|character| {

@@ -6,7 +6,7 @@
 //! by [`crate::integration`].
 
 use crate::integration::{DeliveryOutcome, InboxDisposition, IntegrationEvent, OutboxState};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -113,7 +113,7 @@ pub enum PersistenceError {
 impl Display for PersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "persistence references must be opaque non-numeric values",
+            Self::InvalidReference => "persistence references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::InvalidTimestamp => "persistence timestamps must be greater than zero",
             Self::InvalidAttemptLimit => "outbox maximum attempts must be greater than zero",
             Self::ValueOutOfRange => "persistence value exceeds the supported PostgreSQL range",
@@ -389,7 +389,7 @@ pub fn accept_inbox_event(
     received_at_unix_ms: u64,
 ) -> Result<InboxDisposition, PersistenceError> {
     let consumer_ref =
-        normalized_reference(consumer_ref).ok_or(PersistenceError::InvalidReference)?;
+        canonical_opaque_reference(consumer_ref).ok_or(PersistenceError::InvalidReference)?;
     if received_at_unix_ms == 0 {
         return Err(PersistenceError::InvalidTimestamp);
     }
@@ -440,7 +440,7 @@ pub fn accept_inbox_event(
 }
 
 fn required_persistence_reference(reference: &str) -> Result<&str, PersistenceError> {
-    normalized_reference(reference).ok_or(PersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(PersistenceError::InvalidReference)
 }
 
 fn delivery_outcome_name(outcome: DeliveryOutcome) -> &'static str {

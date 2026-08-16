@@ -7,7 +7,7 @@
 //! requests preserve durable terminal evidence, and exact lifecycle command replays
 //! remain idempotent while conflicting evidence fails closed.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -67,7 +67,7 @@ impl Display for DataRightsError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "data-rights references must be canonical opaque non-numeric values"
+                "data-rights references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidTimestamp => "data-rights timestamps must be greater than zero",
             Self::NonMonotonicTimestamp => "data-rights event time must not move backwards",
@@ -497,8 +497,5 @@ impl DataRightsRequest {
 }
 
 fn required_reference(reference: &str) -> Result<&str, DataRightsError> {
-    match normalized_reference(reference) {
-        Some(normalized) if normalized == reference => Ok(reference),
-        _ => Err(DataRightsError::InvalidReference),
-    }
+    canonical_opaque_reference(reference).ok_or(DataRightsError::InvalidReference)
 }
