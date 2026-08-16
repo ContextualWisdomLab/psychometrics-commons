@@ -73,7 +73,12 @@ fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
 
 #[test]
 fn machine_code_is_lowercase_ascii_and_stable_for_clients() {
-    for invalid_code in ["", "CrossTenantDenied", "cross-tenant-denied", "9cross_tenant"] {
+    for invalid_code in [
+        "",
+        "CrossTenantDenied",
+        "cross-tenant-denied",
+        "9cross_tenant",
+    ] {
         assert_eq!(
             ApiProblem::new(TYPE_URI, 403, TITLE, DETAIL, invalid_code),
             Err(ApiProblemContractError::InvalidCode)

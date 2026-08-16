@@ -45,9 +45,7 @@ impl Display for ApiProblemContractError {
             Self::InvalidTypeUri => {
                 "problem type must use a structurally valid explicit HTTPS or URN identifier"
             }
-            Self::InvalidStatus => {
-                "problem status must be an HTTP client or server error status"
-            }
+            Self::InvalidStatus => "problem status must be an HTTP client or server error status",
             Self::EmptyTitle => "problem title must contain public-safe text",
             Self::EmptyDetail => "problem detail must contain public-safe text",
             Self::InvalidCode => "problem code must be lowercase ASCII and start with a letter",
@@ -183,9 +181,7 @@ fn valid_https_problem_type(remainder: &str) -> bool {
     if !valid_registered_host(host) {
         return false;
     }
-    if port.is_some_and(|port| {
-        port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit())
-    }) {
+    if port.is_some_and(|port| port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit())) {
         return false;
     }
 
@@ -194,9 +190,9 @@ fn valid_https_problem_type(remainder: &str) -> bool {
 
 fn valid_registered_host(host: &str) -> bool {
     !host.is_empty()
-        && host.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'~')
-        })
+        && host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'~'))
 }
 
 fn valid_urn_problem_type(remainder: &str) -> bool {
