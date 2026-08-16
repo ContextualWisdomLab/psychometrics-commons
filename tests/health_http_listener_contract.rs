@@ -7,7 +7,8 @@ use psychometrics_commons_runtime::health::{
     BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth, RuntimeHealthSnapshot,
 };
 use psychometrics_commons_runtime::health_http::{
-    accept_one_health_http, bind_health_http, serve_health_http, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
+    accept_one_health_http, bind_health_http, serve_health_http, HEALTH_LIVE_PATH,
+    HEALTH_READY_PATH,
 };
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
@@ -221,5 +222,45 @@ fn serve_loop_answers_successive_probes_until_accept_fails() {
         stopped.is_err(),
         "serve_health_http must surface the accept failure instead of hanging"
     );
+    server.join().unwrap();
+}
+
+#[test]
+fn serve_loop_keeps_accepting_after_a_client_drops_the_connection() {
+    let listener = bind_health_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let snapshot = healthy_snapshot();
+    let stop = listener.try_clone().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let result = serve_health_http(&listener, &snapshot);
+        let _ = done_tx.send(result);
+    });
+
+    {
+        let mut dropped = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+        dropped
+            .write_all(
+                format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes(),
+            )
+            .unwrap();
+    }
+
+    let live = exchange(
+        addr,
+        &format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+    );
+    assert!(
+        live.starts_with("HTTP/1.1 200 OK\r\n"),
+        "a dropped probe must not stop later GET /live answers: {live}"
+    );
+    assert!(live.contains("\"live\":true"));
+
+    stop.set_nonblocking(true)
+        .expect("the test must be able to stop the shared listener");
+    let _ = TcpStream::connect_timeout(&addr, Duration::from_millis(200));
+    let _ = done_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("serve_health_http must still return after accept can no longer block");
     server.join().unwrap();
 }
