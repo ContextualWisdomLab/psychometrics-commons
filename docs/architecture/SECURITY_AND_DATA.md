@@ -191,7 +191,7 @@ At minimum as features appear:
 - object-reference enumeration/authorization tests;
 - anonymous-token audience/expiry/replay tests;
 - OIDC issuer/audience/signature/nonce-state tests;
-- account-linking conflict/replay tests;
+- account-linking conflict/replay tests, including HTTP recover/unlink that re-check the current binding and reject a client `participant_ref` grant;
 - idempotency-key cross-tenant and conflicting-content tests;
 - research-release identifier/field leakage tests;
 - outbox/inbox replay and poison-message tests;
