@@ -1,7 +1,7 @@
 //! Database-level immutability coverage for append-only participant identity-link history.
 
 use postgres::{Client, NoTls};
-use psychometrics_commons_runtime::postgres_participant_identity::apply_participant_identity_migration;
+use psychometrics_commons_runtime::postgres_identity_link::apply_identity_link_migration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn isolated_client() -> (Client, String) {
@@ -23,7 +23,7 @@ fn isolated_client() -> (Client, String) {
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
         ))
         .unwrap();
-    apply_participant_identity_migration(&mut client).unwrap();
+    apply_identity_link_migration(&mut client).unwrap();
     client
         .batch_execute(
             "INSERT INTO participant_identity_ledger (\
