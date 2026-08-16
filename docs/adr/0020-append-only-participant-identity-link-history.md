@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: PR #124 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, and current-subject lookup through `src/postgres_participant_identity_link.rs`. Prefer #124 over #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: successor of PR #124 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, and current-subject lookup from unterminated history through `src/postgres_participant_identity_link.rs`. Prefer this head over #124 and #114.
 - `PLANNED`: durable HTTP transport, unlink/relink/recovery operator commands, concurrency arbitration beyond the participant row lock, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: PR #124 `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
+- Active-PR persistence evidence: successor of PR #124 `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
