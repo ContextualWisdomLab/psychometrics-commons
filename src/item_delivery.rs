@@ -66,6 +66,40 @@ impl ItemDeliveryEvent {
     pub const fn sequence(&self) -> usize {
         self.sequence
     }
+
+    /// Rebuild one accepted delivery from durable identity evidence.
+    ///
+    /// Use this after process restart so the original delivery identity and
+    /// sequence are preserved. Do not use it to accept a new presentation;
+    /// that path remains [`ItemDeliveryLedger::deliver`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ItemDeliveryError::InvalidReference`] for blank or numeric-like
+    /// identity references, or [`ItemDeliveryError::InconsistentSequence`] when
+    /// the stored sequence is not a positive server sequence.
+    pub fn from_durable_evidence(
+        delivery_ref: impl AsRef<str>,
+        item_version_ref: impl AsRef<str>,
+        presentation_context_ref: impl AsRef<str>,
+        selection_evidence_ref: Option<&str>,
+        sequence: usize,
+    ) -> Result<Self, ItemDeliveryError> {
+        let delivery_ref = required_reference(delivery_ref.as_ref())?;
+        let item_version_ref = required_reference(item_version_ref.as_ref())?;
+        let presentation_context_ref = required_reference(presentation_context_ref.as_ref())?;
+        let selection_evidence_ref = selection_evidence_ref.map(required_reference).transpose()?;
+        if sequence == 0 {
+            return Err(ItemDeliveryError::InconsistentSequence);
+        }
+        Ok(Self {
+            delivery_ref: delivery_ref.to_owned(),
+            item_version_ref: item_version_ref.to_owned(),
+            presentation_context_ref: presentation_context_ref.to_owned(),
+            selection_evidence_ref: selection_evidence_ref.map(str::to_owned),
+            sequence,
+        })
+    }
 }
 
 /// Fail-closed item-delivery error.
@@ -82,6 +116,8 @@ pub enum ItemDeliveryError {
     ItemNotInRelease,
     /// The immutable item version had already been delivered in this session.
     DuplicateItemDelivery,
+    /// Durable events cannot reconstruct a positive monotonic sequence prefix.
+    InconsistentSequence,
 }
 
 impl Display for ItemDeliveryError {
@@ -104,6 +140,9 @@ impl Display for ItemDeliveryError {
             Self::DuplicateItemDelivery => {
                 formatter.write_str("item version was already delivered in this session")
             }
+            Self::InconsistentSequence => formatter.write_str(
+                "durable item deliveries must form a positive monotonic sequence prefix",
+            ),
         }
     }
 }
@@ -200,6 +239,84 @@ impl ItemDeliveryLedger {
         &self.events
     }
 
+    /// Rebuild a session ledger from durable delivery evidence after restart.
+    ///
+    /// Events must already be in server-authoritative order and use the same
+    /// identities the original [`Self::deliver`] calls accepted. The next new
+    /// logical delivery then continues the stored sequence prefix and remains
+    /// bound to the stored release item set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ItemDeliveryError::InvalidReference`] for a blank or
+    /// numeric-like identity or a noncanonical release digest,
+    /// [`ItemDeliveryError::InconsistentSequence`] when stored sequences are
+    /// not `1..=n`, [`ItemDeliveryError::IdempotencyConflict`] when a delivery
+    /// identity repeats, [`ItemDeliveryError::DuplicateItemDelivery`] when an
+    /// item version repeats, or [`ItemDeliveryError::ItemNotInRelease`] when a
+    /// stored event is outside the stored allowed item set.
+    pub fn from_durable_events(
+        session_ref: impl AsRef<str>,
+        instrument_release_ref: impl AsRef<str>,
+        release_content_digest: impl AsRef<str>,
+        locale: impl AsRef<str>,
+        allowed_item_version_refs: &[String],
+        events: Vec<ItemDeliveryEvent>,
+    ) -> Result<Self, ItemDeliveryError> {
+        let session_ref = required_reference(session_ref.as_ref())?;
+        let instrument_release_ref = required_reference(instrument_release_ref.as_ref())?;
+        let locale = required_reference(locale.as_ref())?;
+        let release_content_digest = release_content_digest.as_ref();
+        if !is_canonical_sha256(release_content_digest) {
+            return Err(ItemDeliveryError::InvalidReference);
+        }
+        if allowed_item_version_refs.is_empty() {
+            return Err(ItemDeliveryError::InvalidReference);
+        }
+        let mut normalized_allowed = Vec::with_capacity(allowed_item_version_refs.len());
+        for item_version_ref in allowed_item_version_refs {
+            let item_version_ref = required_reference(item_version_ref)?;
+            if normalized_allowed
+                .iter()
+                .any(|allowed: &String| allowed == item_version_ref)
+            {
+                return Err(ItemDeliveryError::DuplicateItemDelivery);
+            }
+            normalized_allowed.push(item_version_ref.to_owned());
+        }
+        for (index, event) in events.iter().enumerate() {
+            if event.sequence != index + 1 {
+                return Err(ItemDeliveryError::InconsistentSequence);
+            }
+            if events[..index]
+                .iter()
+                .any(|prior| prior.delivery_ref == event.delivery_ref)
+            {
+                return Err(ItemDeliveryError::IdempotencyConflict);
+            }
+            if events[..index]
+                .iter()
+                .any(|prior| prior.item_version_ref == event.item_version_ref)
+            {
+                return Err(ItemDeliveryError::DuplicateItemDelivery);
+            }
+            if !normalized_allowed
+                .iter()
+                .any(|allowed| allowed == &event.item_version_ref)
+            {
+                return Err(ItemDeliveryError::ItemNotInRelease);
+            }
+        }
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            instrument_release_ref: instrument_release_ref.to_owned(),
+            release_content_digest: release_content_digest.to_owned(),
+            locale: locale.to_owned(),
+            allowed_item_version_refs: normalized_allowed,
+            events,
+        })
+    }
+
     /// Record one item delivery or replay an identical accepted delivery.
     ///
     /// Exact replay of a previously accepted `delivery_ref` returns the original
@@ -280,4 +397,14 @@ impl ItemDeliveryLedger {
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
     normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)
+}
+
+fn is_canonical_sha256(digest: &str) -> bool {
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }

@@ -90,6 +90,20 @@ fn seed_recovery_critical_state(client: &mut Client) {
                 'event_dependency_alpha', 'consumption_recovery_alpha', 'effect_recovery_alpha',
                 'processing', 7, 12000, 13000, NULL, NULL
              );
+             INSERT INTO {SOURCE_SCHEMA}.item_delivery_ledger (
+                tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale,
+                allowed_item_version_refs
+             ) VALUES (
+                'tenant_recovery_alpha', 'session_recovery_alpha', 'release_recovery_alpha',
+                '{DIGEST_A}', 'ko-KR', ARRAY['item_version_recovery_alpha']
+             );
+             INSERT INTO {SOURCE_SCHEMA}.item_delivery_event (
+                tenant_ref, session_ref, delivery_event_ref, item_version_ref,
+                presentation_context_ref, selection_evidence_ref, delivery_sequence
+             ) VALUES (
+                'tenant_recovery_alpha', 'session_recovery_alpha', 'delivery_recovery_alpha',
+                'item_version_recovery_alpha', 'presentation_recovery_alpha', NULL, 1
+             );
              INSERT INTO {SOURCE_SCHEMA}.response_snapshot (
                 snapshot_ref, session_ref, event_count, last_sequence
              ) VALUES ('snapshot_recovery_alpha', 'session_recovery_alpha', 1, 1);
@@ -183,6 +197,29 @@ fn assert_restored_evidence(client: &mut Client) {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+
+    let restored_delivery = client
+        .query_one(
+            &format!(
+                "SELECT item_delivery_event.delivery_event_ref, item_delivery_event.item_version_ref,
+                        item_delivery_event.delivery_sequence, item_delivery_ledger.locale
+                 FROM {RESTORED_SCHEMA}.item_delivery_event
+                 JOIN {RESTORED_SCHEMA}.item_delivery_ledger USING (tenant_ref, session_ref)
+                 WHERE item_delivery_event.session_ref = 'session_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect("item-delivery identity should survive restore");
+    assert_eq!(
+        restored_delivery.get::<_, String>(0),
+        "delivery_recovery_alpha"
+    );
+    assert_eq!(
+        restored_delivery.get::<_, String>(1),
+        "item_version_recovery_alpha"
+    );
+    assert_eq!(restored_delivery.get::<_, i64>(2), 1);
+    assert_eq!(restored_delivery.get::<_, String>(3), "ko-KR");
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
@@ -209,6 +246,31 @@ fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
         .expect("conflicting restored outbox replay must fail at the database constraint boundary");
     assert_eq!(database_error.code(), &SqlState::UNIQUE_VIOLATION);
     assert_eq!(database_error.constraint(), Some("integration_outbox_pkey"));
+
+    let duplicate_delivery = client
+        .execute(
+            &format!(
+                "INSERT INTO {RESTORED_SCHEMA}.item_delivery_event (
+                    tenant_ref, session_ref, delivery_event_ref, item_version_ref,
+                    presentation_context_ref, selection_evidence_ref, delivery_sequence
+                 ) VALUES (
+                    'tenant_recovery_alpha', 'session_recovery_alpha', 'delivery_recovery_alpha',
+                    'item_version_recovery_beta', 'presentation_recovery_beta', NULL, 2
+                 )"
+            ),
+            &[],
+        )
+        .expect_err(
+            "restore must preserve item-delivery identity instead of permitting a conflicting replay",
+        );
+    let delivery_error = duplicate_delivery.as_db_error().expect(
+        "conflicting restored item-delivery replay must fail at the database constraint boundary",
+    );
+    assert_eq!(delivery_error.code(), &SqlState::UNIQUE_VIOLATION);
+    assert_eq!(
+        delivery_error.constraint(),
+        Some("item_delivery_event_pkey")
+    );
 
     let independent_tenant = client
         .execute(
@@ -244,6 +306,8 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "integration_outbox",
         "integration_inbox",
         "integration_consumption",
+        "item_delivery_ledger",
+        "item_delivery_event",
         "response_snapshot",
         "response_snapshot_entry",
     ];

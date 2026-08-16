@@ -2,7 +2,7 @@
 
 use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{
-    ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRequest,
+    ItemDeliveryError, ItemDeliveryEvent, ItemDeliveryLedger, ItemDeliveryRequest,
 };
 use psychometrics_commons_runtime::session::SessionState;
 
@@ -343,9 +343,266 @@ fn delivery_errors_have_stable_safe_text() {
             ItemDeliveryError::DuplicateItemDelivery,
             "item version was already delivered in this session",
         ),
+        (
+            ItemDeliveryError::InconsistentSequence,
+            "durable item deliveries must form a positive monotonic sequence prefix",
+        ),
     ];
 
     for (error, expected) in cases {
         assert_eq!(error.to_string(), expected);
     }
+}
+
+#[test]
+fn durable_events_rebuild_the_same_ledger_after_restart() {
+    let three_item_manifest = InstrumentReleaseManifest::new(
+        "release_big_five_ko_v1",
+        "instrument_big_five",
+        "instrument_version_ko_v1",
+        "construct_big_five",
+        &["item_version_001", "item_version_002", "item_version_003"],
+        "ko-KR",
+        "assessment_spec_big_five_v1",
+        "scoring_big_five_v1",
+        "calibration_big_five_v1",
+        Some("norm_big_five_ko_v1"),
+        "narrative_big_five_v1",
+        &["consent_service_v1"],
+        "intended_use_self_reflection_v1",
+        "limitations_big_five_v1",
+        RELEASE_DIGEST,
+    )
+    .unwrap();
+    let mut recorded =
+        ItemDeliveryLedger::from_manifest("session_big_five_restart", &three_item_manifest)
+            .unwrap();
+    recorded
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                Some("selection_fixed_order_v1"),
+            ),
+        )
+        .unwrap();
+    recorded
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_002",
+                "item_version_002",
+                "presentation_standard_v1",
+                None,
+            ),
+        )
+        .unwrap();
+
+    let rebuilt = ItemDeliveryLedger::from_durable_events(
+        recorded.session_ref(),
+        recorded.instrument_release_ref(),
+        recorded.release_content_digest(),
+        recorded.locale(),
+        recorded.allowed_item_version_refs(),
+        recorded
+            .events()
+            .iter()
+            .map(|event| {
+                ItemDeliveryEvent::from_durable_evidence(
+                    event.delivery_ref(),
+                    event.item_version_ref(),
+                    event.presentation_context_ref(),
+                    event.selection_evidence_ref(),
+                    event.sequence(),
+                )
+                .unwrap()
+            })
+            .collect(),
+    )
+    .unwrap();
+
+    assert_eq!(rebuilt, recorded);
+
+    let mut continued = rebuilt;
+    let replay = continued
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                Some("selection_fixed_order_v1"),
+            ),
+        )
+        .unwrap();
+    assert_eq!(replay.sequence(), 1);
+    let third = continued
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_003",
+                "item_version_003",
+                "presentation_standard_v1",
+                None,
+            ),
+        )
+        .unwrap();
+    assert_eq!(third.sequence(), 3);
+}
+
+fn durable_event(delivery_ref: &str, item_version_ref: &str, sequence: usize) -> ItemDeliveryEvent {
+    ItemDeliveryEvent::from_durable_evidence(
+        delivery_ref,
+        item_version_ref,
+        "presentation_standard_v1",
+        None,
+        sequence,
+    )
+    .unwrap()
+}
+
+fn allowed_two_items() -> [String; 2] {
+    ["item_version_001".into(), "item_version_002".into()]
+}
+
+#[test]
+fn durable_event_reconstruction_fails_closed_on_invalid_identity() {
+    assert_eq!(
+        ItemDeliveryEvent::from_durable_evidence(
+            " ",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+            1,
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryEvent::from_durable_evidence(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+            0,
+        ),
+        Err(ItemDeliveryError::InconsistentSequence)
+    );
+    assert_eq!(
+        ItemDeliveryEvent::from_durable_evidence(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            Some("12"),
+            1,
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "12",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &["item_version_001".into()],
+            Vec::new(),
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            "sha256:not-a-digest",
+            "ko-KR",
+            &["item_version_001".into()],
+            Vec::new(),
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &[],
+            Vec::new(),
+        ),
+        Err(ItemDeliveryError::InvalidReference)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &["item_version_001".into(), "item_version_001".into()],
+            Vec::new(),
+        ),
+        Err(ItemDeliveryError::DuplicateItemDelivery)
+    );
+}
+
+#[test]
+fn durable_ledger_reconstruction_fails_closed_on_conflicting_events() {
+    let first = durable_event("delivery_event_001", "item_version_001", 1);
+    let allowed = allowed_two_items();
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &allowed,
+            vec![
+                first.clone(),
+                durable_event("delivery_event_002", "item_version_002", 3)
+            ],
+        ),
+        Err(ItemDeliveryError::InconsistentSequence)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &allowed,
+            vec![
+                first.clone(),
+                durable_event("delivery_event_001", "item_version_002", 2)
+            ],
+        ),
+        Err(ItemDeliveryError::IdempotencyConflict)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &allowed,
+            vec![
+                first.clone(),
+                durable_event("delivery_event_002", "item_version_001", 2)
+            ],
+        ),
+        Err(ItemDeliveryError::DuplicateItemDelivery)
+    );
+    assert_eq!(
+        ItemDeliveryLedger::from_durable_events(
+            "session_big_five_001",
+            "release_big_five_ko_v1",
+            RELEASE_DIGEST,
+            "ko-KR",
+            &allowed,
+            vec![
+                first,
+                durable_event("delivery_event_002", "item_version_003", 2)
+            ],
+        ),
+        Err(ItemDeliveryError::ItemNotInRelease)
+    );
 }

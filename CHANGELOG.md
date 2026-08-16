@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- PostgreSQL item-delivery ledgers reload after restart: `load_item_delivery_ledger` reconstructs the stored tenant, release, locale, digest, allowed item set, and monotonic delivery prefix so a later `deliver` continues the same form, exact replay stays Duplicate, tenant rebinding and gapped sequences fail closed, and recovery COPY/restore keeps `item_delivery_ledger` / `item_delivery_event`.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

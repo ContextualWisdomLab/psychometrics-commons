@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** item-delivery ledger reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Tenant-bound item-delivery identity, exact release/locale/digest/item-set evidence, and monotonic delivery events persist under READ COMMITTED, reload after restart so a later `deliver` continues the stored prefix, and recovery COPY/restore covers `item_delivery_ledger` / `item_delivery_event`. Item-selection arithmetic remains in fast-mlsirm.
 
 ## 5. ADR traceability by concern
 

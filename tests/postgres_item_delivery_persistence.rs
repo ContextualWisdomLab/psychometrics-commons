@@ -4,7 +4,7 @@ use postgres::{Client, IsolationLevel, NoTls, Transaction};
 use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{ItemDeliveryLedger, ItemDeliveryRequest};
 use psychometrics_commons_runtime::postgres_item_delivery::{
-    apply_item_delivery_migration, persist_item_delivery_ledger,
+    apply_item_delivery_migration, load_item_delivery_ledger, persist_item_delivery_ledger,
     ItemDeliveryPersistenceDisposition, ItemDeliveryPersistenceError,
 };
 use psychometrics_commons_runtime::session::SessionState;
@@ -687,6 +687,246 @@ fn selection_item_and_sequence_mismatches_fail_closed() {
     assert!(matches!(
         persist(&mut transaction, &ledger),
         Err(ItemDeliveryPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+fn load_ok(client: &mut Client, tenant_ref: &str, session_ref: &str) -> Option<ItemDeliveryLedger> {
+    let mut transaction = client.transaction().unwrap();
+    let ledger = load_item_delivery_ledger(&mut transaction, tenant_ref, session_ref).unwrap();
+    transaction.commit().unwrap();
+    ledger
+}
+
+#[test]
+fn persisted_ledger_reloads_and_continues_the_stored_sequence() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let three_item = manifest_parts(
+        "release_big_five_ko_v1",
+        &["item_version_001", "item_version_002", "item_version_003"],
+        "ko-KR",
+        RELEASE_DIGEST,
+    );
+    let mut original =
+        ItemDeliveryLedger::from_manifest("session_item_delivery_reload", &three_item).unwrap();
+    original
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_001",
+                "item_version_001",
+                "presentation_standard_v1",
+                Some("selection_fixed_order_v1"),
+            ),
+        )
+        .unwrap();
+    original
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_002",
+                "item_version_002",
+                "presentation_standard_v1",
+                None,
+            ),
+        )
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist(&mut transaction, &original).unwrap(),
+            ItemDeliveryPersistenceDisposition::Inserted
+        );
+        transaction.commit().unwrap();
+    }
+
+    let mut reloaded =
+        load_ok(&mut client, TENANT_REF, "session_item_delivery_reload").expect("stored ledger");
+    assert_eq!(reloaded, original);
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist(&mut transaction, &reloaded).unwrap(),
+            ItemDeliveryPersistenceDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+
+    let third = reloaded
+        .deliver(
+            SessionState::Active,
+            request(
+                "delivery_event_003",
+                "item_version_003",
+                "presentation_standard_v1",
+                None,
+            ),
+        )
+        .unwrap();
+    assert_eq!(third.sequence(), 3);
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist(&mut transaction, &reloaded).unwrap(),
+            ItemDeliveryPersistenceDisposition::Inserted
+        );
+        transaction.commit().unwrap();
+    }
+    assert_eq!(
+        load_ok(&mut client, TENANT_REF, "session_item_delivery_reload").expect("appended ledger"),
+        reloaded
+    );
+}
+
+#[test]
+fn missing_or_empty_ledgers_load_without_inventing_events() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    assert!(load_ok(&mut client, TENANT_REF, "session_item_delivery_absent").is_none());
+    let empty = ItemDeliveryLedger::from_manifest(
+        "session_item_delivery_empty_load",
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+    )
+    .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist(&mut transaction, &empty).unwrap();
+        transaction.commit().unwrap();
+    }
+    let loaded =
+        load_ok(&mut client, TENANT_REF, "session_item_delivery_empty_load").expect("empty header");
+    assert!(loaded.is_empty());
+    assert_eq!(loaded, empty);
+}
+
+#[test]
+fn load_requires_read_committed_and_opaque_identity() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_item_delivery_ledger(&mut transaction, TENANT_REF, "session_serializable_load",),
+        Err(ItemDeliveryPersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_item_delivery_ledger(&mut transaction, TENANT_REF, "12"),
+        Err(ItemDeliveryPersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        load_item_delivery_ledger(&mut transaction, "12", "session_item_delivery_load"),
+        Err(ItemDeliveryPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_rejects_tenant_rebinding_and_gapped_sequences() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+
+    let original = delivered_ledger(
+        "session_item_delivery_gap",
+        "release_big_five_ko_v1",
+        RELEASE_DIGEST,
+        &[(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+        )],
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist(&mut transaction, &original).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_item_delivery_ledger(
+            &mut transaction,
+            "tenant_item_delivery_beta",
+            "session_item_delivery_gap",
+        ),
+        Err(ItemDeliveryPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .execute(
+            "INSERT INTO item_delivery_event (\
+                 tenant_ref, session_ref, delivery_event_ref, item_version_ref, \
+                 presentation_context_ref, selection_evidence_ref, delivery_sequence\
+             ) VALUES (\
+                 $1, 'session_item_delivery_gap', 'delivery_event_003', \
+                 'item_version_002', 'presentation_standard_v1', NULL, 3\
+             )",
+            &[&TENANT_REF],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_item_delivery_ledger(&mut transaction, TENANT_REF, "session_item_delivery_gap"),
+        Err(ItemDeliveryPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_ledger_relation_on_load_is_a_database_failure() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_item_delivery_ledger(&mut transaction, TENANT_REF, "session_missing_header",),
+        Err(ItemDeliveryPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_event_relation_on_load_is_a_database_failure() {
+    let _guard = item_delivery_test_guard();
+    let mut client = test_client();
+    reset_item_delivery_tables(&mut client);
+    apply_item_delivery_migration(&mut client).unwrap();
+    let empty = ItemDeliveryLedger::from_manifest(
+        "session_missing_load",
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+    )
+    .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist(&mut transaction, &empty).unwrap();
+        transaction.commit().unwrap();
+    }
+    client
+        .batch_execute("DROP TABLE item_delivery_event;")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_item_delivery_ledger(&mut transaction, TENANT_REF, "session_missing_load"),
+        Err(ItemDeliveryPersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
 }

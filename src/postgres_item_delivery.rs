@@ -3,7 +3,7 @@
 //! Item selection, calibration, and scoring remain in `fast-mlsirm`. Callers own the
 //! connection, transaction, credentials, and explicit tenant authorization context.
 
-use crate::item_delivery::{ItemDeliveryEvent, ItemDeliveryLedger};
+use crate::item_delivery::{ItemDeliveryError, ItemDeliveryEvent, ItemDeliveryLedger};
 use crate::reference::normalized_reference;
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
@@ -37,6 +37,8 @@ pub enum ItemDeliveryPersistenceError {
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the operation.
     Database(postgres::Error),
+    /// Durable rows cannot reconstruct the domain item-delivery ledger.
+    InconsistentEvidence,
 }
 
 impl Display for ItemDeliveryPersistenceError {
@@ -56,6 +58,9 @@ impl Display for ItemDeliveryPersistenceError {
                 "item delivery persistence requires read committed isolation"
             }
             Self::Database(_) => "PostgreSQL item-delivery persistence failed",
+            Self::InconsistentEvidence => {
+                "durable item-delivery evidence cannot reconstruct the session ledger"
+            }
         })
     }
 }
@@ -114,6 +119,93 @@ pub fn persist_item_delivery_ledger(
     } else {
         ItemDeliveryPersistenceDisposition::Duplicate
     })
+}
+
+/// Load one tenant-bound item-delivery ledger from durable evidence.
+///
+/// Returns `Ok(None)` when no ledger header exists. An empty header
+/// reconstructs as an empty [`ItemDeliveryLedger`] still bound to the stored
+/// release item set. Events are ordered by `delivery_sequence` and must form
+/// the same monotonic prefix the domain assigned. After load,
+/// [`ItemDeliveryLedger::deliver`] continues that prefix.
+///
+/// # Errors
+///
+/// Returns [`ItemDeliveryPersistenceError`] for unsupported isolation, an
+/// invalid tenant or session reference, a tenant mismatch, inconsistent
+/// durable evidence, or a database failure.
+pub fn load_item_delivery_ledger(
+    transaction: &mut Transaction<'_>,
+    tenant_ref: &str,
+    session_ref: &str,
+) -> Result<Option<ItemDeliveryLedger>, ItemDeliveryPersistenceError> {
+    require_read_committed(transaction)?;
+    let tenant_ref = required_reference(tenant_ref)?;
+    let session_ref = required_reference(session_ref)?;
+    let header = transaction.query_opt(
+        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
+         allowed_item_version_refs FROM item_delivery_ledger WHERE session_ref = $1",
+        &[&session_ref],
+    )?;
+    let Some(header) = header else {
+        return Ok(None);
+    };
+    let stored_tenant_ref: String = header.get(0);
+    if stored_tenant_ref != tenant_ref {
+        return Err(ItemDeliveryPersistenceError::ConflictingReplay);
+    }
+    let instrument_release_ref: String = header.get(1);
+    let release_content_digest: String = header.get(2);
+    let locale: String = header.get(3);
+    let allowed_item_version_refs: Vec<String> = header.get(4);
+    let rows = transaction.query(
+        "SELECT delivery_event_ref, item_version_ref, presentation_context_ref, \
+         selection_evidence_ref, delivery_sequence FROM item_delivery_event \
+         WHERE session_ref = $1 ORDER BY delivery_sequence ASC",
+        &[&session_ref],
+    )?;
+    let mut events = Vec::with_capacity(rows.len());
+    for row in rows {
+        let sequence = stored_sequence(row.get(4))?;
+        let selection_evidence_ref: Option<String> = row.get(3);
+        events.push(
+            ItemDeliveryEvent::from_durable_evidence(
+                row.get::<_, String>(0),
+                row.get::<_, String>(1),
+                row.get::<_, String>(2),
+                selection_evidence_ref.as_deref(),
+                sequence,
+            )
+            .map_err(durable_evidence_error)?,
+        );
+    }
+    ItemDeliveryLedger::from_durable_events(
+        session_ref,
+        instrument_release_ref,
+        release_content_digest,
+        locale,
+        &allowed_item_version_refs,
+        events,
+    )
+    .map(Some)
+    .map_err(durable_evidence_error)
+}
+
+fn stored_sequence(sequence: i64) -> Result<usize, ItemDeliveryPersistenceError> {
+    usize::try_from(sequence).map_err(|_| ItemDeliveryPersistenceError::InconsistentEvidence)
+}
+
+fn durable_evidence_error(error: ItemDeliveryError) -> ItemDeliveryPersistenceError {
+    match error {
+        ItemDeliveryError::InvalidReference => ItemDeliveryPersistenceError::InvalidReference,
+        ItemDeliveryError::InconsistentSequence
+        | ItemDeliveryError::IdempotencyConflict
+        | ItemDeliveryError::DuplicateItemDelivery
+        | ItemDeliveryError::ItemNotInRelease
+        | ItemDeliveryError::SessionNotActive(_) => {
+            ItemDeliveryPersistenceError::InconsistentEvidence
+        }
+    }
 }
 
 fn persist_ledger_header(
@@ -277,7 +369,11 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{required_reference, ItemDeliveryPersistenceError};
+    use super::{
+        durable_evidence_error, required_reference, stored_sequence, ItemDeliveryPersistenceError,
+    };
+    use crate::item_delivery::ItemDeliveryError;
+    use crate::session::SessionState;
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -293,5 +389,38 @@ mod reference_guard_tests {
             required_reference("session_item_delivery_alpha").unwrap(),
             "session_item_delivery_alpha"
         );
+        assert_eq!(stored_sequence(1).unwrap(), 1);
+        assert!(matches!(
+            stored_sequence(-1),
+            Err(ItemDeliveryPersistenceError::InconsistentEvidence)
+        ));
+    }
+
+    #[test]
+    fn durable_reconstruction_errors_map_to_persistence_failures() {
+        assert!(matches!(
+            durable_evidence_error(ItemDeliveryError::InvalidReference),
+            ItemDeliveryPersistenceError::InvalidReference
+        ));
+        assert!(matches!(
+            durable_evidence_error(ItemDeliveryError::InconsistentSequence),
+            ItemDeliveryPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ItemDeliveryError::IdempotencyConflict),
+            ItemDeliveryPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ItemDeliveryError::DuplicateItemDelivery),
+            ItemDeliveryPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ItemDeliveryError::ItemNotInRelease),
+            ItemDeliveryPersistenceError::InconsistentEvidence
+        ));
+        assert!(matches!(
+            durable_evidence_error(ItemDeliveryError::SessionNotActive(SessionState::Paused)),
+            ItemDeliveryPersistenceError::InconsistentEvidence
+        ));
     }
 }
