@@ -24,8 +24,8 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: the identity-link successor of #148 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, reconcile-only current-row writes that delete terminated projections before restore, and a database trigger that rejects a second unterminated issuer-scoped subject through `src/postgres_participant_identity_link.rs`. Prefer this successor over #148, #147, #133, #124, and #114.
-- `PLANNED`: durable HTTP transport, unlink/relink/recovery operator commands, data-rights execution, backup/restore evidence, and live Keyverse verification.
+- `IMPLEMENTED_ON_ACTIVE_PR`: the identity-link successor of #166/#160 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, reconcile-only current-row writes that delete terminated projections before restore, a database trigger that rejects a second unterminated issuer-scoped subject, and dual-proof persist/recover commands in `src/account_link_write.rs`. Prefer this successor over #166, #160, #148, #147, #133, #124, and #114.
+- `PLANNED`: durable HTTP transport, live Keyverse verification, data-rights execution, and backup/restore evidence.
 
 ## Decision
 
@@ -160,7 +160,7 @@ Before account-link persistence is considered GA-complete, exact-head evidence m
 - security tests for account-link/recovery takeover and cross-tenant access;
 - exact deployment-profile recovery evidence before any GA/SLO/RPO/RTO claim involving this persistence.
 
-Protected main satisfies the domain-level issuer-scoped first-link portion of this decision, including dual-proof authorization. Active PR persist must apply each link and then its matching ends in one transaction so a restart can write a complete unlink+relink aggregate. HTTP transport, live Keyverse verification, operator recovery commands, and backup/restore evidence remain target work until separately implemented, reviewed, and merged.
+Protected main satisfies the domain-level issuer-scoped first-link portion of this decision, including dual-proof authorization. Active PR persist must apply each link and then its matching ends in one transaction so a restart can write a complete unlink+relink aggregate. Active PR write/recover commands authorize both current proofs before that persist and recover the same participant from a still-valid account proof. HTTP transport, live Keyverse verification, and backup/restore evidence remain target work until separately implemented, reviewed, and merged.
 
 ## Alternatives considered
 
@@ -205,7 +205,7 @@ Until persistence/transport are implemented, protected main provides only the st
 ## Follow-up work
 
 - Psychometrics Commons: implement the physical append-only identity-link migration and repository transaction boundary.
-- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence.
+- Psychometrics Commons: add hosted HTTP unlink/relink/recovery transport on top of the Active PR write/recover commands.
 - Psychometrics Commons: add Keyverse adapter contract without direct database coupling.
 - Psychometrics Commons: integrate data-rights propagation and restricted research-linkage separation tests.
 - Psychometrics Commons: add transaction/concurrency/crash/backup/restore and public-release leakage tests.
@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: the successor of #148 (`migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, and `src/postgres_participant_identity_link.rs`) remains `IMPLEMENTED_ON_ACTIVE_PR` until merged.
+- Active-PR persistence evidence: the successor of #166/#160 (`migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs`) remains `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
