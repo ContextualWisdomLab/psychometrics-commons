@@ -424,7 +424,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
-- `scoring_job` version pins persist through `migrations/0011_scoring_request.sql`. Active PR #168 reloads that unique `scoring_request_ref` after restart; HTTP scoring transport remains Target.
+- `scoring_request` version pins persist through `migrations/0011_scoring_request.sql`. Active PR #168 reloads that unique `scoring_request_ref` after restart; HTTP scoring transport remains Target.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.

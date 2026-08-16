@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #168 scoring-request reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `load_scoring_request` reconstructs the unique version-pinned dispatch identity from `scoring_request` under `READ COMMITTED` after `FOR SHARE` on the request row. A missing request is absent. Unsupported stored schema, blank aliases, stronger isolation, and missing relations fail closed. This does not add HTTP scoring transport, live `fast-mlsirm` execution, or a session-scoped lookup (`session_ref` is not unique). Protected-main `#76` data-rights processing-start persist has already landed.
+**Active PR** #168 scoring-request reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `load_scoring_request` reconstructs the unique version-pinned dispatch identity from `scoring_request` under `READ COMMITTED` after `FOR SHARE` on the request row. A missing request is absent. Unsupported stored schema, blank caller aliases, stronger isolation, and missing relations fail closed. After a row is found, blank stored pins fail closed as corrupt history rather than a caller-alias error. This does not add HTTP scoring transport, live `fast-mlsirm` execution, or a session-scoped lookup (`session_ref` is not unique). Protected-main `#76` data-rights processing-start persist has already landed.
 
 ## 5. ADR traceability by concern
 

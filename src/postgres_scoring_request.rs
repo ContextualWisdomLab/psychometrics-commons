@@ -183,10 +183,10 @@ pub fn apply_scoring_request_migration(
 ///
 /// # Errors
 ///
-/// Returns [`ScoringRequestPersistenceError`] for an invalid reference,
-/// unsupported isolation, stored evidence that cannot reconstruct a valid
-/// request, a schema version outside the `PostgreSQL`/`u16` range, or a
-/// database failure.
+/// Returns [`ScoringRequestPersistenceError`] for an invalid caller
+/// reference, unsupported isolation, stored evidence that cannot reconstruct
+/// a valid request (including blank stored pins), a schema version outside
+/// the `PostgreSQL`/`u16` range, or a database failure.
 pub fn load_scoring_request(
     transaction: &mut Transaction<'_>,
     scoring_request_ref: &str,
@@ -235,8 +235,8 @@ fn stored_schema_version(value: i32) -> Result<u16, ScoringRequestPersistenceErr
 
 fn map_reconstruct_error(error: ScoringContractError) -> ScoringRequestPersistenceError {
     match error {
-        ScoringContractError::EmptyReference => ScoringRequestPersistenceError::InvalidReference,
-        ScoringContractError::UnsupportedOutputSchemaVersion
+        ScoringContractError::EmptyReference
+        | ScoringContractError::UnsupportedOutputSchemaVersion
         | ScoringContractError::UnboundResponseSnapshot
         | ScoringContractError::EmptyResponseSnapshot
         | ScoringContractError::ResponseSnapshotMismatch
@@ -437,11 +437,8 @@ mod reference_guard_tests {
 
     #[test]
     fn reconstruct_errors_map_to_fail_closed_persistence_errors() {
-        assert!(matches!(
-            map_reconstruct_error(ScoringContractError::EmptyReference),
-            ScoringRequestPersistenceError::InvalidReference
-        ));
         for error in [
+            ScoringContractError::EmptyReference,
             ScoringContractError::UnsupportedOutputSchemaVersion,
             ScoringContractError::UnboundResponseSnapshot,
             ScoringContractError::EmptyResponseSnapshot,

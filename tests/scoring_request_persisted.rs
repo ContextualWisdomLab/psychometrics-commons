@@ -113,26 +113,60 @@ fn persisted_reconstruction_rejects_blank_refs_and_unsupported_schema() {
         ScoringRequest::from_persisted("42", persisted_input()).unwrap_err(),
         ScoringContractError::EmptyReference
     );
+
+    let mut input = persisted_input();
+    input.scoring_request_ref = " ";
     assert_eq!(
-        ScoringRequest::from_persisted(
-            "session_reload_score",
-            ScoringRequestInput {
-                scoring_request_ref: " ",
-                ..persisted_input()
-            },
-        )
-        .unwrap_err(),
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
         ScoringContractError::EmptyReference
     );
+
+    let mut input = persisted_input();
+    input.response_snapshot_ref = "";
     assert_eq!(
-        ScoringRequest::from_persisted(
-            "session_reload_score",
-            ScoringRequestInput {
-                requested_output_schema_version: 2,
-                ..persisted_input()
-            },
-        )
-        .unwrap_err(),
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
+        ScoringContractError::EmptyReference
+    );
+
+    let mut input = persisted_input();
+    input.assessment_spec_ref = "   ";
+    assert_eq!(
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
+        ScoringContractError::EmptyReference
+    );
+
+    let mut input = persisted_input();
+    input.instrument_version_ref = "";
+    assert_eq!(
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
+        ScoringContractError::EmptyReference
+    );
+
+    let mut input = persisted_input();
+    input.scoring_version_ref = "";
+    assert_eq!(
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
+        ScoringContractError::EmptyReference
+    );
+
+    let mut input = persisted_input();
+    input.calibration_reference = "";
+    assert_eq!(
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
+        ScoringContractError::EmptyReference
+    );
+
+    let mut input = persisted_input();
+    input.norm_version_ref = Some("");
+    assert_eq!(
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
+        ScoringContractError::EmptyReference
+    );
+
+    let mut input = persisted_input();
+    input.requested_output_schema_version = 2;
+    assert_eq!(
+        ScoringRequest::from_persisted("session_reload_score", input).unwrap_err(),
         ScoringContractError::UnsupportedOutputSchemaVersion
     );
 }
