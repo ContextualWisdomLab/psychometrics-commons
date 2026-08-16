@@ -13,7 +13,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const IDENTITY_LINK_MIGRATION: &str =
-    include_str!("../migrations/0021_participant_identity_link.sql");
+    include_str!("../migrations/0022_participant_identity_link.sql");
 
 /// Outcome of persisting one participant identity-link history.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
