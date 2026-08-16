@@ -243,12 +243,25 @@ fn completion_failure_does_not_enqueue_an_outbox_event() {
 
 #[test]
 fn completion_outbox_errors_retain_typed_sources() {
+    let envelope = ScoringCompletionOutboxError::InvalidCompletionEnvelope;
+    assert_eq!(
+        envelope.to_string(),
+        "scoring completion outbox must bind the exact job and completion time"
+    );
+    assert!(envelope.source().is_none());
+
     let errors = [
-        ScoringCompletionOutboxError::Completion(ScoringJobPersistenceError::InvalidReference),
-        ScoringCompletionOutboxError::Outbox(PersistenceError::InvalidReference),
+        (
+            ScoringCompletionOutboxError::Completion(ScoringJobPersistenceError::InvalidReference),
+            "scoring completion persistence failed",
+        ),
+        (
+            ScoringCompletionOutboxError::Outbox(PersistenceError::InvalidReference),
+            "scoring completion outbox persistence failed",
+        ),
     ];
-    for error in errors {
-        assert!(!error.to_string().is_empty());
+    for (error, expected) in errors {
+        assert_eq!(error.to_string(), expected);
         assert!(error.source().is_some());
     }
 }
