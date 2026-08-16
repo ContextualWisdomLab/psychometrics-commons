@@ -3,8 +3,8 @@
 
 The check is intentionally small and deterministic. It does not try to replace an SPDX schema
 validator or a vulnerability scanner. It proves that the generated file is structurally recognizable
-as SPDX 2.x JSON and that every registry/git dependency pinned by ``Cargo.lock`` is represented by
-name and version before the SBOM is retained as build evidence.
+as a supported SPDX 2.x JSON document and that every registry/git dependency pinned by
+``Cargo.lock`` is represented by name and version before the SBOM is retained as build evidence.
 """
 
 from __future__ import annotations
@@ -14,6 +14,9 @@ from pathlib import Path
 import sys
 import tomllib
 from typing import Any
+
+
+SUPPORTED_SPDX_VERSIONS = frozenset({"SPDX-2.0", "SPDX-2.1", "SPDX-2.2", "SPDX-2.3"})
 
 
 class SbomValidationError(ValueError):
@@ -57,10 +60,10 @@ def _locked_external_packages(path: Path) -> set[tuple[str, str]]:
 
 
 def _spdx_packages(document: dict[str, Any]) -> set[tuple[str, str]]:
-    """Return name/version identities declared by an SPDX JSON document."""
+    """Return name/version identities declared by a supported SPDX 2.x JSON document."""
     spdx_version = document.get("spdxVersion")
-    if not isinstance(spdx_version, str) or not spdx_version.startswith("SPDX-2."):
-        raise SbomValidationError("SBOM must declare an SPDX 2.x version")
+    if spdx_version not in SUPPORTED_SPDX_VERSIONS:
+        raise SbomValidationError("SBOM must declare a supported SPDX 2.x version (2.0 through 2.3)")
     if document.get("dataLicense") != "CC0-1.0":
         raise SbomValidationError("SPDX dataLicense must be CC0-1.0")
 
