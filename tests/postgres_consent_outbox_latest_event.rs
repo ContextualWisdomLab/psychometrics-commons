@@ -70,6 +70,38 @@ fn ledger_with_revocation() -> ConsentLedger {
     ledger
 }
 
+fn same_ms_grant_input() -> ConsentEventInput<'static> {
+    ConsentEventInput {
+        event_ref: "consent_event_z_grant",
+        purpose: ConsentPurpose::ResearchContribution,
+        decision: ConsentDecision::Granted,
+        consent_form_version_ref: "consent_form_latest_v1",
+        research_scope_ref: Some("research_scope_latest_alpha"),
+        occurred_at_unix_ms: 32_000,
+    }
+}
+
+fn ledger_with_same_ms_grant_only() -> ConsentLedger {
+    let mut ledger = ConsentLedger::new("participant_consent_latest_alpha").unwrap();
+    ledger.record(same_ms_grant_input()).unwrap();
+    ledger
+}
+
+fn ledger_with_same_ms_revocation() -> ConsentLedger {
+    let mut ledger = ledger_with_same_ms_grant_only();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "consent_event_a_revoke",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Revoked,
+            consent_form_version_ref: "consent_form_latest_v1",
+            research_scope_ref: Some("research_scope_latest_alpha"),
+            occurred_at_unix_ms: 32_000,
+        })
+        .unwrap();
+    ledger
+}
+
 fn propagation_event(
     event_ref: &str,
     causation_ref: &str,
@@ -208,6 +240,92 @@ fn latest_revocation_can_be_persisted_with_its_propagation_event() {
     assert_eq!(subject_ref, "participant_consent_latest_alpha");
     assert_eq!(causation_ref.as_deref(), Some("consent_event_revoke_alpha"));
     assert_eq!(occurred_at_unix_ms, 31_000);
+
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public;
+             DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
+fn durable_same_ms_revoke_rejects_lex_greater_grant_snapshot() {
+    let mut client = ready_client();
+    let mut persist_transaction = client.transaction().unwrap();
+    persist_consent_ledger(&mut persist_transaction, &ledger_with_same_ms_revocation())
+        .expect("same-millisecond grant then revoke should persist as append-only evidence");
+    persist_transaction.commit().unwrap();
+
+    let stale_event = propagation_event(
+        "event_consent_stale_same_ms_grant",
+        "consent_event_z_grant",
+        32_000,
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_consent_ledger_with_outbox(
+            &mut transaction,
+            TENANT_REF,
+            &ledger_with_same_ms_grant_only(),
+            &stale_event,
+            3,
+        ),
+        Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+    ));
+    transaction.rollback().unwrap();
+
+    let consent_count: i64 = client
+        .query_one("SELECT count(*) FROM consent_event", &[])
+        .unwrap()
+        .get(0);
+    let outbox_count: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(consent_count, 2);
+    assert_eq!(outbox_count, 0);
+
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public;
+             DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"
+        ))
+        .unwrap();
+}
+
+#[test]
+fn durable_same_ms_revocation_propagates_when_grant_ref_sorts_after() {
+    let mut client = ready_client();
+    let ledger = ledger_with_same_ms_revocation();
+    let latest_event = propagation_event(
+        "event_consent_same_ms_revocation",
+        "consent_event_a_revoke",
+        32_000,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    persist_consent_ledger_with_outbox(&mut transaction, TENANT_REF, &ledger, &latest_event, 3)
+        .expect(
+        "same-millisecond revoke should persist with its bound outbox when it was inserted last",
+    );
+    transaction.commit().unwrap();
+
+    let consent_count: i64 = client
+        .query_one("SELECT count(*) FROM consent_event", &[])
+        .unwrap()
+        .get(0);
+    let outbox = client
+        .query_one(
+            "SELECT causation_ref, occurred_at_unix_ms FROM integration_outbox",
+            &[],
+        )
+        .unwrap();
+    let causation_ref: Option<String> = outbox.get(0);
+    let occurred_at_unix_ms: i64 = outbox.get(1);
+    assert_eq!(consent_count, 2);
+    assert_eq!(causation_ref.as_deref(), Some("consent_event_a_revoke"));
+    assert_eq!(occurred_at_unix_ms, 32_000);
 
     client
         .batch_execute(&format!(

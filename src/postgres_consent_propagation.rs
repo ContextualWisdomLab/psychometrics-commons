@@ -4,11 +4,11 @@
 //! existing consent adapter with the existing transactional outbox and verifies that the emitted
 //! event is bound to the authorized tenant, same participant, and latest accepted consent event
 //! before any durable write. After the ledger snapshot is persisted, the same transaction locks
-//! the participant ledger and requires the durable event tail to match the envelope, so a
-//! grant-only in-memory snapshot cannot pair a later stored revocation with stale grant
-//! propagation.
+//! the participant ledger and requires the durable event set and insert-order tail to match the
+//! envelope, so a grant-only in-memory snapshot cannot pair a later stored revocation with stale
+//! grant propagation even when both events share a millisecond and the grant identity sorts last.
 
-use crate::consent::ConsentLedger;
+use crate::consent::{ConsentEvent, ConsentLedger};
 use crate::integration::IntegrationEvent;
 use crate::postgres_consent::{
     persist_consent_ledger, ConsentPersistenceDisposition, ConsentPersistenceError,
@@ -16,6 +16,7 @@ use crate::postgres_consent::{
 use crate::postgres_integration::{enqueue_outbox_event, PersistenceDisposition, PersistenceError};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -86,9 +87,11 @@ impl Error for ConsentOutboxPersistenceError {
 /// propagation to tenant, participant, and ledger tail prevents cross-tenant dispatch and prevents
 /// a later revocation or grant from being durably paired with stale historical propagation evidence.
 /// In-memory envelope checks run before persistence. After the submitted snapshot is written, the
-/// same transaction locks `consent_ledger` and requires the durable `consent_event` tail—ordered by
-/// occurrence time, then event identity—to equal that causation reference and time. A caller that
-/// omits a later stored revocation or grant therefore fails closed before an outbox row is created.
+/// same transaction locks `consent_ledger`, requires every durable `consent_event` identity to appear
+/// in the submitted ledger, and requires the durable tail—ordered by occurrence time, then insert
+/// time, then event identity—to equal that causation reference and time. A caller that omits a later
+/// stored revocation or grant therefore fails closed before an outbox row is created, including when
+/// both events share a millisecond and the omitted grant identity sorts after the revoke.
 /// Callers should persist one new consent event per composition so an earlier purpose change is not
 /// hidden behind a later event that becomes the only bound outbox. Event type, correlation
 /// reference, schema version, and payload digest remain owned by the caller's versioned
@@ -103,8 +106,8 @@ impl Error for ConsentOutboxPersistenceError {
 /// Returns [`ConsentOutboxPersistenceError::InvalidPropagationEnvelope`] before writes for an
 /// invalid, non-canonical, or mismatched authorized tenant, unrelated source or participant, stale
 /// or missing causation reference, or timestamp, and after ledger persistence when the durable
-/// tail does not match the envelope. Consent and outbox failures are preserved in typed error
-/// variants.
+/// tail or durable event set does not match the envelope. Consent and outbox failures are preserved
+/// in typed error variants.
 pub fn persist_consent_ledger_with_outbox(
     transaction: &mut Transaction<'_>,
     authorized_tenant_ref: &str,
@@ -170,19 +173,29 @@ fn require_durable_ledger_tail(
     {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     }
-    let Some(row) = transaction
-        .query_opt(
+    let rows = transaction
+        .query(
             "SELECT event_ref, occurred_at_unix_ms \
              FROM consent_event \
              WHERE participant_ref = $1 \
-             ORDER BY occurred_at_unix_ms DESC, event_ref DESC \
-             LIMIT 1",
+             ORDER BY occurred_at_unix_ms DESC, created_at DESC, event_ref DESC",
             &[&ledger.participant_ref()],
         )
-        .map_err(|error| ConsentOutboxPersistenceError::Consent(error.into()))?
-    else {
+        .map_err(|error| ConsentOutboxPersistenceError::Consent(error.into()))?;
+    let Some(row) = rows.first() else {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     };
+    let submitted: HashSet<&str> = ledger
+        .events()
+        .iter()
+        .map(ConsentEvent::event_ref)
+        .collect();
+    for stored in &rows {
+        let stored_event_ref: String = stored.get(0);
+        if !submitted.contains(stored_event_ref.as_str()) {
+            return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+        }
+    }
     let stored_event_ref: String = row.get(0);
     let stored_occurred: i64 = row.get(1);
     let Ok(expected_occurred) = i64::try_from(propagation_event.occurred_at_unix_ms()) else {
@@ -374,17 +387,22 @@ mod durable_tail_boundary_tests {
 
     const DIGEST: &str = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
     const SCHEMA: &str = "consent_outbox_durable_tail_unit";
+    const SAME_MS_SCHEMA: &str = "consent_outbox_durable_tail_same_ms_unit";
 
     fn ready_client() -> Client {
+        ready_schema_client(SCHEMA)
+    }
+
+    fn ready_schema_client(schema: &str) -> Client {
         let connection = std::env::var("TEST_DATABASE_URL")
             .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
         let mut client = Client::connect(&connection, NoTls)
             .expect("isolated CI PostgreSQL database must be reachable");
         client
             .batch_execute(&format!(
-                "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
-                 CREATE SCHEMA {SCHEMA};
-                 SET search_path TO {SCHEMA};"
+                "DROP SCHEMA IF EXISTS {schema} CASCADE;
+                 CREATE SCHEMA {schema};
+                 SET search_path TO {schema};"
             ))
             .unwrap();
         apply_consent_migration(&mut client).unwrap();
@@ -516,6 +534,88 @@ mod durable_tail_boundary_tests {
         missing_ledger_relation.rollback().unwrap();
         client
             .batch_execute(&format!("DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"))
+            .unwrap();
+    }
+
+    #[test]
+    fn same_ms_insert_order_tail_rejects_incomplete_grant_snapshot() {
+        let mut client = ready_schema_client(SAME_MS_SCHEMA);
+        let grant_only = grant_ledger();
+        let research_scope_ref = Some("research_scope_durable_tail");
+        client
+            .execute(
+                "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
+                &[&grant_only.participant_ref()],
+            )
+            .unwrap();
+        client
+            .execute(
+                "INSERT INTO consent_event (\
+                     participant_ref, event_ref, consent_purpose, consent_decision, \
+                     consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
+                 ) VALUES ($1, $2, 'research_contribution', 'granted', $3, $4, 40000)",
+                &[
+                    &grant_only.participant_ref(),
+                    &"consent_event_durable_tail_grant",
+                    &"consent_form_durable_tail",
+                    &research_scope_ref,
+                ],
+            )
+            .unwrap();
+        client
+            .execute(
+                "INSERT INTO consent_event (\
+                     participant_ref, event_ref, consent_purpose, consent_decision, \
+                     consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
+                 ) VALUES ($1, $2, 'research_contribution', 'revoked', $3, $4, 40000)",
+                &[
+                    &grant_only.participant_ref(),
+                    &"consent_event_a_revoke",
+                    &"consent_form_durable_tail",
+                    &research_scope_ref,
+                ],
+            )
+            .unwrap();
+
+        let mut incomplete = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(
+                &mut incomplete,
+                &grant_only,
+                &event(Some("consent_event_durable_tail_grant"), 40_000),
+            ),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        let mut same_ms_revoke = ConsentLedger::new("participant_consent_durable_tail").unwrap();
+        same_ms_revoke
+            .record(ConsentEventInput {
+                event_ref: "consent_event_durable_tail_grant",
+                purpose: ConsentPurpose::ResearchContribution,
+                decision: ConsentDecision::Granted,
+                consent_form_version_ref: "consent_form_durable_tail",
+                research_scope_ref: Some("research_scope_durable_tail"),
+                occurred_at_unix_ms: 40_000,
+            })
+            .unwrap();
+        same_ms_revoke
+            .record(ConsentEventInput {
+                event_ref: "consent_event_a_revoke",
+                purpose: ConsentPurpose::ResearchContribution,
+                decision: ConsentDecision::Revoked,
+                consent_form_version_ref: "consent_form_durable_tail",
+                research_scope_ref: Some("research_scope_durable_tail"),
+                occurred_at_unix_ms: 40_000,
+            })
+            .unwrap();
+        require_durable_ledger_tail(
+            &mut incomplete,
+            &same_ms_revoke,
+            &event(Some("consent_event_a_revoke"), 40_000),
+        )
+        .expect("insert-order tail should bind the later same-millisecond revoke");
+        incomplete.rollback().unwrap();
+        client
+            .batch_execute(&format!("DROP SCHEMA IF EXISTS {SAME_MS_SCHEMA} CASCADE;"))
             .unwrap();
     }
 }
