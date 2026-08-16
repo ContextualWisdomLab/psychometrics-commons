@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- PostgreSQL consent-ledger reload reconstructs purpose-specific grant and revoke events after process restart, keeping same-millisecond insertion order and failing closed on stored history that cannot reconstruct a valid ledger.
+- PostgreSQL consent-ledger reload reconstructs purpose-specific grant and revoke events after process restart by physical insertion time, keeps same-millisecond revoke-after-grant order, and fails closed on a `created_at` collision or stored history that cannot reconstruct a valid ledger.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

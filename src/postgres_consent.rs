@@ -91,16 +91,19 @@ pub fn apply_consent_migration(
 
 /// Reload one participant-bound consent ledger after process restart.
 ///
-/// Events are reconstructed in occurrence time, then physical insertion time,
-/// then event identity. Equal server timestamps therefore keep a later-inserted
-/// revocation after the grant whose opaque identity sorts later. A missing
-/// ledger is absent rather than an empty grant. Stored events that violate
-/// append-only domain rules fail closed instead of being reordered into a
-/// newer grant.
+/// Events are reconstructed in physical insertion time (`created_at`). A
+/// later-inserted same-millisecond revocation therefore remains after the
+/// grant whose opaque identity sorts later. Two events that share `created_at`
+/// are an ambiguous tail and fail closed instead of being ordered by event
+/// identity. A missing ledger is absent rather than an empty grant. Stored
+/// events that violate append-only domain rules, including an earlier
+/// `occurred_at` after a later insertion, fail closed instead of being
+/// reordered into a newer grant.
 ///
 /// The caller owns the `READ COMMITTED` transaction. The load takes `FOR SHARE`
-/// on the ledger header so a concurrent writer that locks the same row cannot
-/// hide an in-flight append from the reconstructed snapshot.
+/// on the ledger header. That wait applies only to writers that lock the same
+/// row. [`persist_consent_ledger`] inserts the header without `FOR UPDATE`, so
+/// the share lock does not by itself hide a concurrent persist append.
 ///
 /// # Errors
 ///
@@ -112,6 +115,7 @@ pub fn load_consent_ledger(
     participant_ref: &str,
 ) -> Result<Option<ConsentLedger>, ConsentPersistenceError> {
     require_read_committed(transaction)?;
+    let participant_ref = required_reference(participant_ref)?;
     let mut ledger = ConsentLedger::new(participant_ref)
         .map_err(|_| ConsentPersistenceError::InvalidReference)?;
     let participant_ref = ledger.participant_ref().to_owned();
@@ -126,31 +130,59 @@ pub fn load_consent_ledger(
     }
     let rows = transaction.query(
         "SELECT event_ref, consent_purpose, consent_decision, \
-                consent_form_version_ref, research_scope_ref, occurred_at_unix_ms \
+                consent_form_version_ref, research_scope_ref, occurred_at_unix_ms, \
+                COUNT(*) OVER (PARTITION BY created_at) \
          FROM consent_event \
          WHERE participant_ref = $1 \
-         ORDER BY occurred_at_unix_ms ASC, created_at ASC, event_ref ASC",
+         ORDER BY created_at ASC",
         &[&participant_ref],
     )?;
+    let mut loaded_events = Vec::with_capacity(rows.len());
     for row in rows {
-        let event_ref: String = row.get(0);
-        let purpose = parse_purpose(row.get::<_, String>(1).as_str())?;
-        let decision = parse_decision(row.get::<_, String>(2).as_str())?;
-        let consent_form_version_ref: String = row.get(3);
-        let research_scope_ref: Option<String> = row.get(4);
-        let occurred_at_unix_ms = stored_timestamp(row.get(5))?;
+        loaded_events.push(LoadedConsentEvent {
+            event_ref: row.get(0),
+            purpose: parse_purpose(row.get::<_, String>(1).as_str())?,
+            decision: parse_decision(row.get::<_, String>(2).as_str())?,
+            consent_form_version_ref: row.get(3),
+            research_scope_ref: row.get(4),
+            occurred_at_unix_ms: stored_timestamp(row.get(5))?,
+            created_at_tie_count: row.get(6),
+        });
+    }
+    reconstruct_loaded_events(&mut ledger, loaded_events)?;
+    Ok(Some(ledger))
+}
+
+struct LoadedConsentEvent {
+    event_ref: String,
+    purpose: ConsentPurpose,
+    decision: ConsentDecision,
+    consent_form_version_ref: String,
+    research_scope_ref: Option<String>,
+    occurred_at_unix_ms: u64,
+    created_at_tie_count: i64,
+}
+
+fn reconstruct_loaded_events(
+    ledger: &mut ConsentLedger,
+    rows: Vec<LoadedConsentEvent>,
+) -> Result<(), ConsentPersistenceError> {
+    for row in rows {
+        if row.created_at_tie_count > 1 {
+            return Err(ConsentPersistenceError::CorruptHistory);
+        }
         ledger
             .record(ConsentEventInput {
-                event_ref: &event_ref,
-                purpose,
-                decision,
-                consent_form_version_ref: &consent_form_version_ref,
-                research_scope_ref: research_scope_ref.as_deref(),
-                occurred_at_unix_ms,
+                event_ref: &row.event_ref,
+                purpose: row.purpose,
+                decision: row.decision,
+                consent_form_version_ref: &row.consent_form_version_ref,
+                research_scope_ref: row.research_scope_ref.as_deref(),
+                occurred_at_unix_ms: row.occurred_at_unix_ms,
             })
             .map_err(|_| ConsentPersistenceError::CorruptHistory)?;
     }
-    Ok(Some(ledger))
+    Ok(())
 }
 
 /// Persist one participant-bound consent ledger and its accepted events.
@@ -292,7 +324,10 @@ fn stored_timestamp(value: i64) -> Result<u64, ConsentPersistenceError> {
 }
 
 fn required_reference(reference: &str) -> Result<&str, ConsentPersistenceError> {
-    normalized_reference(reference).ok_or(ConsentPersistenceError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(normalized),
+        _ => Err(ConsentPersistenceError::InvalidReference),
+    }
 }
 
 fn require_read_committed(
@@ -310,10 +345,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        decision_name, parse_decision, parse_purpose, purpose_name, required_reference,
-        stored_timestamp, ConsentPersistenceError,
+        decision_name, parse_decision, parse_purpose, purpose_name, reconstruct_loaded_events,
+        required_reference, stored_timestamp, ConsentPersistenceError, LoadedConsentEvent,
     };
-    use crate::consent::{ConsentDecision, ConsentPurpose};
+    use crate::consent::{ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose};
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -329,6 +364,10 @@ mod reference_guard_tests {
             required_reference("participant_consent_alpha").unwrap(),
             "participant_consent_alpha"
         );
+        assert!(matches!(
+            required_reference(" participant_consent_alpha"),
+            Err(ConsentPersistenceError::InvalidReference)
+        ));
     }
 
     #[test]
@@ -362,6 +401,142 @@ mod reference_guard_tests {
         assert!(matches!(
             stored_timestamp(-1),
             Err(ConsentPersistenceError::InvalidTimestamp)
+        ));
+    }
+
+    fn loaded_event(
+        event_ref: &str,
+        purpose: ConsentPurpose,
+        decision: ConsentDecision,
+        research_scope_ref: Option<&str>,
+        occurred_at_unix_ms: u64,
+        created_at_tie_count: i64,
+    ) -> LoadedConsentEvent {
+        LoadedConsentEvent {
+            event_ref: event_ref.to_owned(),
+            purpose,
+            decision,
+            consent_form_version_ref: "consent_form_reconstruct".to_owned(),
+            research_scope_ref: research_scope_ref.map(str::to_owned),
+            occurred_at_unix_ms,
+            created_at_tie_count,
+        }
+    }
+
+    #[test]
+    fn insertion_order_keeps_same_millisecond_revoke_latest() {
+        let mut ledger = ConsentLedger::new("participant_consent_reconstruct").unwrap();
+        reconstruct_loaded_events(
+            &mut ledger,
+            vec![
+                loaded_event(
+                    "consent_event_zzz_reload_grant",
+                    ConsentPurpose::ResearchContribution,
+                    ConsentDecision::Granted,
+                    Some("research_scope_reconstruct"),
+                    32_000,
+                    1,
+                ),
+                loaded_event(
+                    "consent_event_aaa_reload_revoke",
+                    ConsentPurpose::ResearchContribution,
+                    ConsentDecision::Revoked,
+                    Some("research_scope_reconstruct"),
+                    32_000,
+                    1,
+                ),
+            ],
+        )
+        .unwrap();
+        let snapshot = ledger.snapshot_as("consent_snapshot_reconstruct").unwrap();
+        assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
+    }
+
+    #[test]
+    fn non_monotonic_insertion_order_fails_closed_instead_of_reordering() {
+        let mut ledger = ConsentLedger::new("participant_consent_reconstruct").unwrap();
+        assert!(matches!(
+            reconstruct_loaded_events(
+                &mut ledger,
+                vec![
+                    loaded_event(
+                        "consent_event_later",
+                        ConsentPurpose::ServiceOperation,
+                        ConsentDecision::Granted,
+                        None,
+                        20_000,
+                        1,
+                    ),
+                    loaded_event(
+                        "consent_event_earlier",
+                        ConsentPurpose::ServiceOperation,
+                        ConsentDecision::Revoked,
+                        None,
+                        19_000,
+                        1,
+                    ),
+                ],
+            ),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+    }
+
+    #[test]
+    fn equal_created_at_fails_closed_instead_of_identity_order() {
+        let mut ledger = ConsentLedger::new("participant_consent_reconstruct").unwrap();
+        assert!(matches!(
+            reconstruct_loaded_events(
+                &mut ledger,
+                vec![
+                    loaded_event(
+                        "consent_event_zzz_reload_grant",
+                        ConsentPurpose::ResearchContribution,
+                        ConsentDecision::Granted,
+                        Some("research_scope_reconstruct"),
+                        32_000,
+                        2,
+                    ),
+                    loaded_event(
+                        "consent_event_aaa_reload_revoke",
+                        ConsentPurpose::ResearchContribution,
+                        ConsentDecision::Revoked,
+                        Some("research_scope_reconstruct"),
+                        32_000,
+                        2,
+                    ),
+                ],
+            ),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+        assert!(ledger.is_empty());
+    }
+
+    #[test]
+    fn reconstruct_rejects_blank_participant_before_append() {
+        let mut ledger = ConsentLedger::new("participant_consent_reconstruct").unwrap();
+        ledger
+            .record(ConsentEventInput {
+                event_ref: "consent_event_service",
+                purpose: ConsentPurpose::ServiceOperation,
+                decision: ConsentDecision::Granted,
+                consent_form_version_ref: "consent_form_reconstruct",
+                research_scope_ref: None,
+                occurred_at_unix_ms: 10_000,
+            })
+            .unwrap();
+        assert!(matches!(
+            reconstruct_loaded_events(
+                &mut ledger,
+                vec![loaded_event(
+                    " ",
+                    ConsentPurpose::ServiceOperation,
+                    ConsentDecision::Revoked,
+                    None,
+                    11_000,
+                    1,
+                )],
+            ),
+            Err(ConsentPersistenceError::CorruptHistory)
         ));
     }
 }

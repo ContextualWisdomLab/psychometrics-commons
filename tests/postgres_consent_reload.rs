@@ -2,7 +2,7 @@
 //!
 //! A buyer who grants research contribution and later revokes it in the same
 //! millisecond must see the revocation after the runtime reloads the durable
-//! ledger. Reload must not invent consent, reorder insertion-time ties by
+//! ledger. Reload must not invent consent, break insertion-time ties by
 //! opaque identity, or accept a stronger isolation level that can hide a
 //! concurrent append.
 
@@ -274,6 +274,57 @@ fn non_monotonic_stored_events_fail_closed_instead_of_reordering() {
             Err(ConsentPersistenceError::CorruptHistory)
         ),
         "out-of-order durable timestamps must not be silently reordered into a grant"
+    );
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn equal_created_at_reload_fails_closed_instead_of_identity_order() {
+    let _guard = consent_reload_guard();
+    let mut client = test_client();
+    reset_consent_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+
+    let mut grant_only = ConsentLedger::new("participant_consent_reload_tie").unwrap();
+    grant_only
+        .record(grant(
+            "consent_event_zzz_reload_grant",
+            ConsentPurpose::ResearchContribution,
+            "consent_form_reload_tie",
+            Some("research_scope_reload_tie"),
+            32_000,
+        ))
+        .unwrap();
+    persist_ok(&mut client, &grant_only);
+
+    let mut revoked = grant_only.clone();
+    revoked
+        .record(ConsentEventInput {
+            event_ref: "consent_event_aaa_reload_revoke",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Revoked,
+            consent_form_version_ref: "consent_form_reload_tie",
+            research_scope_ref: Some("research_scope_reload_tie"),
+            occurred_at_unix_ms: 32_000,
+        })
+        .unwrap();
+    persist_ok(&mut client, &revoked);
+
+    client
+        .execute(
+            "UPDATE consent_event SET created_at = TIMESTAMPTZ '2026-08-16 00:00:00+00' \
+             WHERE participant_ref = $1",
+            &[&"participant_consent_reload_tie"],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            load_consent_ledger(&mut transaction, "participant_consent_reload_tie"),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ),
+        "equal created_at must not be broken by opaque event identity into a grant"
     );
     transaction.rollback().unwrap();
 }
