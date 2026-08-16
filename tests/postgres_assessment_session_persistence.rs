@@ -656,3 +656,190 @@ fn command_persist_requires_created_identity_and_rejects_conflicts() {
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn stale_shorter_command_history_cannot_rewind_paused_projection() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut session = created_session(
+        "ses_stale_prefix_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &session).unwrap();
+    session
+        .apply_command("cmd_activate_before_pause", 1, SessionCommand::Activate)
+        .unwrap();
+    session
+        .apply_command("cmd_pause_after_activate", 2, SessionCommand::Pause)
+        .unwrap();
+    persist_assessment_session_commands(&mut transaction, &session).unwrap();
+    transaction.commit().unwrap();
+
+    let mut stale = created_session(
+        "ses_stale_prefix_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    stale
+        .apply_command("cmd_activate_before_pause", 1, SessionCommand::Activate)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &stale),
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut load_transaction = client.transaction().unwrap();
+    let loaded = load_assessment_session(&mut load_transaction, "ses_stale_prefix_alpha")
+        .unwrap()
+        .expect("paused session must remain loadable after a rejected stale persist");
+    load_transaction.commit().unwrap();
+    assert_eq!(loaded.state(), SessionState::Paused);
+    assert_eq!(loaded.accepted_commands().len(), 2);
+}
+
+#[test]
+fn command_persist_rejects_identity_mismatch_and_resulting_state_rebind() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let created = created_session(
+        "ses_command_identity_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut rebound = created_session(
+        "ses_command_identity_alpha",
+        "ptc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    rebound
+        .apply_command("cmd_activate_identity", 1, SessionCommand::Activate)
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &created).unwrap();
+    assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &rebound),
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut session = created;
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &session).unwrap();
+    session
+        .apply_command("cmd_activate_identity", 1, SessionCommand::Activate)
+        .unwrap();
+    persist_assessment_session_commands(&mut transaction, &session).unwrap();
+    transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET resulting_state = $2
+             WHERE session_ref = $1 AND command_ref = $3",
+            &[
+                &"ses_command_identity_alpha",
+                &"paused",
+                &"cmd_activate_identity",
+            ],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_assessment_session_commands(&mut transaction, &session),
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_replays_fail_closed_when_command_or_projection_evidence_is_corrupt() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let mut session = created_session(
+        "ses_load_corrupt_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    persist_assessment_session(&mut transaction, &session).unwrap();
+    session
+        .apply_command("cmd_activate_for_load", 1, SessionCommand::Activate)
+        .unwrap();
+    persist_assessment_session_commands(&mut transaction, &session).unwrap();
+    transaction.commit().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET command_name = $2, resulting_state = $3
+             WHERE session_ref = $1 AND command_sequence = 1",
+            &[&"ses_load_corrupt_alpha", &"pause", &"paused"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            load_assessment_session(&mut transaction, "ses_load_corrupt_alpha"),
+            Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
+        ),
+        "Created plus stored Pause must fail closed instead of inventing a lifecycle path"
+    );
+    transaction.rollback().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET command_name = $2, resulting_state = $3
+             WHERE session_ref = $1 AND command_sequence = 1",
+            &[&"ses_load_corrupt_alpha", &"activate", &"paused"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            load_assessment_session(&mut transaction, "ses_load_corrupt_alpha"),
+            Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
+        ),
+        "Activate that stored paused must fail closed"
+    );
+    transaction.rollback().unwrap();
+
+    client
+        .execute(
+            "UPDATE assessment_session_command
+             SET command_name = $2, resulting_state = $3
+             WHERE session_ref = $1 AND command_sequence = 1",
+            &[&"ses_load_corrupt_alpha", &"activate", &"active"],
+        )
+        .unwrap();
+    client
+        .execute(
+            "UPDATE assessment_session SET session_state = $2 WHERE session_ref = $1",
+            &[&"ses_load_corrupt_alpha", &"paused"],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            load_assessment_session(&mut transaction, "ses_load_corrupt_alpha"),
+            Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
+        ),
+        "projection that does not match replayed Active must fail closed"
+    );
+    transaction.rollback().unwrap();
+}

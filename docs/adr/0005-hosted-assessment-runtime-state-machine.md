@@ -60,6 +60,7 @@ A released result references exactly one response snapshot and one scoring resul
 4. Scoring cannot begin before the response snapshot is durable.
 5. Repeated completion/scoring commands are idempotent.
 6. No client-provided timestamp determines authoritative ordering.
+7. Persisting session command history is append-only. A shorter in-memory history than already stored is conflicting replay and must not rewind the current-state projection.
 
 ## Failure modes
 
@@ -79,6 +80,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - concurrent duplicate and out-of-order response tests;
 - crash testing between transaction and event publication;
 - pause/resume and offline replay tests;
+- stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests.
 
@@ -91,3 +93,11 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 ## Reversal conditions
 
 Revisit the storage implementation if event volume demands a different backend, but retain state semantics, idempotency, immutable snapshots, and outbox guarantees.
+
+## References
+
+Fowler, M. (2005, December 12). *Event sourcing*. https://martinfowler.com/eaaDev/EventSourcing.html
+
+Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
+
+PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/index.html

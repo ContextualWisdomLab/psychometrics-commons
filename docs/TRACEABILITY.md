@@ -52,7 +52,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
-| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | **Active PR** #125 persist/load created-session identity and later command history with exact/conflicting replay; HTTP/API concurrency remains missing |
+| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | **Active PR** #125 persist/load created-session identity and later command history with exact/conflicting replay and fail-closed stale shorter history; HTTP/API concurrency remains missing |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #125 created-session persist, load, and command-history replay is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Created sessions persist participant, published-release, version, digest, locale, state, and creation-time identity under `READ COMMITTED`; exact replay is idempotent and rebinding fails closed. Load restores that created identity without re-checking current publication eligibility. Later Activate/Pause/Resume commands persist in `assessment_session_command` and replay on load so an in-progress session survives restart. HTTP session transport remains outside this slice. #109 is the persist-and-load predecessor; #106 is persist-only.
+**Active PR** #125 created-session persist, load, and command-history replay is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Created sessions persist participant, published-release, version, digest, locale, state, and creation-time identity under `READ COMMITTED`; exact replay is idempotent and rebinding fails closed. Load restores that created identity without re-checking current publication eligibility. Later Activate/Pause/Resume commands persist in `assessment_session_command` and replay on load so an in-progress session survives restart. A stale persist that carries fewer commands than already stored fails closed and does not rewind the current-state projection. HTTP session transport remains outside this slice. #109 is the persist-and-load predecessor; #106 is persist-only.
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
 

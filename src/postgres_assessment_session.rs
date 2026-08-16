@@ -4,9 +4,11 @@
 //! and locale identity copied at session creation. It does not rewrite provenance
 //! when the release is later suspended or retired. Created identity is inserted
 //! only for [`SessionState::Created`]. Later lifecycle states persist as
-//! append-only command history plus a current-state projection. Load restores
-//! created identity without re-checking publication eligibility, then replays
-//! stored commands. Replay requires `READ COMMITTED`.
+//! append-only command history plus a current-state projection. A shorter
+//! persist than already stored fails closed so a stale worker cannot rewind
+//! that projection. Load restores created identity without re-checking
+//! publication eligibility, then replays stored commands. Replay requires
+//! `READ COMMITTED`.
 
 use crate::reference::normalized_reference;
 use crate::session::{AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionState};
@@ -170,9 +172,10 @@ pub fn persist_assessment_session(
 ///
 /// The created-session identity row must already exist. Exact replay of the same
 /// command reference, sequence, command, and resulting state is idempotent.
-/// Rebinding command evidence or reusing a sequence under another command
-/// identity fails closed. Load later reconstitutes created identity and replays
-/// these commands.
+/// Rebinding command evidence, reusing a sequence under another command
+/// identity, or persisting a shorter history than already stored fails closed so
+/// a stale Activate-only worker cannot rewind Pause/Resume. Load later
+/// reconstitutes created identity and replays these commands.
 ///
 /// # Errors
 ///
@@ -192,6 +195,13 @@ pub fn persist_assessment_session_commands(
             inserted_any = true;
         }
     }
+    let stored_command_count: i64 = transaction
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session_command WHERE session_ref = $1",
+            &[&session_ref],
+        )?
+        .get(0);
+    reject_stale_command_prefix(stored_command_count, session.accepted_commands().len())?;
     transaction.execute(
         "UPDATE assessment_session SET session_state = $2 WHERE session_ref = $1",
         &[&session_ref, &session.state().persist_name()],
@@ -414,6 +424,24 @@ fn persist_one_session_command(
     }
 }
 
+/// Reject a persist that would rewind stored command history.
+///
+/// A stale worker that only remembers Activate must not overwrite a later
+/// Pause/Resume projection. Count the already-stored rows after exact replay
+/// classification; a shorter in-memory history is conflicting evidence.
+fn reject_stale_command_prefix(
+    stored_command_count: i64,
+    accepted_command_count: usize,
+) -> Result<(), AssessmentSessionPersistenceError> {
+    let stored = u64::try_from(stored_command_count)
+        .map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)?;
+    if stored > accepted_command_count as u64 {
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    } else {
+        Ok(())
+    }
+}
+
 /// Require the transaction isolation level used by the replay-classification contract.
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
@@ -429,7 +457,7 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod tests {
-    use super::AssessmentSessionPersistenceError;
+    use super::{reject_stale_command_prefix, AssessmentSessionPersistenceError};
     use crate::session::{SessionCommand, SessionState};
 
     #[test]
@@ -491,6 +519,21 @@ mod tests {
         assert_eq!(SessionState::Invalidated.persist_name(), "invalidated");
         assert_eq!(SessionCommand::Activate.persist_name(), "activate");
         assert_eq!(SessionCommand::BeginScoring.persist_name(), "begin_scoring");
+    }
+
+    #[test]
+    fn stale_shorter_command_history_is_conflicting_replay() {
+        assert!(matches!(
+            reject_stale_command_prefix(2, 1),
+            Err(AssessmentSessionPersistenceError::ConflictingReplay)
+        ));
+        assert!(reject_stale_command_prefix(2, 2).is_ok());
+        assert!(reject_stale_command_prefix(1, 2).is_ok());
+        assert!(reject_stale_command_prefix(0, 0).is_ok());
+        assert!(matches!(
+            reject_stale_command_prefix(-1, 0),
+            Err(AssessmentSessionPersistenceError::ValueOutOfRange)
+        ));
     }
 
     #[test]
