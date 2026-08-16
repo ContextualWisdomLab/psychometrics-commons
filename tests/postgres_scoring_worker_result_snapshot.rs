@@ -12,7 +12,7 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     ScoringJobCompletionDisposition, ScoringJobFailureDisposition, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_scoring_request::{
-    apply_scoring_request_migration, persist_scoring_request,
+    apply_scoring_request_migration, persist_scoring_request, ScoringRequestPersistenceError,
 };
 use psychometrics_commons_runtime::postgres_scoring_worker::{
     run_scoring_worker_attempt_with_result_snapshot, ScoringWorkerCommitError,
@@ -755,6 +755,206 @@ fn conflicting_preinserted_snapshot_keeps_the_job_leased() {
         .unwrap()
         .get(0);
     assert_eq!(snapshots, 1);
+    let outbox: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox, 0);
+}
+
+fn other_request() -> ScoringRequest {
+    ScoringRequest::from_persisted(
+        "session_worker_snapshot_other",
+        ScoringRequestInput {
+            scoring_request_ref: "scoring_request_worker_snapshot_other",
+            response_snapshot_ref: "response_snapshot_worker_snapshot_other",
+            assessment_spec_ref: "assessment_spec_big_five_v1",
+            instrument_version_ref: "instrument_version_big_five_ko_v1",
+            scoring_version_ref: "scoring_version_big_five_v1",
+            calibration_reference: "calibration_big_five_ko_v1",
+            norm_version_ref: Some("norm_version_big_five_ko_v1"),
+            requested_output_schema_version: 1,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn mismatched_job_request_leaves_the_job_and_snapshot_untouched() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_mismatch";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let other = other_request();
+    let mut transaction = client.transaction().unwrap();
+    persist_scoring_request(&mut transaction, &other).unwrap();
+    transaction.commit().unwrap();
+    let engine = ScriptedResultEngine {
+        result: ScoringResult::new(
+            "result_worker_snapshot",
+            &other,
+            ENGINE_DIGEST,
+            vec![ScoreObservation::scored("big_five_openness", 1.2, Some(0.15)).unwrap()],
+        )
+        .unwrap(),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            other.scoring_request_ref(),
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            80_000,
+        ),
+        Err(ScoringWorkerCommitError::Planning(
+            ScoringWorkerError::MismatchedScoringResult
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let state: String = client
+        .query_one(
+            "SELECT scoring_state FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(state, "leased");
+    let snapshots: i64 = client
+        .query_one("SELECT count(*) FROM result_snapshot", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(snapshots, 0);
+    let outbox: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox, 0);
+}
+
+#[test]
+fn planner_failure_leaves_the_job_and_snapshot_untouched() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_planning";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        result: ScoringResult::new(
+            "result_worker_snapshot",
+            &request,
+            ENGINE_DIGEST,
+            vec![ScoreObservation::scored("big_five_openness", 1.2, Some(0.15)).unwrap()],
+        )
+        .unwrap(),
+    };
+    let mut input = snapshot_input();
+    input.consent_snapshot_refs = &[];
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            request.scoring_request_ref(),
+            &engine,
+            input,
+            worker_envelope(),
+            3,
+            80_000,
+        ),
+        Err(ScoringWorkerCommitError::Planning(
+            ScoringWorkerError::InvalidResultSnapshot
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let state: String = client
+        .query_one(
+            "SELECT scoring_state FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(state, "leased");
+    let snapshots: i64 = client
+        .query_one("SELECT count(*) FROM result_snapshot", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(snapshots, 0);
+    let outbox: i64 = client
+        .query_one("SELECT count(*) FROM integration_outbox", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox, 0);
+}
+
+#[test]
+fn corrupt_stored_request_leaves_the_job_and_snapshot_untouched() {
+    let _guard = worker_snapshot_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_worker_snapshot_corrupt";
+    let fencing_token = persist_request_and_claim(&mut client, job_ref);
+    client
+        .execute(
+            "UPDATE scoring_request SET requested_output_schema_version = 99 \
+             WHERE scoring_request_ref = $1",
+            &[&"scoring_request_worker_snapshot"],
+        )
+        .unwrap();
+    let request = loaded_request();
+    let engine = ScriptedResultEngine {
+        result: ScoringResult::new(
+            "result_worker_snapshot",
+            &request,
+            ENGINE_DIGEST,
+            vec![ScoreObservation::scored("big_five_openness", 1.2, Some(0.15)).unwrap()],
+        )
+        .unwrap(),
+    };
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        run_scoring_worker_attempt_with_result_snapshot(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            request.scoring_request_ref(),
+            &engine,
+            snapshot_input(),
+            worker_envelope(),
+            3,
+            80_000,
+        ),
+        Err(ScoringWorkerCommitError::Request(
+            ScoringRequestPersistenceError::CorruptHistory
+        ))
+    ));
+    transaction.rollback().unwrap();
+
+    let state: String = client
+        .query_one(
+            "SELECT scoring_state FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(state, "leased");
+    let snapshots: i64 = client
+        .query_one("SELECT count(*) FROM result_snapshot", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(snapshots, 0);
     let outbox: i64 = client
         .query_one("SELECT count(*) FROM integration_outbox", &[])
         .unwrap()
