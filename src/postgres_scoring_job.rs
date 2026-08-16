@@ -13,6 +13,10 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const SCORING_JOB_MIGRATION: &str = include_str!("../migrations/0002_scoring_job_state.sql");
+const SCORING_JOB_HEALTH_INDEX_MIGRATION: &str =
+    include_str!("../migrations/0021_scoring_job_health_indexes.sql");
+const SCORING_JOB_EXPIRED_LEASE_INDEX_MIGRATION: &str =
+    include_str!("../migrations/0022_scoring_job_expired_lease_health_indexes.sql");
 
 /// Outcome of persisting a scoring-job cancellation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -173,13 +177,20 @@ impl From<postgres::Error> for ScoringJobPersistenceError {
     }
 }
 
-/// Apply the idempotent scoring-job migration to a `PostgreSQL` connection.
+/// Apply the idempotent scoring-job table and readiness-index migrations.
+///
+/// The shipped base table remains immutable; forward-only health indexes are
+/// applied afterwards so existing installations receive the same readiness
+/// indexes as a newly initialized database.
 ///
 /// # Errors
 ///
-/// Returns the `PostgreSQL` error if the migration cannot be applied.
+/// Returns the `PostgreSQL` error if a required migration cannot be applied.
 pub fn apply_scoring_job_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
-    client.batch_execute(SCORING_JOB_MIGRATION)
+    let migration_batch = format!(
+        "{SCORING_JOB_MIGRATION}\n{SCORING_JOB_HEALTH_INDEX_MIGRATION}\n{SCORING_JOB_EXPIRED_LEASE_INDEX_MIGRATION}"
+    );
+    client.batch_execute(&migration_batch)
 }
 
 /// Persist the immutable identity of a fresh queued scoring job.

@@ -40,7 +40,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
 | Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
 | Durable outbox/inbox delivery semantics | PRD §7, §9 | TRD §19–20 | ADR-0014, ADR-0015 | **Partially implemented**: domain contracts in `src/integration.rs`; PostgreSQL 18 outbox/inbox identity, delivery-attempt persistence, and inbox consumption distinct from receipt; live side-effect execution remains Target |
-| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; HTTP probes, measured thresholds, and deployment evidence remain Target |
+| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; **Active PR** #131 observes aggregate outbox, inbox-consumption, data-rights, and scoring-job backlog counts/ages, including expired leased scoring jobs, and applies partial readiness indexes through `apply_backlog_health_index_migration` / `apply_scoring_job_migration`; HTTP probes remain #122; measured thresholds and deployment-profile evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; actual English/Korean form content, rights, translation, invariance and serving are Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
 | EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/normalized-ingestion/orchestration adapter |
@@ -79,7 +79,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL inbox consumption persists pending/processing/completed and expire-and-reclaim | live adapter crash/retry tests |
 | Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`: liveness is modeled independently from operation-scoped readiness and PostgreSQL write-readiness | live transport probes, metrics, and deployment-profile acceptance |
 | Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`: readiness evaluates only capabilities required by the selected operation and maps PostgreSQL evidence onto that contract | degraded-mode transport/integration tests |
-| Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Implemented** domain contract in `src/health.rs`; `src/postgres_health.rs` fails closed on unsupported/read-only PostgreSQL or a missing required relation | persistence/job backlog metrics, stronger schema probes, alerting, and failure-injection evidence |
+| Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Implemented** domain contract in `src/health.rs`; `src/postgres_health.rs` fails closed on unsupported/read-only PostgreSQL or a missing required relation; **Active PR** #131 classifies durable integration, data-rights, and scoring-job backlog evidence, including expired leases, against an explicit caller policy | HTTP probe wiring on #122, measured deployment-profile thresholds, alerting, and failure-injection evidence |
 | No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
 | AI cannot mutate numeric scientific result | AI Governance; ADR-0009, ADR-0018 | architecture policy | product adapter/adversarial mutation tests |
@@ -104,7 +104,7 @@ src/lib.rs
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
-├── postgres_health.rs  # PostgreSQL major/write-readiness and relation-integrity probe
+├── postgres_health.rs  # PostgreSQL major/write-readiness, relation-integrity, and Active PR operational-backlog probes including scoring-job queues
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
@@ -125,14 +125,17 @@ migrations/
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
 ├── 0011_scoring_request.sql
-└── 0012_integration_consumption.sql
+├── 0012_integration_consumption.sql
+├── 0020_backlog_health_indexes.sql
+├── 0021_scoring_job_health_indexes.sql
+└── 0022_scoring_job_expired_lease_health_indexes.sql
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** #131 PostgreSQL operational-backlog observation is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Aggregate outbox, inbox-consumption, data-rights, and scoring-job counts/ages, plus expired leased scoring-job rows, are classified only against an explicit caller policy. Partial readiness indexes ship in `migrations/0020_backlog_health_indexes.sql`, `migrations/0021_scoring_job_health_indexes.sql`, and `migrations/0022_scoring_job_expired_lease_health_indexes.sql` and must be applied through `apply_backlog_health_index_migration` / `apply_scoring_job_migration` after the owning table migrations; a private test `include_str!` is not a product apply path. Prefer this head over merging #82 or #113 alone. Draft #114 must renumber its identity-link migration past `0022` before it leaves draft. HTTP probes remain #122. Deployment-profile thresholds remain outside this slice.
 
 ## 5. ADR traceability by concern
 

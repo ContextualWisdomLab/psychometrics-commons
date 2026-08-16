@@ -254,7 +254,7 @@ A feature PR being green is not enough to establish this integrated evidence.
 
 Before GA, the repository must contain or link authoritative runbooks for:
 
-- scoring backlog / fast-mlsirm outage;
+- scoring backlog, expired-lease recovery, or fast-mlsirm outage;
 - Keyverse/federation outage;
 - database failover and restore;
 - outbox/inbox poison event and reconciliation;

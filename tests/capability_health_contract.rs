@@ -112,6 +112,61 @@ fn integrity_and_backlog_failures_block_state_changing_readiness() {
 }
 
 #[test]
+fn independent_backlog_signals_compose_without_masking_stalled_or_unknown_work() {
+    let cases = [
+        (
+            BacklogHealth::WithinBounds,
+            BacklogHealth::WithinBounds,
+            BacklogHealth::WithinBounds,
+        ),
+        (
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Unknown,
+            BacklogHealth::Unknown,
+        ),
+        (
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Unknown,
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Unknown,
+        ),
+        (
+            BacklogHealth::Unknown,
+            BacklogHealth::Unknown,
+            BacklogHealth::Unknown,
+        ),
+        (
+            BacklogHealth::Unknown,
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Stalled,
+            BacklogHealth::WithinBounds,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Stalled,
+            BacklogHealth::Unknown,
+            BacklogHealth::Stalled,
+        ),
+        (
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+            BacklogHealth::Stalled,
+        ),
+    ];
+
+    for (left, right, expected) in cases {
+        assert_eq!(left.combine(right), expected);
+    }
+}
+
+#[test]
 fn nonlive_process_and_unknown_required_capability_fail_closed() {
     let snapshot = RuntimeHealthSnapshot::new(
         false,

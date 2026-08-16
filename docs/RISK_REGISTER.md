@@ -44,6 +44,7 @@ This register tracks material product, scientific, privacy, security, operationa
 | Cross-service direct database access creates hidden coupling/privacy blast radius | high | medium | mitigated_by_architecture | ADR-0001/0015; credential/dependency fitness tests pending |
 | Outbox/inbox replay duplicates external release/deletion/scoring side effects | high | medium | evidence_required | transactional outbox/inbox design; persistence/concurrency/recovery implementation pending |
 | Optional dependency outage is reported as total product outage or blocks personal results | medium | medium | mitigated_by_architecture | capability-scoped readiness/degradation; deployment failure tests pending |
+| Dead scoring worker is hidden by a healthy queue depth or enqueue-age bound | high | medium | implementation_in_progress | expired-lease count against caller policy and database clock; HTTP probe wiring remains #122 |
 | Community profile silently depends on g7/AI/TEPP/portal | high | low | mitigated_by_architecture | ADR-0002/0011 + deployment profile contract; install/end-to-end proof pending |
 | OpenAPI/AsyncAPI target docs are published before implementation and mislead integrators | medium | medium | mitigated_by_architecture | ADR-0014 as-built-only contract rule; CI gate pending |
 | Logical ERD drifts from physical migrations | high | medium | evidence_required | ADR-0015 + planned schema fitness test when migrations exist |

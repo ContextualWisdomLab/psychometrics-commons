@@ -84,11 +84,11 @@ fn seed_recovery_critical_state(client: &mut Client) {
              INSERT INTO {SOURCE_SCHEMA}.integration_consumption (
                 consumer_ref, source_ref, tenant_ref, source_event_ref, consumption_ref,
                 side_effect_ref, consumption_state, fencing_token, latest_event_at_unix_ms,
-                claim_expires_at_unix_ms, completion_evidence_ref, cause_code
+                claim_expires_at_unix_ms, claim_deadline_at, completion_evidence_ref, cause_code
              ) VALUES (
                 'consumer_recovery_alpha', 'dependency_recovery_alpha', 'tenant_recovery_alpha',
                 'event_dependency_alpha', 'consumption_recovery_alpha', 'effect_recovery_alpha',
-                'processing', 7, 12000, 13000, NULL, NULL
+                'processing', 7, 12000, 13000, TIMESTAMPTZ '1970-01-01 00:00:13+00', NULL, NULL
              );
              INSERT INTO {SOURCE_SCHEMA}.response_snapshot (
                 snapshot_ref, session_ref, event_count, last_sequence
@@ -150,7 +150,8 @@ fn assert_restored_evidence(client: &mut Client) {
     let restored_consumption = client
         .query_one(
             &format!(
-                "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms
+                "SELECT consumption_state, fencing_token, claim_expires_at_unix_ms,
+                        claim_deadline_at IS NOT NULL
                  FROM {RESTORED_SCHEMA}.integration_consumption
                  WHERE consumption_ref = 'consumption_recovery_alpha'"
             ),
@@ -160,6 +161,10 @@ fn assert_restored_evidence(client: &mut Client) {
     assert_eq!(restored_consumption.get::<_, String>(0), "processing");
     assert_eq!(restored_consumption.get::<_, i64>(1), 7);
     assert_eq!(restored_consumption.get::<_, Option<i64>>(2), Some(13000));
+    assert!(
+        restored_consumption.get::<_, bool>(3),
+        "restored processing claim must keep its database-authoritative deadline"
+    );
 
     let restored_snapshot = client
         .query_one(
