@@ -65,7 +65,7 @@ Construct-relevant personal data remains available to authorized workflows when 
 5. Service denial cannot be based on refusal of optional research contribution.
 6. Data-rights operations are tenant-scoped and identity-verified.
 7. A durable research-consent snapshot projection authorizes identity binding only. A new contribution start must re-check the latest research-purpose `consent_event` for that participant in the same transaction. That event must still be `granted` for the contribution's exact scope, matching `ConsentSnapshot::is_granted` / `active_research_scope`. Latest means last-appended: `occurred_at_unix_ms` then `created_at`, not `event_ref` sort order. A later grant or revoke for another scope, including a same-millisecond later append, replaces the prior scope as the live write capability. Exact replay and withdrawal of already stored evidence remain allowed (`tests/postgres_research_contribution_persistence.rs`).
-8. A research participant reference cannot equal the bound operational participant and cannot be reused across operational identities (`research_contribution_identity_separation_check`, `research_contribution_research_participant_ref_unique`).
+8. A research participant reference cannot equal the bound operational participant, cannot be reused across operational identities, and cannot later be used as an operational participant (`research_contribution_identity_separation_check`, `research_contribution_research_participant_ref_unique`, `require_operational_ref_is_not_research_identity`).
 
 ## Failure behavior
 

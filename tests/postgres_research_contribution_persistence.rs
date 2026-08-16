@@ -1046,3 +1046,47 @@ fn same_millisecond_later_append_replaces_live_scope_when_event_ref_sorts_lower(
         ResearchContributionPersistenceDisposition::Inserted
     );
 }
+
+#[test]
+fn operational_participant_cannot_reuse_an_existing_research_participant_ref() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (first_ledger, first_snapshot) = granted_research(
+        "participant_research_upsilon",
+        "consent_snapshot_research_upsilon",
+        "research_scope_upsilon",
+        19_000,
+    );
+    persist_grant(&mut client, &first_ledger);
+    persist_snapshot_ok(&mut client, &first_snapshot);
+    persist_ok(
+        &mut client,
+        &contribution(
+            "research_contribution_upsilon",
+            "research_participant_shared_upsilon",
+            &first_snapshot,
+            19_100,
+        ),
+    );
+
+    let (reverse_ledger, reverse_snapshot) = granted_research(
+        "research_participant_shared_upsilon",
+        "consent_snapshot_research_upsilon_reverse",
+        "research_scope_upsilon_reverse",
+        19_200,
+    );
+    persist_grant(&mut client, &reverse_ledger);
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            persist_research_consent_snapshot(&mut transaction, &reverse_snapshot),
+            Err(ResearchContributionPersistenceError::OperationalIdentityReuse)
+        ),
+        "a research participant reference must not later become an operational participant"
+    );
+    transaction.rollback().unwrap();
+}

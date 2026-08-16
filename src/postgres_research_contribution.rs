@@ -131,8 +131,9 @@ pub fn apply_research_contribution_migration(
 /// # Errors
 ///
 /// Returns [`ResearchContributionPersistenceError`] when the snapshot lacks an
-/// active research grant, contains an invalid reference, conflicts with an existing
-/// immutable binding, uses unsupported transaction isolation, or the database fails.
+/// active research grant, contains an invalid reference, reuses a research
+/// participant as an operational identity, conflicts with an existing immutable
+/// binding, uses unsupported transaction isolation, or the database fails.
 pub fn persist_research_consent_snapshot(
     transaction: &mut Transaction<'_>,
     consent_snapshot: &ConsentSnapshot,
@@ -148,6 +149,7 @@ pub fn persist_research_consent_snapshot(
         .active_form_version(ConsentPurpose::ResearchContribution)
         .and_then(normalized_reference)
         .ok_or(ResearchContributionPersistenceError::ResearchConsentRequired)?;
+    require_operational_ref_is_not_research_identity(transaction, participant_ref)?;
 
     let inserted = transaction.execute(
         "INSERT INTO research_consent_snapshot (\
@@ -303,6 +305,7 @@ fn persist_contribution_start(
             evidence.research_scope_ref,
         )?;
         require_namespace_separation(transaction, evidence.research_participant_ref)?;
+        require_operational_ref_is_not_research_identity(transaction, &evidence.participant_ref)?;
     }
 
     let inserted = transaction.execute(
@@ -431,6 +434,20 @@ fn require_namespace_separation(
          SELECT 1 FROM research_contribution WHERE research_participant_ref = $1 \
          LIMIT 1",
         &[&research_participant_ref],
+    )?;
+    if collision.is_some() {
+        return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
+    }
+    Ok(())
+}
+
+fn require_operational_ref_is_not_research_identity(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+) -> Result<(), ResearchContributionPersistenceError> {
+    let collision = transaction.query_opt(
+        "SELECT 1 FROM research_contribution WHERE research_participant_ref = $1 LIMIT 1",
+        &[&participant_ref],
     )?;
     if collision.is_some() {
         return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
