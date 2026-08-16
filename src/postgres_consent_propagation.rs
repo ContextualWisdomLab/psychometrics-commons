@@ -188,7 +188,10 @@ fn require_durable_ledger_tail(
     let Ok(expected_occurred) = i64::try_from(propagation_event.occurred_at_unix_ms()) else {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     };
-    if stored_event_ref != causation_ref || stored_occurred != expected_occurred {
+    if stored_event_ref != causation_ref {
+        return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
+    }
+    if stored_occurred != expected_occurred {
         return Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope);
     }
     Ok(())
@@ -342,5 +345,177 @@ mod envelope_tests {
                 Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
             ));
         }
+    }
+
+    #[test]
+    fn empty_ledger_cannot_bind_a_propagation_envelope() {
+        let empty = ConsentLedger::new("participant_consent_envelope_unit").unwrap();
+        let candidate = event(
+            "psychometrics_commons",
+            TENANT_REF,
+            empty.participant_ref(),
+            Some("consent_event_envelope_unit"),
+            10_000,
+        );
+        assert!(matches!(
+            validate_propagation_envelope(TENANT_REF, &empty, &candidate),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+    }
+}
+
+#[cfg(test)]
+mod durable_tail_boundary_tests {
+    use super::{require_durable_ledger_tail, ConsentOutboxPersistenceError};
+    use crate::consent::{ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose};
+    use crate::integration::IntegrationEvent;
+    use crate::postgres_consent::apply_consent_migration;
+    use postgres::{Client, NoTls};
+
+    const DIGEST: &str = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+    const SCHEMA: &str = "consent_outbox_durable_tail_unit";
+
+    fn ready_client() -> Client {
+        let connection = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+        let mut client = Client::connect(&connection, NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable");
+        client
+            .batch_execute(&format!(
+                "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
+                 CREATE SCHEMA {SCHEMA};
+                 SET search_path TO {SCHEMA};"
+            ))
+            .unwrap();
+        apply_consent_migration(&mut client).unwrap();
+        client
+    }
+
+    fn grant_ledger() -> ConsentLedger {
+        let mut ledger = ConsentLedger::new("participant_consent_durable_tail").unwrap();
+        ledger
+            .record(ConsentEventInput {
+                event_ref: "consent_event_durable_tail_grant",
+                purpose: ConsentPurpose::ResearchContribution,
+                decision: ConsentDecision::Granted,
+                consent_form_version_ref: "consent_form_durable_tail",
+                research_scope_ref: Some("research_scope_durable_tail"),
+                occurred_at_unix_ms: 40_000,
+            })
+            .unwrap();
+        ledger
+    }
+
+    fn event(causation: Option<&str>, occurred_at_unix_ms: u64) -> IntegrationEvent {
+        IntegrationEvent::new(
+            "event_consent_durable_tail",
+            "consent.changed",
+            "v1",
+            "psychometrics_commons",
+            "tenant_consent_durable_tail",
+            "participant_consent_durable_tail",
+            occurred_at_unix_ms,
+            "correlation_consent_durable_tail",
+            causation,
+            DIGEST,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn durable_tail_boundaries_fail_closed_without_enqueue() {
+        let mut client = ready_client();
+        let ledger = grant_ledger();
+        let bound = event(Some("consent_event_durable_tail_grant"), 40_000);
+
+        let mut missing_ledger = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(&mut missing_ledger, &ledger, &bound),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        assert!(matches!(
+            require_durable_ledger_tail(&mut missing_ledger, &ledger, &event(None, 40_000)),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        missing_ledger.rollback().unwrap();
+
+        client
+            .execute(
+                "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
+                &[&ledger.participant_ref()],
+            )
+            .unwrap();
+        let mut missing_events = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(&mut missing_events, &ledger, &bound),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        missing_events.rollback().unwrap();
+
+        let research_scope_ref = Some("research_scope_durable_tail");
+        client
+            .execute(
+                "INSERT INTO consent_event (\
+                     participant_ref, event_ref, consent_purpose, consent_decision, \
+                     consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
+                 ) VALUES ($1, $2, 'research_contribution', 'granted', $3, $4, 40000)",
+                &[
+                    &ledger.participant_ref(),
+                    &"consent_event_durable_tail_grant",
+                    &"consent_form_durable_tail",
+                    &research_scope_ref,
+                ],
+            )
+            .unwrap();
+
+        let mut mismatch = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(
+                &mut mismatch,
+                &ledger,
+                &event(Some("consent_event_durable_tail_grant"), 40_001),
+            ),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        assert!(matches!(
+            require_durable_ledger_tail(
+                &mut mismatch,
+                &ledger,
+                &event(Some("consent_event_durable_tail_other"), 40_000),
+            ),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        require_durable_ledger_tail(&mut mismatch, &ledger, &bound)
+            .expect("exact durable tail should accept the bound envelope");
+        mismatch.rollback().unwrap();
+
+        let mut overflow_transaction = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(
+                &mut overflow_transaction,
+                &ledger,
+                &event(Some("consent_event_durable_tail_grant"), u64::MAX),
+            ),
+            Err(ConsentOutboxPersistenceError::InvalidPropagationEnvelope)
+        ));
+        overflow_transaction.rollback().unwrap();
+
+        client.batch_execute("DROP TABLE consent_event;").unwrap();
+        let mut missing_event_relation = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(&mut missing_event_relation, &ledger, &bound),
+            Err(ConsentOutboxPersistenceError::Consent(_))
+        ));
+        missing_event_relation.rollback().unwrap();
+        client.batch_execute("DROP TABLE consent_ledger;").unwrap();
+        let mut missing_ledger_relation = client.transaction().unwrap();
+        assert!(matches!(
+            require_durable_ledger_tail(&mut missing_ledger_relation, &ledger, &bound),
+            Err(ConsentOutboxPersistenceError::Consent(_))
+        ));
+        missing_ledger_relation.rollback().unwrap();
+        client
+            .batch_execute(&format!("DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;"))
+            .unwrap();
     }
 }
