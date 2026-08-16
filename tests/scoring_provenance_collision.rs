@@ -75,7 +75,9 @@ fn result_input<'a>() -> ResultSnapshotInput<'a> {
     }
 }
 
-fn session_for(request: &ScoringRequest) -> psychometrics_commons_runtime::session::AssessmentSession {
+fn session_for(
+    request: &ScoringRequest,
+) -> psychometrics_commons_runtime::session::AssessmentSession {
     common::assessment_session(
         request.session_ref(),
         "participant_ref",

@@ -359,8 +359,7 @@ fn result_snapshot_rejects_mismatched_scoring_request() {
     )
     .unwrap();
 
-    let error =
-        ResultSnapshot::new(&session, &first_request, &result, result_input()).unwrap_err();
+    let error = ResultSnapshot::new(&session, &first_request, &result, result_input()).unwrap_err();
     assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
     assert_eq!(
         error.to_string(),
