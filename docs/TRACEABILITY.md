@@ -40,7 +40,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
 | Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
 | Durable outbox/inbox delivery semantics | PRD §7, §9 | TRD §19–20 | ADR-0014, ADR-0015 | **Partially implemented**: domain contracts in `src/integration.rs`; PostgreSQL 18 outbox/inbox identity, delivery-attempt persistence, and inbox consumption distinct from receipt; live side-effect execution remains Target |
-| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; **Active PR** this slice adds GET `/live` and GET `/ready`; measured thresholds and deployment-profile evidence remain Target |
+| Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; **Active PR** #91 adds GET `/live` and GET `/ready`; measured thresholds and deployment-profile evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; actual English/Korean form content, rights, translation, invariance and serving are Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
 | EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/orchestration adapter; `src/longitudinal_observation.rs` records validity, recorded, received, and ingested clocks with explicit membership shares. Enrollment state, PostgreSQL persistence, HTTP, Gyeot collection, and TEPP kernels remain Target |
@@ -77,8 +77,8 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | No default tenant for writes | TRD §11; Security/Data | authorization-domain primitive exists; persistence remains Target | persistence/API tenant negative tests |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` domain envelope/inbox/retry contracts plus PostgreSQL tenant/source-scoped integration evidence, delivery-attempt persistence, and inbox consumption | durable side-effect processing completion, poison-message/crash recovery, broader aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015; UML integration sequence | `src/integration.rs` states/retry semantics; PostgreSQL inbox consumption persists pending/processing/completed and expire-and-reclaim | live adapter crash/retry tests |
-| Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** this slice exposes GET `/live` independently from GET `/ready` | bound listener, metrics, and deployment-profile acceptance |
-| Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** this slice keeps `/ready?capability=` fail-closed for unknown or unsafe required capabilities | degraded-mode transport/integration tests |
+| Liveness is distinct from operation readiness | Operability §3–4; ADR-0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** #91 exposes GET `/live` independently from GET `/ready` | bound listener, metrics, and deployment-profile acceptance |
+| Optional capability outage does not fail unrelated work | Operability §3–4; ADR-0011/0017 | **Implemented** in `src/health.rs` and `src/postgres_health.rs`; **Active PR** #91 keeps `/ready?capability=` fail-closed for unknown or unsafe required capabilities | degraded-mode transport/integration tests |
 | Unknown/stalled backlog or unknown/incompatible integrity blocks new state-changing work | Operability §3, §6, §8 | **Implemented** domain contract in `src/health.rs`; `src/postgres_health.rs` fails closed on unsupported/read-only PostgreSQL or a missing required relation | persistence/job backlog metrics, stronger schema probes, alerting, and failure-injection evidence |
 | No operational IDs in public research release | TRD §14–15; Research Governance | architecture policy | release fixture/static/runtime leakage tests |
 | AI optional; deterministic core remains | PRD §9.5; TRD §17; AI Governance | architecture policy | narrative fallback end-to-end test |
@@ -98,7 +98,7 @@ src/lib.rs
 ├── consent.rs        # purpose-specific consent + research contribution lifecycle
 ├── data_rights.rs    # export/deletion lifecycle and retention evidence
 ├── health.rs         # operation-scoped liveness/readiness and capability-state contract
-├── health_http.rs    # Active PR operator GET /live and GET /ready probes (not protected-main truth)
+├── health_http.rs    # Active PR #91 operator GET /live and GET /ready probes (not protected-main truth)
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** operator health HTTP probes are not protected-main truth until an unchanged reviewed/check-clean head is integrated. GET `/live` and GET `/ready` translate `RuntimeHealthSnapshot` into HTTP 200/503 JSON and return RFC 9457 problem details for malformed or unsupported requests. Public/admin product routes, a bound listener, measured thresholds, and deployment-profile evidence remain outside this slice. Persist-backed session HTTP, exclusive outbox delivery-lease persistence, claim-next scoring-job poll, and longitudinal observation-time ingest are already on the current protected-main head.
+**Active PR** #91 operator health HTTP probes are not protected-main truth until an unchanged reviewed/check-clean head is integrated. GET `/live` and GET `/ready` translate `RuntimeHealthSnapshot` into HTTP 200/503 JSON and return RFC 9457 problem details for malformed or unsupported requests. Public/admin product routes, a bound listener, measured thresholds, and deployment-profile evidence remain outside this slice. Persist-backed session HTTP, exclusive outbox delivery-lease persistence, claim-next scoring-job poll, and longitudinal observation-time ingest are already on the current protected-main head.
 
 The command entry point compares supplied participant and session records and does not claim those aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target.
 
@@ -196,7 +196,7 @@ Whenever a durable conversation decision changes one of those boundaries, the ap
 
 The prose API/event families in TRD are architecture requirements, not evidence of an implemented transport.
 
-The first implemented HTTP surface is the operator health-probe pair. This Active PR adds `openapi/health-probes.yaml` (OpenAPI 3.2.0) listing only GET `/live` and GET `/ready`. Probe success/unready bodies use the documented health-snapshot representation; malformed or unsupported requests use RFC 9457 `application/problem+json`. Public/admin product routes remain unimplemented and are not listed.
+The first implemented HTTP surface is the operator health-probe pair. Active PR #91 adds `openapi/health-probes.yaml` (OpenAPI 3.2.0) listing only GET `/live` and GET `/ready`. Probe success/unready bodies use the documented health-snapshot representation; malformed or unsupported requests use RFC 9457 `application/problem+json`. Public/admin product routes remain unimplemented and are not listed.
 
 When durable message transport is implemented, the same PR or a prerequisite PR must add and validate an AsyncAPI 3.1.x document for actually produced/consumed event channels and message schemas. It must encode/reference ADR-0014 canonical UTF-8 payload hashing, SHA-256 payload digest semantics, tenant/resource binding, deduplication identity, pending/processing/completed consumption, replay retention, and quarantine behavior.
 
