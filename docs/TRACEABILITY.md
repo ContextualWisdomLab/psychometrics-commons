@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** scoring-worker retryable engine outage (successor of #190) is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ScoringWorkerResultOutcome::Retryable` schedules the existing `record_retryable_scoring_failure` path, writes zero `integration_outbox` rows, persists no `result_snapshot`, and does not invent a score. Prefer this head over #190, #172, #168, #167, #155, #136, #115, and #69; those predecessors should not land separately. Live `fast-mlsirm` execution and claim-next remain later adapters.
+**Active PR** #200 scoring-worker retryable engine outage (successor of #190) is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ScoringWorkerResultOutcome::Retryable` schedules the existing `record_retryable_scoring_failure` path, writes zero `integration_outbox` rows, persists no `result_snapshot`, and does not invent a score. Prefer this head over #190, #172, #168, #167, #155, #136, #115, and #69; those predecessors should not land separately. Live `fast-mlsirm` execution and claim-next remain later adapters.
 
 ## 5. ADR traceability by concern
 
