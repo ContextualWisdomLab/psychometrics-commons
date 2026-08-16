@@ -117,9 +117,10 @@ fn insert_consumption(client: &mut Client, suffix: &str, state: &str, event_at: 
                     "INSERT INTO integration_consumption (\
                          consumer_ref, source_ref, tenant_ref, source_event_ref,\
                          consumption_ref, side_effect_ref, consumption_state, fencing_token,\
-                         latest_event_at_unix_ms, claim_expires_at_unix_ms\
+                         latest_event_at_unix_ms, claim_expires_at_unix_ms, claim_deadline_at\
                      ) VALUES ('consumer_backlog_alpha','upstream_backlog_alpha',\
-                               'tenant_backlog_alpha',$1,$2,$3,'processing',1,$4,$5)",
+                               'tenant_backlog_alpha',$1,$2,$3,'processing',1,$4,$5,\
+                               TIMESTAMPTZ 'epoch' + ($5 * INTERVAL '1 millisecond'))",
                     &[
                         &source_event_ref,
                         &consumption_ref,
