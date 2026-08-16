@@ -1,6 +1,7 @@
 //! Request-bound scoring-worker planning must persist one immutable result snapshot.
 
 use psychometrics_commons_runtime::postgres_result_snapshot::ResultSnapshotPersistenceError;
+use psychometrics_commons_runtime::postgres_scoring_job::ScoringJobPersistenceError;
 use psychometrics_commons_runtime::postgres_scoring_request::ScoringRequestPersistenceError;
 use psychometrics_commons_runtime::postgres_scoring_worker::ScoringWorkerCommitError;
 use psychometrics_commons_runtime::result::ResultSnapshotInput;
@@ -394,4 +395,11 @@ fn request_and_snapshot_commit_errors_retain_typed_sources() {
         "scoring worker could not persist the immutable result snapshot; keep the job leased"
     );
     assert!(snapshot.source().is_some());
+
+    let claim = ScoringWorkerCommitError::Claim(ScoringJobPersistenceError::NoDueJob);
+    assert_eq!(
+        claim.to_string(),
+        "scoring worker could not claim the next due job; do not invent a score"
+    );
+    assert!(claim.source().is_some());
 }

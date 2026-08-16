@@ -908,4 +908,11 @@ fn worker_commit_errors_retain_typed_sources() {
         "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
     );
     assert!(retry.source().is_some());
+
+    let claim = ScoringWorkerCommitError::Claim(ScoringJobPersistenceError::NoDueJob);
+    assert_eq!(
+        claim.to_string(),
+        "scoring worker could not claim the next due job; do not invent a score"
+    );
+    assert!(claim.source().is_some());
 }

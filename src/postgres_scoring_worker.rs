@@ -17,7 +17,9 @@ use crate::postgres_scoring_failure::{
     record_permanent_scoring_failure_with_outbox, ScoringFailureOutboxError,
     ScoringFailureOutboxPersistence,
 };
-use crate::postgres_scoring_job::{record_retryable_scoring_failure, ScoringJobPersistenceError};
+use crate::postgres_scoring_job::{
+    claim_next_scoring_job, record_retryable_scoring_failure, ScoringJobPersistenceError,
+};
 use crate::postgres_scoring_request::{load_scoring_request, ScoringRequestPersistenceError};
 use crate::result::ResultSnapshotInput;
 use crate::scoring_job::ScoringJobState;
@@ -99,6 +101,8 @@ pub enum ScoringWorkerCommitError {
     Failure(ScoringFailureOutboxError),
     /// Retryable outage persistence failed; keep the job leased.
     Retry(ScoringJobPersistenceError),
+    /// Claim-next could not lease a due scoring job.
+    Claim(ScoringJobPersistenceError),
 }
 
 impl Display for ScoringWorkerCommitError {
@@ -124,6 +128,9 @@ impl Display for ScoringWorkerCommitError {
             Self::Retry(_) => {
                 "scoring worker could not record a retryable engine outage; keep the job leased and do not invent a score"
             }
+            Self::Claim(_) => {
+                "scoring worker could not claim the next due job; do not invent a score"
+            }
         })
     }
 }
@@ -137,7 +144,7 @@ impl Error for ScoringWorkerCommitError {
             Self::Snapshot(error) => Some(error),
             Self::Completion(error) => Some(error),
             Self::Failure(error) => Some(error),
-            Self::Retry(error) => Some(error),
+            Self::Retry(error) | Self::Claim(error) => Some(error),
         }
     }
 }
@@ -378,4 +385,91 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
             Ok(ScoringWorkerSnapshotPersistence { terminal, snapshot })
         }
     }
+}
+
+/// Durable claim-next attempt that used the stored job-row request pin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimedScoringWorkerAttempt {
+    scoring_job_ref: String,
+    scoring_request_ref: String,
+    fencing_token: u64,
+    persistence: ScoringWorkerSnapshotPersistence,
+}
+
+impl ClaimedScoringWorkerAttempt {
+    /// Return the opaque identity of the leased scoring job.
+    #[must_use]
+    pub fn scoring_job_ref(&self) -> &str {
+        &self.scoring_job_ref
+    }
+
+    /// Return the stored scoring-request pin used for this attempt.
+    #[must_use]
+    pub fn scoring_request_ref(&self) -> &str {
+        &self.scoring_request_ref
+    }
+
+    /// Return the fencing token issued by claim-next.
+    #[must_use]
+    pub const fn fencing_token(&self) -> u64 {
+        self.fencing_token
+    }
+
+    /// Return the snapshot and terminal persistence produced by the attempt.
+    #[must_use]
+    pub const fn persistence(&self) -> ScoringWorkerSnapshotPersistence {
+        self.persistence
+    }
+}
+
+/// Claim the next due scoring job and run it with the stored request pin.
+///
+/// The caller does not supply `scoring_job_ref` or `scoring_request_ref`.
+/// Claim-next reads both from the oldest due job row and then calls only
+/// [`run_scoring_worker_attempt_with_result_snapshot`]. Live `fast-mlsirm`
+/// execution remains a later adapter behind [`ScoringWorkerResultEngine`].
+///
+/// # Errors
+///
+/// Returns [`ScoringWorkerCommitError::Claim`] when no due job can be leased,
+/// or the existing request, planning, retry, snapshot, or terminal errors from
+/// the bound worker attempt.
+#[allow(clippy::too_many_arguments)]
+pub fn claim_and_run_next_scoring_worker_attempt(
+    transaction: &mut Transaction<'_>,
+    worker_ref: &str,
+    lease_ref: &str,
+    claimed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+    engine: &impl ScoringWorkerResultEngine,
+    snapshot_input: ResultSnapshotInput<'_>,
+    envelope: ScoringWorkerEnvelope<'_>,
+    outbox_max_attempts: usize,
+    retry_at_unix_ms: u64,
+) -> Result<ClaimedScoringWorkerAttempt, ScoringWorkerCommitError> {
+    let claimed = claim_next_scoring_job(
+        transaction,
+        worker_ref,
+        lease_ref,
+        claimed_at_unix_ms,
+        expires_at_unix_ms,
+    )
+    .map_err(ScoringWorkerCommitError::Claim)?;
+    let persistence = run_scoring_worker_attempt_with_result_snapshot(
+        transaction,
+        claimed.scoring_job_ref(),
+        claimed.lease().fencing_token(),
+        claimed.scoring_request_ref(),
+        engine,
+        snapshot_input,
+        envelope,
+        outbox_max_attempts,
+        retry_at_unix_ms,
+    )?;
+    Ok(ClaimedScoringWorkerAttempt {
+        scoring_job_ref: claimed.scoring_job_ref().to_owned(),
+        scoring_request_ref: claimed.scoring_request_ref().to_owned(),
+        fencing_token: claimed.lease().fencing_token(),
+        persistence,
+    })
 }

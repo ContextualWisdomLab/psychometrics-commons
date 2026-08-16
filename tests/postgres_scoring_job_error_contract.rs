@@ -84,6 +84,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ScoringJobPersistenceError::LeaseStillActive,
             "scoring job lease has not expired",
         ),
+        (
+            ScoringJobPersistenceError::NoDueJob,
+            "no due scoring job is available; wait for the next queued or retry-scheduled job",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());
