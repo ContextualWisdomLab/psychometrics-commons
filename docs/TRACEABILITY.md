@@ -222,6 +222,8 @@ CI should validate linked documentation paths and status/name consistency now an
 
 ## 10. References
 
+Eddy, W. (Ed.). (2022). *Transmission Control Protocol (TCP)* (RFC 9293). Internet Engineering Task Force. https://doi.org/10.17487/RFC9293
+
 Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP Semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
 
 Kubernetes Authors. (2024). *Configure liveness, readiness and startup probes*. Kubernetes Documentation. https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/

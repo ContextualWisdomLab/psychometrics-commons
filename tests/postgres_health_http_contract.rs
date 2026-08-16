@@ -237,3 +237,54 @@ fn serve_loop_answers_live_then_ready_without_store_io_on_live() {
     assert!(stopped.is_err());
     server.join().unwrap();
 }
+
+#[test]
+fn serve_loop_keeps_accepting_after_a_client_drops_the_connection() {
+    let listener = bind_health_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop = listener.try_clone().unwrap();
+    let (done_tx, done_rx) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let mut client = test_client();
+        let result = serve_postgres_health_http(
+            &listener,
+            &mut client,
+            &["pg_catalog.pg_class"],
+            BacklogHealth::WithinBounds,
+        );
+        let _ = done_tx.send(result);
+    });
+
+    {
+        let mut dropped = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+        dropped
+            .write_all(
+                format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes(),
+            )
+            .unwrap();
+    }
+
+    let mut live_stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    live_stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    live_stream
+        .write_all(format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+        .unwrap();
+    live_stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut live = String::new();
+    live_stream.read_to_string(&mut live).unwrap();
+    assert!(
+        live.starts_with("HTTP/1.1 200 OK\r\n"),
+        "a dropped PostgreSQL-backed probe must not stop later GET /live answers: {live}"
+    );
+    assert!(live.contains("\"live\":true"));
+    assert!(!live.contains(POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF));
+
+    stop.set_nonblocking(true).unwrap();
+    let _ = TcpStream::connect_timeout(&addr, Duration::from_millis(200));
+    let _ = done_rx
+        .recv_timeout(Duration::from_secs(3))
+        .expect("serve_postgres_health_http must still return after accept can no longer block");
+    server.join().unwrap();
+}

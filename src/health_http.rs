@@ -682,6 +682,13 @@ mod tests {
             ServeIoSource::Accept,
         ));
         assert!(
+            should_continue_after_serve_error(
+                &io::Error::new(io::ErrorKind::ConnectionReset, "rst before accept"),
+                ServeIoSource::Accept,
+            ),
+            "accept ConnectionReset must retry so a reset handshake does not stop later probes"
+        );
+        assert!(
             !should_continue_after_serve_error(
                 &io::Error::new(io::ErrorKind::WouldBlock, "nonblocking"),
                 ServeIoSource::Accept,
