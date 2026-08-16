@@ -392,6 +392,10 @@ fn anonymous_command_docs_do_not_claim_store_load() {
         !command_tests.contains("must load the participant"),
         "command tests must not say a transport must load records the gate does not prove"
     );
+    assert!(
+        !command_tests.contains("_loaded_"),
+        "command tests must name supplied records, not loaded records"
+    );
 
     for (label, document) in [
         ("CHANGELOG.md", changelog.as_str()),
@@ -421,8 +425,14 @@ fn anonymous_command_docs_do_not_claim_store_load() {
             "{label} must not name superseded #147 as the current participant persist landing"
         );
         assert!(
-            document.contains("#158"),
-            "{label} must name Active PR #158 as the current participant persist landing"
+            !document.contains("Active PR #158"),
+            "{label} must not name closed restore-reconcile #158 as the current participant persist landing"
+        );
+        let persist_status = document.to_ascii_lowercase();
+        assert!(
+            persist_status.contains("persist/reload remains target")
+                || persist_status.contains("persist/reload of `assessment_participant` remains target"),
+            "{label} must say assessment_participant persist/reload remains Target on this honesty head"
         );
     }
 }

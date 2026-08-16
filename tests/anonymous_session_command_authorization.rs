@@ -2,7 +2,7 @@
 //!
 //! A transport should hold participant and session records before calling this
 //! boundary. These tests pass supplied records; the type system does not prove
-//! they were loaded from the product store. Persist/reload remains Active PR #158.
+//! they were loaded from the product store. Persist/reload remains Target.
 
 use psychometrics_commons_runtime::anonymous_authorization::{
     apply_anonymous_session_command, authorize_anonymous_session_command,
@@ -127,31 +127,31 @@ fn anonymous_context(
 }
 
 #[test]
-fn current_anonymous_proof_may_command_only_its_loaded_session() {
+fn current_anonymous_proof_may_command_only_its_supplied_session() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
-    let loaded = session("participant_alpha", "session_alpha");
+    let supplied = session("participant_alpha", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &loaded, COMMAND_NOW_UNIX_MS),
+        authorize_anonymous_session_command(&actor, &owner, &supplied, COMMAND_NOW_UNIX_MS),
         Ok(())
     );
 }
 
 #[test]
-fn anonymous_command_authorization_uses_loaded_participant_tenant_not_caller_scope() {
+fn anonymous_command_authorization_uses_supplied_participant_tenant_not_caller_scope() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let foreign_owner = participant("tenant_beta", "participant_alpha");
-    let loaded = session("participant_alpha", "session_alpha");
+    let supplied = session("participant_alpha", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &foreign_owner, &loaded, COMMAND_NOW_UNIX_MS),
+        authorize_anonymous_session_command(&actor, &foreign_owner, &supplied, COMMAND_NOW_UNIX_MS),
         Err(AnonymousResourceAuthorizationError::CrossTenantDenied)
     );
 }
 
 #[test]
-fn anonymous_command_authorization_rejects_a_session_owned_by_another_loaded_participant() {
+fn anonymous_command_authorization_rejects_a_session_owned_by_another_supplied_participant() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
     let other_persons_session = session("participant_beta", "session_alpha");
@@ -168,7 +168,7 @@ fn anonymous_command_authorization_rejects_a_session_owned_by_another_loaded_par
 }
 
 #[test]
-fn anonymous_command_authorization_rejects_a_different_loaded_session_for_the_same_owner() {
+fn anonymous_command_authorization_rejects_a_different_supplied_session_for_the_same_owner() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
     let other_session = session("participant_alpha", "session_beta");
@@ -183,18 +183,23 @@ fn anonymous_command_authorization_rejects_a_different_loaded_session_for_the_sa
 fn anonymous_command_authorization_fails_closed_for_zero_or_expired_server_time() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
-    let loaded = session("participant_alpha", "session_alpha");
+    let supplied = session("participant_alpha", "session_alpha");
 
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &loaded, 0),
+        authorize_anonymous_session_command(&actor, &owner, &supplied, 0),
         Err(AnonymousResourceAuthorizationError::InvalidTimestamp)
     );
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &loaded, PROOF_VALID_UNTIL_UNIX_MS),
+        authorize_anonymous_session_command(&actor, &owner, &supplied, PROOF_VALID_UNTIL_UNIX_MS),
         Err(AnonymousResourceAuthorizationError::Expired)
     );
     assert_eq!(
-        authorize_anonymous_session_command(&actor, &owner, &loaded, PROOF_VALID_UNTIL_UNIX_MS + 1),
+        authorize_anonymous_session_command(
+            &actor,
+            &owner,
+            &supplied,
+            PROOF_VALID_UNTIL_UNIX_MS + 1
+        ),
         Err(AnonymousResourceAuthorizationError::Expired)
     );
 }
@@ -221,7 +226,7 @@ fn anonymous_command_authorization_rejects_compound_failures_in_time_then_owner_
 }
 
 #[test]
-fn anonymous_command_authorization_rejects_actor_when_loaded_participant_and_session_agree() {
+fn anonymous_command_authorization_rejects_actor_when_supplied_participant_and_session_agree() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let other_owner = participant("tenant_alpha", "participant_beta");
     let other_persons_session = session("participant_beta", "session_alpha");
@@ -238,7 +243,7 @@ fn anonymous_command_authorization_rejects_actor_when_loaded_participant_and_ses
 }
 
 #[test]
-fn anonymous_command_authorization_rejects_compound_foreign_tenant_and_inconsistent_loaded_pair_as_cross_tenant(
+fn anonymous_command_authorization_rejects_compound_foreign_tenant_and_inconsistent_supplied_pair_as_cross_tenant(
 ) {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let foreign_owner = participant("tenant_beta", "participant_alpha");
@@ -256,16 +261,16 @@ fn anonymous_command_authorization_rejects_compound_foreign_tenant_and_inconsist
 }
 
 #[test]
-fn authorized_anonymous_proof_may_activate_only_its_loaded_session() {
+fn authorized_anonymous_proof_may_activate_only_its_supplied_session() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
-    let mut loaded = session("participant_alpha", "session_alpha");
+    let mut supplied = session("participant_alpha", "session_alpha");
 
     assert_eq!(
         apply_anonymous_session_command(
             &actor,
             &owner,
-            &mut loaded,
+            &mut supplied,
             "command_activate_alpha",
             1,
             SessionCommand::Activate,
@@ -273,11 +278,11 @@ fn authorized_anonymous_proof_may_activate_only_its_loaded_session() {
         ),
         Ok(SessionState::Active)
     );
-    assert_eq!(loaded.state(), SessionState::Active);
+    assert_eq!(supplied.state(), SessionState::Active);
 }
 
 #[test]
-fn unauthorized_anonymous_command_does_not_mutate_the_loaded_session() {
+fn unauthorized_anonymous_command_does_not_mutate_the_supplied_session() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
     let mut other_session = session("participant_alpha", "session_beta");
@@ -300,16 +305,16 @@ fn unauthorized_anonymous_command_does_not_mutate_the_loaded_session() {
 }
 
 #[test]
-fn cross_tenant_anonymous_command_does_not_mutate_the_loaded_session() {
+fn cross_tenant_anonymous_command_does_not_mutate_the_supplied_session() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let foreign_owner = participant("tenant_beta", "participant_alpha");
-    let mut loaded = session("participant_alpha", "session_alpha");
+    let mut supplied = session("participant_alpha", "session_alpha");
 
     assert_eq!(
         apply_anonymous_session_command(
             &actor,
             &foreign_owner,
-            &mut loaded,
+            &mut supplied,
             "command_activate_foreign_tenant",
             1,
             SessionCommand::Activate,
@@ -319,11 +324,11 @@ fn cross_tenant_anonymous_command_does_not_mutate_the_loaded_session() {
             AnonymousResourceAuthorizationError::CrossTenantDenied
         ))
     );
-    assert_eq!(loaded.state(), SessionState::Created);
+    assert_eq!(supplied.state(), SessionState::Created);
 }
 
 #[test]
-fn owner_mismatch_anonymous_command_does_not_mutate_the_loaded_session() {
+fn owner_mismatch_anonymous_command_does_not_mutate_the_supplied_session() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
     let mut other_persons_session = session("participant_beta", "session_alpha");
@@ -349,13 +354,13 @@ fn owner_mismatch_anonymous_command_does_not_mutate_the_loaded_session() {
 fn expired_anonymous_proof_cannot_apply_an_otherwise_legal_session_command() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
-    let mut loaded = session("participant_alpha", "session_alpha");
+    let mut supplied = session("participant_alpha", "session_alpha");
 
     assert_eq!(
         apply_anonymous_session_command(
             &actor,
             &owner,
-            &mut loaded,
+            &mut supplied,
             "command_activate_expired",
             1,
             SessionCommand::Activate,
@@ -365,19 +370,19 @@ fn expired_anonymous_proof_cannot_apply_an_otherwise_legal_session_command() {
             AnonymousResourceAuthorizationError::Expired
         ))
     );
-    assert_eq!(loaded.state(), SessionState::Created);
+    assert_eq!(supplied.state(), SessionState::Created);
 }
 
 #[test]
 fn authorized_anonymous_command_still_fails_closed_on_illegal_lifecycle_transition() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
-    let mut loaded = session("participant_alpha", "session_alpha");
+    let mut supplied = session("participant_alpha", "session_alpha");
 
     let error = apply_anonymous_session_command(
         &actor,
         &owner,
-        &mut loaded,
+        &mut supplied,
         "command_complete_too_early",
         1,
         SessionCommand::Complete,
@@ -392,7 +397,7 @@ fn authorized_anonymous_command_still_fails_closed_on_illegal_lifecycle_transiti
         }
         other => panic!("expected lifecycle rejection, got {other:?}"),
     }
-    assert_eq!(loaded.state(), SessionState::Created);
+    assert_eq!(supplied.state(), SessionState::Created);
     assert!(error.to_string().contains("Complete"));
     assert!(std::error::Error::source(&error).is_some());
 }
