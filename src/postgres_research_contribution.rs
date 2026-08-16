@@ -20,9 +20,7 @@
 //! Exact replay and withdrawal of already stored evidence stay allowed. The
 //! caller owns credentials and the surrounding transaction boundary.
 
-use crate::consent::{
-    ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState,
-};
+use crate::consent::{ConsentPurpose, ConsentSnapshot, ResearchContribution};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -275,17 +273,12 @@ fn validated_contribution_evidence<'a>(
         return Err(ResearchContributionPersistenceError::OperationalIdentityReuse);
     }
 
-    let withdrawal = match contribution.state() {
-        ResearchContributionState::Active => None,
-        ResearchContributionState::Withdrawn => {
-            let (event_ref, withdrawn_at_unix_ms) = contribution
-                .withdrawal_evidence()
-                .ok_or(ResearchContributionPersistenceError::InvalidReference)?;
-            Some(ValidatedWithdrawal {
-                withdrawal_event_ref: required_reference(event_ref)?,
-                withdrawn_at_unix_ms: bounded_timestamp(withdrawn_at_unix_ms)?,
-            })
-        }
+    let withdrawal = match contribution.withdrawal_evidence() {
+        Some((event_ref, withdrawn_at_unix_ms)) => Some(ValidatedWithdrawal {
+            withdrawal_event_ref: required_reference(event_ref)?,
+            withdrawn_at_unix_ms: bounded_timestamp(withdrawn_at_unix_ms)?,
+        }),
+        None => None,
     };
 
     Ok(ValidatedEvidence {
