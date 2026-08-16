@@ -185,7 +185,7 @@ fn valid_https_problem_type(remainder: &str) -> bool {
         return false;
     }
 
-    valid_uri_ascii(&remainder[authority_end..])
+    valid_https_suffix(&remainder[authority_end..])
 }
 
 fn valid_registered_host(host: &str) -> bool {
@@ -225,12 +225,31 @@ fn valid_urn_namespace_specific_string(value: &str) -> bool {
     })
 }
 
-fn valid_uri_ascii(value: &str) -> bool {
-    valid_percent_encoded_ascii(value, |byte| {
-        is_unreserved(byte)
-            || is_sub_delimiter(byte)
-            || matches!(byte, b':' | b'/' | b'?' | b'#' | b'[' | b']' | b'@')
-    })
+fn valid_https_suffix(value: &str) -> bool {
+    let (path_and_query, fragment) = value
+        .split_once('#')
+        .map_or((value, None), |(before, fragment)| (before, Some(fragment)));
+    let (path, query) = path_and_query
+        .split_once('?')
+        .map_or((path_and_query, None), |(path, query)| (path, Some(query)));
+
+    valid_percent_encoded_ascii(path, is_path_byte)
+        && query.is_none_or(|query| valid_percent_encoded_ascii(query, is_query_or_fragment_byte))
+        && fragment.is_none_or(|fragment| {
+            valid_percent_encoded_ascii(fragment, is_query_or_fragment_byte)
+        })
+}
+
+const fn is_path_byte(byte: u8) -> bool {
+    is_path_segment_byte(byte) || byte == b'/'
+}
+
+const fn is_query_or_fragment_byte(byte: u8) -> bool {
+    is_path_segment_byte(byte) || matches!(byte, b'/' | b'?')
+}
+
+const fn is_path_segment_byte(byte: u8) -> bool {
+    is_unreserved(byte) || is_sub_delimiter(byte) || matches!(byte, b':' | b'@')
 }
 
 fn valid_percent_encoded_ascii(value: &str, allowed: fn(u8) -> bool) -> bool {
