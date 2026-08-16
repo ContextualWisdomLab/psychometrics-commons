@@ -3,7 +3,7 @@
 //! A transport must load the participant and assessment session from the product store,
 //! then ask this boundary whether the already-verified anonymous session may command
 //! that exact session. These tests pass supplied records; the type system does not
-//! prove they were loaded. Persist/reload remains Active PR #114.
+//! prove they were loaded. Persist/reload remains Active PR #133.
 
 use psychometrics_commons_runtime::anonymous_authorization::{
     apply_anonymous_session_command, authorize_anonymous_session_command,

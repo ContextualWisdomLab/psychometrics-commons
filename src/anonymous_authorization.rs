@@ -117,20 +117,20 @@ pub fn authorize_anonymous_session(
     Ok(())
 }
 
-/// Allow a verified anonymous participant to command one loaded assessment session.
+/// Allow a verified anonymous participant to command one supplied assessment session.
 ///
 /// Callers provide four values:
 ///
 /// - `actor`: an [`AnonymousSessionContext`] created only after the short-lived anonymous proof has
 ///   already been verified;
-/// - `participant`: the [`ParticipantRecord`] loaded from the product store for that command;
-/// - `session`: the [`AssessmentSession`] loaded from the product store for that command; and
+/// - `participant`: the [`ParticipantRecord`] the caller supplies for that command;
+/// - `session`: the [`AssessmentSession`] the caller supplies for that command; and
 /// - `now_unix_ms`: the current time from the application's trusted server clock, not a client clock.
 ///
 /// The function compares the actor to those supplied records. It does **not** accept a
 /// caller-built [`ResourceScope`]. It does not prove the records were loaded from the product
 /// store; a transport can still construct both aggregates from the proof. Persist/reload of
-/// `assessment_participant` remains Active PR #114. For example, a proof for `session_alpha` /
+/// `assessment_participant` remains Active PR #133. For example, a proof for `session_alpha` /
 /// `participant_alpha` in `tenant_alpha` is allowed only when the supplied participant is that
 /// same person in that same tenant and the supplied session is `session_alpha` owned by that
 /// person. A session owned by `participant_beta`, or `session_beta` owned by the same person,
@@ -177,7 +177,7 @@ pub fn authorize_anonymous_session_command(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AnonymousSessionCommandError {
-    /// The verified anonymous session was not allowed to command the loaded session.
+    /// The verified anonymous session was not allowed to command the supplied session.
     Authorization(AnonymousResourceAuthorizationError),
     /// Authorization succeeded, but the lifecycle command was not legal for the current state.
     Transition(TransitionError),
@@ -201,20 +201,21 @@ impl Error for AnonymousSessionCommandError {
     }
 }
 
-/// Apply one session command only after the loaded session is authorized.
+/// Apply one session command only after the supplied session is authorized.
 ///
 /// Call this from an HTTP or messaging adapter after the short-lived anonymous proof has been
-/// verified and the participant and session have been loaded from the product store. Authorization
-/// runs first. If it fails, the session is left unchanged. If it succeeds, the existing session
-/// lifecycle rules decide whether the command may change state.
+/// verified. Pass the participant and session records the caller holds. This function does not
+/// prove the records were loaded from the product store. Authorization runs first. If it fails,
+/// the session is left unchanged. If it succeeds, the existing session lifecycle rules decide
+/// whether the command may change state.
 ///
-/// For example, a current proof for `session_alpha` may activate that loaded session. The same
+/// For example, a current proof for `session_alpha` may activate that supplied session. The same
 /// proof cannot activate `session_beta`, and an expired proof cannot activate `session_alpha` even
 /// though `Activate` is otherwise legal from `Created`.
 ///
 /// # Errors
 ///
-/// Returns [`AnonymousSessionCommandError::Authorization`] when the loaded records are not the
+/// Returns [`AnonymousSessionCommandError::Authorization`] when the supplied records are not the
 /// exact current anonymous session, or [`AnonymousSessionCommandError::Transition`] when the
 /// command is not legal from the current lifecycle state.
 pub fn apply_anonymous_session_command(
