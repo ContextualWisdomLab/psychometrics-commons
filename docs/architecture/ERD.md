@@ -35,6 +35,7 @@ erDiagram
     response_snapshot ||--o{ scoring_job : submitted_for
     scoring_job ||--o| result_snapshot : produces
     assessment_participant ||--o{ result_snapshot : owns
+    assessment_session ||--o{ result_snapshot : publishes
 
     assessment_participant ||--o| consent_ledger : records
     consent_ledger ||--o{ consent_event : appends
@@ -208,6 +209,7 @@ erDiagram
     result_snapshot {
       string result_snapshot_ref PK
       string participant_ref FK
+      string session_ref FK
       string scoring_job_ref FK
       string response_snapshot_ref FK
       string scoring_result_ref
@@ -475,6 +477,7 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `(session_ref, server_sequence)` | authoritative response ordering |
 | unique `response_event_ref` | no server event identity reuse |
 | unique `response_snapshot_ref` and one canonical completed snapshot per session/version policy | immutable scoring evidence |
+| at most one current non-superseded `result_snapshot` per `session_ref` | restarted workers load one published tip |
 | unique `release_ref` for one locale-specific publication identity | instrument-release replay safety |
 | unique `(instrument_version_ref, item_order)` | deterministic published order |
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |

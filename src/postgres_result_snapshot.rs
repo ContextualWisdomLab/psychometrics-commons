@@ -147,11 +147,50 @@ pub fn persist_result_snapshot(
     classify_existing_snapshot(transaction, snapshot, created_at, schema_version)
 }
 
+/// Load the current published result for one assessment session.
+///
+/// After restart, call this with the session the participant is viewing. It
+/// returns the unique non-superseded snapshot so a worker can serve the stored
+/// score without calling the scoring engine. No header returns `None`. Two
+/// current tips for the same session fail closed.
+///
+/// # Errors
+///
+/// Returns [`ResultSnapshotPersistenceError`] for unsupported isolation, an
+/// invalid session reference, inconsistent durable evidence, or a database
+/// failure.
+pub fn load_current_result_snapshot_for_session(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Option<ResultSnapshot>, ResultSnapshotPersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = required_reference(session_ref)?;
+    let tips = transaction.query(
+        "SELECT result_snapshot_ref \
+         FROM result_snapshot \
+         WHERE session_ref = $1 \
+           AND result_snapshot_ref NOT IN ( \
+               SELECT supersedes_ref FROM result_snapshot \
+               WHERE session_ref = $1 AND supersedes_ref IS NOT NULL \
+           )",
+        &[&session_ref],
+    )?;
+    match tips.len() {
+        0 => Ok(None),
+        1 => {
+            let snapshot_ref: String = tips[0].get(0);
+            load_result_snapshot(transaction, &snapshot_ref)
+        }
+        _ => Err(ResultSnapshotPersistenceError::InconsistentEvidence),
+    }
+}
+
 /// Load one immutable result snapshot from durable evidence.
 ///
 /// Returns `Ok(None)` when no snapshot header exists. Copied observations are
-/// reconstructed in stored `observation_order`. After load, exact persist
-/// replay stays [`ResultSnapshotPersistenceDisposition::Duplicate`].
+/// reconstructed in stored `observation_order`, which must be contiguous
+/// `0..n-1`. After load, exact persist replay stays
+/// [`ResultSnapshotPersistenceDisposition::Duplicate`].
 ///
 /// # Errors
 ///
@@ -192,19 +231,20 @@ pub fn load_result_snapshot(
     let created_at_unix_ms = stored_timestamp(header.get(13))?;
     let supersedes_ref: Option<String> = header.get(14);
     let rows = transaction.query(
-        "SELECT construct_ref, observation_disposition, score, standard_error \
+        "SELECT observation_order, construct_ref, observation_disposition, score, standard_error \
          FROM result_snapshot_observation \
          WHERE result_snapshot_ref = $1 \
          ORDER BY observation_order",
         &[&result_snapshot_ref],
     )?;
     let mut score_observations = Vec::with_capacity(rows.len());
-    for row in rows {
+    for (expected_index, row) in rows.iter().enumerate() {
+        require_contiguous_observation_order(expected_index, row.get(0))?;
         score_observations.push(observation_from_stored(
-            row.get(0),
-            &row.get::<_, String>(1),
-            row.get(2),
+            row.get(1),
+            &row.get::<_, String>(2),
             row.get(3),
+            row.get(4),
         )?);
     }
     ResultSnapshot::from_durable_evidence(ResultSnapshotEvidence {
@@ -449,6 +489,19 @@ fn observation_order(index: usize) -> Result<i32, ResultSnapshotPersistenceError
     i32::try_from(index).map_err(|_| ResultSnapshotPersistenceError::InvalidTimestamp)
 }
 
+fn require_contiguous_observation_order(
+    expected_index: usize,
+    stored_order: i32,
+) -> Result<(), ResultSnapshotPersistenceError> {
+    let expected_order = i32::try_from(expected_index)
+        .map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)?;
+    if stored_order == expected_order {
+        Ok(())
+    } else {
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    }
+}
+
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), ResultSnapshotPersistenceError> {
@@ -465,8 +518,9 @@ fn require_read_committed(
 mod reference_guard_tests {
     use super::{
         durable_evidence_error, observation_disposition_name, observation_from_stored,
-        observation_order, postgres_timestamp, required_reference, stored_schema_version,
-        stored_timestamp, ResultSnapshotPersistenceError,
+        observation_order, postgres_timestamp, require_contiguous_observation_order,
+        required_reference, stored_schema_version, stored_timestamp,
+        ResultSnapshotPersistenceError,
     };
     use crate::result::ResultSnapshotError;
     use crate::scoring::ObservationDisposition;
@@ -494,6 +548,15 @@ mod reference_guard_tests {
         assert!(matches!(
             observation_order(usize::MAX),
             Err(ResultSnapshotPersistenceError::InvalidTimestamp)
+        ));
+        assert!(require_contiguous_observation_order(0, 0).is_ok());
+        assert!(matches!(
+            require_contiguous_observation_order(1, 2),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert!(matches!(
+            require_contiguous_observation_order(usize::MAX, 0),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
         ));
         assert_eq!(
             observation_disposition_name(ObservationDisposition::Scored),
