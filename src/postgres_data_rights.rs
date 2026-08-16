@@ -162,13 +162,14 @@ pub fn apply_data_rights_migration(client: &mut Client) -> Result<(), postgres::
 
 /// Persist one requested data-rights resource and all declared dependent-system outbox events.
 ///
-/// The function owns one short local `PostgreSQL` transaction so a database or outbox error rolls
-/// back the request row, target rows, and any earlier event inserts together. It does not deliver
-/// events itself; the existing outbox worker owns retry, quarantine, and reconciliation behavior.
-/// Exact request replay is idempotent only when the target set and outbox evidence are unchanged.
-/// The insert-then-inspect first-write classifier requires `READ COMMITTED`, matching the existing
-/// integration outbox replay contract, and fails closed when the session default uses stronger
-/// isolation.
+/// Retrying the same creation request does not create another record when it still names the same
+/// participant, scope, dependent systems, event identities, and outbox evidence, even if the
+/// stored request has already moved to a later valid processing state. The function owns one short
+/// local `PostgreSQL` transaction so a database or outbox error rolls back the request row, target
+/// rows, and any earlier event inserts together. It does not deliver events itself; the existing
+/// outbox worker owns retry, quarantine, and reconciliation behavior. The insert-then-inspect
+/// first-write classifier requires `READ COMMITTED`, matching the existing integration outbox
+/// replay contract, and fails closed when the session default uses stronger isolation.
 ///
 /// # Errors
 ///
@@ -222,11 +223,12 @@ pub fn persist_requested_data_rights_with_propagation(
 
 /// Persist requester identity verification for one already requested data-rights identity.
 ///
-/// Exact replay of the same evidence and verification time is idempotent. A later
-/// conflicting verification fails closed. Replay classification locks the matched
-/// request row until the caller-owned transaction ends so the classified lifecycle
-/// cannot change before the caller composes subsequent atomic work.
-/// This adapter does not start processing or complete the request.
+/// Retrying the same verification does not create a second verification when the evidence and
+/// verification time are unchanged, even after the request has moved to a later valid processing
+/// state. A conflicting verification fails closed. Replay classification locks the matched request
+/// row until the caller-owned transaction ends so the classified lifecycle cannot change before
+/// the caller composes subsequent atomic work. This adapter does not start processing or complete
+/// the request.
 ///
 /// # Errors
 ///
@@ -287,7 +289,7 @@ pub fn persist_data_rights_identity_verification(
     let row = query_optional_row(
         transaction,
         "SELECT participant_ref, request_kind, scope_ref,
-                current_state, verification_evidence_ref, verified_at_unix_ms
+                verification_evidence_ref, verified_at_unix_ms
          FROM data_rights_request_state
          WHERE request_ref = $1 AND tenant_ref = $2
          FOR UPDATE",
@@ -299,20 +301,18 @@ pub fn persist_data_rights_identity_verification(
     let stored_participant: String = row.get(0);
     let stored_kind: String = row.get(1);
     let stored_scope: String = row.get(2);
-    let stored_state: String = row.get(3);
-    let stored_evidence: Option<String> = row.get(4);
-    let stored_verified_at: Option<i64> = row.get(5);
+    let stored_evidence: Option<String> = row.get(3);
+    let stored_verified_at: Option<i64> = row.get(4);
     let identity_matches = stored_participant == request.participant_ref()
         && stored_kind == request_kind
         && stored_scope == request.scope_ref();
     if !identity_matches {
         Err(DataRightsPersistenceError::ConflictingReplay)
-    } else if stored_state == "identity_verified"
-        && stored_evidence.as_deref() == Some(evidence_ref)
+    } else if stored_evidence.as_deref() == Some(evidence_ref)
         && stored_verified_at == Some(verified_at)
     {
         Ok(DataRightsVerificationDisposition::Duplicate)
-    } else if stored_state == "identity_verified" {
+    } else if stored_evidence.is_some() || stored_verified_at.is_some() {
         Err(DataRightsPersistenceError::ConflictingReplay)
     } else {
         Err(DataRightsPersistenceError::InvalidRequestState)
@@ -355,8 +355,35 @@ fn persist_request_header(
     }
 
     let row = transaction.query_one(
-        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, current_state, \
-                requested_at_unix_ms, latest_event_at_unix_ms \
+        "SELECT tenant_ref, participant_ref, request_kind, scope_ref, requested_at_unix_ms,
+                CASE
+                  WHEN current_state = 'requested' THEN
+                    latest_event_at_unix_ms = requested_at_unix_ms
+                    AND verification_evidence_ref IS NULL
+                    AND verified_at_unix_ms IS NULL
+                  WHEN current_state = 'identity_verified' THEN
+                    verification_evidence_ref IS NOT NULL
+                    AND verified_at_unix_ms IS NOT NULL
+                    AND verified_at_unix_ms >= requested_at_unix_ms
+                    AND latest_event_at_unix_ms = verified_at_unix_ms
+                  WHEN current_state IN ('processing','completed','partially_completed','failed') THEN
+                    verification_evidence_ref IS NOT NULL
+                    AND verified_at_unix_ms IS NOT NULL
+                    AND verified_at_unix_ms >= requested_at_unix_ms
+                    AND latest_event_at_unix_ms >= verified_at_unix_ms
+                  WHEN current_state = 'rejected' THEN
+                    latest_event_at_unix_ms >= requested_at_unix_ms
+                    AND (
+                      (verification_evidence_ref IS NULL AND verified_at_unix_ms IS NULL)
+                      OR (
+                        verification_evidence_ref IS NOT NULL
+                        AND verified_at_unix_ms IS NOT NULL
+                        AND verified_at_unix_ms >= requested_at_unix_ms
+                        AND latest_event_at_unix_ms >= verified_at_unix_ms
+                      )
+                    )
+                  ELSE FALSE
+                END AS lifecycle_is_coherent
          FROM data_rights_request_state WHERE request_ref = $1",
         &[&request.request_ref()],
     )?;
@@ -364,9 +391,8 @@ fn persist_request_header(
         && row.get::<_, String>(1) == request.participant_ref()
         && row.get::<_, String>(2) == request_kind_name(request.kind())
         && row.get::<_, String>(3) == request.scope_ref()
-        && row.get::<_, String>(4) == "requested"
-        && row.get::<_, i64>(5) == requested_at
-        && row.get::<_, i64>(6) == requested_at;
+        && row.get::<_, i64>(4) == requested_at
+        && row.get::<_, bool>(5);
     if exact && stored_targets_match(transaction, request, targets)? {
         Ok(DataRightsPersistenceDisposition::Duplicate)
     } else {

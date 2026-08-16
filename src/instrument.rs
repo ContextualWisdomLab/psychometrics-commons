@@ -78,7 +78,7 @@ pub enum InstrumentReleaseError {
     EmptyItemSet,
     /// The release repeats an item-version reference.
     DuplicateItemReference,
-    /// The locale is not a supported BCP 47-style tag.
+    /// The locale is not an exact whitespace-free supported BCP 47-style tag.
     InvalidLocale,
     /// The release content digest is not a canonical SHA-256 digest reference.
     InvalidDigest,
@@ -116,7 +116,9 @@ impl Display for InstrumentReleaseError {
             Self::DuplicateItemReference => {
                 "instrument release item-version references must be unique"
             }
-            Self::InvalidLocale => "instrument release locale must be a valid BCP 47-style tag",
+            Self::InvalidLocale => {
+                "instrument release locale must be an exact whitespace-free BCP 47-style tag"
+            }
             Self::InvalidDigest => {
                 "instrument release content digest must be sha256 followed by 64 lowercase hexadecimal digits"
             }
@@ -181,8 +183,10 @@ impl InstrumentReleaseManifest {
     /// Create a fully pinned immutable instrument-release manifest.
     ///
     /// Item order is semantically significant and is therefore preserved exactly.
-    /// All public references must be opaque. The content digest identifies the
-    /// canonical release bytes independently from human-readable version names.
+    /// All public references must be opaque. The locale must already be an exact,
+    /// whitespace-free BCP 47-style tag; this constructor never trims locale input.
+    /// The content digest identifies the canonical release bytes independently from
+    /// human-readable version names.
     ///
     /// # Errors
     ///
@@ -217,8 +221,7 @@ impl InstrumentReleaseManifest {
             consent_requirement_refs,
             InstrumentReleaseError::InvalidReference,
         )?;
-        let locale = locale.trim();
-        if !valid_locale(locale) {
+        if locale.trim() != locale || !valid_locale(locale) {
             return Err(InstrumentReleaseError::InvalidLocale);
         }
         if !valid_sha256_digest(content_digest) {
@@ -288,7 +291,7 @@ impl InstrumentReleaseManifest {
         &self.item_version_refs
     }
 
-    /// Return the locale pinned by the release.
+    /// Return the exact locale pinned by the release.
     #[must_use]
     pub fn locale(&self) -> &str {
         &self.locale
@@ -481,7 +484,8 @@ impl PublicationEvidenceRecord {
     /// references. Failed or unresolved evaluations may leave those collections
     /// empty so the product can retain explicit fail-closed evidence. Provenance is
     /// mandatory for every status so all decisions retain the evaluated context and
-    /// evidence artifact identity.
+    /// evidence artifact identity. The locale must arrive in its exact whitespace-free
+    /// spelling; this constructor does not silently normalize locale evidence.
     ///
     /// # Errors
     ///
@@ -526,8 +530,7 @@ impl PublicationEvidenceRecord {
         )?;
         let approval_refs =
             normalize_unique_references(approval_refs, InstrumentReleaseError::InvalidReference)?;
-        let locale = locale.trim();
-        if !valid_locale(locale) {
+        if locale.trim() != locale || !valid_locale(locale) {
             return Err(InstrumentReleaseError::InvalidLocale);
         }
         if !valid_sha256_digest(content_digest) {
