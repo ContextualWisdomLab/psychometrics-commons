@@ -94,6 +94,16 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## Public HTTP contracts
+
+Implemented public HTTP families are described by an exact OpenAPI 3.2.0 as-built document and return RFC 9457 problem details. HTTP semantics, including method and target parsing, follow RFC 9110. A response, catalog, or session operation that is not in the as-built document is not available to a purchaser.
+
+Product consequences:
+
+- `POST /v1/sessions/{session_ref}/responses` records one answer on an Active session; use an `item_version_ref` from the bound published release and replay with the same `Idempotency-Key`;
+- problem details use stable URNs and never echo raw request bodies, SQL, or provider text;
+- Created or paused sessions stay rejected so a purchaser cannot write answers before Activate.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -124,3 +134,9 @@ Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
+Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
+
+OpenAPI Initiative. (2025). *OpenAPI Specification Version 3.2.0*. https://spec.openapis.org/oas/v3.2.0

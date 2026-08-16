@@ -337,6 +337,36 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
 }
 
 #[test]
+fn response_event_http_contract_is_mapped() {
+    let root = repository_root();
+    let openapi = read_required(&root.join("openapi/responses.yaml"));
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+    let changelog = read_required(&root.join("CHANGELOG.md"));
+
+    for marker in [
+        "openapi: 3.2.0",
+        "/v1/sessions/{session_ref}/responses",
+        "recordSessionResponse",
+        "application/problem+json",
+        "Idempotency-Key",
+    ] {
+        assert!(
+            openapi.contains(marker),
+            "response OpenAPI must name as-built marker {marker}"
+        );
+    }
+    assert!(
+        traceability.contains("POST /v1/sessions/{session_ref}/responses")
+            && traceability.contains("not protected-main truth"),
+        "traceability must keep response-event HTTP off protected main until integrated"
+    );
+    assert!(
+        changelog.contains("POST /v1/sessions/{session_ref}/responses"),
+        "changelog must tell a purchaser the response write path"
+    );
+}
+
+#[test]
 fn uml_covers_identity_longitudinal_and_workbench_behavior() {
     let uml = read_required(&repository_root().join("docs/architecture/UML.md"));
 

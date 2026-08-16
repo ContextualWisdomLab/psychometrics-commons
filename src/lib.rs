@@ -34,6 +34,7 @@ pub mod postgres_scoring_request;
 mod reference;
 pub mod research_release;
 pub mod response;
+pub mod response_http;
 pub mod result;
 pub mod scoring;
 pub mod scoring_job;

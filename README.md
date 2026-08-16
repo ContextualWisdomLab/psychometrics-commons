@@ -8,6 +8,16 @@ Measure -> Understand -> Reflect -> Observe Over Time -> Contribute to Science
 
 This repository owns the hosted product runtime and integration composition. It consumes reusable measurement contracts and numerical capabilities from `ContextualWisdomLab/fast-mlsirm`; identity and federation from Keyverse; temporal/event analysis from TEPP; and research release/catalog capabilities from `semantic-data-portal`.
 
+## Record an answer on an active session
+
+When the response-event HTTP family is running in this process:
+
+1. Confirm the session is Active (`GET /v1/sessions/{session_ref}` when that family is available).
+2. Call `POST /v1/sessions/{session_ref}/responses` with `item_version_ref`, canonical `payload_digest`, and an opaque `Idempotency-Key`.
+3. After every item is recorded, Complete the session with `POST /v1/sessions/{session_ref}/commands`.
+
+Created or paused sessions are rejected. Items that are not on the bound published release are rejected. The as-built contract is [`openapi/responses.yaml`](openapi/responses.yaml).
+
 ## Architecture boundary
 
 Psychometrics Commons owns product APIs, instrument publication, participant/session lifecycle, response events, consent and data-rights workflows, scoring dispatch, immutable result snapshots, product persistence, resource authorization, reference-client composition, deployment profiles, research-contribution handoff, observability, and service integration.
