@@ -80,6 +80,18 @@ class SupplyChainProvenanceContract(unittest.TestCase):
         self.assertIn("sha256sum --check SHA256SUMS", package_job)
         self.assertIn("target/package/*.crate", package_job)
 
+    def test_package_job_proves_binary_reproducibility_in_isolated_target_dirs(self) -> None:
+        """Two isolated locked package runs must produce the same crate before attestation."""
+        text = self.workflow_text()
+        package_job = mapping_block(mapping_block(text, "jobs", 0), "package", 2)
+        self.assertEqual(package_job.count("cargo package --locked --target-dir"), 2)
+        self.assertIn("target/repro-one", package_job)
+        self.assertIn("target/repro-two", package_job)
+        self.assertIn('test "${#first_packages[@]}" -eq 1', package_job)
+        self.assertIn('test "${#second_packages[@]}" -eq 1', package_job)
+        self.assertIn('cmp "${first_packages[0]}" "${second_packages[0]}"', package_job)
+        self.assertIn('cp "${first_packages[0]}" target/package/', package_job)
+
     def test_attestation_credentials_exist_only_on_protected_main_push(self) -> None:
         """OIDC and attestation writes must be unreachable from pull requests."""
         text = self.workflow_text()
