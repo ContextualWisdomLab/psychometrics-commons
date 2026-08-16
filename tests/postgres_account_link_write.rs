@@ -7,6 +7,7 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::account_link::AuthenticatedAccountControl;
 use psychometrics_commons_runtime::account_link_write::{
+    accept_account_linked_capability, grant_account_linked_capability,
     persist_authorized_account_link, persist_authorized_account_unlink,
     recover_participant_for_authenticated_account, AccountLinkWriteError,
 };
@@ -593,5 +594,66 @@ fn ended_subject_proof_cannot_unlink_a_rebound_current_binding() {
     assert_eq!(
         recovered.linked_subject_ref(),
         Some("keyverse_subject_rebound")
+    );
+}
+
+#[test]
+fn persisted_unlink_invalidates_a_previously_granted_account_capability() {
+    let _guard = write_test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_link(
+        &mut transaction,
+        &mut participant,
+        &anonymous_control(),
+        &authenticated_control(),
+        "link_event_identity_write",
+        10_400,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let capability =
+        grant_account_linked_capability(&participant, &authenticated_control(), 10_450)
+            .unwrap()
+            .expect("a persisted current binding must grant an account-linked capability");
+    accept_account_linked_capability(&participant, &capability, &authenticated_control(), 10_460)
+        .expect("the grant must remain valid while the current binding is stored");
+
+    let mut transaction = client.transaction().unwrap();
+    persist_authorized_account_unlink(
+        &mut transaction,
+        &mut participant,
+        &authenticated_control(),
+        "link_end_event_identity_write",
+        10_500,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+
+    let error = accept_account_linked_capability(
+        &participant,
+        &capability,
+        &authenticated_control(),
+        10_550,
+    )
+    .expect_err("persisted unlink must invalidate the pre-unlink account-linked capability");
+    assert!(matches!(error, AccountLinkWriteError::NoCurrentBinding));
+
+    let mut transaction = client.transaction().unwrap();
+    let recovered = recover_participant_for_authenticated_account(
+        &mut transaction,
+        &authenticated_control(),
+        10_600,
+    )
+    .unwrap();
+    transaction.commit().unwrap();
+    assert!(
+        recovered.is_none(),
+        "recover after persisted unlink must not return the participant"
     );
 }
