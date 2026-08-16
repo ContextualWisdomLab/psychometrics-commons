@@ -6,6 +6,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Added
 - Longitudinal observation ingest keeps validity, recorded, received, and ingested clocks plus explicit membership shares so an offline Seoul-clinic EMA cannot collapse into one timestamp or one primary group.
+- Scoring, session, consent, invariance, and publication-evidence ADRs plus measurement/quality governance now cite the *Standards for Educational and Psychological Testing* (AERA, APA, & NCME, 2014) and the IRT/validity sources those decisions already asserted; RFC 9457 remains only on Problem Details surfaces.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

@@ -9,7 +9,7 @@ Psychometrics Commons does not implement psychometric numerical kernels. This do
 
 ## 1. Core principle
 
-A score is publishable only when the intended interpretation and use have evidence appropriate to the measurement model, population, language, administration mode, and decision consequence.
+A score is publishable only when the intended interpretation and use have evidence appropriate to the measurement model, population, language, administration mode, and decision consequence. Publication and intended score-use evidence required by this document follow the *Standards for Educational and Psychological Testing* (American Educational Research Association, American Psychological Association, & National Council on Measurement in Education, 2014).
 
 High correlation alone is not estimation accuracy, measurement agreement, fairness, or validity. The product therefore treats correlation as a supplementary relationship statistic rather than the primary accuracy gate.
 
@@ -353,6 +353,8 @@ Operational monitoring separates:
 A drift alert is evidence for investigation, not automatic proof that a construct changed. Remediation can include recalibration, linking, subgroup-specific parameters, suspension, new version publication, or retirement according to the governing evidence.
 
 ## 20. Key references
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
 
 Bland, J. M., & Altman, D. G. (1986). Statistical methods for assessing agreement between two methods of clinical measurement. *The Lancet, 327*(8476), 307–310. https://doi.org/10.1016/S0140-6736(86)90837-8
 
