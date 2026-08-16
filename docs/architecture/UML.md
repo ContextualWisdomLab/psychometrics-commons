@@ -295,6 +295,12 @@ sequenceDiagram
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
 
+    C->>A: activate session
+    A->>DB: load assessment_participant + assessment_session
+    A->>A: authorize anonymous command from loaded records
+    A->>DB: atomically state=Active
+    A-->>C: activation accepted
+
     loop each presented item / response
         A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
         P->>C: answer presented item
@@ -304,10 +310,10 @@ sequenceDiagram
         A-->>C: accepted sequence
     end
 
-        C->>A: complete session
-        A->>DB: load assessment_participant + assessment_session
-        A->>A: authorize anonymous command from loaded records
-        A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
+    C->>A: complete session
+    A->>DB: load assessment_participant + assessment_session
+    A->>A: authorize anonymous command from loaded records
+    A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
     W->>DB: claim scoring work
