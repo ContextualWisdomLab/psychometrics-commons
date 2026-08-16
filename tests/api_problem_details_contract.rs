@@ -45,6 +45,8 @@ fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
         "https://",
         "https:///problem",
         "https://example.test/%zz",
+        "https://example.test/[invalid]",
+        "https://example.test/a#one#two",
         "urn:",
         "urn:x:value",
         "urn:example:",
