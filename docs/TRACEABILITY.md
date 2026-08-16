@@ -136,6 +136,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #60 exclusive outbox delivery-lease persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Pending outbox rows accept one fenced worker lease, recover expiry from the database clock without transferring the fence, reject a future caller timestamp that would steal a still-live lease, and reject stale or zero-window claims. Live side-effect execution remains outside this slice.
 
+**Active PR** #86 anonymous-session resource authorization, plus the follow-up command boundary that derives the assessment-session resource from the loaded participant tenant/owner and loaded session, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. HTTP transport remains outside this slice.
+
 Protected-main `0c695b98f38369db8c80d4f8a54ab1fdb3022716` now includes #228 claim-next scoring-job poll (`claim_next_scoring_job` takes the oldest due queued or retry-scheduled row with `FOR UPDATE SKIP LOCKED`) and #235 longitudinal observation-time ingest. Those slices are no longer Active PR work on this branch. Live `fast-mlsirm` execution, scoring HTTP, a claim-next loop that calls `run_scoring_worker_attempt_with_result_snapshot`, enrollment persistence, Gyeot collection, and TEPP kernels remain later slices.
 
 ## 5. ADR traceability by concern
