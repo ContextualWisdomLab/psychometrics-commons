@@ -34,7 +34,7 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
         ),
         (
             InstrumentReleasePersistenceError::InconsistentEvidence,
-            "durable instrument-release evidence cannot reconstruct the published snapshot",
+            "durable instrument-release evidence cannot reconstruct the stored snapshot",
         ),
     ] {
         assert_eq!(error.to_string(), expected_message);

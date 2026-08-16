@@ -129,3 +129,22 @@ fn persisted_suspended_release_cannot_reactivate_without_rebound_evidence() {
     );
     assert_eq!(release.state(), PublicationState::Suspended);
 }
+
+#[test]
+fn persisted_review_release_cannot_publish_without_rebound_evidence() {
+    let mut release = InstrumentRelease::from_persisted_snapshot(
+        published_manifest(),
+        PublicationState::Review,
+        40_000,
+    )
+    .unwrap();
+
+    assert_eq!(
+        release
+            .apply_command("publish_after_reload", PublicationCommand::Publish, 40_500)
+            .unwrap_err(),
+        InstrumentReleaseError::MissingPublicationEvidence
+    );
+    assert!(!release.accepts_new_sessions());
+    assert_eq!(release.state(), PublicationState::Review);
+}

@@ -41,7 +41,7 @@ pub enum InstrumentReleasePersistenceError {
     InvalidTimestamp,
     /// Instrument-release persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
-    /// Durable rows cannot reconstruct the published instrument release.
+    /// Durable rows cannot reconstruct the stored instrument-release snapshot.
     InconsistentEvidence,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
@@ -66,7 +66,7 @@ impl Display for InstrumentReleasePersistenceError {
                 "instrument release persistence requires read committed isolation"
             }
             Self::InconsistentEvidence => {
-                "durable instrument-release evidence cannot reconstruct the published snapshot"
+                "durable instrument-release evidence cannot reconstruct the stored snapshot"
             }
             Self::Database(_) => "PostgreSQL instrument-release persistence failed",
         })
@@ -529,5 +529,9 @@ mod reference_guard_tests {
                 InstrumentReleasePersistenceError::InconsistentEvidence
             ));
         }
+        assert_eq!(
+            InstrumentReleasePersistenceError::InconsistentEvidence.to_string(),
+            "durable instrument-release evidence cannot reconstruct the stored snapshot"
+        );
     }
 }
