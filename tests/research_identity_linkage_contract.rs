@@ -7,7 +7,7 @@
 //! projection cannot carry the operational reference or linkage-key version.
 
 use psychometrics_commons_runtime::research_identity_linkage::{
-    RestrictedIdentityLinkage, RestrictedIdentityLinkageError,
+    PublicResearchReleaseProjection, RestrictedIdentityLinkage, RestrictedIdentityLinkageError,
 };
 
 fn valid_linkage() -> RestrictedIdentityLinkage {
@@ -168,4 +168,55 @@ fn public_release_projection_omits_operational_identity_and_linkage_key_version(
     assert!(!rendered.contains(linkage.linkage_key_version()));
     assert!(!rendered.contains("participant_operational_one"));
     assert!(!rendered.contains("linkage_key_version_2026_q3"));
+}
+
+#[test]
+fn public_projection_constructs_from_research_identities_only() {
+    let projection = PublicResearchReleaseProjection::new(
+        "research_participant_program_one",
+        "research_program_commons_one",
+    )
+    .expect("a public projection must construct from research identities alone");
+    assert_eq!(
+        projection.research_participant_ref(),
+        "research_participant_program_one"
+    );
+    assert_eq!(
+        projection.research_program_ref(),
+        "research_program_commons_one"
+    );
+    let rendered = format!("{projection:?}");
+    assert!(!rendered.contains("participant_operational"));
+    assert!(!rendered.contains("linkage_key_version"));
+}
+
+#[test]
+fn public_projection_rejects_blank_padded_numeric_or_collapsed_identities() {
+    for (research_participant_ref, research_program_ref, expected) in [
+        (
+            "",
+            "research_program_commons_one",
+            RestrictedIdentityLinkageError::InvalidReference,
+        ),
+        (
+            " research_participant_program_one",
+            "research_program_commons_one",
+            RestrictedIdentityLinkageError::InvalidReference,
+        ),
+        (
+            "12",
+            "research_program_commons_one",
+            RestrictedIdentityLinkageError::InvalidReference,
+        ),
+        (
+            "research_participant_program_one",
+            "research_participant_program_one",
+            RestrictedIdentityLinkageError::OperationalIdentityReuse,
+        ),
+    ] {
+        let error =
+            PublicResearchReleaseProjection::new(research_participant_ref, research_program_ref)
+                .expect_err("public projection must fail closed without a restricted linkage");
+        assert_eq!(error, expected);
+    }
 }

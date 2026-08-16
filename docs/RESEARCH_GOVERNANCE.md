@@ -67,7 +67,7 @@ The consent user experience explains, as applicable:
 
 Operational participant identifiers are not used as research identifiers.
 
-A restricted linkage boundary maps an operational participant to a purpose/program-specific research pseudonym. Active PR #162 persistence for that mapping is not protected-main truth. The mapping:
+A restricted linkage boundary maps an operational participant to a purpose/program-specific research pseudonym. Active PR #162 persistence for that mapping is not protected-main truth. A public-release fixture loads `public_research_identity` by program and never looks up a restricted linkage identity. The mapping:
 
 - is unavailable to ordinary analytics and public-release workflows;
 - is accessed only through an explicit restricted role/purpose;

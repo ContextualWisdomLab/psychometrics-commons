@@ -135,7 +135,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #162 restricted research-identity linkage persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Operators persist one operational participant to one program-scoped research identity, load the restricted mapping only for authorized research work, and publish only `public_research_identity` columns. A second program keeps a distinct research identity. Public releases, Keyverse subjects, and linkage-key material stay outside this slice.
+**Active PR** #162 restricted research-identity linkage persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Operators persist one operational participant to one program-scoped research identity, load the restricted mapping only for authorized research work, and publish only `public_research_identity` columns. A release fixture loads those columns by program from the public view. A second program keeps a distinct research identity. Public releases, Keyverse subjects, and linkage-key material stay outside this slice.
 
 ## 5. ADR traceability by concern
 

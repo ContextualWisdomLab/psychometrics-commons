@@ -152,6 +152,32 @@ pub struct PublicResearchReleaseProjection {
 }
 
 impl PublicResearchReleaseProjection {
+    /// Build a public-release identity from research identifiers only.
+    ///
+    /// A release fixture calls this after reading `public_research_identity`.
+    /// It cannot carry an operational participant or linkage-key version.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RestrictedIdentityLinkageError::InvalidReference`] when either
+    /// identity is blank, whitespace-padded, or numeric-like, or
+    /// [`RestrictedIdentityLinkageError::OperationalIdentityReuse`] when the
+    /// research identity equals the program.
+    pub fn new(
+        research_participant_ref: &str,
+        research_program_ref: &str,
+    ) -> Result<Self, RestrictedIdentityLinkageError> {
+        let research_participant_ref = exact_reference(research_participant_ref)?;
+        let research_program_ref = exact_reference(research_program_ref)?;
+        if research_participant_ref == research_program_ref {
+            return Err(RestrictedIdentityLinkageError::OperationalIdentityReuse);
+        }
+        Ok(Self {
+            research_participant_ref: research_participant_ref.to_owned(),
+            research_program_ref: research_program_ref.to_owned(),
+        })
+    }
+
     /// Return the research pseudonym allowed in a public release fixture.
     #[must_use]
     pub fn research_participant_ref(&self) -> &str {
@@ -174,7 +200,10 @@ fn exact_reference(reference: &str) -> Result<&str, RestrictedIdentityLinkageErr
 
 #[cfg(test)]
 mod tests {
-    use super::{exact_reference, RestrictedIdentityLinkage, RestrictedIdentityLinkageError};
+    use super::{
+        exact_reference, PublicResearchReleaseProjection, RestrictedIdentityLinkage,
+        RestrictedIdentityLinkageError,
+    };
 
     #[test]
     fn program_or_research_identity_cannot_reuse_another_namespace() {
@@ -231,5 +260,21 @@ mod tests {
                 .research_participant_ref(),
             linkage.research_participant_ref()
         );
+        let public = PublicResearchReleaseProjection::new(
+            linkage.research_participant_ref(),
+            linkage.research_program_ref(),
+        )
+        .unwrap();
+        assert_eq!(
+            public.research_program_ref(),
+            linkage.research_program_ref()
+        );
+        assert!(matches!(
+            PublicResearchReleaseProjection::new(
+                linkage.research_participant_ref(),
+                linkage.research_participant_ref()
+            ),
+            Err(RestrictedIdentityLinkageError::OperationalIdentityReuse)
+        ));
     }
 }

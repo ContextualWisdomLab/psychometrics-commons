@@ -2,9 +2,10 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_research_identity_linkage::{
-    apply_research_identity_linkage_migration, load_public_research_release_projection,
-    load_restricted_identity_linkage, persist_restricted_identity_linkage,
-    RestrictedIdentityLinkagePersistenceDisposition, RestrictedIdentityLinkagePersistenceError,
+    apply_research_identity_linkage_migration, load_public_research_identities_for_program,
+    load_public_research_release_projection, load_restricted_identity_linkage,
+    persist_restricted_identity_linkage, RestrictedIdentityLinkagePersistenceDisposition,
+    RestrictedIdentityLinkagePersistenceError,
 };
 use psychometrics_commons_runtime::research_identity_linkage::RestrictedIdentityLinkage;
 use std::sync::{Mutex, MutexGuard};
@@ -288,4 +289,72 @@ fn persistence_database_errors_keep_a_source_and_stable_message() {
         "PostgreSQL restricted-linkage persistence failed"
     );
     assert!(std::error::Error::source(&error).is_some());
+}
+
+#[test]
+fn program_scoped_public_load_reads_only_the_public_view() {
+    let _guard = linkage_test_guard();
+    let mut client = test_client();
+    reset_linkage_tables(&mut client);
+    apply_research_identity_linkage_migration(&mut client).unwrap();
+    let first = sample_linkage();
+    let second = RestrictedIdentityLinkage::new(
+        "linkage_commons_program_two",
+        first.participant_ref(),
+        "research_participant_program_two",
+        "research_program_commons_two",
+        "linkage_key_version_2026_q3",
+        1_724_000_100_000,
+    )
+    .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    persist_restricted_identity_linkage(&mut transaction, &first).unwrap();
+    persist_restricted_identity_linkage(&mut transaction, &second).unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let program_one =
+        load_public_research_identities_for_program(&mut transaction, first.research_program_ref())
+            .unwrap();
+    assert_eq!(program_one.len(), 1);
+    assert_eq!(
+        program_one[0].research_participant_ref(),
+        first.research_participant_ref()
+    );
+    assert_eq!(
+        program_one[0].research_program_ref(),
+        first.research_program_ref()
+    );
+    let rendered = format!("{program_one:?}");
+    assert!(!rendered.contains(first.participant_ref()));
+    assert!(!rendered.contains(first.linkage_key_version()));
+    assert!(!rendered.contains(second.research_participant_ref()));
+
+    let view_rows: Vec<(String, String)> = transaction
+        .query(
+            "SELECT research_participant_ref, research_program_ref \
+             FROM research_identity_linkage_test.public_research_identity \
+             WHERE research_program_ref = $1",
+            &[&first.research_program_ref()],
+        )
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect();
+    assert_eq!(
+        view_rows,
+        vec![(
+            first.research_participant_ref().to_owned(),
+            first.research_program_ref().to_owned()
+        )]
+    );
+    assert!(matches!(
+        load_public_research_identities_for_program(
+            &mut transaction,
+            " research_program_commons_one"
+        ),
+        Err(RestrictedIdentityLinkagePersistenceError::InvalidReference)
+    ));
+    transaction.commit().unwrap();
 }

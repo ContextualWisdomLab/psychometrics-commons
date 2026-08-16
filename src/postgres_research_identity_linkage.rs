@@ -174,7 +174,10 @@ pub fn load_restricted_identity_linkage(
 /// Load the public-release projection for one stored linkage.
 ///
 /// The returned value contains only research identities. It cannot carry the
-/// operational participant or the linkage-key version.
+/// operational participant or the linkage-key version. A public-release role
+/// that can select only `public_research_identity` should call
+/// [`load_public_research_identities_for_program`] instead; this lookup still
+/// needs the restricted linkage identity.
 ///
 /// # Errors
 ///
@@ -189,6 +192,36 @@ pub fn load_public_research_release_projection(
         return Ok(None);
     };
     Ok(Some(linkage.public_release_projection()))
+}
+
+/// Load public-release identities for one research program from the public view.
+///
+/// The query selects only `public_research_identity` columns. It cannot return
+/// an operational participant or linkage-key version.
+///
+/// # Errors
+///
+/// Returns [`RestrictedIdentityLinkagePersistenceError`] when the program
+/// identity is invalid, a stored row cannot be reconstructed, or the database
+/// operation fails.
+pub fn load_public_research_identities_for_program(
+    client: &mut impl postgres::GenericClient,
+    research_program_ref: &str,
+) -> Result<Vec<PublicResearchReleaseProjection>, RestrictedIdentityLinkagePersistenceError> {
+    let research_program_ref = required_reference(research_program_ref)?;
+    let rows = client.query(
+        "SELECT research_participant_ref, research_program_ref \
+         FROM public_research_identity \
+         WHERE research_program_ref = $1 \
+         ORDER BY research_participant_ref",
+        &[&research_program_ref],
+    )?;
+    rows.into_iter()
+        .map(|row| {
+            PublicResearchReleaseProjection::new(&row.get::<_, String>(0), &row.get::<_, String>(1))
+                .map_err(|_| RestrictedIdentityLinkagePersistenceError::ConflictingReplay)
+        })
+        .collect()
 }
 
 fn persist_research_participant(
@@ -272,6 +305,9 @@ fn reconstruct_stored_linkage(
 }
 
 fn required_reference(reference: &str) -> Result<&str, RestrictedIdentityLinkagePersistenceError> {
+    if reference.trim() != reference {
+        return Err(RestrictedIdentityLinkagePersistenceError::InvalidReference);
+    }
     normalized_reference(reference)
         .ok_or(RestrictedIdentityLinkagePersistenceError::InvalidReference)
 }
@@ -336,6 +372,10 @@ mod tests {
         ));
         assert!(matches!(
             required_reference("12"),
+            Err(RestrictedIdentityLinkagePersistenceError::InvalidReference)
+        ));
+        assert!(matches!(
+            required_reference(" linkage_commons_program_one"),
             Err(RestrictedIdentityLinkagePersistenceError::InvalidReference)
         ));
         assert_eq!(
