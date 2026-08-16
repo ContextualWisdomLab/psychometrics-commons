@@ -74,6 +74,27 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
+## Research de-identification and restricted linkage
+
+Public research releases must not become joinable to operational assessment
+identity. ISO/IEC 20889:2018 classifies pseudonymization and other
+privacy-enhancing de-identification techniques; ISO/IEC 27559:2022 provides the
+current framework for applying those techniques without treating blanking or
+blanket masking as a complete control. The product therefore keeps a restricted
+linkage store for authorized research contribution and projects only
+program-scoped research identities into public release fixtures.
+
+Product consequences:
+
+- operational participant references and linkage-key versions never appear in
+  public-release projections;
+- one person may hold distinct research identities across programs; those
+  identities are not collapsed;
+- authorized research workflows keep the exact linkage they need instead of a
+  masked substitute that would break contribution, withdrawal, or audit;
+- linkage-key material stays in the key-management system; the database stores
+  only the key-generation version.
+
 ## Temporal and provenance evidence
 
 Longitudinal observations distinguish validity time from source-recorded time,
@@ -117,7 +138,11 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
+International Organization for Standardization. (2018). *ISO/IEC 20889:2018 Privacy enhancing data de-identification—Terminology and classification of techniques*. https://www.iso.org/standard/69373.html
+
 International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
+International Organization for Standardization. (2022). *ISO/IEC 27559:2022 Information security, cybersecurity and privacy protection—Privacy enhancing data de-identification framework*. https://www.iso.org/standard/71619.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
