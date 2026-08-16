@@ -2,8 +2,9 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::{
-    apply_response_event_migration, load_response_ledger, persist_response_event,
-    ResponseEventPersistenceDisposition, ResponseEventPersistenceError,
+    apply_response_event_migration, load_response_event_receipts, load_response_ledger,
+    persist_response_event, ResponseEventPersistenceDisposition, ResponseEventPersistenceError,
+    ResponseEventReceipt,
 };
 use psychometrics_commons_runtime::response::{ResponseEvent, ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
@@ -128,6 +129,13 @@ fn load_ok(client: &mut Client, session_ref: &str) -> ResponseLedger {
     ledger
 }
 
+fn load_receipts_ok(client: &mut Client, session_ref: &str) -> Vec<ResponseEventReceipt> {
+    let mut transaction = client.transaction().unwrap();
+    let receipts = load_response_event_receipts(&mut transaction, session_ref).unwrap();
+    transaction.commit().unwrap();
+    receipts
+}
+
 fn load_err(client: &mut Client, session_ref: &str) -> ResponseEventPersistenceError {
     let mut transaction = client.transaction().unwrap();
     let error = load_response_ledger(&mut transaction, session_ref).unwrap_err();
@@ -181,6 +189,11 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
 
     let after_first = load_ok(&mut client, "session_ipip_ko_quick");
     assert_eq!(after_first.events(), std::slice::from_ref(&first));
+    let first_receipts = load_receipts_ok(&mut client, "session_ipip_ko_quick");
+    assert_eq!(first_receipts.len(), 1);
+    assert_eq!(first_receipts[0].event(), &first);
+    assert_eq!(first_receipts[0].observed_at_unix_ms(), OBSERVED_AT_MS);
+    assert_eq!(first_receipts[0].received_at_unix_ms(), RECEIVED_AT_MS);
 
     let second = live
         .record(
@@ -535,5 +548,47 @@ fn inverted_or_zero_event_times_and_time_rebinding_fail_closed() {
             RECEIVED_AT_MS + 1
         ),
         ResponseEventPersistenceError::ConflictingReplay
+    ));
+
+    client
+        .batch_execute(
+            "ALTER TABLE response_event DROP CONSTRAINT response_event_observed_not_after_received_check;",
+        )
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO response_event (\
+                 response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                 payload_digest, server_sequence, observed_at, received_at\
+             ) VALUES (\
+                 'server_event_item_inverted', 'session_ipip_ko_inverted', \
+                 'client_event_item_inverted', 'item_version_n_inverted', $1, 1, \
+                 TIMESTAMPTZ '2023-11-14 22:13:21+00', \
+                 TIMESTAMPTZ '2023-11-14 22:13:20+00'\
+             )",
+            &[&DIGEST_N1],
+        )
+        .unwrap();
+    assert!(matches!(
+        load_err(&mut client, "session_ipip_ko_inverted"),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    client
+        .execute(
+            "INSERT INTO response_event (\
+                 response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                 payload_digest, server_sequence, observed_at, received_at\
+             ) VALUES (\
+                 'server_event_item_epoch', 'session_ipip_ko_epoch', \
+                 'client_event_item_epoch', 'item_version_n_epoch', $1, 1, \
+                 TIMESTAMPTZ '1970-01-01 00:00:00+00', \
+                 TIMESTAMPTZ '1970-01-01 00:00:00+00'\
+             )",
+            &[&DIGEST_N1],
+        )
+        .unwrap();
+    assert!(matches!(
+        load_err(&mut client, "session_ipip_ko_epoch"),
+        ResponseEventPersistenceError::InvalidTimestamp
     ));
 }

@@ -16,6 +16,39 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0020_response_event.sql");
 
+/// One accepted event plus the distinct observed and received clocks.
+///
+/// `observed_at_unix_ms` is source-valid time. `received_at_unix_ms` is
+/// platform receipt time. Reload keeps both so a Korean IPIP Quick restart
+/// can hand the same temporal prefix to later TEPP or scoring composition
+/// without inventing an answer or a score.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseEventReceipt {
+    event: ResponseEvent,
+    observed_at_unix_ms: u64,
+    received_at_unix_ms: u64,
+}
+
+impl ResponseEventReceipt {
+    /// Return the accepted response-event identity and evidence.
+    #[must_use]
+    pub const fn event(&self) -> &ResponseEvent {
+        &self.event
+    }
+
+    /// Return source-valid observed time in Unix milliseconds.
+    #[must_use]
+    pub const fn observed_at_unix_ms(&self) -> u64 {
+        self.observed_at_unix_ms
+    }
+
+    /// Return platform receipt time in Unix milliseconds.
+    #[must_use]
+    pub const fn received_at_unix_ms(&self) -> u64 {
+        self.received_at_unix_ms
+    }
+}
+
 /// Outcome of persisting one accepted response event.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -164,10 +197,68 @@ pub fn persist_response_event(
     )
 }
 
+/// Rebuild accepted events and their observed/received clocks after restart.
+///
+/// Rows are read in `server_sequence` order. A missing session returns an empty
+/// list. Gapped, reordered, conflicting, inverted, or zero stored times fail
+/// closed. Observed time stays distinct from platform receipt time.
+///
+/// # Errors
+///
+/// Returns [`ResponseEventPersistenceError`] for an unbound session, unsupported
+/// isolation, corrupt stored history, invalid stored time, or a database failure.
+pub fn load_response_event_receipts(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Vec<ResponseEventReceipt>, ResponseEventPersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = required_reference(session_ref)?;
+    let rows = transaction.query(
+        "SELECT response_event_ref, client_event_ref, item_version_ref, \
+                payload_digest, server_sequence, observed_at, received_at \
+         FROM response_event \
+         WHERE session_ref = $1 \
+         ORDER BY server_sequence",
+        &[&session_ref],
+    )?;
+    let mut receipts = Vec::with_capacity(rows.len());
+    for row in rows {
+        let server_event_ref: String = row.get(0);
+        let client_event_ref: String = row.get(1);
+        let item_version_ref: String = row.get(2);
+        let payload_digest: String = row.get(3);
+        let server_sequence: i64 = row.get(4);
+        let observed_at: SystemTime = row.get(5);
+        let received_at: SystemTime = row.get(6);
+        let sequence = usize::try_from(server_sequence)
+            .map_err(|_| ResponseEventPersistenceError::InvalidSequence)?;
+        let observed_at_unix_ms = unix_ms_from_system_time(observed_at)?;
+        let received_at_unix_ms = unix_ms_from_system_time(received_at)?;
+        if observed_at_unix_ms > received_at_unix_ms {
+            return Err(ResponseEventPersistenceError::InvalidTimestamp);
+        }
+        let event = ResponseEvent::from_persisted(
+            server_event_ref,
+            client_event_ref,
+            item_version_ref,
+            payload_digest,
+            sequence,
+        )
+        .map_err(map_rebuild_error)?;
+        receipts.push(ResponseEventReceipt {
+            event,
+            observed_at_unix_ms,
+            received_at_unix_ms,
+        });
+    }
+    Ok(receipts)
+}
+
 /// Rebuild the accepted response ledger for one session after restart.
 ///
 /// Rows are read in `server_sequence` order. A missing session returns an empty
-/// ledger. Gapped, reordered, or conflicting stored identities fail closed.
+/// ledger. Gapped, reordered, conflicting identities, or invalid stored times
+/// fail closed.
 ///
 /// # Errors
 ///
@@ -177,35 +268,11 @@ pub fn load_response_ledger(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<ResponseLedger, ResponseEventPersistenceError> {
-    require_read_committed(transaction)?;
-    let session_ref = required_reference(session_ref)?;
-    let rows = transaction.query(
-        "SELECT response_event_ref, client_event_ref, item_version_ref, \
-                payload_digest, server_sequence \
-         FROM response_event \
-         WHERE session_ref = $1 \
-         ORDER BY server_sequence",
-        &[&session_ref],
-    )?;
-    let mut events = Vec::with_capacity(rows.len());
-    for row in rows {
-        let server_event_ref: String = row.get(0);
-        let client_event_ref: String = row.get(1);
-        let item_version_ref: String = row.get(2);
-        let payload_digest: String = row.get(3);
-        let server_sequence: i64 = row.get(4);
-        let sequence = usize::try_from(server_sequence)
-            .map_err(|_| ResponseEventPersistenceError::InvalidSequence)?;
-        let event = ResponseEvent::from_persisted(
-            server_event_ref,
-            client_event_ref,
-            item_version_ref,
-            payload_digest,
-            sequence,
-        )
-        .map_err(map_rebuild_error)?;
-        events.push(event);
-    }
+    let receipts = load_response_event_receipts(transaction, session_ref)?;
+    let events = receipts
+        .into_iter()
+        .map(|receipt| receipt.event)
+        .collect();
     ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)
 }
 
@@ -292,6 +359,21 @@ fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersist
         .ok_or(ResponseEventPersistenceError::InvalidTimestamp)
 }
 
+fn unix_ms_from_system_time(time: SystemTime) -> Result<u64, ResponseEventPersistenceError> {
+    let duration = time
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ResponseEventPersistenceError::InvalidTimestamp)?;
+    let unix_ms = duration
+        .as_secs()
+        .checked_mul(1_000)
+        .and_then(|value| value.checked_add(u64::from(duration.subsec_millis())))
+        .ok_or(ResponseEventPersistenceError::InvalidTimestamp)?;
+    if unix_ms == 0 {
+        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
+    Ok(unix_ms)
+}
+
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), ResponseEventPersistenceError> {
@@ -308,8 +390,10 @@ fn require_read_committed(
 mod reference_guard_tests {
     use super::{
         map_rebuild_error, postgres_sequence, postgres_timestamptz, required_reference,
-        ResponseEventPersistenceError,
+        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
     };
+    use crate::response::ResponseEvent;
+    use std::time::{Duration, UNIX_EPOCH};
     use crate::response::WriteError;
     use crate::session::SessionState;
 
@@ -337,6 +421,55 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::InvalidTimestamp)
         ));
         assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
+        assert!(matches!(
+            unix_ms_from_system_time(UNIX_EPOCH),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert!(matches!(
+            unix_ms_from_system_time(UNIX_EPOCH - Duration::from_millis(1)),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert_eq!(
+            unix_ms_from_system_time(UNIX_EPOCH + Duration::from_secs(1_700_000_000)).unwrap(),
+            1_700_000_000_000
+        );
+        let overflow_secs = u64::MAX / 1_000 + 1;
+        if let Some(far_future) = UNIX_EPOCH.checked_add(Duration::from_secs(overflow_secs)) {
+            assert!(matches!(
+                unix_ms_from_system_time(far_future),
+                Err(ResponseEventPersistenceError::InvalidTimestamp)
+            ));
+        }
+        let add_overflow_secs = u64::MAX / 1_000;
+        if let Some(near_max) = UNIX_EPOCH
+            .checked_add(Duration::from_secs(add_overflow_secs))
+            .and_then(|time| time.checked_add(Duration::from_millis(616)))
+        {
+            assert!(matches!(
+                unix_ms_from_system_time(near_max),
+                Err(ResponseEventPersistenceError::InvalidTimestamp)
+            ));
+        }
+    }
+
+    #[test]
+    fn receipt_keeps_distinct_observed_and_received_times() {
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let receipt = ResponseEventReceipt {
+            event: event.clone(),
+            observed_at_unix_ms: 1_700_000_000_000,
+            received_at_unix_ms: 1_700_000_000_250,
+        };
+        assert_eq!(receipt.event(), &event);
+        assert_eq!(receipt.observed_at_unix_ms(), 1_700_000_000_000);
+        assert_eq!(receipt.received_at_unix_ms(), 1_700_000_000_250);
     }
 
     #[test]

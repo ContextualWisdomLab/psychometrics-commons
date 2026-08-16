@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main contains domain lifecycle primitives plus bounded PostgreSQL slices including completed `response_snapshot` persist; mid-session `response_event` persist/reload is Active PR work in `migrations/0020_response_event.sql` and is not protected-main truth until merged
+- Current/as-built status: protected main contains domain lifecycle primitives plus bounded PostgreSQL slices including completed `response_snapshot` persist; mid-session `response_event` persist/reload with distinct observed/received clocks is Active PR #182 work in `migrations/0020_response_event.sql` and is not protected-main truth until merged
 - Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
 - Migration status: active PR #24 introduces only the bounded integration-evidence slice; the remaining product schema still must be established from the logical ERD and this ADR without synthetic provenance backfills
 

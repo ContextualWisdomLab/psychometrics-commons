@@ -134,7 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
 
-**Active PR** #182 response-event persist/reload stores each accepted answer under `response_event` so a mid-session restart can rebuild the same Korean IPIP Quick prefix before snapshot freeze. Observed time and platform receipt time stay distinct. Exact replay is idempotent; client-identity, sequence, evidence, and time rebinding fail closed under `READ COMMITTED`. Prefer this head over #174, #53, and snapshot-only #151. HTTP transport and live scoring remain outside this slice. This is not protected-main truth until an unchanged reviewed/check-clean head is integrated.
+**Active PR** #182 response-event persist/reload stores each accepted answer under `response_event` so a mid-session restart can rebuild the same Korean IPIP Quick prefix before snapshot freeze. Observed time and platform receipt time stay distinct on write and reload (`ResponseEventReceipt`). Exact replay is idempotent; client-identity, sequence, evidence, inverted/zero stored time, and time rebinding fail closed under `READ COMMITTED`. Prefer this head over #174, #53, and snapshot-only #151. HTTP transport and live scoring remain outside this slice. This is not protected-main truth until an unchanged reviewed/check-clean head is integrated.
 
 ## 5. ADR traceability by concern
 
