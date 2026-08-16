@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -94,6 +94,27 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## Integration consistency and transactional outbox
+
+Scoring-job completion, permanent failure, and integration evidence share one
+caller-owned `READ COMMITTED` transaction. Hohpe and Woolf (2003) describe the
+transactional outbox so a local state change and its downstream message cannot
+diverge after a crash. Richardson (2018) applies that pattern to microservice
+boundaries: the worker binds one stable idempotency key and retries against that
+key instead of minting a second event.
+
+Product consequences:
+
+- a scoring-worker attempt assigns one length-prefixed `event_ref` from the job
+  plus accepted result, or the job plus permanent cause, before any write;
+- exact replay of the same terminal evidence is idempotent;
+- a later attempt that presents a different result or cause fails closed and
+  leaves the original outbox row as the only terminal evidence;
+- a non-terminal engine or transport failure must not invent a score or insert a
+  terminal outbox row;
+- live `fast-mlsirm` execution remains a later adapter behind the same engine
+  contract.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -106,6 +127,10 @@ Product consequences:
 ## References — APA 7th
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
+
+Richardson, C. (2018). *Microservices patterns: With examples in Java*. Manning.
 
 International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 
