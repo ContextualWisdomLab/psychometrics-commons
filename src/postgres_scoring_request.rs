@@ -120,6 +120,8 @@ pub enum ScoringRequestPersistenceError {
     UnsupportedIsolationLevel,
     /// Stored request columns cannot reconstruct a valid version-pinned request.
     CorruptHistory,
+    /// Stored schema major is well-formed but not implemented by this runtime.
+    UnsupportedStoredSchema,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -141,6 +143,9 @@ impl Display for ScoringRequestPersistenceError {
             }
             Self::CorruptHistory => {
                 "stored scoring request rows cannot reconstruct a valid version-pinned request"
+            }
+            Self::UnsupportedStoredSchema => {
+                "stored scoring request schema version is not supported by this runtime"
             }
             Self::Database(_) => "PostgreSQL scoring-request persistence failed",
         })
@@ -183,10 +188,11 @@ pub fn apply_scoring_request_migration(
 ///
 /// # Errors
 ///
-/// Returns [`ScoringRequestPersistenceError`] for an invalid reference,
-/// unsupported isolation, stored evidence that cannot reconstruct a valid
-/// request, a schema version outside the `PostgreSQL`/`u16` range, or a
-/// database failure.
+/// Returns [`ScoringRequestPersistenceError`] for an invalid caller
+/// reference, unsupported isolation, stored evidence that cannot reconstruct
+/// a valid request (including blank stored pins), a well-formed stored schema
+/// major this runtime does not implement, a schema version outside the
+/// `PostgreSQL`/`u16` range, or a database failure.
 pub fn load_scoring_request(
     transaction: &mut Transaction<'_>,
     scoring_request_ref: &str,
@@ -235,8 +241,10 @@ fn stored_schema_version(value: i32) -> Result<u16, ScoringRequestPersistenceErr
 
 fn map_reconstruct_error(error: ScoringContractError) -> ScoringRequestPersistenceError {
     match error {
-        ScoringContractError::EmptyReference => ScoringRequestPersistenceError::InvalidReference,
-        ScoringContractError::UnsupportedOutputSchemaVersion
+        ScoringContractError::UnsupportedOutputSchemaVersion => {
+            ScoringRequestPersistenceError::UnsupportedStoredSchema
+        }
+        ScoringContractError::EmptyReference
         | ScoringContractError::UnboundResponseSnapshot
         | ScoringContractError::EmptyResponseSnapshot
         | ScoringContractError::ResponseSnapshotMismatch
@@ -433,16 +441,20 @@ mod reference_guard_tests {
             ScoringRequestPersistenceError::CorruptHistory.to_string(),
             "stored scoring request rows cannot reconstruct a valid version-pinned request"
         );
+        assert_eq!(
+            ScoringRequestPersistenceError::UnsupportedStoredSchema.to_string(),
+            "stored scoring request schema version is not supported by this runtime"
+        );
     }
 
     #[test]
     fn reconstruct_errors_map_to_fail_closed_persistence_errors() {
         assert!(matches!(
-            map_reconstruct_error(ScoringContractError::EmptyReference),
-            ScoringRequestPersistenceError::InvalidReference
+            map_reconstruct_error(ScoringContractError::UnsupportedOutputSchemaVersion),
+            ScoringRequestPersistenceError::UnsupportedStoredSchema
         ));
         for error in [
-            ScoringContractError::UnsupportedOutputSchemaVersion,
+            ScoringContractError::EmptyReference,
             ScoringContractError::UnboundResponseSnapshot,
             ScoringContractError::EmptyResponseSnapshot,
             ScoringContractError::ResponseSnapshotMismatch,
