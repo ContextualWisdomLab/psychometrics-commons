@@ -88,3 +88,86 @@ fn data_rights_probe_supports_transaction_success_and_direct_client_failure() {
 
     cleanup_schema(client, &schema);
 }
+
+#[test]
+fn integration_probe_transaction_rejects_each_invalid_timestamp_independently() {
+    let mut client = test_client();
+    let schema = create_isolated_schema(&mut client, "integration_probe_txn_ts");
+    client
+        .batch_execute(
+            "CREATE TABLE integration_outbox (current_state TEXT, latest_event_at_unix_ms BIGINT);\
+             CREATE TABLE integration_consumption (\
+                 consumption_state TEXT, latest_event_at_unix_ms BIGINT);\
+             INSERT INTO integration_outbox VALUES ('pending', -1);\
+             INSERT INTO integration_consumption VALUES ('pending', 4_000);",
+        )
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            probe_postgres_integration_backlog(&mut transaction),
+            Err(PostgresBacklogProbeError::InvalidStoredValue)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    client
+        .batch_execute(
+            "TRUNCATE integration_outbox, integration_consumption;\
+             INSERT INTO integration_outbox VALUES ('pending', 4_000);\
+             INSERT INTO integration_consumption VALUES ('pending', 0);",
+        )
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            probe_postgres_integration_backlog(&mut transaction),
+            Err(PostgresBacklogProbeError::InvalidStoredValue)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    cleanup_schema(client, &schema);
+}
+
+#[test]
+fn data_rights_probe_transaction_rejects_each_invalid_timestamp_independently() {
+    let mut client = test_client();
+    let schema = create_isolated_schema(&mut client, "data_rights_probe_txn_ts");
+    client
+        .batch_execute(
+            "CREATE TABLE data_rights_request_state (\
+                 current_state TEXT, requested_at_unix_ms BIGINT);\
+             CREATE TABLE data_rights_propagation_state (\
+                 current_state TEXT, latest_event_at_unix_ms BIGINT);\
+             INSERT INTO data_rights_request_state VALUES ('requested', -1);\
+             INSERT INTO data_rights_propagation_state VALUES ('pending', 2_000);",
+        )
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            probe_postgres_data_rights_backlog(&mut transaction),
+            Err(PostgresBacklogProbeError::InvalidStoredValue)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    client
+        .batch_execute(
+            "TRUNCATE data_rights_request_state, data_rights_propagation_state;\
+             INSERT INTO data_rights_request_state VALUES ('requested', 2_000);\
+             INSERT INTO data_rights_propagation_state VALUES ('pending', 0);",
+        )
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            probe_postgres_data_rights_backlog(&mut transaction),
+            Err(PostgresBacklogProbeError::InvalidStoredValue)
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    cleanup_schema(client, &schema);
+}
