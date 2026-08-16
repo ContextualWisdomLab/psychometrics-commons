@@ -5,6 +5,8 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Hosted dual-proof account-link write, recover, and unlink commands so a transport adapter can authorize both proofs, persist the append-only history, recover the same product-owned participant from a still-valid Keyverse account proof after restart, and end that current binding from the same still-valid proof. Expired proofs fail before persist, lookup, or unlink. A rebound current subject cannot be unlinked with an ended subject's proof. A later account-linked capability is bound to the current `link_event_ref`, so unlink, rebound, or a later same-subject attach under a new event invalidates a previously issued grant. HTTP transport and live token verification remain target.
+- PostgreSQL 18 append-only participant identity-link persistence so a dual-proof account link, unlink, and relink survive process restart without rewriting the product-owned participant reference. Persist applies each link and then its matching ends in one transaction, exact replay is idempotent, and exact replay also restores or clears the derived current projection so operator repair cannot leave a missing or stale unique enforcer. Conflicting evidence fails closed, and one unterminated issuer-scoped subject cannot belong to two participants even when the derived current projection is missing. A returning account recovers the same `participant_ref` from that history. A link-end cannot attach to another participant's link.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
@@ -59,6 +61,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Hosted account-link recover now keeps a loaded participant only when its current tenant, issuer, and subject still match the still-valid proof, so a concurrent unlink+relink cannot hand back a rebound identity.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.

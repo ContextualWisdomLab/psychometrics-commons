@@ -368,9 +368,30 @@ sequenceDiagram
     C->>A: link request + anonymous-session proof + Keyverse assertion
     A->>K: validate issuer/audience/signature/expiry/anti-replay context
     K-->>A: validated subject claims
+    A->>A: persist_authorized_account_link dual-proof write command
     A->>DB: verify tenant/ownership + append Active ParticipantIdentityLink
     DB-->>A: immutable link evidence / current-link projection
     A-->>C: link complete
+    P->>C: return with the same Keyverse account
+    C->>A: recover request + current Keyverse assertion
+    A->>A: recover_participant_for_authenticated_account
+    A->>DB: load unterminated issuer-scoped subject
+    DB-->>A: candidate participant plus current binding
+    A->>A: keep only when current tenant/issuer/subject still match the proof
+    A->>A: grant_account_linked_capability bound to current link_event_ref
+    A-->>C: recovered participant plus account-linked capability, or unused-account none
+    C->>A: later account-privileged command + current Keyverse assertion + grant
+    A->>A: accept_account_linked_capability re-checks current link_event_ref
+    A-->>C: accept or NoCurrentBinding
+    P->>C: choose to unlink the current Keyverse account
+    C->>A: unlink request + current Keyverse assertion
+    A->>A: persist_authorized_account_unlink
+    A->>DB: reload history and append link-end when current binding still matches
+    DB-->>A: immutable unlink evidence / cleared current-link projection
+    A-->>C: unlink complete; later recover with the same proof returns none
+    C->>A: replay the pre-unlink account-linked capability
+    A->>A: accept_account_linked_capability
+    A-->>C: NoCurrentBinding — unlink invalidated the grant
 
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
 ```
