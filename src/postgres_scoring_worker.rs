@@ -53,6 +53,8 @@ pub enum ScoringWorkerPersistence {
 pub enum ScoringWorkerCommitError {
     /// The supplied event identity is not the stable job and outcome key.
     Identity(ScoringWorkerError),
+    /// The engine or planner could not produce a typed terminal attempt.
+    Planning(ScoringWorkerError),
     /// Fenced successful completion or its outbox evidence failed.
     Completion(ScoringCompletionOutboxError),
     /// Fenced permanent failure or its outbox evidence failed.
@@ -62,7 +64,12 @@ pub enum ScoringWorkerCommitError {
 impl Display for ScoringWorkerCommitError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::Identity(_) => "scoring worker terminal identity is invalid",
+            Self::Identity(_) => {
+                "scoring worker must reuse the stable job and outcome event identity"
+            }
+            Self::Planning(_) => {
+                "scoring worker could not plan a terminal attempt; keep the job leased and retry after a typed engine outcome"
+            }
             Self::Completion(_) => "scoring worker completion persistence failed",
             Self::Failure(_) => "scoring worker failure persistence failed",
         })
@@ -72,7 +79,7 @@ impl Display for ScoringWorkerCommitError {
 impl Error for ScoringWorkerCommitError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Identity(error) => Some(error),
+            Self::Identity(error) | Self::Planning(error) => Some(error),
             Self::Completion(error) => Some(error),
             Self::Failure(error) => Some(error),
         }
@@ -91,8 +98,8 @@ impl Error for ScoringWorkerCommitError {
 ///
 /// Returns [`ScoringWorkerCommitError::Identity`] before writes when the event identity
 /// is not the stable job/outcome key, [`ScoringWorkerCommitError::Completion`] when
-/// successful completion fails, or [`ScoringWorkerCommitError::Failure`] when permanent
-/// failure fails.
+/// fenced successful completion fails, or [`ScoringWorkerCommitError::Failure`] when
+/// permanent failure fails.
 #[allow(clippy::too_many_arguments)]
 pub fn commit_scoring_worker_outcome(
     transaction: &mut Transaction<'_>,
@@ -155,9 +162,10 @@ pub fn commit_scoring_worker_outcome(
 ///
 /// # Errors
 ///
-/// Returns [`ScoringWorkerCommitError::Identity`] when planning fails,
-/// [`ScoringWorkerCommitError::Completion`] when successful completion fails, or
-/// [`ScoringWorkerCommitError::Failure`] when permanent failure fails.
+/// Returns [`ScoringWorkerCommitError::Planning`] when the engine or planner cannot
+/// produce a typed terminal attempt, [`ScoringWorkerCommitError::Completion`] when
+/// successful completion fails, or [`ScoringWorkerCommitError::Failure`] when
+/// permanent failure fails.
 pub fn run_scoring_worker_attempt(
     transaction: &mut Transaction<'_>,
     scoring_job_ref: &str,
@@ -169,7 +177,7 @@ pub fn run_scoring_worker_attempt(
 ) -> Result<ScoringWorkerPersistence, ScoringWorkerCommitError> {
     let attempt =
         plan_scoring_worker_attempt(scoring_job_ref, scoring_request_ref, engine, envelope)
-            .map_err(ScoringWorkerCommitError::Identity)?;
+            .map_err(ScoringWorkerCommitError::Planning)?;
     commit_planned_scoring_worker_attempt(
         transaction,
         scoring_job_ref,

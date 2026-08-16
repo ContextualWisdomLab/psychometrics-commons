@@ -179,8 +179,8 @@ impl ScoringWorkerAttempt {
 /// Ask the engine, then bind the stable job-plus-outcome outbox identity.
 ///
 /// The caller still owns event type, tenant, schema, correlation, causation, and
-/// payload digest. This planner overwrites any minted `event_ref` with the stable
-/// identity for the job plus accepted result or permanent cause.
+/// payload digest. `ScoringWorkerEnvelope` has no `event_ref`; this planner binds
+/// the stable identity for the job plus accepted result or permanent cause.
 ///
 /// # Errors
 ///
