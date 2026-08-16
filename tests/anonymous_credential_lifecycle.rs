@@ -245,6 +245,7 @@ fn errors_are_stable_beginner_readable_and_have_no_hidden_source() {
         AnonymousCredentialError::InvalidTimestamp,
         AnonymousCredentialError::InvalidLifetime,
         AnonymousCredentialError::ConflictingRevocation,
+        AnonymousCredentialError::Unauthorized,
     ];
 
     for error in cases {

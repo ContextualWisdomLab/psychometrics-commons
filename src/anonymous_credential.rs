@@ -12,6 +12,7 @@
 //! identity, and append-only revocation evidence explicit so a later HTTP adapter cannot silently
 //! widen anonymous-session authority.
 
+use crate::anonymous_session::AnonymousSessionContext;
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -30,6 +31,8 @@ pub enum AnonymousCredentialError {
     InvalidLifetime,
     /// A revocation replay tried to replace already-recorded immutable revocation evidence.
     ConflictingRevocation,
+    /// The presented digest, binding, or server time did not authorize this credential.
+    Unauthorized,
 }
 
 impl Display for AnonymousCredentialError {
@@ -49,6 +52,9 @@ impl Display for AnonymousCredentialError {
             }
             Self::ConflictingRevocation => {
                 "anonymous credential revocation evidence cannot be replaced"
+            }
+            Self::Unauthorized => {
+                "present a current exact digest for this tenant, participant, and session"
             }
         })
     }
@@ -238,6 +244,59 @@ impl AnonymousCredential {
                 self.revoked_at_unix_ms = Some(revoked_at_unix_ms);
                 Ok(())
             }
+        }
+    }
+
+    /// Mint the exact anonymous-session context this credential currently authorizes.
+    ///
+    /// A transport should call this after it hashes the presented bearer proof. The returned
+    /// context names this credential as authorization evidence and expires at the earlier of
+    /// credential expiry or recorded revocation. Later resource checks can then use that context
+    /// without seeing the raw proof.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AnonymousCredentialError::Unauthorized`] when the presented digest, tenant,
+    /// participant, session, or server time does not currently authorize this credential.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if an already-authorized credential somehow lacks a valid session-context
+    /// binding. [`AnonymousCredential::new`] rejects those inputs, so a panic means an internal
+    /// invariant was broken rather than a caller mistake.
+    pub fn session_context(
+        &self,
+        presented_proof_digest: &str,
+        tenant_ref: &str,
+        participant_ref: &str,
+        session_ref: &str,
+        now_unix_ms: u64,
+    ) -> Result<AnonymousSessionContext, AnonymousCredentialError> {
+        if !self.authorizes(
+            presented_proof_digest,
+            tenant_ref,
+            participant_ref,
+            session_ref,
+            now_unix_ms,
+        ) {
+            return Err(AnonymousCredentialError::Unauthorized);
+        }
+        Ok(AnonymousSessionContext::new(
+            self.tenant_ref(),
+            self.participant_ref(),
+            self.session_ref(),
+            self.credential_ref(),
+            self.authority_expires_at_unix_ms(),
+        )
+        .expect("an authorized credential already carries valid session-context inputs"))
+    }
+
+    const fn authority_expires_at_unix_ms(&self) -> u64 {
+        match self.revoked_at_unix_ms {
+            Some(revoked_at_unix_ms) if revoked_at_unix_ms < self.expires_at_unix_ms => {
+                revoked_at_unix_ms
+            }
+            _ => self.expires_at_unix_ms,
         }
     }
 }
