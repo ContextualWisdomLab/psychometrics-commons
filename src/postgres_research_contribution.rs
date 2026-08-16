@@ -11,7 +11,9 @@
 //! binding rather than trusting a second in-memory snapshot. The caller owns
 //! credentials and the surrounding transaction boundary.
 
-use crate::consent::{ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState};
+use crate::consent::{
+    ConsentPurpose, ConsentSnapshot, ResearchContribution, ResearchContributionState,
+};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -365,9 +367,7 @@ fn persist_withdrawal(
     }
 }
 
-fn required_reference(
-    reference: &str,
-) -> Result<&str, ResearchContributionPersistenceError> {
+fn required_reference(reference: &str) -> Result<&str, ResearchContributionPersistenceError> {
     normalized_reference(reference).ok_or(ResearchContributionPersistenceError::InvalidReference)
 }
 
