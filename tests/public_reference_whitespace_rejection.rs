@@ -177,6 +177,7 @@ fn default_ignorable_and_bidirectional_format_characters_are_rejected() {
         "tenant\u{ffa0}ref",  // HALFWIDTH HANGUL FILLER
         "tenant\u{1bca0}ref", // SHORTHAND FORMAT LETTER OVERLAP
         "tenant\u{1d173}ref", // MUSICAL SYMBOL BEGIN BEAM
+        "tenant\u{fff0}ref",  // <not a character> default-ignorable
         "tenant\u{e0001}ref", // LANGUAGE TAG
         "tenant\u{e0020}ref", // TAG SPACE
         "tenant\u{e0100}ref", // VARIATION SELECTOR-17
