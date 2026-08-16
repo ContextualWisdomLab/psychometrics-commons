@@ -1,15 +1,16 @@
 //! Session-bound immutable item-delivery evidence.
 //!
 //! Item delivery is product-runtime state rather than psychometric item-selection
-//! arithmetic. A ledger is created only from an already validated immutable
-//! [`InstrumentReleaseManifest`], so the release identity, locale, content digest,
-//! and complete allowed item-version set cannot drift apart. New logical delivery
-//! events are accepted only while the assessment session is active; exact retries of
-//! previously accepted delivery identities remain idempotent after lifecycle advance.
+//! arithmetic. A ledger is created only from an authoritative [`AssessmentSession`]
+//! and the exact validated [`InstrumentReleaseManifest`] pinned by that session, so
+//! callers cannot rebind delivery evidence to another release. New logical delivery
+//! events consult the server-authoritative session aggregate directly; exact retries
+//! of previously accepted delivery identities remain idempotent after lifecycle
+//! advance.
 
 use crate::instrument::InstrumentReleaseManifest;
 use crate::reference::normalized_reference;
-use crate::session::SessionState;
+use crate::session::{AssessmentSession, SessionState};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -72,8 +73,12 @@ impl ItemDeliveryEvent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ItemDeliveryError {
-    /// A required reference was blank or numeric-like instead of opaque.
+    /// A required delivery-evidence reference was blank or numeric-like instead of opaque.
     InvalidReference,
+    /// The supplied immutable release manifest does not match session creation provenance.
+    SessionReleaseMismatch,
+    /// The supplied assessment session does not own this item-delivery ledger.
+    SessionMismatch,
     /// A new logical delivery was attempted while the assessment session was not active.
     SessionNotActive(SessionState),
     /// A delivery reference was replayed with evidence different from its first use.
@@ -90,6 +95,10 @@ impl Display for ItemDeliveryError {
             Self::InvalidReference => {
                 formatter.write_str("item delivery references must be opaque non-numeric values")
             }
+            Self::SessionReleaseMismatch => formatter
+                .write_str("item delivery manifest does not match assessment session provenance"),
+            Self::SessionMismatch => formatter
+                .write_str("item delivery ledger does not belong to the supplied assessment session"),
             Self::SessionNotActive(state) => {
                 write!(
                     formatter,
@@ -114,8 +123,8 @@ impl Error for ItemDeliveryError {}
 ///
 /// The ledger deliberately records item-delivery evidence only. Selection/calibration
 /// algorithms remain in `fast-mlsirm`; persistence and transport adapters may store or
-/// expose these values differently but must preserve the same idempotency, ordering,
-/// exact-release membership, and active-session invariants.
+/// expose these values differently but must preserve the same session authority,
+/// idempotency, ordering, exact-release membership, and active-session invariants.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ItemDeliveryLedger {
     session_ref: String,
@@ -127,23 +136,31 @@ pub struct ItemDeliveryLedger {
 }
 
 impl ItemDeliveryLedger {
-    /// Create an empty item-delivery ledger from one exact immutable release manifest.
+    /// Create an empty item-delivery ledger from an authoritative assessment session.
     ///
-    /// Release identity, content digest, locale, and allowed item versions are copied
-    /// from the validated manifest as one unit. This prevents callers from composing
-    /// an apparently valid ledger from references that belong to different releases.
+    /// The supplied manifest must be the same immutable release that was pinned when
+    /// `session` was created. Release reference, instrument version, content digest,
+    /// and locale are checked before any delivery state is created; allowed item
+    /// versions are then copied from that exact manifest as one immutable unit.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::InvalidReference`] when `session_ref` is blank or
-    /// numeric-like instead of an opaque product identifier.
-    pub fn from_manifest(
-        session_ref: &str,
+    /// Returns [`ItemDeliveryError::SessionReleaseMismatch`] when the manifest does
+    /// not exactly match the immutable release provenance carried by `session`.
+    pub fn from_session(
+        session: &AssessmentSession,
         manifest: &InstrumentReleaseManifest,
     ) -> Result<Self, ItemDeliveryError> {
-        let session_ref = required_reference(session_ref)?;
+        if session.instrument_release_ref() != manifest.release_ref()
+            || session.instrument_version_ref() != manifest.instrument_version_ref()
+            || session.instrument_release_content_digest() != manifest.content_digest()
+            || session.locale() != manifest.locale()
+        {
+            return Err(ItemDeliveryError::SessionReleaseMismatch);
+        }
+
         Ok(Self {
-            session_ref: session_ref.to_owned(),
+            session_ref: session.session_ref().to_owned(),
             instrument_release_ref: manifest.release_ref().to_owned(),
             release_content_digest: manifest.content_digest().to_owned(),
             locale: manifest.locale().to_owned(),
@@ -202,16 +219,20 @@ impl ItemDeliveryLedger {
 
     /// Record one item delivery or replay an identical accepted delivery.
     ///
-    /// Exact replay of a previously accepted `delivery_ref` returns the original
-    /// immutable event even after the session leaves [`SessionState::Active`]. Reuse
-    /// of that identity with different evidence fails closed. Every genuinely new
-    /// logical delivery still requires an active session and an item version present
-    /// in the exact bound release manifest. A different delivery identity cannot
-    /// re-administer an item version already delivered in the session.
+    /// `session` is authoritative for both ownership and current lifecycle state.
+    /// Its immutable session/release provenance must match the ledger before request
+    /// evidence is considered. Exact replay of a previously accepted `delivery_ref`
+    /// then returns the original immutable event even after the session leaves
+    /// [`SessionState::Active`]. Reuse of that identity with different evidence fails
+    /// closed. Every genuinely new logical delivery still requires the authoritative
+    /// session to be active and an item version present in the exact bound release.
+    /// A different delivery identity cannot re-administer an item already delivered.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed evidence,
+    /// Returns [`ItemDeliveryError::SessionMismatch`] when the supplied session does
+    /// not match the ledger's immutable session/release provenance,
+    /// [`ItemDeliveryError::InvalidReference`] for malformed request evidence,
     /// [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay,
     /// [`ItemDeliveryError::SessionNotActive`] when a new logical delivery is offered
     /// outside an active session, [`ItemDeliveryError::ItemNotInRelease`] when the
@@ -220,9 +241,17 @@ impl ItemDeliveryLedger {
     /// offered under another logical delivery identity.
     pub fn deliver(
         &mut self,
-        state: SessionState,
+        session: &AssessmentSession,
         request: ItemDeliveryRequest<'_>,
     ) -> Result<ItemDeliveryEvent, ItemDeliveryError> {
+        if session.session_ref() != self.session_ref
+            || session.instrument_release_ref() != self.instrument_release_ref
+            || session.instrument_release_content_digest() != self.release_content_digest
+            || session.locale() != self.locale
+        {
+            return Err(ItemDeliveryError::SessionMismatch);
+        }
+
         let delivery_ref = required_reference(request.delivery_ref)?;
         let item_version_ref = required_reference(request.item_version_ref)?;
         let presentation_context_ref = required_reference(request.presentation_context_ref)?;
@@ -246,8 +275,8 @@ impl ItemDeliveryLedger {
             };
         }
 
-        if state != SessionState::Active {
-            return Err(ItemDeliveryError::SessionNotActive(state));
+        if session.state() != SessionState::Active {
+            return Err(ItemDeliveryError::SessionNotActive(session.state()));
         }
 
         if !self
