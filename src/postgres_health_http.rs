@@ -68,7 +68,8 @@ pub fn accept_one_postgres_health_http(
 /// Serve PostgreSQL-backed probes until `accept` fails.
 ///
 /// GET `/live` still answers without store I/O. GET `/ready` observes the
-/// caller-owned connection after each accept.
+/// caller-owned connection after each accept. A dropped probe connection does
+/// not stop later probes.
 ///
 /// # Errors
 ///

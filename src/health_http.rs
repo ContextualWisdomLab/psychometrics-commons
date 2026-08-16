@@ -163,10 +163,11 @@ where
 /// Serve probe requests until `accept` fails.
 ///
 /// Operators run this loop so Kubernetes or a load balancer can keep asking
-/// GET `/live` and GET `/ready`. Interrupted accepts retry. Any other accept,
-/// read, or write error stops the loop so a closed or non-blocking listener
-/// does not spin. TLS, keep-alive, and measured SLO values remain outside
-/// this slice.
+/// GET `/live` and GET `/ready`. Interrupted, aborted, or reset accepts retry.
+/// Per-connection read or write errors do not stop later probes. Other accept
+/// errors, including `WouldBlock` on a closed or non-blocking listener, stop
+/// the loop so it does not spin. TLS, keep-alive, and measured SLO values
+/// remain outside this slice.
 ///
 /// # Errors
 ///
@@ -190,26 +191,49 @@ where
     F: FnMut(&str) -> HealthHttpResponse,
 {
     loop {
-        match classify_serve_accept(accept_one_health_http_with(listener, |request| {
-            handler(request)
-        })) {
-            ServeAcceptProgress::Continue => {}
-            ServeAcceptProgress::Stop(error) => return Err(error),
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Err(error) = serve_accepted_health_http(&mut stream, &mut handler) {
+                    if !should_continue_after_serve_error(&error, ServeIoSource::Connection) {
+                        return Err(error);
+                    }
+                }
+            }
+            Err(error) => {
+                if !should_continue_after_serve_error(&error, ServeIoSource::Accept) {
+                    return Err(error);
+                }
+            }
         }
     }
 }
 
-#[derive(Debug)]
-enum ServeAcceptProgress {
-    Continue,
-    Stop(io::Error),
+fn serve_accepted_health_http<F>(stream: &mut TcpStream, handler: &mut F) -> io::Result<()>
+where
+    F: FnMut(&str) -> HealthHttpResponse,
+{
+    stream.set_read_timeout(Some(HEALTH_HTTP_IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(HEALTH_HTTP_IO_TIMEOUT))?;
+    let request = read_http_request(stream)?;
+    let response = handler(&request);
+    write_http_response(stream, &response)
 }
 
-fn classify_serve_accept(result: io::Result<()>) -> ServeAcceptProgress {
-    match result {
-        Ok(()) => ServeAcceptProgress::Continue,
-        Err(error) if error.kind() == io::ErrorKind::Interrupted => ServeAcceptProgress::Continue,
-        Err(error) => ServeAcceptProgress::Stop(error),
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ServeIoSource {
+    Accept,
+    Connection,
+}
+
+fn should_continue_after_serve_error(error: &io::Error, source: ServeIoSource) -> bool {
+    match source {
+        ServeIoSource::Accept => matches!(
+            error.kind(),
+            io::ErrorKind::Interrupted
+                | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::ConnectionReset
+        ),
+        ServeIoSource::Connection => true,
     }
 }
 
@@ -430,11 +454,11 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_request_read, backlog_label, capability_state_label, classify_serve_accept,
-        handle_health_http_request, health_ready_response, health_request_required_capabilities,
+        apply_request_read, backlog_label, capability_state_label, handle_health_http_request,
+        health_ready_response, health_request_required_capabilities,
         health_request_requires_readiness_snapshot, integrity_label, json_string, reason_phrase,
-        RequestReadProgress, ServeAcceptProgress, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH,
-        HEALTH_READY_PATH,
+        should_continue_after_serve_error, RequestReadProgress, ServeIoSource,
+        HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
@@ -649,28 +673,54 @@ mod tests {
 
     #[test]
     fn serve_loop_retries_interrupted_accepts_and_stops_on_other_errors() {
-        assert!(matches!(
-            classify_serve_accept(Ok(())),
-            ServeAcceptProgress::Continue
+        assert!(should_continue_after_serve_error(
+            &io::Error::new(io::ErrorKind::Interrupted, "signal"),
+            ServeIoSource::Accept,
         ));
-        assert!(matches!(
-            classify_serve_accept(Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "signal"
-            ))),
-            ServeAcceptProgress::Continue
+        assert!(should_continue_after_serve_error(
+            &io::Error::new(io::ErrorKind::ConnectionAborted, "client gone"),
+            ServeIoSource::Accept,
         ));
-        let stopped = classify_serve_accept(Err(io::Error::new(
-            io::ErrorKind::ConnectionAborted,
-            "closed",
-        )));
-        match stopped {
-            ServeAcceptProgress::Stop(error) => {
-                assert_eq!(error.kind(), io::ErrorKind::ConnectionAborted);
-            }
-            ServeAcceptProgress::Continue => {
-                panic!("non-interrupted accept errors must stop the serve loop")
-            }
-        }
+        assert!(
+            !should_continue_after_serve_error(
+                &io::Error::new(io::ErrorKind::WouldBlock, "nonblocking"),
+                ServeIoSource::Accept,
+            ),
+            "accept WouldBlock must stop a closed or non-blocking listener"
+        );
+    }
+
+    #[test]
+    fn serve_loop_keeps_running_after_per_connection_io_errors() {
+        assert!(
+            should_continue_after_serve_error(
+                &io::Error::new(io::ErrorKind::BrokenPipe, "peer gone"),
+                ServeIoSource::Connection,
+            ),
+            "a load-balancer reset after accept must not stop later probes"
+        );
+        assert!(should_continue_after_serve_error(
+            &io::Error::new(io::ErrorKind::ConnectionReset, "rst"),
+            ServeIoSource::Connection,
+        ));
+        assert!(should_continue_after_serve_error(
+            &io::Error::new(io::ErrorKind::TimedOut, "write timeout"),
+            ServeIoSource::Connection,
+        ));
+        assert!(should_continue_after_serve_error(
+            &io::Error::new(io::ErrorKind::ConnectionAborted, "client gone"),
+            ServeIoSource::Accept,
+        ));
+        assert!(should_continue_after_serve_error(
+            &io::Error::new(io::ErrorKind::Interrupted, "signal"),
+            ServeIoSource::Accept,
+        ));
+        assert!(
+            !should_continue_after_serve_error(
+                &io::Error::new(io::ErrorKind::WouldBlock, "nonblocking"),
+                ServeIoSource::Accept,
+            ),
+            "accept WouldBlock must still stop a closed or non-blocking listener"
+        );
     }
 }
