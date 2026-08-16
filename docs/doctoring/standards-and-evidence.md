@@ -111,7 +111,10 @@ Product consequences:
 - unsupported stored schema versions fail closed instead of being coerced into
   the current output contract;
 - a completed job cannot commit without the immutable result snapshot a buyer
-  later retrieves.
+  later retrieves;
+- a retryable engine or transport outage schedules the next attempt and writes
+  no terminal outbox row, so a later success still uses one stable `event_ref`
+  (Hohpe & Woolf, 2003; Richardson, 2018).
 
 ## Evidence maintenance rules
 
