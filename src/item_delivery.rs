@@ -142,8 +142,9 @@ impl ItemDeliveryLedger {
     ///
     /// The supplied manifest must be the same immutable release that was pinned when
     /// `session` was created. Release reference, instrument version, content digest,
-    /// and locale are checked before any delivery state is created; allowed item
-    /// versions are then copied from that exact manifest as one immutable unit.
+    /// locale, and the ordered item-version set are checked before any delivery state
+    /// is created. Allowed item versions are then copied from the session, not from
+    /// the caller-supplied manifest, so a reused digest cannot rebind the item set.
     ///
     /// # Errors
     ///
@@ -158,12 +159,14 @@ impl ItemDeliveryLedger {
             session.instrument_version_ref(),
             session.instrument_release_content_digest(),
             session.locale(),
+            session.item_version_refs(),
         );
         let manifest_provenance = (
             manifest.release_ref(),
             manifest.instrument_version_ref(),
             manifest.content_digest(),
             manifest.locale(),
+            manifest.item_version_refs(),
         );
         if session_provenance != manifest_provenance {
             return Err(ItemDeliveryError::SessionReleaseMismatch);
@@ -171,11 +174,11 @@ impl ItemDeliveryLedger {
 
         Ok(Self {
             session_ref: session.session_ref().to_owned(),
-            instrument_release_ref: manifest.release_ref().to_owned(),
-            instrument_version_ref: manifest.instrument_version_ref().to_owned(),
-            release_content_digest: manifest.content_digest().to_owned(),
-            locale: manifest.locale().to_owned(),
-            allowed_item_version_refs: manifest.item_version_refs().to_vec(),
+            instrument_release_ref: session.instrument_release_ref().to_owned(),
+            instrument_version_ref: session.instrument_version_ref().to_owned(),
+            release_content_digest: session.instrument_release_content_digest().to_owned(),
+            locale: session.locale().to_owned(),
+            allowed_item_version_refs: session.item_version_refs().to_vec(),
             events: Vec::new(),
         })
     }
