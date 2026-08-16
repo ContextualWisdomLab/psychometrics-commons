@@ -309,14 +309,17 @@ fn as_built_session_table_names_the_active_persist_and_load_pr() {
         .find(|line| line.contains("`assessment_session`"))
         .expect("as-built physical schema table must list assessment_session");
     assert!(
-        table_row.contains("**Active PR** #138") && !table_row.contains("#61") && !table_row.contains("#121"),
-        "assessment_session table cell must name start-composition Active PR #138, not persist-and-load predecessor #121 or persist-only #61"
+        table_row.contains("**Active PR** #164")
+            && !table_row.contains("#61")
+            && !table_row.contains("#121")
+            && !table_row.contains("#138"),
+        "assessment_session table cell must name stored-release start Active PR #164, not in-memory-start predecessor #138, persist-and-load predecessor #121, or persist-only #61"
     );
     assert!(
-        as_built.contains("PR #138 `migrations/0014_assessment_session.sql`")
+        as_built.contains("PR #164 `migrations/0014_assessment_session.sql`")
             && as_built.contains("not protected-main truth")
-            && as_built.contains("start_created_assessment_session"),
-        "as-built session section must name the start-composition PR without promoting it to Implemented"
+            && as_built.contains("start_created_assessment_session_from_stored_release"),
+        "as-built session section must name the stored-release start PR without promoting it to Implemented"
     );
 }
 
