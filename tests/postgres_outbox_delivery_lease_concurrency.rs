@@ -71,8 +71,7 @@ fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
     apply_integration_migration(&mut primary)
         .expect("integration migration should install the outbox schema");
     assert_eq!(
-        enqueue_outbox_event(&mut primary, &event(), 3)
-            .expect("pending event should be enqueued"),
+        enqueue_outbox_event(&mut primary, &event(), 3).expect("pending event should be enqueued"),
         PersistenceDisposition::Inserted,
     );
 
