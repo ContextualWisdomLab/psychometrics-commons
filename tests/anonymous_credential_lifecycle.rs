@@ -124,6 +124,49 @@ fn construction_rejects_malformed_identity_digest_and_lifetime_evidence() {
         );
     }
 
+    let noncanonical_reference_sets = [
+        [
+            " anonymous_credential_alpha ",
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+        ],
+        [
+            "anonymous_credential_alpha",
+            " tenant_alpha ",
+            "participant_alpha",
+            "session_alpha",
+        ],
+        [
+            "anonymous_credential_alpha",
+            "tenant_alpha",
+            "participant_alpha\t",
+            "session_alpha",
+        ],
+        [
+            "anonymous_credential_alpha",
+            "tenant_alpha",
+            "participant_alpha",
+            "\u{00a0}session_alpha",
+        ],
+    ];
+    for references in noncanonical_reference_sets {
+        assert_eq!(
+            AnonymousCredential::new(
+                references[0],
+                references[1],
+                references[2],
+                references[3],
+                DIGEST_A,
+                1_000,
+                2_000,
+            )
+            .unwrap_err(),
+            AnonymousCredentialError::InvalidReference,
+            "credential construction must not normalize resource-identity aliases"
+        );
+    }
+
     for invalid_digest in [
         "",
         "sha256:abc",
