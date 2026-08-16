@@ -40,7 +40,7 @@ pub enum HealthProcessConfigError {
     InvalidListenAddress,
     /// `PORT` was blank, padded, or not a TCP port.
     InvalidListenPort,
-    /// `DATABASE_URL` was set but was not an unpadded `postgres` URL.
+    /// `DATABASE_URL` was set but was not an unpadded postgres URL or libpq string.
     InvalidDatabaseUrl,
     /// `HEALTH_BACKLOG_HEALTH` was set to an unknown label.
     InvalidBacklogHealth,
@@ -57,7 +57,7 @@ impl Display for HealthProcessConfigError {
             }
             Self::InvalidListenPort => "PORT must be an unpadded TCP port from 0 to 65535",
             Self::InvalidDatabaseUrl => {
-                "DATABASE_URL must be an unpadded postgres:// or postgresql:// URL when set"
+                "DATABASE_URL must be an unpadded postgres URL or libpq keyword/value string when set"
             }
             Self::InvalidBacklogHealth => {
                 "HEALTH_BACKLOG_HEALTH must be within_bounds, stalled, or unknown when set"
@@ -240,9 +240,6 @@ fn parse_database_url(
         Err(()) => Err(HealthProcessConfigError::InvalidDatabaseUrl),
         Ok(None) => Ok((None, None)),
         Ok(Some(value)) => {
-            if !value.starts_with("postgres://") && !value.starts_with("postgresql://") {
-                return Err(HealthProcessConfigError::InvalidDatabaseUrl);
-            }
             let config = postgres::Config::from_str(&value)
                 .map_err(|_| HealthProcessConfigError::InvalidDatabaseUrl)?;
             Ok((Some(value), Some(config)))

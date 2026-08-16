@@ -231,6 +231,19 @@ fn postgres_urls_and_named_backlog_values_are_accepted() {
     ]))
     .unwrap();
     assert_eq!(unknown.backlog_health(), BacklogHealth::Unknown);
+
+    let libpq = parse_health_process_config(env_lookup(&[
+        (HEALTH_LISTEN_ADDR_ENV, "127.0.0.1:0"),
+        (
+            HEALTH_DATABASE_URL_ENV,
+            "host=localhost user=postgres password=ci_job_run dbname=psychometrics_commons_test",
+        ),
+    ]))
+    .expect("libpq keyword/value DATABASE_URL used by Runtime CI must start the process");
+    assert_eq!(
+        libpq.database_url(),
+        Some("host=localhost user=postgres password=ci_job_run dbname=psychometrics_commons_test")
+    );
 }
 
 #[test]
