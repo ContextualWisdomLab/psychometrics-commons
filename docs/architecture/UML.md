@@ -179,7 +179,7 @@ classDiagram
 
 - `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence.
 - `ScoringJob` is operational state; `ResultSnapshot` is scientific/product evidence. They are not the same aggregate.
-- `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
+- `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent. This Active PR reloads the append-only `ConsentLedger` from durable `consent_event` rows after restart so the latest purpose decision, including a same-millisecond revocation, is the one operators and later HTTP consent transport will see.
 - `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.
 - `ParticipantIdentityLink` is product-owned append-only account-attachment history. It is neither the participant primary key nor a research pseudonym.
 - Longitudinal records preserve collection and temporal-analysis references without duplicating the Gyeot application database or TEPP analytical kernel.

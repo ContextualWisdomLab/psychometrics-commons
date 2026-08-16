@@ -17,6 +17,8 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
+| `consent_ledger` | consent | Implemented subset |
+| `consent_event` | consent | Implemented subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
@@ -57,6 +59,10 @@ The protected-main slice persists:
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
+
+## Active PR consent-ledger reload
+
+`migrations/0005_consent_lifecycle.sql` and `src/postgres_consent.rs` already persist purpose-specific `consent_ledger` / `consent_event` rows on protected main. This Active PR adds `load_consent_ledger` and no new physical objects. After restart, a caller reconstructs the append-only ledger under `READ COMMITTED` by occurrence time, then `created_at`, then event identity. A missing participant is absent rather than an empty grant. Out-of-order or unknown stored labels fail closed. HTTP consent transport and outbox composition remain outside this slice.
 
 ## Logical-to-physical mapping rule
 
