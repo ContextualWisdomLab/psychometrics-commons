@@ -19,6 +19,7 @@ pub mod integration;
 pub mod item_delivery;
 pub mod narrative;
 pub mod participant;
+pub mod postgres_assessment_session;
 pub mod postgres_consent;
 pub mod postgres_data_rights;
 pub mod postgres_data_rights_processing;
