@@ -25,13 +25,29 @@ fn manifest(
     instrument_version_ref: &str,
     content_digest: &str,
 ) -> InstrumentReleaseManifest {
+    manifest_with_locale_and_items(
+        release_ref,
+        instrument_version_ref,
+        content_digest,
+        "ko-KR",
+        &["item_version_001", "item_version_002"],
+    )
+}
+
+fn manifest_with_locale_and_items(
+    release_ref: &str,
+    instrument_version_ref: &str,
+    content_digest: &str,
+    locale: &str,
+    item_version_refs: &[&str],
+) -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
         release_ref,
         "instrument_big_five",
         instrument_version_ref,
         "construct_big_five",
-        &["item_version_001", "item_version_002"],
-        "ko-KR",
+        item_version_refs,
+        locale,
         "assessment_spec_big_five_v1",
         "scoring_version_big_five_v1",
         "calibration_big_five_ko_v1",
@@ -46,12 +62,20 @@ fn manifest(
 }
 
 fn published_release() -> InstrumentRelease {
+    published_release_named(
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        RELEASE_A_DIGEST,
+    )
+}
+
+fn published_release_named(
+    release_ref: &str,
+    instrument_version_ref: &str,
+    content_digest: &str,
+) -> InstrumentRelease {
     let mut release = InstrumentRelease::new(
-        manifest(
-            "release_big_five_ko_v1",
-            "instrument_version_big_five_ko_v1",
-            RELEASE_A_DIGEST,
-        ),
+        manifest(release_ref, instrument_version_ref, content_digest),
         10_000,
     )
     .unwrap();
@@ -67,10 +91,10 @@ fn published_release() -> InstrumentRelease {
             PublicationEvidenceRecord::new(
                 "publication_evidence_session_authority",
                 "evidence_policy_self_reflection_v1",
-                "release_big_five_ko_v1",
-                "instrument_version_big_five_ko_v1",
+                release_ref,
+                instrument_version_ref,
                 &["item_version_001", "item_version_002"],
-                RELEASE_A_DIGEST,
+                content_digest,
                 "ko-KR",
                 "intended_use_self_reflection_v1",
                 "assessment_spec_big_five_v1",
@@ -143,6 +167,85 @@ fn ledger_rejects_manifest_not_pinned_by_the_assessment_session() {
 }
 
 #[test]
+fn ledger_rejects_manifest_that_rebinds_the_session_item_set() {
+    let release = published_release();
+    let session = created_session(&release);
+    let rebound_manifest = manifest_with_locale_and_items(
+        "release_big_five_ko_v1",
+        "instrument_version_big_five_ko_v1",
+        RELEASE_A_DIGEST,
+        "ko-KR",
+        &["item_version_001", "item_version_002", "item_version_003"],
+    );
+
+    assert_eq!(
+        ItemDeliveryLedger::from_session(&session, &rebound_manifest),
+        Err(ItemDeliveryError::SessionReleaseMismatch),
+        "a matching digest must not let a caller enlarge the session item set"
+    );
+}
+
+#[test]
+fn ledger_rejects_each_isolated_session_release_mismatch() {
+    let release = published_release();
+    let session = created_session(&release);
+    let cases = [
+        (
+            "release_big_five_ko_v2",
+            "instrument_version_big_five_ko_v1",
+            RELEASE_A_DIGEST,
+            "ko-KR",
+            &["item_version_001", "item_version_002"][..],
+        ),
+        (
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v2",
+            RELEASE_A_DIGEST,
+            "ko-KR",
+            &["item_version_001", "item_version_002"],
+        ),
+        (
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            RELEASE_B_DIGEST,
+            "ko-KR",
+            &["item_version_001", "item_version_002"],
+        ),
+        (
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            RELEASE_A_DIGEST,
+            "en-US",
+            &["item_version_001", "item_version_002"],
+        ),
+        (
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            RELEASE_A_DIGEST,
+            "ko-KR",
+            &["item_version_002", "item_version_001"],
+        ),
+        (
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            RELEASE_A_DIGEST,
+            "ko-KR",
+            &["item_version_001"],
+        ),
+    ];
+
+    for (release_ref, version_ref, digest, locale, items) in cases {
+        let mismatched =
+            manifest_with_locale_and_items(release_ref, version_ref, digest, locale, items);
+        assert_eq!(
+            ItemDeliveryLedger::from_session(&session, &mismatched),
+            Err(ItemDeliveryError::SessionReleaseMismatch),
+            "from_session must reject {release_ref}/{version_ref}/{digest}/{locale}/{items:?}"
+        );
+    }
+}
+
+#[test]
 fn created_session_cannot_be_presented_as_active_by_the_caller() {
     let release = published_release();
     let session = created_session(&release);
@@ -184,4 +287,38 @@ fn only_the_bound_assessment_session_can_operate_the_ledger() {
     );
     assert!(ledger.is_empty());
     assert!(ledger.deliver(&session, delivery_request()).is_ok());
+}
+
+#[test]
+fn deliver_rejects_same_session_ref_with_different_release_provenance() {
+    let release = published_release();
+    let mut session = created_session(&release);
+    session
+        .apply_command(
+            "session_activate_item_delivery_authority",
+            1,
+            SessionCommand::Activate,
+        )
+        .unwrap();
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
+    let other_release = published_release_named(
+        "release_big_five_ko_v2",
+        "instrument_version_big_five_ko_v2",
+        RELEASE_B_DIGEST,
+    );
+    let other_session = AssessmentSession::new(
+        "session_item_delivery_authority",
+        "participant_item_delivery_authority",
+        &other_release,
+        "ko-KR",
+        21_000,
+    )
+    .unwrap();
+
+    assert_eq!(
+        ledger.deliver(&other_session, delivery_request()),
+        Err(ItemDeliveryError::SessionMismatch),
+        "exact session_ref reuse must not rebind delivery to another published release"
+    );
+    assert!(ledger.is_empty());
 }

@@ -47,8 +47,12 @@ classDiagram
     }
     class AssessmentSession {
       +session_ref
+      +instrument_release_ref
       +instrument_version_ref
+      +instrument_release_content_digest
+      +item_version_refs
       +participant_ref
+      +locale
       +state
       +created_at
     }
