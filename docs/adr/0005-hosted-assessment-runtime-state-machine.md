@@ -18,7 +18,7 @@ Psychometrics Commons implements an explicit hosted assessment runtime with appe
 draft -> review -> published -> suspended -> retired
 ```
 
-Published releases are immutable. Editing content creates a new `instrument_version_ref`. Suspension blocks new sessions but does not invalidate existing result provenance. Retirement blocks new sessions permanently unless a new release is published. A created session loaded from durable storage must restore the copied release/version/digest/locale identity without re-checking whether the release currently accepts new sessions. Later lifecycle commands persist as append-only history and replay on load so Activate/Pause/Resume survive process restart.
+Published releases are immutable. Editing content creates a new `instrument_version_ref`. Suspension blocks new sessions but does not invalidate existing result provenance. Retirement blocks new sessions permanently unless a new release is published. A created session loaded from durable storage must restore the copied release/version/digest/locale identity without re-checking whether the release currently accepts new sessions. Starting a *new* session must call `AssessmentSession::new` from a currently published release (`created_session_for_start` / `start_created_assessment_session`). Persist of an already-created aggregate is not the start boundary, and load is not authorization. Later lifecycle commands persist as append-only history and replay on load so Activate/Pause/Resume survive process restart.
 
 ### Assessment session
 
@@ -62,6 +62,7 @@ A released result references exactly one response snapshot and one scoring resul
 6. No client-provided timestamp determines authoritative ordering.
 7. Persisting session command history is append-only. A shorter in-memory history than already stored is conflicting replay and must not rewind the current-state projection.
 8. Command-history persist locks the `assessment_session` header row (`SELECT … FOR UPDATE`) before inserting or counting commands, so a concurrent shorter-history writer cannot count a prefix under `READ COMMITTED` and then overwrite a later projection.
+9. A new session starts only from a currently published release through `created_session_for_start` / `start_created_assessment_session`. Reconstituting stored identity is load, not start.
 
 ## Failure modes
 
@@ -83,6 +84,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - pause/resume and offline replay tests;
 - stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);
 - concurrent header-row lock tests (`command_persist_locks_session_header_until_caller_commits`);
+- published-release start-boundary tests (`start_uses_published_release_and_never_reconstitution`, `start_rejects_unpublished_release_and_locale_mismatch`, `start_persists_published_release_and_rejects_unpublished_before_insert`);
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests.
 

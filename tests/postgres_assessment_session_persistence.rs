@@ -9,8 +9,9 @@ use psychometrics_commons_runtime::instrument::{
 };
 use psychometrics_commons_runtime::postgres_assessment_session::{
     apply_assessment_session_migration, load_assessment_session, persist_assessment_session,
-    persist_assessment_session_commands, AssessmentSessionPersistenceDisposition,
-    AssessmentSessionPersistenceError,
+    persist_assessment_session_commands, start_created_assessment_session,
+    AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
+    AssessmentSessionStartError,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
@@ -138,6 +139,72 @@ fn created_session(
         20_000,
     )
     .unwrap()
+}
+
+#[test]
+fn start_persists_published_release_and_rejects_unpublished_before_insert() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
+
+    let mut transaction = client.transaction().unwrap();
+    let (started, disposition) = start_created_assessment_session(
+        &mut transaction,
+        "ses_start_published_persist_alpha",
+        PARTICIPANT_REF,
+        &published,
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    assert_eq!(
+        disposition,
+        AssessmentSessionPersistenceDisposition::Inserted
+    );
+    assert_eq!(started.state(), SessionState::Created);
+    assert_eq!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_published_persist_alpha",
+            PARTICIPANT_REF,
+            &published,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap()
+        .1,
+        AssessmentSessionPersistenceDisposition::Duplicate
+    );
+    transaction.commit().unwrap();
+
+    let draft =
+        InstrumentRelease::new(manifest("release_big_five_ko_v1", VALID_DIGEST), 10_000).unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_draft_must_not_insert",
+            PARTICIPANT_REF,
+            &draft,
+            "ko-KR",
+            20_100,
+        ),
+        Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
+    ));
+    transaction.rollback().unwrap();
+
+    let count: i64 = client
+        .query_one(
+            "SELECT COUNT(*) FROM assessment_session WHERE session_ref = $1",
+            &[&"ses_start_draft_must_not_insert"],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(
+        count, 0,
+        "an unpublished start must not insert a session row"
+    );
 }
 
 #[test]

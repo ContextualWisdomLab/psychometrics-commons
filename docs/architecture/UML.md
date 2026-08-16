@@ -291,7 +291,8 @@ sequenceDiagram
 
     P->>C: choose published instrument + locale
     C->>A: POST session (idempotency key)
-    A->>DB: persist anonymous participant/session
+    A->>DB: start created session from currently published release
+    Note over A,DB: start calls AssessmentSession::new; load is not authorization
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
 
@@ -499,6 +500,7 @@ For effects fully owned by the same PostgreSQL transaction, the domain side effe
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
 - Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
 - `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land.
+- Session start from a currently published release (`created_session_for_start` / `start_created_assessment_session`) exists on the Active PR successor of #146; HTTP `POST /v1/sessions` remains target.
 
 ## 14. Reference
 

@@ -2,17 +2,22 @@
 //!
 //! This module stores the participant, published-release, version, content-digest,
 //! and locale identity copied at session creation. It does not rewrite provenance
-//! when the release is later suspended or retired. Created identity is inserted
-//! only for [`SessionState::Created`]. Later lifecycle states persist as
-//! append-only command history plus a current-state projection. A shorter
-//! persist than already stored fails closed so a stale worker cannot rewind
-//! that projection. Command persist locks the created-session header row
-//! before inserting or counting commands. Load restores created identity
-//! without re-checking publication eligibility, then replays stored commands.
-//! Replay requires `READ COMMITTED`.
+//! when the release is later suspended or retired. New sessions must start
+//! through [`created_session_for_start`] or [`start_created_assessment_session`],
+//! which call [`AssessmentSession::new`]. Created identity is inserted only for
+//! [`SessionState::Created`]. Later lifecycle states persist as append-only
+//! command history plus a current-state projection. A shorter persist than
+//! already stored fails closed so a stale worker cannot rewind that projection.
+//! Command persist locks the created-session header row before inserting or
+//! counting commands. Load restores created identity without re-checking
+//! publication eligibility, then replays stored commands. Replay requires
+//! `READ COMMITTED`.
 
+use crate::instrument::InstrumentRelease;
 use crate::reference::normalized_reference;
-use crate::session::{AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionState};
+use crate::session::{
+    AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionCreationError, SessionState,
+};
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -108,6 +113,73 @@ impl From<postgres::Error> for AssessmentSessionPersistenceError {
     }
 }
 
+/// Fail-closed error for starting a created session from a live published release.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum AssessmentSessionStartError {
+    /// A session or participant reference was blank or numeric-like.
+    InvalidReference,
+    /// The server-authoritative session creation timestamp was zero.
+    InvalidTimestamp,
+    /// The selected immutable release is not currently allowed to begin new sessions.
+    InstrumentReleaseUnavailable,
+    /// The requested assessment locale does not exactly match the published release locale.
+    LocaleMismatch,
+    /// The created session could not be persisted.
+    Persistence(AssessmentSessionPersistenceError),
+}
+
+impl Display for AssessmentSessionStartError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidReference => {
+                "use opaque non-numeric session and participant references to start a session"
+            }
+            Self::InvalidTimestamp => {
+                "use a server creation time greater than zero to start a session"
+            }
+            Self::InstrumentReleaseUnavailable => {
+                "publish the exact instrument release before starting a new session"
+            }
+            Self::LocaleMismatch => "start the session with the exact published release locale",
+            Self::Persistence(_) => {
+                "session start could not persist the created session; retry the exact start or repair the store"
+            }
+        })
+    }
+}
+
+impl Error for AssessmentSessionStartError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Persistence(error) => Some(error),
+            Self::InvalidReference
+            | Self::InvalidTimestamp
+            | Self::InstrumentReleaseUnavailable
+            | Self::LocaleMismatch => None,
+        }
+    }
+}
+
+impl From<SessionCreationError> for AssessmentSessionStartError {
+    fn from(error: SessionCreationError) -> Self {
+        match error {
+            SessionCreationError::InvalidReference => Self::InvalidReference,
+            SessionCreationError::InvalidTimestamp => Self::InvalidTimestamp,
+            SessionCreationError::InstrumentReleaseUnavailable => {
+                Self::InstrumentReleaseUnavailable
+            }
+            SessionCreationError::LocaleMismatch => Self::LocaleMismatch,
+        }
+    }
+}
+
+impl From<AssessmentSessionPersistenceError> for AssessmentSessionStartError {
+    fn from(error: AssessmentSessionPersistenceError) -> Self {
+        Self::Persistence(error)
+    }
+}
+
 /// Apply the idempotent assessment-session and command-history migrations.
 ///
 /// # Errors
@@ -118,6 +190,67 @@ pub fn apply_assessment_session_migration(
 ) -> Result<(), postgres::Error> {
     client.batch_execute(ASSESSMENT_SESSION_MIGRATION)?;
     client.batch_execute(ASSESSMENT_SESSION_COMMAND_MIGRATION)
+}
+
+/// Build a created session that is legal to persist as a new start.
+///
+/// HTTP `POST /v1/sessions` and any other start path must call this, or
+/// [`start_created_assessment_session`], rather than
+/// [`AssessmentSession::from_persisted_created`]. This uses
+/// [`AssessmentSession::new`], so a suspended or retired release cannot begin a
+/// new session.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionStartError`] when the session or participant
+/// reference is invalid, the timestamp is zero, the release does not currently
+/// accept new sessions, or the requested locale is not the release locale.
+pub fn created_session_for_start(
+    session_ref: &str,
+    participant_ref: &str,
+    release: &InstrumentRelease,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<AssessmentSession, AssessmentSessionStartError> {
+    AssessmentSession::new(
+        session_ref,
+        participant_ref,
+        release,
+        requested_locale,
+        created_at_unix_ms,
+    )
+    .map_err(AssessmentSessionStartError::from)
+}
+
+/// Start one created session from a live published release and persist it.
+///
+/// This is the start boundary: it calls [`created_session_for_start`] and then
+/// [`persist_assessment_session`]. Exact replay of the same start is idempotent.
+/// It does not treat load as authorization and does not accept a reconstituted
+/// session.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionStartError`] for an unpublished or mismatched
+/// release, invalid start identity, or a persistence failure.
+pub fn start_created_assessment_session(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    participant_ref: &str,
+    release: &InstrumentRelease,
+    requested_locale: &str,
+    created_at_unix_ms: u64,
+) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
+{
+    let session = created_session_for_start(
+        session_ref,
+        participant_ref,
+        release,
+        requested_locale,
+        created_at_unix_ms,
+    )?;
+    let disposition = persist_assessment_session(transaction, &session)?;
+    Ok((session, disposition))
 }
 
 /// Persist one created assessment-session identity bound to a published release.
@@ -462,8 +595,10 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod tests {
-    use super::{reject_stale_command_prefix, AssessmentSessionPersistenceError};
-    use crate::session::{SessionCommand, SessionState};
+    use super::{
+        reject_stale_command_prefix, AssessmentSessionPersistenceError, AssessmentSessionStartError,
+    };
+    use crate::session::{SessionCommand, SessionCreationError, SessionState};
 
     #[test]
     fn session_persistence_errors_are_safe_and_specific() {
@@ -559,5 +694,41 @@ mod tests {
             "PostgreSQL assessment-session persistence failed"
         );
         assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn session_start_errors_map_creation_failures_and_keep_persistence_source() {
+        for (creation, expected) in [
+            (
+                SessionCreationError::InvalidReference,
+                AssessmentSessionStartError::InvalidReference,
+            ),
+            (
+                SessionCreationError::InvalidTimestamp,
+                AssessmentSessionStartError::InvalidTimestamp,
+            ),
+            (
+                SessionCreationError::InstrumentReleaseUnavailable,
+                AssessmentSessionStartError::InstrumentReleaseUnavailable,
+            ),
+            (
+                SessionCreationError::LocaleMismatch,
+                AssessmentSessionStartError::LocaleMismatch,
+            ),
+        ] {
+            let mapped = AssessmentSessionStartError::from(creation);
+            assert_eq!(mapped.to_string(), expected.to_string());
+            assert!(std::error::Error::source(&mapped).is_none());
+        }
+
+        let persistence =
+            AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay);
+        assert!(matches!(
+            persistence,
+            AssessmentSessionStartError::Persistence(
+                AssessmentSessionPersistenceError::ConflictingReplay
+            )
+        ));
+        assert!(std::error::Error::source(&persistence).is_some());
     }
 }
