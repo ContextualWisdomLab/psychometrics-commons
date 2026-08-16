@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS participant_identity_link (
     CONSTRAINT participant_identity_link_pkey PRIMARY KEY (identity_link_ref),
     CONSTRAINT participant_identity_link_participant_fk FOREIGN KEY (participant_ref)
         REFERENCES assessment_participant (participant_ref),
+    CONSTRAINT participant_identity_link_participant_link_unique UNIQUE (
+        participant_ref,
+        identity_link_ref
+    ),
     CONSTRAINT participant_identity_link_distinct_proofs_check CHECK (
         anonymous_proof_ref <> authenticated_proof_ref
     )
@@ -128,6 +132,9 @@ CREATE TABLE IF NOT EXISTS participant_identity_link_end (
         REFERENCES assessment_participant (participant_ref),
     CONSTRAINT participant_identity_link_end_linked_event_fk FOREIGN KEY (linked_event_ref)
         REFERENCES participant_identity_link (identity_link_ref),
+    CONSTRAINT participant_identity_link_end_linked_event_participant_fk
+        FOREIGN KEY (participant_ref, linked_event_ref)
+        REFERENCES participant_identity_link (participant_ref, identity_link_ref),
     CONSTRAINT participant_identity_link_end_linked_event_unique UNIQUE (linked_event_ref)
 );
 
@@ -140,6 +147,9 @@ CREATE TABLE IF NOT EXISTS current_participant_identity_link (
     CONSTRAINT current_participant_identity_link_pkey PRIMARY KEY (participant_ref),
     CONSTRAINT current_participant_identity_link_identity_fk FOREIGN KEY (identity_link_ref)
         REFERENCES participant_identity_link (identity_link_ref),
+    CONSTRAINT current_participant_identity_link_identity_participant_fk
+        FOREIGN KEY (participant_ref, identity_link_ref)
+        REFERENCES participant_identity_link (participant_ref, identity_link_ref),
     CONSTRAINT current_participant_identity_link_participant_fk FOREIGN KEY (participant_ref)
         REFERENCES assessment_participant (participant_ref),
     CONSTRAINT current_participant_identity_link_subject_unique UNIQUE (

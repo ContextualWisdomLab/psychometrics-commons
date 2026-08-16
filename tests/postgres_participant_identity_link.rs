@@ -63,6 +63,15 @@ fn anonymous_participant() -> ParticipantRecord {
     .unwrap()
 }
 
+fn anonymous_participant_beta() -> ParticipantRecord {
+    ParticipantRecord::new_anonymous(
+        "participant_identity_beta",
+        "tenant_identity_alpha",
+        10_000,
+    )
+    .unwrap()
+}
+
 fn linked_participant() -> ParticipantRecord {
     let mut participant = anonymous_participant();
     participant
@@ -557,6 +566,39 @@ fn two_unterminated_links_for_one_subject_fail_closed_on_lookup() {
         error,
         IdentityLinkPersistenceError::CorruptHistory
     ));
+}
+
+#[test]
+fn link_end_cannot_attach_to_another_participants_link() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &linked_participant());
+    persist_ok(&mut client, &anonymous_participant_beta());
+
+    let error = client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.participant_identity_link_end (\
+                 link_end_event_ref, participant_ref, linked_event_ref, evidence_ref, \
+                 ended_at_unix_ms\
+             ) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &"link_end_event_identity_cross",
+                &"participant_identity_beta",
+                &"link_event_identity_alpha",
+                &"unlink_evidence_identity_cross",
+                &10_200_i64,
+            ],
+        )
+        .expect_err("a link-end must belong to the same participant as the ended link");
+    assert!(error.as_db_error().is_some());
+}
+
+fn anonymous_participant_beta() -> ParticipantRecord {
+    ParticipantRecord::new_anonymous("participant_identity_beta", "tenant_identity_alpha", 10_000)
+        .unwrap()
 }
 
 #[test]
