@@ -260,7 +260,8 @@ pub fn load_participant_by_current_identity_subject(
 /// missing or stale even though append-only history is intact. A returning
 /// login already resolves from that history. Run this before accepting new
 /// account-link writes so concurrent first-inserts cannot bind a subject that
-/// already has an unterminated holder. Two unterminated holders of the same
+/// already has an unterminated holder, and so an ended issuer-scoped subject
+/// is free for a later participant. Two unterminated holders of the same
 /// issuer-scoped subject, or two current links on one participant, fail closed.
 ///
 /// # Errors

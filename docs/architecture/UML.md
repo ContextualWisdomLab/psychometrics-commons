@@ -373,6 +373,7 @@ sequenceDiagram
     A-->>C: link complete
 
     Note over DB: Unlink/relink/recovery appends lifecycle evidence; historical response/result identifiers are never rewritten
+    Note over DB: After restore, rebuild current projections from unterminated history before new writes so ended subjects are free
 ```
 
 ## 9. Longitudinal Gyeot-to-TEPP orchestration sequence
