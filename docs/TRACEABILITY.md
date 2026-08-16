@@ -139,7 +139,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** remaining PostgreSQL persist and operator-health HTTP slices are not protected-main truth until unchanged reviewed/check-clean heads are integrated. This baseline records item-delivery ledger persistence (#48) and immutable result snapshots (#51). Session, identity-link, response-event, scoring-completion, research, data-rights completion, and HTTP health-probe work remain Active PR only.
+**Active PR** remaining PostgreSQL persist and operator-health HTTP slices are not protected-main truth until unchanged reviewed/check-clean heads are integrated. This baseline records item-delivery ledger persistence (#48) and immutable result snapshots (#51). Session, identity-link, response-event, scoring-completion, research, data-rights completion, and HTTP health-probe work remain Active PR only. Merged #76 processing-start is current-main history after this evaluated SHA, not Active PR and not this baseline's claimed surface.
 
 ## 5. ADR traceability by concern
 
