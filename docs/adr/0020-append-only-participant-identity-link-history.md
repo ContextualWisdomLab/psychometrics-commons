@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: PR #160 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay reconciliation of a missing or stale current projection, and hosted dual-proof write/recover commands in `src/account_link_write.rs`. Prefer #160 over #147, #133, #124, and #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #160 adds hosted dual-proof write/recover commands in `src/account_link_write.rs` on the append-only persist/reload path. PR #158 adds store-wide restore reconcile of the derived current projection. Prefer #160 for write/recover and #158 for restore reconcile. Do not merge #147, #133, #124, or #114.
 - `PLANNED`: durable HTTP transport, unlink/relink HTTP commands, concurrency arbitration beyond the participant row lock, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
