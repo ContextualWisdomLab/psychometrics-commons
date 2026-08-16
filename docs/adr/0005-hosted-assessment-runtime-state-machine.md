@@ -43,7 +43,7 @@ As-built domain contract in `src/item_delivery.rs` and `src/session.rs`:
 - Allowed item versions are copied from the session aggregate, not from the caller-supplied manifest.
 - `deliver(&AssessmentSession, ItemDeliveryRequest)` authorizes both ownership and lifecycle from the same aggregate. A caller cannot present `SessionState::Active` for a `Created` session.
 - Exact replay of an accepted `delivery_ref` remains idempotent after the session leaves `Active`. Conflicting replay fails closed. Unknown or non-active states fail closed for new logical deliveries.
-- Same `session_ref` with different published-release provenance is `SessionMismatch`, not an idempotent replay.
+- Same `session_ref` with different published-release provenance, including a reused digest that enlarges, shrinks, or reorders the pinned item-version set, is `SessionMismatch`, not an idempotent replay.
 
 This decision is as-built for the in-process domain API. Durable PostgreSQL item-delivery persistence currently compares tenant, session, release reference, digest, locale, and allowed items; it does not yet persist `instrument_version_ref`. Until that column exists, version-only rebinding is closed in the domain ledger and remains an explicit persistence gap.
 
@@ -98,7 +98,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - pause/resume and offline replay tests;
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests;
-- `tests/item_delivery_session_authority.rs` rejects detached lifecycle forgery, isolated release/version/digest/locale/item-set mismatches, and same-`session_ref` / different-release delivery;
+- `tests/item_delivery_session_authority.rs` rejects detached lifecycle forgery, isolated release/version/digest/locale/item-set mismatches, same-`session_ref` / different-release delivery, and same-`session_ref` delivery after a reused digest rebinds the item set;
 - `tests/session_release_binding.rs` proves session creation copies the published item-version set.
 
 ## Alternatives rejected

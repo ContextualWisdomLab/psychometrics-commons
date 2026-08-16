@@ -132,7 +132,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** item-delivery session authority is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Ledgers are constructed only from an authoritative `AssessmentSession`; `from_session` rejects isolated release/version/digest/locale mismatches and a reused digest that rebinds the ordered item-version set; `deliver` authorizes lifecycle from the same aggregate. PostgreSQL item-delivery persistence still omits `instrument_version_ref`, so version-only durable rebinding remains an explicit adapter gap. Live HTTP delivery orchestration remains outside this slice.
+**Active PR** item-delivery session authority is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Ledgers are constructed only from an authoritative `AssessmentSession`; `from_session` rejects isolated release/version/digest/locale mismatches and a reused digest that rebinds the ordered item-version set; `deliver` rejects the same `session_ref` when release, version, digest, locale, or the ordered item-version set differs from the ledger. PostgreSQL item-delivery persistence still omits `instrument_version_ref`, so version-only durable rebinding remains an explicit adapter gap. Live HTTP delivery orchestration remains outside this slice.
 
 ## 5. ADR traceability by concern
 

@@ -300,6 +300,7 @@ sequenceDiagram
     A-->>C: session resource + item-delivery contract
 
     loop each presented item / response
+        Note over A,DB: deliver compares session_ref, release, version, digest, locale, and the ordered item-version set before appending
         A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
         P->>C: answer presented item
         C->>A: submit response(client_event_ref)
