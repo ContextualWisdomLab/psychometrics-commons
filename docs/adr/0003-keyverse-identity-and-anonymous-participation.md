@@ -37,6 +37,10 @@ The mapping between operational and research identities is stored in a restricte
 
 Keyverse claims establish authenticated subject and coarse scopes. Psychometrics Commons performs resource-level decisions for instrument administration, result ownership, research roles, data export, deletion, and release approval. A Keyverse administrator is not automatically a Psychometrics Commons research data steward.
 
+Anonymous session commands are a product-owned gate after the short-lived proof has already been verified. Transports that loaded `assessment_participant` and `assessment_session` must call `authorize_anonymous_session_command` / `apply_anonymous_session_command`. Those functions compare the verified actor to the loaded tenant, participant, and session references. They do not accept a caller-built `ResourceScope`. Fail-closed classification order is trusted server time, exclusive expiry, loaded-participant tenant, loaded session/participant ownership, actor participant, then session identity (National Institute of Standards and Technology, 2025).
+
+The lower-level `authorize_anonymous_session(actor, resource, now)` check remains for callers that already hold a stored assessment-session `ResourceScope`. It is not sufficient by itself for a command against a different loaded session.
+
 ## Invariants
 
 1. Core anonymous assessment does not require a Keyverse account.
@@ -74,3 +78,7 @@ The product does not rely on blanket PII masking that destroys operational utili
 ## Reversal conditions
 
 Revisit if Keyverse cannot meet a deployment's residency or federation requirements. A replacement must remain OIDC-compatible and preserve subject-mapping semantics without moving credentials into the product database.
+
+## References
+
+Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4

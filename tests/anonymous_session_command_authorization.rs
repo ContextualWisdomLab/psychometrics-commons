@@ -201,6 +201,31 @@ fn anonymous_command_authorization_rejects_compound_failures_in_time_then_owner_
 }
 
 #[test]
+fn anonymous_command_authorization_rejects_actor_when_loaded_participant_and_session_agree() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let other_owner = participant("tenant_alpha", "participant_beta");
+    let other_persons_session = session("participant_beta", "session_alpha");
+
+    assert_eq!(
+        authorize_anonymous_session_command(&actor, &other_owner, &other_persons_session, 1_500),
+        Err(AnonymousResourceAuthorizationError::OwnerMismatch)
+    );
+}
+
+#[test]
+fn anonymous_command_authorization_rejects_compound_foreign_tenant_and_inconsistent_loaded_pair_as_cross_tenant(
+) {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let foreign_owner = participant("tenant_beta", "participant_alpha");
+    let other_persons_session = session("participant_beta", "session_alpha");
+
+    assert_eq!(
+        authorize_anonymous_session_command(&actor, &foreign_owner, &other_persons_session, 1_500),
+        Err(AnonymousResourceAuthorizationError::CrossTenantDenied)
+    );
+}
+
+#[test]
 fn authorized_anonymous_proof_may_activate_only_its_loaded_session() {
     let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
     let owner = participant("tenant_alpha", "participant_alpha");
@@ -242,6 +267,52 @@ fn unauthorized_anonymous_command_does_not_mutate_the_loaded_session() {
         ))
     );
     assert_eq!(other_session.state(), SessionState::Created);
+}
+
+#[test]
+fn cross_tenant_anonymous_command_does_not_mutate_the_loaded_session() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let foreign_owner = participant("tenant_beta", "participant_alpha");
+    let mut loaded = session("participant_alpha", "session_alpha");
+
+    assert_eq!(
+        apply_anonymous_session_command(
+            &actor,
+            &foreign_owner,
+            &mut loaded,
+            "command_activate_foreign_tenant",
+            1,
+            SessionCommand::Activate,
+            1_500,
+        ),
+        Err(AnonymousSessionCommandError::Authorization(
+            AnonymousResourceAuthorizationError::CrossTenantDenied
+        ))
+    );
+    assert_eq!(loaded.state(), SessionState::Created);
+}
+
+#[test]
+fn owner_mismatch_anonymous_command_does_not_mutate_the_loaded_session() {
+    let actor = anonymous_context("tenant_alpha", "participant_alpha", "session_alpha");
+    let owner = participant("tenant_alpha", "participant_alpha");
+    let mut other_persons_session = session("participant_beta", "session_alpha");
+
+    assert_eq!(
+        apply_anonymous_session_command(
+            &actor,
+            &owner,
+            &mut other_persons_session,
+            "command_activate_foreign_owner",
+            1,
+            SessionCommand::Activate,
+            1_500,
+        ),
+        Err(AnonymousSessionCommandError::Authorization(
+            AnonymousResourceAuthorizationError::OwnerMismatch
+        ))
+    );
+    assert_eq!(other_persons_session.state(), SessionState::Created);
 }
 
 #[test]
@@ -297,13 +368,37 @@ fn authorized_anonymous_command_still_fails_closed_on_illegal_lifecycle_transiti
 }
 
 #[test]
-fn anonymous_session_command_errors_preserve_safe_authorization_text() {
-    let authorization = AnonymousSessionCommandError::Authorization(
-        AnonymousResourceAuthorizationError::SessionMismatch,
-    );
-    assert_eq!(
-        authorization.to_string(),
-        "anonymous session authority does not match the resource session"
-    );
-    assert!(std::error::Error::source(&authorization).is_some());
+fn anonymous_session_command_authorization_errors_display_and_source_all_variants() {
+    let cases = [
+        (
+            AnonymousResourceAuthorizationError::InvalidTimestamp,
+            "anonymous resource authorization requires positive server time",
+        ),
+        (
+            AnonymousResourceAuthorizationError::Expired,
+            "anonymous session authority is expired",
+        ),
+        (
+            AnonymousResourceAuthorizationError::CrossTenantDenied,
+            "anonymous session authority does not match the resource tenant",
+        ),
+        (
+            AnonymousResourceAuthorizationError::ResourceKindMismatch,
+            "anonymous session authority is limited to its assessment-session resource",
+        ),
+        (
+            AnonymousResourceAuthorizationError::OwnerMismatch,
+            "anonymous session authority does not match the resource participant",
+        ),
+        (
+            AnonymousResourceAuthorizationError::SessionMismatch,
+            "anonymous session authority does not match the resource session",
+        ),
+    ];
+
+    for (inner, expected) in cases {
+        let error = AnonymousSessionCommandError::Authorization(inner);
+        assert_eq!(error.to_string(), expected);
+        assert!(std::error::Error::source(&error).is_some());
+    }
 }

@@ -10,9 +10,9 @@
 //! rights, administer a tenant, or access another participant's session.
 //!
 //! Transports that already loaded a participant and session should call
-//! [`authorize_anonymous_session_command`]. That function builds the resource from those stored
-//! records so a caller cannot invent a matching tenant/owner/session triple and then command a
-//! different loaded session.
+//! [`authorize_anonymous_session_command`]. That function compares the verified actor to those
+//! stored records so a caller cannot invent a matching tenant/owner/session triple and then
+//! command a different loaded session.
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::authorization::{ResourceKind, ResourceScope};
@@ -127,12 +127,18 @@ pub fn authorize_anonymous_session(
 /// - `session`: the [`AssessmentSession`] loaded from the product store for that command; and
 /// - `now_unix_ms`: the current time from the application's trusted server clock, not a client clock.
 ///
-/// The function builds the resource from those loaded records. It does **not** accept a
-/// caller-invented tenant, owner, or session reference. For example, a proof for
+/// The function compares the actor to those loaded records. It does **not** accept a
+/// caller-invented tenant, owner, or session reference, and it does not build a
+/// [`ResourceScope`] that a transport could invent. For example, a proof for
 /// `session_alpha` / `participant_alpha` in `tenant_alpha` is allowed only when the loaded
 /// participant is that same person in that same tenant and the loaded session is `session_alpha`
 /// owned by that person. A session owned by `participant_beta`, or `session_beta` owned by the
 /// same person, is denied.
+///
+/// Checks run in a stable fail-closed order: trusted server time, expiry, loaded-participant
+/// tenant, loaded session/participant ownership, actor participant, then session identity.
+/// Tenant is classified before ownership so a foreign-tenant row that also disagrees on
+/// participant identity is reported as [`AnonymousResourceAuthorizationError::CrossTenantDenied`].
 ///
 /// # Errors
 ///
@@ -152,17 +158,18 @@ pub fn authorize_anonymous_session_command(
     if !actor.is_valid_at(now_unix_ms) {
         return Err(AnonymousResourceAuthorizationError::Expired);
     }
-    if session.participant_ref() != participant.participant_ref() {
+    if actor.tenant_ref() != participant.tenant_ref() {
+        return Err(AnonymousResourceAuthorizationError::CrossTenantDenied);
+    }
+    if session.participant_ref() != participant.participant_ref()
+        || actor.participant_ref() != participant.participant_ref()
+    {
         return Err(AnonymousResourceAuthorizationError::OwnerMismatch);
     }
-    let resource = ResourceScope::participant_owned(
-        ResourceKind::AssessmentSession,
-        participant.tenant_ref(),
-        participant.participant_ref(),
-        session.session_ref(),
-    )
-    .map_err(|_| AnonymousResourceAuthorizationError::SessionMismatch)?;
-    authorize_anonymous_session(actor, &resource, now_unix_ms)
+    if actor.session_ref() != session.session_ref() {
+        return Err(AnonymousResourceAuthorizationError::SessionMismatch);
+    }
+    Ok(())
 }
 
 /// Fail-closed error for applying a session command after anonymous authorization.
