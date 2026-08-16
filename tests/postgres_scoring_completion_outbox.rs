@@ -10,7 +10,8 @@ use psychometrics_commons_runtime::postgres_scoring_completion::{
 };
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
-    ScoringJobCompletionDisposition, ScoringJobPersistenceError,
+    record_successful_scoring_completion, ScoringJobCompletionDisposition,
+    ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::error::Error;
@@ -135,6 +136,128 @@ fn completion_and_outbox_commit_and_replay_together() {
         ScoringJobCompletionDisposition::Duplicate
     );
     assert_eq!(duplicate.outbox(), PersistenceDisposition::Duplicate);
+    transaction.commit().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT scoring_state, result_ref FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap();
+    let state: String = row.get(0);
+    let stored_result_ref: Option<String> = row.get(1);
+    assert_eq!(state, "completed");
+    assert_eq!(stored_result_ref.as_deref(), Some(result_ref));
+    let outbox_count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM integration_outbox WHERE event_ref = $1",
+            &[&event.event_ref()],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox_count, 1);
+}
+
+#[test]
+fn exact_legacy_completion_then_helper_inserts_the_missing_outbox() {
+    let _guard = completion_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_completion_legacy_complete";
+    let result_ref = "scoring_result_completion_legacy_complete";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_completion_legacy_complete",
+    );
+    let event = completion_event("event_completion_legacy_complete", job_ref, DIGEST_A);
+
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        record_successful_scoring_completion(
+            &mut transaction,
+            job_ref,
+            fencing_token,
+            result_ref,
+            20_000,
+        )
+        .unwrap(),
+        ScoringJobCompletionDisposition::Completed
+    );
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    let reconciled = record_successful_scoring_completion_with_outbox(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        result_ref,
+        20_000,
+        &event,
+        3,
+    )
+    .unwrap();
+    assert_eq!(
+        reconciled.completion(),
+        ScoringJobCompletionDisposition::Duplicate
+    );
+    assert_eq!(reconciled.outbox(), PersistenceDisposition::Inserted);
+    transaction.commit().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT scoring_state, result_ref FROM scoring_job_state WHERE scoring_job_ref = $1",
+            &[&job_ref],
+        )
+        .unwrap();
+    let state: String = row.get(0);
+    let stored_result_ref: Option<String> = row.get(1);
+    assert_eq!(state, "completed");
+    assert_eq!(stored_result_ref.as_deref(), Some(result_ref));
+    let outbox_count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM integration_outbox WHERE event_ref = $1",
+            &[&event.event_ref()],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(outbox_count, 1);
+}
+
+#[test]
+fn exact_legacy_outbox_then_helper_completes_the_leased_job() {
+    let _guard = completion_test_guard();
+    let mut client = test_client();
+    reset_and_migrate(&mut client);
+    let job_ref = "scoring_job_completion_legacy_outbox";
+    let result_ref = "scoring_result_completion_legacy_outbox";
+    let fencing_token = persist_and_claim(
+        &mut client,
+        job_ref,
+        "scoring_request_completion_legacy_outbox",
+    );
+    let event = completion_event("event_completion_legacy_outbox", job_ref, DIGEST_A);
+    assert_eq!(
+        enqueue_outbox_event(&mut client, &event, 3).unwrap(),
+        PersistenceDisposition::Inserted
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    let reconciled = record_successful_scoring_completion_with_outbox(
+        &mut transaction,
+        job_ref,
+        fencing_token,
+        result_ref,
+        20_000,
+        &event,
+        3,
+    )
+    .unwrap();
+    assert_eq!(
+        reconciled.completion(),
+        ScoringJobCompletionDisposition::Completed
+    );
+    assert_eq!(reconciled.outbox(), PersistenceDisposition::Duplicate);
     transaction.commit().unwrap();
 
     let row = client

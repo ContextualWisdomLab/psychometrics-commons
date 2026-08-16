@@ -75,10 +75,12 @@ impl Error for ScoringCompletionOutboxError {
 /// Persist one fenced successful scoring completion and one immutable outbox event atomically.
 ///
 /// Before any write, the outbox event must be emitted by `psychometrics_commons`, identify the
-/// exact scoring job as its subject, and carry the same server-authoritative completion time. This
-/// prevents an otherwise valid scoring completion from being committed beside unrelated outbox
-/// evidence. Event type, tenant, schema version, correlation, causation, and payload semantics stay
-/// with the caller's versioned integration contract rather than being invented here.
+/// exact scoring job as its subject, and carry the same server-authoritative completion time.
+/// Event type, tenant, schema version, correlation, causation, payload digest, event identity,
+/// and `scoring_result_ref` stay on the caller's versioned integration contract; this composition
+/// does not add a schema that binds those fields. A new `event_ref` after an already-accepted
+/// completion therefore inserts a second outbox row rather than rewriting historical completion
+/// evidence.
 ///
 /// The caller supplies and owns a `READ COMMITTED` transaction. After envelope validation, the
 /// scoring-job transition runs first and the outbox insert runs in the same transaction. If either
