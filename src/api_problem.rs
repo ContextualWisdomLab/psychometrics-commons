@@ -330,6 +330,10 @@ mod tests {
 
         for invalid_type in [
             "https://bad!.test/problems/denied",
+            "https://:80/problems/denied",
+            "https://example.test:",
+            "https://example.test:abc/problems/denied",
+            "https://user@example.test/problems/denied",
             "https://example.test/%",
             "https://example.test/%0G",
             "https://example.test/?%zz",
@@ -344,6 +348,19 @@ mod tests {
                 "{invalid_type}"
             );
         }
-        assert!(ApiProblem::new("urn:ab:value", 403, "Denied", "Public detail.", "denied").is_ok());
+        for valid_type in [
+            "https://example.test:443/problems/denied",
+            "https://example.test/problems/denied?version=2#details",
+            "https://example.test?a/b?c",
+            "urn:ab:value",
+            "urn:example:problem:v1",
+            "urn:example:problem/v1",
+            "urn:example:a@b",
+        ] {
+            assert!(
+                ApiProblem::new(valid_type, 403, "Denied", "Public detail.", "denied").is_ok(),
+                "{valid_type}"
+            );
+        }
     }
 }
