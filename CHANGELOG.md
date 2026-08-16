@@ -5,6 +5,8 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- `POST /v1/sessions` now maps a published instrument release to a created session or a reviewed RFC 9457 problem. Store the returned `session_ref` and persist the created session; publish the release or request its exact locale when the problem says so. The as-built OpenAPI document lists only this operation.
+- Command-history persist now locks the session header before insert or count, so a concurrent Activate-only worker cannot rewind a later Pause/Resume projection. Retry the later persist after the lock holder commits.
 - Created assessment sessions can be loaded from PostgreSQL without re-checking current publication eligibility, so a later suspend or retire cannot rewrite stored provenance. Missing sessions return none; later stored states without command history fail closed.
 - Assessment-session Activate/Pause/Resume command history persists in PostgreSQL so an in-progress session reloads after restart. Exact command replay is idempotent; sequence reuse and evidence rebinding fail closed.
 - PostgreSQL persistence for created assessment sessions bound to one published locale-specific release: exact replay is idempotent, and rebinding participant, release, version, digest, locale, state, or creation time fails closed.

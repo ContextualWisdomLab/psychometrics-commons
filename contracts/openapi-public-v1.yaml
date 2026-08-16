@@ -1,0 +1,128 @@
+openapi: "3.2.0"
+info:
+  title: Psychometrics Commons Public API
+  version: 0.1.0
+  description: >
+    As-built operations only. This document lists POST /v1/sessions.
+    Other TRD families remain unimplemented and are omitted so integrators
+    do not treat them as available.
+  contact:
+    name: ContextualWisdomLab
+    url: https://github.com/ContextualWisdomLab/psychometrics-commons
+jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema"
+paths:
+  /v1/sessions:
+    post:
+      operationId: createSession
+      summary: Start a created anonymous assessment session
+      description: >
+        Send an opaque session_ref as the resource-specific idempotency key,
+        an opaque participant_ref, the exact published locale, and a
+        server-issued created_at_unix_ms. The host supplies the published
+        instrument release. Persist the created session, then return 201.
+        Reuse the same session_ref to continue the assessment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Created session identity the client should store and reuse.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSessionAccepted"
+        "400":
+          description: Use an opaque reference or a server-issued creation time greater than zero.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+        "409":
+          description: Publish the instrument release or request its exact locale before starting.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ApiProblem"
+components:
+  schemas:
+    CreateSessionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - participant_ref
+        - requested_locale
+        - created_at_unix_ms
+      properties:
+        session_ref:
+          type: string
+          description: Opaque non-numeric session reference and resource-specific idempotency key.
+        participant_ref:
+          type: string
+          description: Opaque non-numeric product-owned participant reference.
+        requested_locale:
+          type: string
+          description: Exact BCP 47-style locale that must match the published release.
+        created_at_unix_ms:
+          type: integer
+          minimum: 1
+          description: Server-issued Unix time in milliseconds. Zero is rejected.
+    CreateSessionAccepted:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - participant_ref
+        - instrument_release_ref
+        - instrument_version_ref
+        - instrument_release_content_digest
+        - locale
+        - created_at_unix_ms
+        - session_state
+      properties:
+        session_ref:
+          type: string
+        participant_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        instrument_version_ref:
+          type: string
+        instrument_release_content_digest:
+          type: string
+        locale:
+          type: string
+        created_at_unix_ms:
+          type: integer
+          minimum: 1
+        session_state:
+          type: string
+          const: created
+    ApiProblem:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - status
+        - title
+        - detail
+        - code
+      properties:
+        type:
+          type: string
+          description: Explicit HTTPS or URN problem type. about blank is rejected.
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        title:
+          type: string
+        detail:
+          type: string
+          description: Occurrence-independent public next action. No SQL or provider text.
+        code:
+          type: string
+          description: Lowercase machine code starting with a letter.

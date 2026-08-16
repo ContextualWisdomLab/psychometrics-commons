@@ -61,6 +61,7 @@ A released result references exactly one response snapshot and one scoring resul
 5. Repeated completion/scoring commands are idempotent.
 6. No client-provided timestamp determines authoritative ordering.
 7. Persisting session command history is append-only. A shorter in-memory history than already stored is conflicting replay and must not rewind the current-state projection.
+8. Command-history persist locks the `assessment_session` header row (`SELECT … FOR UPDATE`) before inserting or counting commands, so a concurrent shorter-history writer cannot count a prefix under `READ COMMITTED` and then overwrite a later projection.
 
 ## Failure modes
 
@@ -81,6 +82,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - crash testing between transaction and event publication;
 - pause/resume and offline replay tests;
 - stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);
+- concurrent header-lock tests (`command_persist_locks_session_header_until_caller_commits`);
 - immutable snapshot and supersession tests;
 - end-to-end scoring dispatch contract tests.
 
@@ -101,3 +103,5 @@ Fowler, M. (2005, December 12). *Event sourcing*. https://martinfowler.com/eaaDe
 Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, building, and deploying messaging solutions*. Addison-Wesley.
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/index.html
+
+PostgreSQL Global Development Group. (2026). *Explicit locking*. In *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/explicit-locking.html

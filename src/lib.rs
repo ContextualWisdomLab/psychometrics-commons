@@ -9,6 +9,7 @@
 
 pub mod account_link;
 pub mod anonymous_session;
+pub mod api_problem;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
@@ -39,3 +40,4 @@ pub mod result;
 pub mod scoring;
 pub mod scoring_job;
 pub mod session;
+pub mod session_http;

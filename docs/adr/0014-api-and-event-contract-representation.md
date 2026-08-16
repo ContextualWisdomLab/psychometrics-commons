@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral
+- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; **Active PR** work adds a transport-neutral `POST /v1/sessions` mapping (`src/session_http.rs`) plus an as-built OpenAPI 3.2.0 document that lists only that operation (`contracts/openapi-public-v1.yaml`) and the RFC 9457 primitive (`src/api_problem.rs`). A live HTTP adapter and remaining TRD families remain Target.
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 
@@ -233,7 +233,8 @@ Costs:
 
 ## Follow-up work
 
-- when the first HTTP transport lands, add the exact OpenAPI document and route/problem contract tests;
+- mount a live HTTP adapter that serializes `create_assessment_session` as `POST /v1/sessions` and `ApiProblem` as `application/problem+json`;
+- add remaining TRD families to OpenAPI only when those operations exist;
 - when the first durable event transport lands, add AsyncAPI plus canonicalization/digest test vectors and tenant-bound outbox/inbox migrations;
 - add consumer crash/replay/quarantine integration tests against the selected persistence/broker adapters;
 - link deployment-specific deduplication-retention policy to backup/restore and broker retention evidence.

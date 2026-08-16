@@ -290,7 +290,8 @@ sequenceDiagram
     participant N as Narrative Adapter
 
     P->>C: choose published instrument + locale
-    C->>A: POST session (idempotency key)
+    C->>A: POST /v1/sessions (session_ref is the idempotency key)
+    Note over A: Active PR session_http maps published release + locale or returns RFC 9457
     A->>DB: persist anonymous participant/session
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract

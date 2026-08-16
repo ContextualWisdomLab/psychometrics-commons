@@ -6,9 +6,10 @@
 //! only for [`SessionState::Created`]. Later lifecycle states persist as
 //! append-only command history plus a current-state projection. A shorter
 //! persist than already stored fails closed so a stale worker cannot rewind
-//! that projection. Load restores created identity without re-checking
-//! publication eligibility, then replays stored commands. Replay requires
-//! `READ COMMITTED`.
+//! that projection. Command persist locks the session header before insert or
+//! count so a concurrent shorter writer cannot overwrite a later projection.
+//! Load restores created identity without re-checking publication eligibility,
+//! then replays stored commands. Replay requires `READ COMMITTED`.
 
 use crate::reference::normalized_reference;
 use crate::session::{AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionState};
@@ -174,8 +175,11 @@ pub fn persist_assessment_session(
 /// command reference, sequence, command, and resulting state is idempotent.
 /// Rebinding command evidence, reusing a sequence under another command
 /// identity, or persisting a shorter history than already stored fails closed so
-/// a stale Activate-only worker cannot rewind Pause/Resume. Load later
-/// reconstitutes created identity and replays these commands.
+/// a stale Activate-only worker cannot rewind Pause/Resume. The created-session
+/// header row is locked with `SELECT … FOR UPDATE` before commands are inserted
+/// or counted, so a concurrent Activate-only persist cannot count a prefix and
+/// then overwrite a later Pause/Resume projection. Load later reconstitutes
+/// created identity and replays these commands.
 ///
 /// # Errors
 ///
@@ -338,7 +342,7 @@ fn postgres_bigint(value: u64) -> Result<i64, AssessmentSessionPersistenceError>
     i64::try_from(value).map_err(|_| AssessmentSessionPersistenceError::ValueOutOfRange)
 }
 
-/// Require the created-session identity row before persisting later commands.
+/// Require and lock the created-session identity row before persisting later commands.
 fn require_existing_created_identity(
     transaction: &mut Transaction<'_>,
     session: &AssessmentSession,
@@ -347,7 +351,8 @@ fn require_existing_created_identity(
         .query_opt(
             "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
                     instrument_release_content_digest, locale, created_at_unix_ms
-             FROM assessment_session WHERE session_ref = $1",
+             FROM assessment_session WHERE session_ref = $1
+             FOR UPDATE",
             &[&session.session_ref()],
         )?
         .ok_or(AssessmentSessionPersistenceError::MissingCreatedIdentity)?;
