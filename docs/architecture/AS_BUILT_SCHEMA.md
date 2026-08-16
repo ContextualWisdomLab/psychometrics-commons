@@ -18,7 +18,7 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
-| `assessment_session` | session | **Active PR** #61 (not protected-main truth) |
+| `assessment_session` | session | **Active PR** #109 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 

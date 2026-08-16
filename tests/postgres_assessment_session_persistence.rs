@@ -338,18 +338,33 @@ fn created_session_load_restores_identity_and_rejects_later_states() {
     );
     transaction.commit().unwrap();
 
-    client
-        .execute(
-            "UPDATE assessment_session SET session_state = $2 WHERE session_ref = $1",
-            &[&"ses_load_created_alpha", &"active"],
-        )
-        .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        load_assessment_session(&mut transaction, "ses_load_created_alpha"),
-        Err(AssessmentSessionPersistenceError::UnsupportedStoredState)
-    ));
-    transaction.rollback().unwrap();
+    for later_state in [
+        "active",
+        "paused",
+        "completed",
+        "scoring",
+        "scored",
+        "released",
+        "expired",
+        "cancelled",
+        "invalidated",
+    ] {
+        client
+            .execute(
+                "UPDATE assessment_session SET session_state = $2 WHERE session_ref = $1",
+                &[&"ses_load_created_alpha", &later_state],
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(
+            matches!(
+                load_assessment_session(&mut transaction, "ses_load_created_alpha"),
+                Err(AssessmentSessionPersistenceError::UnsupportedStoredState)
+            ),
+            "load must fail closed for stored {later_state} without command history"
+        );
+        transaction.rollback().unwrap();
+    }
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
@@ -394,6 +409,17 @@ fn session_persist_requires_read_committed_and_surfaces_database_failure() {
         "PostgreSQL assessment-session persistence failed"
     );
     assert!(std::error::Error::source(&missing_table).is_some());
+    let missing_load = load_assessment_session(&mut transaction, session.session_ref())
+        .expect_err("load against a missing table must return the database error");
+    assert!(matches!(
+        missing_load,
+        AssessmentSessionPersistenceError::Database(_)
+    ));
+    assert_eq!(
+        missing_load.to_string(),
+        "PostgreSQL assessment-session persistence failed"
+    );
+    assert!(std::error::Error::source(&missing_load).is_some());
     transaction.rollback().unwrap();
 
     let overflow = AssessmentSession::new(
