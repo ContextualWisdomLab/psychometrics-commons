@@ -1,12 +1,16 @@
 //! `PostgreSQL` 18 persistence for purpose-specific consent evidence.
 //!
-//! This adapter stores product-owned consent events only. Identity credentials
-//! remain in Keyverse. The caller owns the connection, credentials, and
-//! transaction boundary. Ledger and event replay require `READ COMMITTED` so a
-//! concurrent insert that wins a unique-key race is visible to the exact-replay
-//! classifier.
+//! This adapter stores and reloads product-owned consent events only. Identity
+//! credentials remain in Keyverse. The caller owns the connection, credentials,
+//! and transaction boundary. Ledger persist, exact-replay classification, and
+//! restart reload require `READ COMMITTED` so a concurrent insert that wins a
+//! unique-key race is visible to the classifier and so a later-inserted
+//! same-millisecond revocation is not hidden behind a grant whose identity
+//! sorts later.
 
-use crate::consent::{ConsentDecision, ConsentEvent, ConsentLedger, ConsentPurpose};
+use crate::consent::{
+    ConsentDecision, ConsentEvent, ConsentEventInput, ConsentLedger, ConsentPurpose,
+};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -36,6 +40,8 @@ pub enum ConsentPersistenceError {
     InvalidTimestamp,
     /// Consent persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
+    /// Stored events cannot reconstruct a valid append-only consent ledger.
+    CorruptHistory,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -51,6 +57,7 @@ impl Display for ConsentPersistenceError {
             Self::UnsupportedIsolationLevel => {
                 "consent persistence requires read committed isolation"
             }
+            Self::CorruptHistory => "stored consent events cannot reconstruct a valid ledger",
             Self::Database(_) => "PostgreSQL consent persistence failed",
         })
     }
@@ -80,6 +87,70 @@ pub fn apply_consent_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
     client.batch_execute(CONSENT_MIGRATION)
+}
+
+/// Reload one participant-bound consent ledger after process restart.
+///
+/// Events are reconstructed in occurrence time, then physical insertion time,
+/// then event identity. Equal server timestamps therefore keep a later-inserted
+/// revocation after the grant whose opaque identity sorts later. A missing
+/// ledger is absent rather than an empty grant. Stored events that violate
+/// append-only domain rules fail closed instead of being reordered into a
+/// newer grant.
+///
+/// The caller owns the `READ COMMITTED` transaction. The load takes `FOR SHARE`
+/// on the ledger header so a concurrent writer that locks the same row cannot
+/// hide an in-flight append from the reconstructed snapshot.
+///
+/// # Errors
+///
+/// Returns [`ConsentPersistenceError`] for an invalid participant reference,
+/// unsupported isolation, stored events that cannot reconstruct a valid ledger,
+/// a timestamp outside the `PostgreSQL` range, or a database failure.
+pub fn load_consent_ledger(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+) -> Result<Option<ConsentLedger>, ConsentPersistenceError> {
+    require_read_committed(transaction)?;
+    let mut ledger = ConsentLedger::new(participant_ref)
+        .map_err(|_| ConsentPersistenceError::InvalidReference)?;
+    let participant_ref = ledger.participant_ref().to_owned();
+    if transaction
+        .query_opt(
+            "SELECT participant_ref FROM consent_ledger WHERE participant_ref = $1 FOR SHARE",
+            &[&participant_ref],
+        )?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let rows = transaction.query(
+        "SELECT event_ref, consent_purpose, consent_decision, \
+                consent_form_version_ref, research_scope_ref, occurred_at_unix_ms \
+         FROM consent_event \
+         WHERE participant_ref = $1 \
+         ORDER BY occurred_at_unix_ms ASC, created_at ASC, event_ref ASC",
+        &[&participant_ref],
+    )?;
+    for row in rows {
+        let event_ref: String = row.get(0);
+        let purpose = parse_purpose(row.get::<_, String>(1).as_str())?;
+        let decision = parse_decision(row.get::<_, String>(2).as_str())?;
+        let consent_form_version_ref: String = row.get(3);
+        let research_scope_ref: Option<String> = row.get(4);
+        let occurred_at_unix_ms = stored_timestamp(row.get(5))?;
+        ledger
+            .record(ConsentEventInput {
+                event_ref: &event_ref,
+                purpose,
+                decision,
+                consent_form_version_ref: &consent_form_version_ref,
+                research_scope_ref: research_scope_ref.as_deref(),
+                occurred_at_unix_ms,
+            })
+            .map_err(|_| ConsentPersistenceError::CorruptHistory)?;
+    }
+    Ok(Some(ledger))
 }
 
 /// Persist one participant-bound consent ledger and its accepted events.
@@ -190,11 +261,34 @@ fn purpose_name(purpose: ConsentPurpose) -> &'static str {
     }
 }
 
+fn parse_purpose(purpose: &str) -> Result<ConsentPurpose, ConsentPersistenceError> {
+    match purpose {
+        "service_operation" => Ok(ConsentPurpose::ServiceOperation),
+        "account_persistence" => Ok(ConsentPurpose::AccountPersistence),
+        "longitudinal_observation" => Ok(ConsentPurpose::LongitudinalObservation),
+        "research_contribution" => Ok(ConsentPurpose::ResearchContribution),
+        "communications" => Ok(ConsentPurpose::Communications),
+        _ => Err(ConsentPersistenceError::CorruptHistory),
+    }
+}
+
 fn decision_name(decision: ConsentDecision) -> &'static str {
     match decision {
         ConsentDecision::Granted => "granted",
         ConsentDecision::Revoked => "revoked",
     }
+}
+
+fn parse_decision(decision: &str) -> Result<ConsentDecision, ConsentPersistenceError> {
+    match decision {
+        "granted" => Ok(ConsentDecision::Granted),
+        "revoked" => Ok(ConsentDecision::Revoked),
+        _ => Err(ConsentPersistenceError::CorruptHistory),
+    }
+}
+
+fn stored_timestamp(value: i64) -> Result<u64, ConsentPersistenceError> {
+    u64::try_from(value).map_err(|_| ConsentPersistenceError::InvalidTimestamp)
 }
 
 fn required_reference(reference: &str) -> Result<&str, ConsentPersistenceError> {
@@ -215,7 +309,11 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{required_reference, ConsentPersistenceError};
+    use super::{
+        decision_name, parse_decision, parse_purpose, purpose_name, required_reference,
+        stored_timestamp, ConsentPersistenceError,
+    };
+    use crate::consent::{ConsentDecision, ConsentPurpose};
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -231,5 +329,39 @@ mod reference_guard_tests {
             required_reference("participant_consent_alpha").unwrap(),
             "participant_consent_alpha"
         );
+    }
+
+    #[test]
+    fn stored_purpose_and_decision_labels_round_trip_or_fail_closed() {
+        for purpose in [
+            ConsentPurpose::ServiceOperation,
+            ConsentPurpose::AccountPersistence,
+            ConsentPurpose::LongitudinalObservation,
+            ConsentPurpose::ResearchContribution,
+            ConsentPurpose::Communications,
+        ] {
+            assert_eq!(parse_purpose(purpose_name(purpose)).unwrap(), purpose);
+        }
+        assert!(matches!(
+            parse_purpose("unknown_purpose"),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+        assert_eq!(
+            parse_decision(decision_name(ConsentDecision::Granted)).unwrap(),
+            ConsentDecision::Granted
+        );
+        assert_eq!(
+            parse_decision(decision_name(ConsentDecision::Revoked)).unwrap(),
+            ConsentDecision::Revoked
+        );
+        assert!(matches!(
+            parse_decision("unknown_decision"),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+        assert_eq!(stored_timestamp(32_000).unwrap(), 32_000);
+        assert!(matches!(
+            stored_timestamp(-1),
+            Err(ConsentPersistenceError::InvalidTimestamp)
+        ));
     }
 }
