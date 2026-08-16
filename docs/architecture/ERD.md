@@ -1,7 +1,7 @@
 # Logical Entity-Relationship Model
 
 - Status: Normative logical data model
-- Date: 2026-08-13
+- Date: 2026-08-16
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
@@ -47,6 +47,7 @@ erDiagram
     research_participant ||--o{ research_identity_linkage : linked_under_restriction
     research_participant ||--o{ dataset_snapshot_member : included_as
     dataset_snapshot ||--o{ dataset_snapshot_member : contains
+    dataset_snapshot ||--o{ research_release_approval : approved_as
     dataset_snapshot ||--o{ research_release : released_as
 
     assessment_participant ||--o{ longitudinal_enrollment : enrolls
@@ -298,6 +299,24 @@ erDiagram
       string contribution_ref
     }
 
+    research_release_approval {
+      string research_release_ref PK
+      string dataset_snapshot_ref FK
+      string research_scope_ref
+      string manifest_digest
+      string privacy_review_ref
+      string scientific_review_ref
+      string metadata_bundle_ref
+      string license_record_ref
+      string measurement_provenance_ref
+      string access_approval_ref
+      string citation_metadata_ref
+      string release_approver_ref
+      string ordinary_admin_ref
+      string access_class
+      timestamp created_at
+    }
+
     research_release {
       string research_release_ref PK
       string dataset_snapshot_ref FK
@@ -459,6 +478,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `participant_identity_link` history;
 - accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
+- accepted `research_release_approval` evidence;
 - published `research_release`.
 
 Operational fields such as delivery attempt, inbox processing, enrollment state, or analysis-submission state may change according to their own audited lifecycle; they must not alter the immutable scientific payload they reference.
@@ -485,7 +505,8 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `(tenant_ref, source, outbox_event_ref)` or an equivalently stronger globally unique event identity with tenant binding | durable outbound event identity |
 | unique `(tenant_ref, consumer_name, source, source_event_ref)` | tenant-bound inbox deduplication |
 | unique research linkage for `(research_program_ref, participant_ref)` unless an ADR explicitly permits rotation semantics | controlled pseudonym mapping |
-| unique manifest digest identity for a published research release reference | release replay safety |
+| unique `research_release_ref` for product-owned approval evidence | research-release approval replay safety |
+| unique manifest digest identity for a published research release reference | catalog release replay safety |
 
 Idempotency keys are tenant/resource scoped; a key from one tenant cannot suppress or replay another tenant's state change.
 

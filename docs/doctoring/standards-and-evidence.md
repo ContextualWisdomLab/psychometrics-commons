@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-16
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -94,6 +94,18 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## Research release evidence
+
+Product-owned Research Commons approval evidence is an immutable archival record, not a mutable operational row. FAIR requires findable, accessible, interoperable, and reusable research objects with persistent identifiers and provenance (Wilkinson et al., 2016). TRUST requires transparency, responsibility, user focus, sustainability, and technology sufficient to keep that evidence trustworthy over time (Lin et al., 2020). OAIS distinguishes submission, archival, and dissemination information packages so approval evidence can exist before public catalog dissemination (Consultative Committee for Space Data Systems, 2012). FORCE11 data-citation principles require a specific, persistent, versioned dataset identity rather than a mutable project page (Data Citation Synthesis Group, 2014).
+
+Product consequences:
+
+- accepted release-approval evidence is persisted before `semantic-data-portal` registration;
+- exact replay is idempotent and conflicting identity reuse fails closed;
+- UPDATE, DELETE, and TRUNCATE of stored approval evidence fail at the database boundary;
+- backup/restore must keep the approval row and its immutability guard;
+- public catalog presentation remains a later dissemination handoff, not a rewrite of the archival record.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -107,6 +119,12 @@ Product consequences:
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
 
+Consultative Committee for Space Data Systems. (2012). *Reference model for an open archival information system (OAIS)* (Recommended Practice CCSDS 650.0-M-2). https://public.ccsds.org/pubs/650x0m2.pdf
+
+Data Citation Synthesis Group. (2014). *Joint declaration of data citation principles*. FORCE11. https://doi.org/10.25490/a97f-egyk
+
+International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
 International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 
 International Organization for Standardization. (2023a). *ISO/IEC 23894:2023 Information technology—Artificial intelligence—Guidance on risk management*. https://www.iso.org/standard/77304.html
@@ -117,10 +135,12 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
-International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+Lin, D., Crabtree, J., Dillo, I., Downs, R. R., Edmunds, R., Giaretta, D., De Giusti, M., L'Hours, H., Hugo, W., Jenkyns, R., Khodiyar, V., Martone, M. E., Mokrane, M., Navale, V., Petters, J., Sierman, B., Sokolova, D. V., Stockhause, M., & Westbrook, J. (2020). The TRUST Principles for digital repositories. *Scientific Data, 7*, Article 144. https://doi.org/10.1038/s41597-020-0486-7
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
-World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
+Wilkinson, M. D., Dumontier, M., Aalbersberg, I. J., Appleton, G., Axton, M., Baak, A., Blomberg, N., Boiten, J.-W., da Silva Santos, L. B., Bourne, P. E., Bouwman, J., Brookes, A. J., Clark, T., Crosas, M., Dillo, I., Dumon, O., Edmunds, S., Evelo, C. T., Finkers, R., ... Mons, B. (2016). The FAIR Guiding Principles for scientific data management and stewardship. *Scientific Data, 3*, Article 160018. https://doi.org/10.1038/sdata.2016.18
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/

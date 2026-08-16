@@ -1,7 +1,7 @@
 # UML-Aligned Domain and Behavior Models
 
 - Status: Normative architecture view
-- Date: 2026-08-10
+- Date: 2026-08-16
 - Notation: Mermaid diagrams using OMG UML 2.5.1 structural/behavioral semantics where the notation permits
 - Authority: accepted ADRs and PRD/TRD override a diagram if a contradiction is discovered
 
@@ -120,6 +120,17 @@ classDiagram
       +privacy_review_ref
       +state
     }
+    class ResearchReleaseApproval {
+      +research_release_ref
+      +dataset_snapshot_ref
+      +research_scope_ref
+      +manifest_digest
+      +privacy_review_ref
+      +scientific_review_ref
+      +access_class
+      +release_approver_ref
+      +ordinary_admin_ref
+    }
     class ResearchRelease {
       +research_release_ref
       +dataset_snapshot_ref
@@ -169,6 +180,7 @@ classDiagram
     AssessmentParticipant "1" --> "0..*" ResearchContribution : opts into
     AssessmentParticipant "1" --> "0..*" DataRightsRequest : requests
     ResearchContribution "0..*" --> "0..*" DatasetSnapshot : eligible input
+    DatasetSnapshot "1" --> "0..*" ResearchReleaseApproval : approved as
     DatasetSnapshot "1" --> "0..*" ResearchRelease : released as
     AssessmentParticipant "1" --> "0..*" LongitudinalEnrollment : enrolls
     LongitudinalEnrollment "1" --> "0..*" LongitudinalObservationRecord : ingests
@@ -177,7 +189,7 @@ classDiagram
 
 ### Domain-model rules
 
-- `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence.
+- `InstrumentVersion`, `ItemDeliveryEvent`, `ResponseSnapshot`, `ResultSnapshot`, accepted longitudinal observation evidence, accepted `ResearchReleaseApproval` evidence, and published `ResearchRelease` are immutable semantic artifacts or append-only evidence.
 - `ScoringJob` is operational state; `ResultSnapshot` is scientific/product evidence. They are not the same aggregate.
 - `ConsentSnapshot` records a purpose-specific decision and exact form/version evidence. Research consent is not inferred from service consent.
 - `ResearchContribution` is a product-domain participation record; public research data uses a separate research participant namespace behind the restricted linkage boundary.

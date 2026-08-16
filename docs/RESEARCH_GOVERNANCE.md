@@ -1,7 +1,7 @@
 # Research Commons Governance
 
 - Status: Normative product-governance baseline
-- Date: 2026-08-09
+- Date: 2026-08-16
 - Product contribution/snapshot owner: `ContextualWisdomLab/psychometrics-commons`
 - Catalog/release discovery owner: `ContextualWisdomLab/semantic-data-portal`
 
@@ -201,11 +201,11 @@ Moving between access classes is a governed release action. A restricted release
 
 ## 11. semantic-data-portal boundary
 
-Psychometrics Commons creates/approves the immutable research release manifest and supplies artifact references/digests through the integration contract.
+Psychometrics Commons creates/approves the immutable research release manifest and supplies artifact references/digests through the integration contract. Product-owned approval evidence is persisted as an immutable `research_release_approval` record before any catalog handoff. That record is not a public catalog entry and does not introduce restricted research linkage.
 
 `semantic-data-portal` owns catalog, ontology/lineage/discovery, release presentation, and its own access-control implementation. It does not query Psychometrics Commons operational response tables.
 
-Registration is idempotent by release identity and manifest digest. Reusing a release reference with a different digest fails closed.
+Registration is idempotent by release identity and manifest digest. Reusing a release reference with a different digest fails closed. Exact replay of the same product-owned approval evidence is idempotent; conflicting rebinding fails closed.
 
 ## 12. Citation and provenance
 
@@ -296,7 +296,8 @@ As implementation grows, tests include:
 - public/controlled/private access behavior matches release class;
 - portal outage queues/reconciles without affecting personal results;
 - superseding release preserves old release identity and correction relation;
-- backup/restore does not re-enable a withdrawn contribution for future release.
+- backup/restore does not re-enable a withdrawn contribution for future release;
+- backup/restore preserves product-owned approval evidence and keeps those rows immutable.
 
 ## 19. Research release gate
 
@@ -314,6 +315,8 @@ A release is blocked until the exact snapshot has:
 - release approver evidence distinct from ordinary identity administration;
 - no unresolved release-blocking security/privacy/scientific finding.
 
+Accepted gate evidence is stored as an immutable product-owned record. Catalog publication remains a later `semantic-data-portal` handoff and is not implied by persistence.
+
 ## 20. Related architecture artifacts
 
 - `docs/architecture/ERD.md` — research identity linkage, snapshot members, releases
@@ -322,3 +325,13 @@ A release is blocked until the exact snapshot has:
 - `docs/adr/0006-consent-data-rights-and-research-separation.md`
 - `docs/adr/0007-semantic-data-portal-research-release-boundary.md`
 - `docs/adr/0010-versioned-provenance-and-immutable-results.md`
+
+## 21. References
+
+Consultative Committee for Space Data Systems. (2012). *Reference model for an open archival information system (OAIS)* (Recommended Practice CCSDS 650.0-M-2). https://public.ccsds.org/pubs/650x0m2.pdf
+
+Data Citation Synthesis Group. (2014). *Joint declaration of data citation principles*. FORCE11. https://doi.org/10.25490/a97f-egyk
+
+Lin, D., Crabtree, J., Dillo, I., Downs, R. R., Edmunds, R., Giaretta, D., De Giusti, M., L'Hours, H., Hugo, W., Jenkyns, R., Khodiyar, V., Martone, M. E., Mokrane, M., Navale, V., Petters, J., Sierman, B., Sokolova, D. V., Stockhause, M., & Westbrook, J. (2020). The TRUST Principles for digital repositories. *Scientific Data, 7*, Article 144. https://doi.org/10.1038/s41597-020-0486-7
+
+Wilkinson, M. D., Dumontier, M., Aalbersberg, I. J., Appleton, G., Axton, M., Baak, A., Blomberg, N., Boiten, J.-W., da Silva Santos, L. B., Bourne, P. E., Bouwman, J., Brookes, A. J., Clark, T., Crosas, M., Dillo, I., Dumon, O., Edmunds, S., Evelo, C. T., Finkers, R., ... Mons, B. (2016). The FAIR Guiding Principles for scientific data management and stewardship. *Scientific Data, 3*, Article 160018. https://doi.org/10.1038/sdata.2016.18
