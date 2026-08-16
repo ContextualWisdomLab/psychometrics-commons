@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Versioned Personality Style presentation mapping (`style_mapping_version_v1`) assigns an original pole-dominance style from already-scored Big Five observations, keeps mixed/adjacent and balanced profiles honest, and never mutates numeric scores.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

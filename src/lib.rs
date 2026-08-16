@@ -8,6 +8,7 @@
 //! contracts rather than reimplemented here.
 
 pub mod account_link;
+pub mod anonymous_authorization;
 pub mod anonymous_session;
 pub mod authorization;
 pub mod consent;
@@ -38,3 +39,4 @@ pub mod result;
 pub mod scoring;
 pub mod scoring_job;
 pub mod session;
+pub mod style_mapping;

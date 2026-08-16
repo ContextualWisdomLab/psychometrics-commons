@@ -6,7 +6,7 @@
 - Scope: consumer Big Five results, Personality Style mapping, narrative generation, result provenance, client presentation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: continuous score/result provenance primitives are implemented on protected main; the consumer Personality Style mapping and narrative runtime are not yet implemented
+- Current/as-built status: continuous score/result provenance primitives, canonical style-assignment identity, and deterministic narrative fallback rendering are implemented on protected main; the first versioned Personality Style mapping (`src/style_mapping.rs`, `style_mapping_version_v1`) is Active PR work and is not protected-main truth until that head is integrated
 - Target status: deterministic versioned style assignment plus deterministic localized narrative fallback, with optional bounded AI prose rendering
 - Migration status: no persisted style-assignment records exist yet; the first implementation must introduce the canonical assignment identity without synthetic backfill claims
 
@@ -173,9 +173,9 @@ Costs:
 
 ## Follow-up work
 
-- define the first original Personality Style mapping with explicit prototype/rule rationale;
-- define the canonical style-assignment serialization schema and test vectors before persistence/API implementation;
-- create boundary/mixed-profile fixture bank;
+- land the Active PR `style_mapping_version_v1` pole-dominance mapping and keep it segregated from protected-main truth until review/checks pass;
+- publish the first approved interpretation-rule bundle and localized deterministic units that this mapping selects;
+- persist style-assignment artifacts with the canonical key; do not backfill historical results;
 - design Result Explorer explanations showing source dimensions and uncertainty;
 - evaluate Barnum susceptibility, perceived usefulness, calibration, and “not like me” feedback separately from score validity.
 
@@ -186,6 +186,18 @@ Costs:
 - Architecture: `ARCHITECTURE.md`, `docs/architecture/UML.md`, `docs/architecture/ERD.md`.
 - AI policy: `docs/AI_GOVERNANCE.md`.
 - Delivery/evidence: `docs/TRACEABILITY.md`, `docs/ROADMAP.md`, `docs/RISK_REGISTER.md`.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association.
+
+Costa, P. T., Jr., & McCrae, R. R. (1992). Four ways five factors are basic. *Personality and Individual Differences, 13*(6), 653–665. https://doi.org/10.1016/0191-8869(92)90236-I
+
+Forer, B. R. (1949). The fallacy of personal validation: A classroom demonstration of gullibility. *The Journal of Abnormal and Social Psychology, 44*(1), 118–123. https://doi.org/10.1037/h0059240
+
+John, O. P., & Srivastava, S. (1999). The Big Five trait taxonomy: History, measurement, and theoretical perspectives. In L. A. Pervin & O. P. John (Eds.), *Handbook of personality: Theory and research* (2nd ed., pp. 102–138). Guilford Press.
+
+McCrae, R. R., & Costa, P. T., Jr. (1989). Reinterpreting the Myers-Briggs Type Indicator from the perspective of the five-factor model of personality. *Journal of Personality, 57*(1), 17–40. https://doi.org/10.1111/j.1467-6494.1989.tb00759.x
 
 ## Reversal conditions
 
