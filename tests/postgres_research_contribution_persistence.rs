@@ -878,3 +878,97 @@ fn research_participant_ref_cannot_be_reused_across_operational_identities() {
         ResearchContributionPersistenceError::OperationalIdentityReuse
     ));
 }
+
+#[test]
+fn contribution_fails_closed_when_consent_ledger_was_never_persisted() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let snapshot = research_snapshot(
+        "participant_research_rho",
+        "consent_snapshot_research_rho",
+        "research_scope_rho",
+        16_000,
+    );
+    persist_snapshot_ok(&mut client, &snapshot);
+    assert!(
+        matches!(
+            persist_err(
+                &mut client,
+                &contribution(
+                    "research_contribution_rho",
+                    "research_participant_rho",
+                    &snapshot,
+                    16_100,
+                ),
+            ),
+            ResearchContributionPersistenceError::ResearchConsentRequired
+        ),
+        "a stored snapshot must not authorize a start when no consent_event exists"
+    );
+}
+
+#[test]
+fn later_purpose_level_grant_for_another_scope_blocks_stale_snapshot_start() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_consent_migration(&mut client).unwrap();
+    apply_research_contribution_migration(&mut client).unwrap();
+
+    let (mut ledger, stale_snapshot) = granted_research(
+        "participant_research_sigma",
+        "consent_snapshot_research_sigma_stale",
+        "research_scope_sigma_stale",
+        17_000,
+    );
+    persist_grant(&mut client, &ledger);
+    persist_snapshot_ok(&mut client, &stale_snapshot);
+
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "research_consent_grant_replacement",
+            purpose: ConsentPurpose::ResearchContribution,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "research_consent_form_v1",
+            research_scope_ref: Some("research_scope_sigma_current"),
+            occurred_at_unix_ms: 17_200,
+        })
+        .unwrap();
+    persist_grant(&mut client, &ledger);
+    let current_snapshot = ledger
+        .snapshot_as("consent_snapshot_research_sigma_current")
+        .unwrap();
+    persist_snapshot_ok(&mut client, &current_snapshot);
+
+    assert!(
+        matches!(
+            persist_err(
+                &mut client,
+                &contribution(
+                    "research_contribution_sigma_stale",
+                    "research_participant_sigma_stale",
+                    &stale_snapshot,
+                    17_300,
+                ),
+            ),
+            ResearchContributionPersistenceError::ResearchConsentRequired
+        ),
+        "a later purpose-level grant must replace the prior scope as the live write capability"
+    );
+    assert_eq!(
+        persist_ok(
+            &mut client,
+            &contribution(
+                "research_contribution_sigma_current",
+                "research_participant_sigma_current",
+                &current_snapshot,
+                17_400,
+            ),
+        ),
+        ResearchContributionPersistenceDisposition::Inserted
+    );
+}
