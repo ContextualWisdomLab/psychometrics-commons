@@ -115,9 +115,10 @@ pub fn apply_participant_identity_link_migration(
 /// and link-end evidence is idempotent. Reusing an event identity with
 /// different issuer, subject, proof, or time fails closed. An unterminated
 /// issuer-scoped subject cannot belong to two participants at once, even
-/// when the derived current projection is missing. Exact replay reconciles
-/// the derived current row from unterminated history, or deletes a stale
-/// row after unlink, so uniqueness stays enforced.
+/// when the derived current projection is missing. After history is written,
+/// reconcile is the only current-row writer: it deletes tenant-scoped current
+/// rows whose links have ended, then restores or clears this participant's
+/// derived row so a stale projection cannot block relink or a later bind.
 ///
 /// # Errors
 ///
@@ -343,14 +344,6 @@ fn persist_one_link(
         Err(error) => return Err(classify_subject_unique_violation(error)),
     };
     if inserted == 1 {
-        insert_current_projection(
-            transaction,
-            participant_ref,
-            identity_link_ref,
-            tenant_ref,
-            identity_issuer,
-            identity_subject_ref,
-        )?;
         return Ok(true);
     }
     let row = transaction.query_one(
@@ -385,6 +378,8 @@ fn reconcile_current_projection(
     participant: &ParticipantRecord,
 ) -> Result<(), IdentityLinkPersistenceError> {
     let participant_ref = required_reference(participant.participant_ref())?;
+    let tenant_ref = required_reference(participant.tenant_ref())?;
+    delete_terminated_current_projections(transaction, tenant_ref)?;
     let Some(identity_link_ref) = participant.link_event_ref() else {
         transaction.execute(
             "DELETE FROM current_participant_identity_link WHERE participant_ref = $1",
@@ -392,7 +387,6 @@ fn reconcile_current_projection(
         )?;
         return Ok(());
     };
-    let tenant_ref = required_reference(participant.tenant_ref())?;
     let identity_link_ref = required_reference(identity_link_ref)?;
     let identity_issuer = required_reference(
         participant
@@ -427,30 +421,20 @@ fn reconcile_current_projection(
     }
 }
 
-fn insert_current_projection(
+fn delete_terminated_current_projections(
     transaction: &mut Transaction<'_>,
-    participant_ref: &str,
-    identity_link_ref: &str,
     tenant_ref: &str,
-    identity_issuer: &str,
-    identity_subject_ref: &str,
 ) -> Result<(), IdentityLinkPersistenceError> {
-    match transaction.execute(
-        "INSERT INTO current_participant_identity_link (\
-             participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
-             identity_subject_ref\
-         ) VALUES ($1, $2, $3, $4, $5)",
-        &[
-            &participant_ref,
-            &identity_link_ref,
-            &tenant_ref,
-            &identity_issuer,
-            &identity_subject_ref,
-        ],
-    ) {
-        Ok(_) => Ok(()),
-        Err(error) => Err(classify_subject_unique_violation(error)),
-    }
+    transaction.execute(
+        "DELETE FROM current_participant_identity_link current_link \
+         WHERE current_link.tenant_ref = $1 \
+           AND EXISTS ( \
+               SELECT 1 FROM participant_identity_link_end ended_link \
+               WHERE ended_link.linked_event_ref = current_link.identity_link_ref \
+           )",
+        &[&tenant_ref],
+    )?;
+    Ok(())
 }
 
 fn persist_one_link_end(
@@ -477,11 +461,6 @@ fn persist_one_link_end(
         ],
     )?;
     if inserted == 1 {
-        transaction.execute(
-            "DELETE FROM current_participant_identity_link \
-             WHERE participant_ref = $1 AND identity_link_ref = $2",
-            &[&participant_ref, &linked_event_ref],
-        )?;
         return Ok(true);
     }
     let row = transaction.query_one(
@@ -621,9 +600,6 @@ fn classify_subject_unique_violation(error: postgres::Error) -> IdentityLinkPers
             "current_participant_identity_link_subject_unique"
             | "participant_identity_link_unterminated_subject_unique",
         ) => IdentityLinkPersistenceError::SubjectAlreadyBound,
-        Some("current_participant_identity_link_pkey") => {
-            IdentityLinkPersistenceError::ConflictingReplay
-        }
         _ => IdentityLinkPersistenceError::Database(error),
     }
 }

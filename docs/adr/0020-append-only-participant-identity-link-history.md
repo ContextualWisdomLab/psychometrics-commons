@@ -24,7 +24,7 @@ This ADR is a mixture of current and target state. Protected main provides stabl
 ### Implementation status
 
 - `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
-- `IMPLEMENTED_ON_ACTIVE_PR`: the identity-link successor of #133 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, exact-replay restoration of a missing current projection, and a database trigger that rejects a second unterminated issuer-scoped subject through `src/postgres_participant_identity_link.rs`. Prefer this successor over #147, #133, #124, and #114.
+- `IMPLEMENTED_ON_ACTIVE_PR`: the identity-link successor of #148 adds append-only `participant_identity_link` / `participant_identity_link_end` persistence, derived current-link projection, lifecycle-order persist of a complete unlink+relink aggregate, restart reload, current-subject lookup from unterminated history, reconcile-only current-row writes that delete terminated projections before restore, and a database trigger that rejects a second unterminated issuer-scoped subject through `src/postgres_participant_identity_link.rs`. Prefer this successor over #148, #147, #133, #124, and #114.
 - `PLANNED`: durable HTTP transport, unlink/relink/recovery operator commands, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
@@ -65,7 +65,7 @@ Keyverse is a dependency, not a source of truth for historical product identity.
 
 ## Contract details
 
-The protected-main machine-readable contract is the Rust domain surface in `src/participant.rs`: it supports stable participant identity plus a first optional subject-link boundary. PR #29 strengthens that same surface so the external account is represented by issuer plus provider-scoped subject. No hosted identity-link HTTP API, durable transport event, or physical identity-link schema is claimed by either state.
+The protected-main machine-readable contract is the Rust domain surface in `src/participant.rs`: it supports stable participant identity plus a first optional subject-link boundary. PR #29 strengthens that same surface so the external account is represented by issuer plus provider-scoped subject. Active PR physical schema exists in `migrations/0022_participant_identity_link.sql` and `migrations/0023_participant_identity_link_unterminated_subject.sql`; no hosted identity-link HTTP API or durable transport event is claimed until those transports exist.
 
 Target transport/persistence contracts must preserve the following semantics when implemented:
 
@@ -228,7 +228,7 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
 - Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
-- Active-PR persistence evidence: the successor of #133 (`migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, and `src/postgres_participant_identity_link.rs`) remains `IMPLEMENTED_ON_ACTIVE_PR` until merged.
+- Active-PR persistence evidence: the successor of #148 (`migrations/0022_participant_identity_link.sql`, `migrations/0023_participant_identity_link_unterminated_subject.sql`, and `src/postgres_participant_identity_link.rs`) remains `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.

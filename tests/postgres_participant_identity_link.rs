@@ -66,6 +66,55 @@ fn current_projection_rows(client: &mut Client, participant_ref: &str) -> i64 {
         .get(0)
 }
 
+fn current_projection_link_ref(client: &mut Client, participant_ref: &str) -> Option<String> {
+    client
+        .query_opt(
+            "SELECT identity_link_ref \
+             FROM identity_link_persistence_test.current_participant_identity_link \
+             WHERE participant_ref = $1",
+            &[&participant_ref],
+        )
+        .unwrap()
+        .map(|row| row.get(0))
+}
+
+fn insert_stale_current_projection(
+    client: &mut Client,
+    participant_ref: &str,
+    identity_link_ref: &str,
+    tenant_ref: &str,
+    identity_issuer: &str,
+    identity_subject_ref: &str,
+) {
+    client
+        .execute(
+            "INSERT INTO identity_link_persistence_test.current_participant_identity_link (\
+                 participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
+                 identity_subject_ref\
+             ) VALUES ($1, $2, $3, $4, $5)",
+            &[
+                &participant_ref,
+                &identity_link_ref,
+                &tenant_ref,
+                &identity_issuer,
+                &identity_subject_ref,
+            ],
+        )
+        .unwrap();
+}
+
+fn unlinked_participant() -> ParticipantRecord {
+    let mut participant = linked_participant();
+    participant
+        .record_link_end(
+            "link_end_event_identity_alpha",
+            "unlink_evidence_identity_alpha",
+            10_200,
+        )
+        .unwrap();
+    participant
+}
+
 fn anonymous_participant() -> ParticipantRecord {
     ParticipantRecord::new_anonymous(
         "participant_identity_alpha",
@@ -606,21 +655,14 @@ fn exact_replay_clears_stale_projection_after_unlink() {
         )
         .unwrap();
     persist_ok(&mut client, &unlinked);
-    client
-        .execute(
-            "INSERT INTO identity_link_persistence_test.current_participant_identity_link (\
-                 participant_ref, identity_link_ref, tenant_ref, identity_issuer, \
-                 identity_subject_ref\
-             ) VALUES ($1, $2, $3, $4, $5)",
-            &[
-                &"participant_identity_alpha",
-                &"link_event_identity_alpha",
-                &"tenant_identity_alpha",
-                &"keyverse_issuer_alpha",
-                &"keyverse_subject_alpha",
-            ],
-        )
-        .unwrap();
+    insert_stale_current_projection(
+        &mut client,
+        "participant_identity_alpha",
+        "link_event_identity_alpha",
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    );
 
     assert_eq!(
         persist_ok(&mut client, &unlinked),
@@ -697,6 +739,100 @@ fn exact_replay_restores_current_projection_after_relink() {
     .expect("relink replay must restore only the unterminated current subject");
     assert_eq!(found.participant_ref(), "participant_identity_alpha");
     assert_eq!(found.linked_subject_ref(), Some("keyverse_subject_gamma"));
+}
+
+#[test]
+fn exact_replay_of_relink_replaces_stale_current_projection() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &unlinked_participant());
+    insert_stale_current_projection(
+        &mut client,
+        "participant_identity_alpha",
+        "link_event_identity_alpha",
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    );
+
+    assert_eq!(
+        persist_ok(&mut client, &relinked_participant()),
+        IdentityLinkPersistenceDisposition::Inserted,
+        "relink after a stale current row must append the new link instead of failing closed"
+    );
+    assert_eq!(
+        current_projection_link_ref(&mut client, "participant_identity_alpha").as_deref(),
+        Some("link_event_identity_gamma")
+    );
+    assert!(load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .is_none());
+    let found = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_gamma",
+        "keyverse_subject_gamma",
+    )
+    .expect("relink replay must leave the current subject recoverable");
+    assert_eq!(found.participant_ref(), "participant_identity_alpha");
+    assert_eq!(found.linked_subject_ref(), Some("keyverse_subject_gamma"));
+}
+
+#[test]
+fn stale_current_after_unlink_does_not_block_another_participant_rebind() {
+    let _guard = identity_link_test_guard();
+    let mut client = test_client();
+    reset_identity_link_tables(&mut client);
+    apply_participant_identity_link_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &unlinked_participant());
+    insert_stale_current_projection(
+        &mut client,
+        "participant_identity_alpha",
+        "link_event_identity_alpha",
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    );
+
+    let mut next = anonymous_participant_beta();
+    next.link_account(
+        "link_event_identity_beta",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+        "anonymous_proof_identity_beta",
+        "authenticated_proof_identity_beta",
+        10_250,
+    )
+    .unwrap();
+    assert_eq!(
+        persist_ok(&mut client, &next),
+        IdentityLinkPersistenceDisposition::Inserted,
+        "a terminated subject's stale current row must not tell the next buyer the account is taken"
+    );
+    assert_eq!(
+        current_projection_rows(&mut client, "participant_identity_alpha"),
+        0
+    );
+    let found = load_by_subject_ok(
+        &mut client,
+        "tenant_identity_alpha",
+        "keyverse_issuer_alpha",
+        "keyverse_subject_alpha",
+    )
+    .expect("the reused subject must resolve to the participant that currently holds it");
+    assert_eq!(found.participant_ref(), "participant_identity_beta");
+    assert_eq!(
+        current_projection_link_ref(&mut client, "participant_identity_beta").as_deref(),
+        Some("link_event_identity_beta")
+    );
 }
 
 #[test]
