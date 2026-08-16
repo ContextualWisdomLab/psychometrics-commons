@@ -98,6 +98,25 @@ fn seed_recovery_critical_state(client: &mut Client) {
              ) VALUES (
                 'snapshot_recovery_alpha', 1, 'response_recovery_alpha',
                 'item_version_recovery_alpha', '{DIGEST_A}'
+             );
+             INSERT INTO {SOURCE_SCHEMA}.research_consent_snapshot (
+                consent_snapshot_ref, participant_ref, research_scope_ref, consent_form_version_ref
+             ) VALUES (
+                'consent_snapshot_recovery_research', 'participant_recovery_research',
+                'research_scope_recovery', 'consent_form_recovery'
+             );
+             INSERT INTO {SOURCE_SCHEMA}.research_contribution (
+                contribution_ref, participant_ref, research_participant_ref,
+                consent_snapshot_ref, research_scope_ref, started_at_unix_ms
+             ) VALUES (
+                'research_contribution_recovery', 'participant_recovery_research',
+                'research_participant_recovery', 'consent_snapshot_recovery_research',
+                'research_scope_recovery', 15000
+             );
+             INSERT INTO {SOURCE_SCHEMA}.research_withdrawal_event (
+                contribution_ref, withdrawal_event_ref, withdrawn_at_unix_ms
+             ) VALUES (
+                'research_contribution_recovery', 'withdrawal_event_recovery', 16000
              );"
         ))
         .expect("recovery fixture should satisfy all protected-main persistence constraints");
@@ -188,6 +207,49 @@ fn assert_restored_evidence(client: &mut Client) {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+
+    let restored_research = client
+        .query_one(
+            &format!(
+                "SELECT research_contribution.participant_ref,
+                        research_contribution.research_participant_ref,
+                        research_withdrawal_event.withdrawal_event_ref,
+                        research_withdrawal_event.withdrawn_at_unix_ms
+                 FROM {RESTORED_SCHEMA}.research_contribution
+                 JOIN {RESTORED_SCHEMA}.research_withdrawal_event USING (contribution_ref)
+                 WHERE research_contribution.contribution_ref = 'research_contribution_recovery'"
+            ),
+            &[],
+        )
+        .expect("consent-bound research contribution evidence should survive restore");
+    assert_eq!(
+        restored_research.get::<_, String>(0),
+        "participant_recovery_research"
+    );
+    assert_eq!(
+        restored_research.get::<_, String>(1),
+        "research_participant_recovery"
+    );
+    assert_eq!(
+        restored_research.get::<_, String>(2),
+        "withdrawal_event_recovery"
+    );
+    assert_eq!(restored_research.get::<_, i64>(3), 16000);
+
+    let research_mutation = client
+        .execute(
+            &format!(
+                "UPDATE {RESTORED_SCHEMA}.research_contribution
+                 SET research_participant_ref = 'research_participant_tampered'
+                 WHERE contribution_ref = 'research_contribution_recovery'"
+            ),
+            &[],
+        )
+        .expect_err("restored research contribution evidence must remain immutable");
+    let research_error = research_mutation
+        .as_db_error()
+        .expect("immutable restored research evidence must fail at the database boundary");
+    assert_eq!(research_error.code().code(), "55000");
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
@@ -251,6 +313,9 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "integration_consumption",
         "response_snapshot",
         "response_snapshot_entry",
+        "research_consent_snapshot",
+        "research_contribution",
+        "research_withdrawal_event",
     ];
     let backups: Vec<(&str, Vec<u8>)> = tables
         .iter()
