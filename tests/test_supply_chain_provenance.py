@@ -69,6 +69,17 @@ class SupplyChainProvenanceContract(unittest.TestCase):
             "actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d", text
         )
 
+    def test_concurrency_never_cancels_a_different_protected_main_revision(self) -> None:
+        """A newer main push must not erase provenance execution for an older exact source SHA."""
+        text = self.workflow_text()
+        concurrency = mapping_block(text, "concurrency", 0)
+        self.assertEqual(
+            mapping_scalar(concurrency, "group", 2),
+            "psychometrics-commons-provenance-${{ github.event.pull_request.number || github.sha }}",
+        )
+        self.assertEqual(mapping_scalar(concurrency, "cancel-in-progress", 2), "true")
+        self.assertNotIn("github.ref", concurrency)
+
     def test_package_job_preserves_exact_source_and_checksum_evidence(self) -> None:
         """The source package must come from the exact checked-out revision."""
         text = self.workflow_text()
