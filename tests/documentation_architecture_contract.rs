@@ -337,6 +337,73 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
 }
 
 #[test]
+fn anonymous_command_docs_do_not_claim_store_load() {
+    let root = repository_root();
+    let authorization = read_required(&root.join("src/anonymous_authorization.rs"));
+    let security = read_required(&root.join("docs/architecture/SECURITY_AND_DATA.md"));
+    let changelog = read_required(&root.join("CHANGELOG.md"));
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+    let adr =
+        read_required(&root.join("docs/adr/0003-keyverse-identity-and-anonymous-participation.md"));
+    let erd = read_required(&root.join("docs/architecture/ERD.md"));
+    let command_tests =
+        read_required(&root.join("tests/anonymous_session_command_authorization.rs"));
+    let uml = read_required(&root.join("docs/architecture/UML.md"));
+
+    assert!(
+        !authorization.contains("have been loaded from the product store"),
+        "apply_anonymous_session_command rustdoc must not claim the caller already loaded records"
+    );
+    assert!(
+        !authorization.contains("ParticipantRecord`] loaded from the product store"),
+        "authorize_anonymous_session_command rustdoc must not label the participant argument as store-loaded"
+    );
+    assert!(
+        authorization.contains("does not prove the records were loaded"),
+        "command authorization rustdoc must say the gate does not prove store load"
+    );
+    assert!(
+        !security.contains("supplied after a store load"),
+        "SECURITY_AND_DATA must not claim the command gate observed a store load"
+    );
+    assert!(
+        security.contains("does not prove those records were store-loaded"),
+        "SECURITY_AND_DATA must say the command gate does not prove store load"
+    );
+    assert!(
+        uml.contains(
+            "as-built command gate compares supplied records and does not perform the load"
+        ),
+        "UML happy-path must distinguish target store load from the as-built command gate"
+    );
+
+    for (label, document) in [
+        ("CHANGELOG.md", changelog.as_str()),
+        ("docs/TRACEABILITY.md", traceability.as_str()),
+        (
+            "docs/adr/0003-keyverse-identity-and-anonymous-participation.md",
+            adr.as_str(),
+        ),
+        ("docs/architecture/ERD.md", erd.as_str()),
+        ("docs/architecture/SECURITY_AND_DATA.md", security.as_str()),
+        (
+            "tests/anonymous_session_command_authorization.rs",
+            command_tests.as_str(),
+        ),
+        ("src/anonymous_authorization.rs", authorization.as_str()),
+    ] {
+        assert!(
+            !document.contains("remains Active PR #114"),
+            "{label} must not name superseded #114 as the current participant persist landing"
+        );
+        assert!(
+            document.contains("#133"),
+            "{label} must name Active PR #133 as the current participant persist landing"
+        );
+    }
+}
+
+#[test]
 fn uml_covers_identity_longitudinal_and_workbench_behavior() {
     let uml = read_required(&repository_root().join("docs/architecture/UML.md"));
 

@@ -278,6 +278,8 @@ Export cannot complete with a deletion-retention exception. Exact terminal repla
 
 ## 6. Anonymous assessment happy-path sequence
 
+This sequence is target transport. The as-built command gate compares supplied records and does not perform the load.
+
 ```mermaid
 sequenceDiagram
     autonumber
