@@ -7,8 +7,9 @@
 
 use crate::participant::ParticipantRecord;
 use crate::postgres_participant::{
-    load_anonymous_participant_base, persist_anonymous_participant_base,
-    ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
+    apply_participant_base_migration, load_anonymous_participant_base,
+    persist_anonymous_participant_base, ParticipantBasePersistenceDisposition,
+    ParticipantBasePersistenceError,
 };
 use postgres::{Client, NoTls};
 
@@ -21,13 +22,10 @@ fn transaction_reload_instantiation_covers_success_absence_and_invalid_aliases()
             "CREATE SCHEMA IF NOT EXISTS participant_base_library_coverage;\
              SET search_path TO participant_base_library_coverage;\
              DROP TABLE IF EXISTS assessment_participant;\
-             CREATE TABLE assessment_participant (\
-                 participant_ref TEXT PRIMARY KEY,\
-                 tenant_ref TEXT NOT NULL,\
-                 created_at_unix_ms BIGINT NOT NULL\
-             );",
+             DROP FUNCTION IF EXISTS reject_assessment_participant_mutation() CASCADE;",
         )
         .unwrap();
+    apply_participant_base_migration(&mut client).unwrap();
 
     let participant = ParticipantRecord::new_anonymous(
         "participant_library_coverage",
