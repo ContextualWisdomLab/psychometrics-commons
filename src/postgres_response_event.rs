@@ -429,9 +429,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        map_rebuild_error, millis_from_duration, postgres_sequence, postgres_timestamptz,
-        query_existing_event_row, require_contiguous_receipt_history, required_reference,
-        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
+        classify_existing_event, map_rebuild_error, millis_from_duration, postgres_sequence,
+        postgres_timestamptz, query_existing_event_row, require_contiguous_receipt_history,
+        required_reference, unix_ms_from_system_time, ResponseEventPersistenceError,
+        ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
@@ -574,9 +575,30 @@ mod reference_guard_tests {
         client
             .batch_execute("SET search_path TO response_event_query_helper_missing;")
             .unwrap();
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
         let mut transaction = client.transaction().unwrap();
         assert!(matches!(
             query_existing_event_row(&mut transaction, "server_event_item_01"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        let observed_at = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert!(matches!(
+            classify_existing_event(
+                &mut transaction,
+                "session_ipip_ko_quick",
+                &event,
+                "server_event_item_01",
+                1,
+                observed_at,
+                observed_at + Duration::from_millis(250),
+            ),
             Err(ResponseEventPersistenceError::Database(_))
         ));
         transaction.rollback().unwrap();
