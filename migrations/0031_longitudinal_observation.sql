@@ -1,5 +1,27 @@
 -- Durable, immutable normalized longitudinal observation evidence.
 
+-- Keep the database boundary aligned with the shared opaque-reference contract: references must
+-- be nonblank, have no outer whitespace, and must not be numeric-like (including signs,
+-- decimal/group separators, or exponent notation). The fixed pg_catalog search path prevents
+-- caller-controlled schemas from changing function resolution inside this CHECK helper.
+CREATE OR REPLACE FUNCTION longitudinal_reference_is_valid(reference_value text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+SET search_path = pg_catalog
+AS $longitudinal_reference$
+    SELECT
+        reference_value IS NOT NULL
+        AND reference_value <> ''
+        AND left(reference_value, 1) !~ '[[:space:]]'
+        AND right(reference_value, 1) !~ '[[:space:]]'
+        AND NOT (
+            reference_value ~ '[[:digit:]]'
+            AND reference_value ~ '^[[:digit:]+,.eE-]+$'
+        );
+$longitudinal_reference$;
+
 CREATE TABLE IF NOT EXISTS longitudinal_observation (
     observation_record_ref text PRIMARY KEY,
     tenant_ref text NOT NULL,
@@ -19,13 +41,13 @@ CREATE TABLE IF NOT EXISTS longitudinal_observation (
     CONSTRAINT longitudinal_observation_source_identity_unique
         UNIQUE (tenant_ref, enrollment_ref, source_system_ref, source_observation_ref),
     CONSTRAINT longitudinal_observation_reference_check CHECK (
-        observation_record_ref = btrim(observation_record_ref) AND observation_record_ref <> '' AND observation_record_ref !~ '^[0-9]+$'
-        AND tenant_ref = btrim(tenant_ref) AND tenant_ref <> '' AND tenant_ref !~ '^[0-9]+$'
-        AND enrollment_ref = btrim(enrollment_ref) AND enrollment_ref <> '' AND enrollment_ref !~ '^[0-9]+$'
-        AND source_system_ref = btrim(source_system_ref) AND source_system_ref <> '' AND source_system_ref !~ '^[0-9]+$'
-        AND source_observation_ref = btrim(source_observation_ref) AND source_observation_ref <> '' AND source_observation_ref !~ '^[0-9]+$'
-        AND construct_ref = btrim(construct_ref) AND construct_ref <> '' AND construct_ref !~ '^[0-9]+$'
-        AND measure_ref = btrim(measure_ref) AND measure_ref <> '' AND measure_ref !~ '^[0-9]+$'
+        longitudinal_reference_is_valid(observation_record_ref)
+        AND longitudinal_reference_is_valid(tenant_ref)
+        AND longitudinal_reference_is_valid(enrollment_ref)
+        AND longitudinal_reference_is_valid(source_system_ref)
+        AND longitudinal_reference_is_valid(source_observation_ref)
+        AND longitudinal_reference_is_valid(construct_ref)
+        AND longitudinal_reference_is_valid(measure_ref)
     ),
     CONSTRAINT longitudinal_observation_time_check CHECK (
         validity_start_at_unix_ms > 0 AND validity_end_at_unix_ms >= validity_start_at_unix_ms
@@ -36,7 +58,11 @@ CREATE TABLE IF NOT EXISTS longitudinal_observation (
         AND utc_offset_minutes BETWEEN -720 AND 840
     ),
     CONSTRAINT longitudinal_observation_anomaly_check CHECK (
-        clock_anomaly_code IS NULL OR clock_anomaly_code = 'recorded_after_received'
+        (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
+        OR (
+            clock_anomaly_code = 'recorded_after_received'
+            AND recorded_at_unix_ms > received_at_unix_ms
+        )
     )
 );
 
@@ -51,14 +77,45 @@ CREATE TABLE IF NOT EXISTS longitudinal_membership_share (
         UNIQUE (observation_record_ref, membership_context_ref),
     CONSTRAINT longitudinal_membership_sequence_check CHECK (membership_sequence > 0),
     CONSTRAINT longitudinal_membership_reference_check CHECK (
-        membership_context_ref = btrim(membership_context_ref)
-        AND membership_context_ref <> ''
-        AND membership_context_ref !~ '^[0-9]+$'
+        longitudinal_reference_is_valid(membership_context_ref)
     ),
     CONSTRAINT longitudinal_membership_weight_check CHECK (
         weight_parts_per_10_000 BETWEEN 1 AND 10000
     )
 );
+
+-- Reapply evolving CHECK definitions so an idempotent rerun upgrades a schema created by an
+-- earlier iteration of this not-yet-shipped migration rather than trusting constraint names alone.
+ALTER TABLE longitudinal_observation
+    DROP CONSTRAINT IF EXISTS longitudinal_observation_reference_check;
+ALTER TABLE longitudinal_observation
+    ADD CONSTRAINT longitudinal_observation_reference_check CHECK (
+        longitudinal_reference_is_valid(observation_record_ref)
+        AND longitudinal_reference_is_valid(tenant_ref)
+        AND longitudinal_reference_is_valid(enrollment_ref)
+        AND longitudinal_reference_is_valid(source_system_ref)
+        AND longitudinal_reference_is_valid(source_observation_ref)
+        AND longitudinal_reference_is_valid(construct_ref)
+        AND longitudinal_reference_is_valid(measure_ref)
+    );
+
+ALTER TABLE longitudinal_observation
+    DROP CONSTRAINT IF EXISTS longitudinal_observation_anomaly_check;
+ALTER TABLE longitudinal_observation
+    ADD CONSTRAINT longitudinal_observation_anomaly_check CHECK (
+        (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
+        OR (
+            clock_anomaly_code = 'recorded_after_received'
+            AND recorded_at_unix_ms > received_at_unix_ms
+        )
+    );
+
+ALTER TABLE longitudinal_membership_share
+    DROP CONSTRAINT IF EXISTS longitudinal_membership_reference_check;
+ALTER TABLE longitudinal_membership_share
+    ADD CONSTRAINT longitudinal_membership_reference_check CHECK (
+        longitudinal_reference_is_valid(membership_context_ref)
+    );
 
 CREATE OR REPLACE FUNCTION reject_longitudinal_mutation()
 RETURNS trigger
