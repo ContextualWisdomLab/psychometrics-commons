@@ -1,3 +1,5 @@
+//! Documentation-contract coverage for the stored data-rights authorization boundary.
+
 const AUTHORIZATION_ARCHITECTURE: &str =
     include_str!("../docs/architecture/DATA_RIGHTS_AUTHORIZATION.md");
 
