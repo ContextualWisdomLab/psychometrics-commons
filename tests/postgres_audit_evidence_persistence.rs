@@ -8,8 +8,7 @@ use psychometrics_commons_runtime::postgres_audit::{
 };
 use std::sync::{Mutex, MutexGuard};
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_DIGEST: &str =
     "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
@@ -275,7 +274,10 @@ fn migration_is_idempotent_and_database_constraints_reject_bad_machine_evidence(
                 outcome_code, evidence_digest, occurred_at_unix_ms\
              ) VALUES {row}"
         );
-        assert!(client.execute(&statement, &[]).is_err(), "row must fail closed: {row}");
+        assert!(
+            client.execute(&statement, &[]).is_err(),
+            "row must fail closed: {row}"
+        );
     }
 
     assert_eq!(
