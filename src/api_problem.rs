@@ -253,16 +253,31 @@ fn valid_urn_namespace_id(namespace_id: &str) -> bool {
 }
 
 fn valid_urn_namespace_specific_string(value: &str) -> bool {
-    if value.is_empty() {
-        return false;
-    }
-    valid_percent_encoded_ascii(value, |byte| {
-        is_unreserved(byte) || is_sub_delimiter(byte) || matches!(byte, b':' | b'@' | b'/')
-    })
+    valid_urn_component(value, is_path_byte)
 }
 
 fn valid_urn_rq_component(value: &str) -> bool {
-    !value.is_empty() && valid_percent_encoded_ascii(value, is_query_or_fragment_byte)
+    valid_urn_component(value, is_query_or_fragment_byte)
+}
+
+fn valid_urn_component(value: &str, continuation_allowed: fn(u8) -> bool) -> bool {
+    let bytes = value.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+
+    let continuation_start = if first == b'%' {
+        if bytes.len() < 3 || !bytes[1].is_ascii_hexdigit() || !bytes[2].is_ascii_hexdigit() {
+            return false;
+        }
+        3
+    } else if is_path_segment_byte(first) {
+        1
+    } else {
+        return false;
+    };
+
+    valid_percent_encoded_ascii(&value[continuation_start..], continuation_allowed)
 }
 
 fn valid_https_suffix(value: &str) -> bool {
@@ -383,9 +398,17 @@ mod tests {
             "urn:-a:value",
             "urn:a-:value",
             "urn:example:bad value",
+            "urn:example:/problem",
+            "urn:example:%",
+            "urn:example:%0",
+            "urn:example:%0G",
             "urn:example:problem?bare",
             "urn:example:problem?+",
             "urn:example:problem?=",
+            "urn:example:problem?+/resolver",
+            "urn:example:problem?+?resolver",
+            "urn:example:problem?=/version",
+            "urn:example:problem?=?version",
             "urn:example:problem#one#two",
             "urn:example:problem?+resolver?=%zz",
         ] {
@@ -400,6 +423,7 @@ mod tests {
             "https://example.test/problems/denied?version=2#details",
             "https://example.test?a/b?c",
             "urn:ab:value",
+            "urn:example:%70roblem",
             "urn:example:problem:v1",
             "urn:example:problem/v1",
             "urn:example:a@b",
