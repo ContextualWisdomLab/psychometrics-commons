@@ -2,7 +2,7 @@
 
 - Status: Normative evidence map
 - Date: 2026-08-14
-- Protected-main baseline: `4b828134f4d597ca1add3d6dbf02bebd72bfb0b2`
+- Protected-main baseline: `cc5850a0d1eacbbf16d03075534fce460a8286e6`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
@@ -12,18 +12,34 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
-| `integration_outbox` | integration | Implemented subset |
+| `integration_outbox` | integration | Implemented subset; exclusive delivery-lease extension is **Active PR** #60 |
 | `integration_delivery_attempt` | integration | Implemented subset |
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
-| `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
+| `integration_consumption` | integration | Implemented subset |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
-## Active PR inbox-consumption physical schema
+## Active PR outbox delivery-lease physical schema
 
-PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
+PR #60 (`feat/outbox-delivery-lease-20260814`) extends the protected-main `integration_outbox` relation through `migrations/0013_outbox_delivery_lease.sql` and `src/postgres_integration.rs`. The extension is **Active PR**, not protected-main truth.
+
+The active slice adds:
+
+- nullable `lease_worker_ref` and `lease_ref` opaque ownership references;
+- nullable positive `lease_fencing_token` and `lease_expires_at_unix_ms` values that are either all present or all absent for the current lease;
+- `delivery_lease_generation BIGINT NOT NULL DEFAULT 0 CHECK (delivery_lease_generation >= 0)` as the persisted monotonic generation;
+- `integration_outbox_fencing_generation_check`, requiring any live `lease_fencing_token` to equal the current persisted generation;
+- exclusive pending-row claims, explicit expired-lease recovery, and fenced attempt recording that clears the current lease after an accepted attempt;
+- database-clock authority for both worker-side lease-expiry classification and exclusive-lease recovery, while caller-supplied attempt timestamps remain immutable delivery-attempt evidence and a future caller observation cannot steal a still-live lease;
+- fail-closed stale fencing before replay classification whenever a current lease exists, while exact replay after a completed attempt has cleared its lease remains idempotent.
+
+Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_delivery_lease.rs`, `tests/postgres_outbox_delivery_lease_fencing_integrity.rs`, `tests/postgres_outbox_delivery_lease_authority.rs`, `tests/postgres_outbox_delivery_lease_concurrency.rs`, `tests/postgres_outbox_delivery_lease_coverage_edges.rs`, and `tests/postgres_outbox_delivery_lease_migration_isolation.rs`. These tests cover exclusive claim/recovery, monotonic fencing, invalid physical state rejection, database-authoritative expiry, rejection of a future caller timestamp against a still-live lease, stale-fence replay precedence, blocking-proven concurrent claims, schema isolation, and persistence failure paths. The slice must remain **Active PR** until the exact reviewed/check-clean head is merged and protected main is refetched.
+
+## Protected-main inbox-consumption physical schema
+
+`migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` persist one consumption work item for an existing `integration_inbox` receipt. This is an **Implemented subset** on protected main after #58. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence. Subsequent claim-deadline columns from later inbox-expiry slices remain documented with those slices.
 
 ## Protected-main scoring-job physical schema
 
