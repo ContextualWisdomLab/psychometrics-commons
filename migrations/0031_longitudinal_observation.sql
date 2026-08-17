@@ -109,6 +109,15 @@ BEGIN
 END;
 $$;
 
+-- A membership-only trigger cannot observe an observation whose membership vector is empty,
+-- because no child INSERT exists to fire it. Defer the same invariant from the parent INSERT so
+-- the complete vector can be inserted in the transaction while a header-only commit still fails.
+DROP TRIGGER IF EXISTS longitudinal_observation_membership_total_check ON longitudinal_observation;
+CREATE CONSTRAINT TRIGGER longitudinal_observation_membership_total_check
+AFTER INSERT ON longitudinal_observation
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION enforce_longitudinal_membership_total();
+
 DROP TRIGGER IF EXISTS longitudinal_membership_total_check ON longitudinal_membership_share;
 CREATE CONSTRAINT TRIGGER longitudinal_membership_total_check
 AFTER INSERT ON longitudinal_membership_share
