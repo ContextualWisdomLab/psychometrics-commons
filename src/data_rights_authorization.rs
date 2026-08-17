@@ -88,4 +88,18 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn bound_request_authorizes_the_exact_stored_identity() {
+        let actor = actor();
+        assert_eq!(
+            authorize_bound_data_rights_request(
+                &actor,
+                "tenant_alpha",
+                "participant_alpha",
+                "data_rights_request_alpha",
+            ),
+            Ok(())
+        );
+    }
 }
