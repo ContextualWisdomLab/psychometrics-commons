@@ -34,7 +34,7 @@ pub enum ParticipantBasePersistenceDisposition {
 pub enum ParticipantBasePersistenceError {
     /// A participant or tenant reference was blank, numeric-like, or not in exact issued spelling.
     InvalidReference,
-    /// The participant creation timestamp was zero or outside the PostgreSQL `BIGINT` range.
+    /// The participant creation timestamp was zero or outside the `PostgreSQL` `BIGINT` range.
     InvalidTimestamp,
     /// A linked or historically linked record was passed to this base-only persistence boundary.
     LinkedRecordRequiresIdentityHistory,
@@ -42,9 +42,9 @@ pub enum ParticipantBasePersistenceError {
     ConflictingReplay,
     /// Stored participant identity evidence could not be reconstructed without normalization.
     CorruptStoredIdentity,
-    /// Participant base persistence requires PostgreSQL `READ COMMITTED` isolation.
+    /// Participant base persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
-    /// PostgreSQL rejected or could not execute the persistence operation.
+    /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
 
@@ -89,11 +89,11 @@ impl From<postgres::Error> for ParticipantBasePersistenceError {
     }
 }
 
-/// Apply the idempotent participant-base migration to a PostgreSQL connection.
+/// Apply the idempotent participant-base migration to a `PostgreSQL` connection.
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL error if the schema cannot be created.
+/// Returns the `PostgreSQL` error if the schema cannot be created.
 pub fn apply_participant_base_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
@@ -141,21 +141,24 @@ pub fn persist_anonymous_participant_base(
         return Ok(ParticipantBasePersistenceDisposition::Inserted);
     }
 
-    let Some(row) = transaction.query_opt(
+    let existing = match transaction.query_opt(
         "SELECT tenant_ref, created_at_unix_ms FROM assessment_participant \
          WHERE participant_ref = $1",
         &[&participant_ref],
-    )?
-    else {
-        return Err(ParticipantBasePersistenceError::CorruptStoredIdentity);
+    ) {
+        Ok(Some(row)) => Some((row.get::<_, String>(0), row.get::<_, i64>(1))),
+        Ok(None) => None,
+        Err(error) => return Err(ParticipantBasePersistenceError::from(error)),
     };
-    let stored_tenant_ref: String = row.get(0);
-    let stored_created_at_unix_ms: i64 = row.get(1);
-    if stored_tenant_ref == tenant_ref && stored_created_at_unix_ms == created_at_unix_ms {
-        Ok(ParticipantBasePersistenceDisposition::Duplicate)
-    } else {
-        Err(ParticipantBasePersistenceError::ConflictingReplay)
-    }
+    classify_conflict_winner(
+        existing
+            .as_ref()
+            .map(|(stored_tenant_ref, stored_created_at_unix_ms)| {
+                (stored_tenant_ref.as_str(), *stored_created_at_unix_ms)
+            }),
+        tenant_ref,
+        created_at_unix_ms,
+    )
 }
 
 /// Load one tenant-bound anonymous participant base record.
@@ -193,7 +196,12 @@ pub fn load_anonymous_participant_base(
         .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
     required_exact_reference(&stored_tenant_ref)
         .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
-    if stored_participant_ref != participant_ref || stored_tenant_ref != tenant_ref {
+    if !stored_base_identity_matches(
+        &stored_participant_ref,
+        &stored_tenant_ref,
+        participant_ref,
+        tenant_ref,
+    ) {
         return Err(ParticipantBasePersistenceError::CorruptStoredIdentity);
     }
     let created_at_unix_ms = stored_timestamp(stored_created_at_unix_ms)?;
@@ -204,6 +212,32 @@ pub fn load_anonymous_participant_base(
     )
     .map(Some)
     .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)
+}
+
+fn classify_conflict_winner(
+    existing: Option<(&str, i64)>,
+    tenant_ref: &str,
+    created_at_unix_ms: i64,
+) -> Result<ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError> {
+    match existing {
+        Some((stored_tenant_ref, stored_created_at_unix_ms))
+            if stored_tenant_ref == tenant_ref
+                && stored_created_at_unix_ms == created_at_unix_ms =>
+        {
+            Ok(ParticipantBasePersistenceDisposition::Duplicate)
+        }
+        Some(_) => Err(ParticipantBasePersistenceError::ConflictingReplay),
+        None => Err(ParticipantBasePersistenceError::CorruptStoredIdentity),
+    }
+}
+
+fn stored_base_identity_matches(
+    stored_participant_ref: &str,
+    stored_tenant_ref: &str,
+    participant_ref: &str,
+    tenant_ref: &str,
+) -> bool {
+    stored_participant_ref == participant_ref && stored_tenant_ref == tenant_ref
 }
 
 fn required_exact_reference(reference: &str) -> Result<&str, ParticipantBasePersistenceError> {
@@ -248,7 +282,8 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        postgres_timestamp, required_exact_reference, stored_timestamp,
+        classify_conflict_winner, postgres_timestamp, required_exact_reference,
+        stored_base_identity_matches, stored_timestamp, ParticipantBasePersistenceDisposition,
         ParticipantBasePersistenceError,
     };
 
@@ -323,6 +358,43 @@ mod tests {
             assert_eq!(error.to_string(), expected);
             assert!(std::error::Error::source(&error).is_none());
         }
+    }
+
+    #[test]
+    fn conflict_winner_and_reload_guards_fail_closed_on_missing_or_rebound_identity() {
+        assert_eq!(
+            classify_conflict_winner(
+                Some(("tenant_public_demo", 40_000)),
+                "tenant_public_demo",
+                40_000
+            )
+            .unwrap(),
+            ParticipantBasePersistenceDisposition::Duplicate
+        );
+        assert!(matches!(
+            classify_conflict_winner(
+                Some(("tenant_other_demo", 40_000)),
+                "tenant_public_demo",
+                40_000
+            ),
+            Err(ParticipantBasePersistenceError::ConflictingReplay)
+        ));
+        assert!(matches!(
+            classify_conflict_winner(None, "tenant_public_demo", 40_000),
+            Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
+        ));
+        assert!(stored_base_identity_matches(
+            "participant_public_demo",
+            "tenant_public_demo",
+            "participant_public_demo",
+            "tenant_public_demo"
+        ));
+        assert!(!stored_base_identity_matches(
+            "participant_public_demo",
+            "tenant_other_demo",
+            "participant_public_demo",
+            "tenant_public_demo"
+        ));
     }
 
     #[test]

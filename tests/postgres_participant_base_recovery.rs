@@ -1,4 +1,4 @@
-//! Real PostgreSQL recovery acceptance for the anonymous participant base record.
+//! Real `PostgreSQL` recovery acceptance for the anonymous participant base record.
 //!
 //! The participant identity is recovery-critical product state: a restore must preserve the exact
 //! participant/tenant binding and creation time, and must not reopen that identifier for rebinding.

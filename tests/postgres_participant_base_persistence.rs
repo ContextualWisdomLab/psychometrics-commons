@@ -217,7 +217,7 @@ fn participant_base_evidence_is_immutable_at_the_database_boundary() {
             .batch_execute(statement)
             .expect_err("participant base evidence must reject destructive mutation");
         assert_eq!(
-            error.code().map(|code| code.code()),
+            error.code().map(postgres::error::SqlState::code),
             Some("55000"),
             "immutability rejection must use SQLSTATE 55000: {statement}"
         );
