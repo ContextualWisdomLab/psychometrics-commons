@@ -1,4 +1,4 @@
-//! Real PostgreSQL regression for conflicting stored receipt identity history.
+//! Real `PostgreSQL` regression for conflicting stored receipt identity history.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::{
