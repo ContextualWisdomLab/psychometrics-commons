@@ -840,9 +840,22 @@ mod reference_guard_tests {
         let missing = client
             .query_one("SELECT * FROM response_event_unique_classify_missing", &[])
             .unwrap_err();
+        let database = classify_unique_violation(missing);
         assert!(matches!(
-            classify_unique_violation(missing),
+            database,
             ResponseEventPersistenceError::Database(_)
         ));
+        assert!(std::error::Error::source(&database).is_some());
+        for error in [
+            ResponseEventPersistenceError::InvalidReference,
+            ResponseEventPersistenceError::ConflictingReplay,
+            ResponseEventPersistenceError::SequenceConflict,
+            ResponseEventPersistenceError::InvalidSequence,
+            ResponseEventPersistenceError::InvalidTimestamp,
+            ResponseEventPersistenceError::UnsupportedIsolationLevel,
+        ] {
+            assert!(!error.to_string().is_empty());
+            assert!(std::error::Error::source(&error).is_none());
+        }
     }
 }
