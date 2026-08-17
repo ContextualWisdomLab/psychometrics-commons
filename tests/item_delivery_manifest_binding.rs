@@ -46,6 +46,10 @@ fn ledger_derives_release_identity_locale_and_item_set_from_exact_manifest() {
 
     assert_eq!(ledger.session_ref(), "session_big_five_001");
     assert_eq!(ledger.instrument_release_ref(), manifest.release_ref());
+    assert_eq!(
+        ledger.instrument_version_ref(),
+        manifest.instrument_version_ref()
+    );
     assert_eq!(ledger.release_content_digest(), manifest.content_digest());
     assert_eq!(ledger.locale(), manifest.locale());
     assert_eq!(
