@@ -208,14 +208,14 @@ impl DeterministicNarrativeBundle<'_> {
     }
 
     fn validate(&self) -> Result<(), NarrativeFallbackError> {
-        required_reference(self.narrative_version_ref)?;
-        required_reference(self.style_mapping_version_ref)?;
+        required_canonical_reference(self.narrative_version_ref)?;
+        required_canonical_reference(self.style_mapping_version_ref)?;
         required_digest(self.interpretation_rule_bundle_digest)?;
         required_text(self.locale)?;
 
         let mut unit_refs: Vec<&str> = Vec::with_capacity(self.units.len());
         for unit in self.units {
-            let unit_ref = required_reference(unit.interpretation_unit_ref)?;
+            let unit_ref = required_canonical_reference(unit.interpretation_unit_ref)?;
             if unit_refs.contains(&unit_ref) {
                 return Err(NarrativeFallbackError::DuplicateReference);
             }
@@ -267,6 +267,15 @@ fn validate_interpretation_selection(
 
 fn required_reference(reference: &str) -> Result<&str, NarrativeFallbackError> {
     normalized_reference(reference).ok_or(NarrativeFallbackError::InvalidReference)
+}
+
+fn required_canonical_reference(reference: &str) -> Result<&str, NarrativeFallbackError> {
+    let normalized = required_reference(reference)?;
+    if normalized == reference {
+        Ok(reference)
+    } else {
+        Err(NarrativeFallbackError::InvalidReference)
+    }
 }
 
 fn required_text(text: &str) -> Result<&str, NarrativeFallbackError> {
