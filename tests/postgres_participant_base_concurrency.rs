@@ -3,7 +3,7 @@
 //! The adapter inserts with `ON CONFLICT DO NOTHING` and then rereads the winner under
 //! `READ COMMITTED`. These cases prove two complementary facts without a fixed sleep:
 //! an uncommitted winner makes a conflicting persist wait (`lock_timeout` SQLSTATE `55P03`),
-//! and a waiting persist classifies the committed winner as Duplicate or ConflictingReplay
+//! and a waiting persist classifies the committed winner as `Duplicate` or `ConflictingReplay`
 //! rather than inventing corrupt stored identity.
 
 use postgres::{Client, NoTls};
@@ -12,11 +12,18 @@ use psychometrics_commons_runtime::postgres_participant::{
     apply_participant_base_migration, persist_anonymous_participant_base,
     ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
 };
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
 const TEST_SCHEMA: &str = "participant_base_concurrency_test";
+static PARTICIPANT_CONCURRENCY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn participant_concurrency_test_guard() -> MutexGuard<'static, ()> {
+    PARTICIPANT_CONCURRENCY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -43,7 +50,9 @@ fn prepare_schema(client: &mut Client) {
 }
 
 fn assert_unique_key_is_held(observer: &mut Client, participant_ref: &str) {
-    observer.batch_execute("SET lock_timeout TO '0';").unwrap();
+    observer
+        .batch_execute("SET lock_timeout TO '100ms';")
+        .unwrap();
     let error = observer
         .execute(
             "INSERT INTO assessment_participant \
@@ -58,7 +67,7 @@ fn assert_unique_key_is_held(observer: &mut Client, participant_ref: &str) {
         "unique-key contention must surface as lock_timeout, not a later classification: {error}"
     );
     observer
-        .batch_execute("SET lock_timeout TO DEFAULT;")
+        .batch_execute("ROLLBACK; SET lock_timeout TO DEFAULT;")
         .unwrap();
 }
 
@@ -149,6 +158,7 @@ fn race_replay(
 
 #[test]
 fn uncommitted_winner_makes_conflicting_persist_wait() {
+    let _guard = participant_concurrency_test_guard();
     let mut winner_client = test_client();
     prepare_schema(&mut winner_client);
     let winner = ParticipantRecord::new_anonymous(
@@ -186,6 +196,7 @@ fn uncommitted_winner_makes_conflicting_persist_wait() {
 
 #[test]
 fn concurrent_replay_observes_committed_winner_before_classification() {
+    let _guard = participant_concurrency_test_guard();
     let mut winner_client = test_client();
     prepare_schema(&mut winner_client);
 
