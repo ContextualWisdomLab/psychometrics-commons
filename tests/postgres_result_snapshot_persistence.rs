@@ -888,9 +888,11 @@ fn current_session_load_rejects_blank_observation_construct() {
     );
     client
         .batch_execute(
-            "UPDATE result_snapshot_observation \
+            "ALTER TABLE result_snapshot_observation DISABLE TRIGGER ALL; \
+             UPDATE result_snapshot_observation \
              SET construct_ref = '' \
-             WHERE result_snapshot_ref = 'result_snapshot_disposition';",
+             WHERE result_snapshot_ref = 'result_snapshot_disposition'; \
+             ALTER TABLE result_snapshot_observation ENABLE TRIGGER ALL;",
         )
         .unwrap();
     let mut transaction = client.transaction().unwrap();
