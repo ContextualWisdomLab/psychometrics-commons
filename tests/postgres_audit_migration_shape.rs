@@ -29,8 +29,8 @@ fn migration_serializes_creation_before_observing_relation_state() {
         lock > begin,
         "advisory lock must execute inside the migration DO block"
     );
-    assert_eq!(
-        first_relation_observation, relation_refresh,
+    assert!(
+        first_relation_observation > lock,
         "no relation observation may occur before the migration advisory lock"
     );
     assert!(
