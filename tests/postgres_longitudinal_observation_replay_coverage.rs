@@ -32,6 +32,68 @@ const BASE_INGESTED_AT: u64 = 1_776_662_270_000;
 const BASE_TIMEZONE: &str = "Asia/Seoul";
 const BASE_OFFSET: i16 = 540;
 
+#[derive(Clone, Copy)]
+struct ObservationSpec<'a> {
+    observation_record_ref: &'a str,
+    enrollment_ref: &'a str,
+    source_system_ref: &'a str,
+    source_observation_ref: &'a str,
+    construct_ref: &'a str,
+    measure_ref: &'a str,
+    memberships: &'a [MembershipShareInput<'a>],
+    validity_start_at_unix_ms: u64,
+    validity_end_at_unix_ms: u64,
+    recorded_at_unix_ms: u64,
+    received_at_unix_ms: u64,
+    ingested_at_unix_ms: u64,
+    timezone_name: &'a str,
+    utc_offset_minutes: i16,
+}
+
+impl<'a> ObservationSpec<'a> {
+    fn base(memberships: &'a [MembershipShareInput<'a>]) -> Self {
+        Self {
+            observation_record_ref: BASE_RECORD_REF,
+            enrollment_ref: BASE_ENROLLMENT_REF,
+            source_system_ref: BASE_SOURCE_SYSTEM_REF,
+            source_observation_ref: BASE_SOURCE_OBSERVATION_REF,
+            construct_ref: BASE_CONSTRUCT_REF,
+            measure_ref: BASE_MEASURE_REF,
+            memberships,
+            validity_start_at_unix_ms: BASE_VALIDITY_START,
+            validity_end_at_unix_ms: BASE_VALIDITY_END,
+            recorded_at_unix_ms: BASE_RECORDED_AT,
+            received_at_unix_ms: BASE_RECEIVED_AT,
+            ingested_at_unix_ms: BASE_INGESTED_AT,
+            timezone_name: BASE_TIMEZONE,
+            utc_offset_minutes: BASE_OFFSET,
+        }
+    }
+
+    fn build(self) -> LongitudinalObservationRecord {
+        LongitudinalObservationSet::new()
+            .ingest(LongitudinalObservationInput {
+                observation_record_ref: self.observation_record_ref,
+                enrollment_ref: self.enrollment_ref,
+                source_system_ref: self.source_system_ref,
+                source_observation_ref: self.source_observation_ref,
+                construct_ref: self.construct_ref,
+                measure_ref: self.measure_ref,
+                membership_shares: self.memberships,
+                time: ObservationTimeInput {
+                    validity_start_at_unix_ms: self.validity_start_at_unix_ms,
+                    validity_end_at_unix_ms: self.validity_end_at_unix_ms,
+                    recorded_at_unix_ms: self.recorded_at_unix_ms,
+                    received_at_unix_ms: self.received_at_unix_ms,
+                    ingested_at_unix_ms: self.ingested_at_unix_ms,
+                    timezone_name: self.timezone_name,
+                    utc_offset_minutes: self.utc_offset_minutes,
+                },
+            })
+            .unwrap()
+    }
+}
+
 fn guard() -> MutexGuard<'static, ()> {
     TEST_LOCK
         .lock()
@@ -52,108 +114,6 @@ fn fresh_client() -> Client {
     client
 }
 
-#[allow(clippy::too_many_arguments)]
-fn record(
-    observation_record_ref: &str,
-    enrollment_ref: &str,
-    source_system_ref: &str,
-    source_observation_ref: &str,
-    construct_ref: &str,
-    measure_ref: &str,
-    memberships: &[MembershipShareInput<'_>],
-    validity_start_at_unix_ms: u64,
-    validity_end_at_unix_ms: u64,
-    recorded_at_unix_ms: u64,
-    received_at_unix_ms: u64,
-    ingested_at_unix_ms: u64,
-    timezone_name: &str,
-    utc_offset_minutes: i16,
-) -> LongitudinalObservationRecord {
-    LongitudinalObservationSet::new()
-        .ingest(LongitudinalObservationInput {
-            observation_record_ref,
-            enrollment_ref,
-            source_system_ref,
-            source_observation_ref,
-            construct_ref,
-            measure_ref,
-            membership_shares: memberships,
-            time: ObservationTimeInput {
-                validity_start_at_unix_ms,
-                validity_end_at_unix_ms,
-                recorded_at_unix_ms,
-                received_at_unix_ms,
-                ingested_at_unix_ms,
-                timezone_name,
-                utc_offset_minutes,
-            },
-        })
-        .unwrap()
-}
-
-fn base_record() -> LongitudinalObservationRecord {
-    let memberships = [
-        MembershipShareInput {
-            membership_context_ref: "clinic_ward_seoul_01",
-            weight_parts_per_10_000: 6_000,
-        },
-        MembershipShareInput {
-            membership_context_ref: "night_shift_team_alpha",
-            weight_parts_per_10_000: 4_000,
-        },
-    ];
-    record(
-        BASE_RECORD_REF,
-        BASE_ENROLLMENT_REF,
-        BASE_SOURCE_SYSTEM_REF,
-        BASE_SOURCE_OBSERVATION_REF,
-        BASE_CONSTRUCT_REF,
-        BASE_MEASURE_REF,
-        &memberships,
-        BASE_VALIDITY_START,
-        BASE_VALIDITY_END,
-        BASE_RECORDED_AT,
-        BASE_RECEIVED_AT,
-        BASE_INGESTED_AT,
-        BASE_TIMEZONE,
-        BASE_OFFSET,
-    )
-}
-
-fn variant(
-    observation_record_ref: &str,
-    enrollment_ref: &str,
-    source_system_ref: &str,
-    source_observation_ref: &str,
-    construct_ref: &str,
-    measure_ref: &str,
-    memberships: &[MembershipShareInput<'_>],
-    validity_start_at_unix_ms: u64,
-    validity_end_at_unix_ms: u64,
-    recorded_at_unix_ms: u64,
-    received_at_unix_ms: u64,
-    ingested_at_unix_ms: u64,
-    timezone_name: &str,
-    utc_offset_minutes: i16,
-) -> LongitudinalObservationRecord {
-    record(
-        observation_record_ref,
-        enrollment_ref,
-        source_system_ref,
-        source_observation_ref,
-        construct_ref,
-        measure_ref,
-        memberships,
-        validity_start_at_unix_ms,
-        validity_end_at_unix_ms,
-        recorded_at_unix_ms,
-        received_at_unix_ms,
-        ingested_at_unix_ms,
-        timezone_name,
-        utc_offset_minutes,
-    )
-}
-
 fn base_memberships() -> [MembershipShareInput<'static>; 2] {
     [
         MembershipShareInput {
@@ -165,6 +125,11 @@ fn base_memberships() -> [MembershipShareInput<'static>; 2] {
             weight_parts_per_10_000: 4_000,
         },
     ]
+}
+
+fn base_record() -> LongitudinalObservationRecord {
+    let memberships = base_memberships();
+    ObservationSpec::base(&memberships).build()
 }
 
 fn persist(
@@ -199,7 +164,7 @@ fn assert_conflict(
 }
 
 #[test]
-fn every_immutable_header_and_membership_dimension_rejects_rebinding() {
+fn every_immutable_header_dimension_rejects_rebinding() {
     let _guard = guard();
     let mut client = fresh_client();
     let base = base_record();
@@ -213,261 +178,104 @@ fn every_immutable_header_and_membership_dimension_rejects_rebinding() {
     );
 
     let memberships = base_memberships();
-    let header_variants = [
-        variant(
-            "longitudinal_observation_record_other",
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            "longitudinal_enrollment_other",
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            "gyeot_collection_other",
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            "gyeot_observation_other",
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            "construct_agreeableness",
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            "measure_ipip_extraversion_ko_v2",
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START + 1,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END + 1,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT + 1,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT + 1,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT + 1,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            "Asia/Tokyo",
-            BASE_OFFSET,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECORDED_AT,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            480,
-        ),
-        variant(
-            BASE_RECORD_REF,
-            BASE_ENROLLMENT_REF,
-            BASE_SOURCE_SYSTEM_REF,
-            BASE_SOURCE_OBSERVATION_REF,
-            BASE_CONSTRUCT_REF,
-            BASE_MEASURE_REF,
-            &memberships,
-            BASE_VALIDITY_START,
-            BASE_VALIDITY_END,
-            BASE_RECEIVED_AT + 1,
-            BASE_RECEIVED_AT,
-            BASE_INGESTED_AT,
-            BASE_TIMEZONE,
-            BASE_OFFSET,
-        ),
+    let spec = ObservationSpec::base(&memberships);
+    let variants = [
+        ObservationSpec {
+            observation_record_ref: "longitudinal_observation_record_other",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            enrollment_ref: "longitudinal_enrollment_other",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            source_system_ref: "gyeot_collection_other",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            source_observation_ref: "gyeot_observation_other",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            construct_ref: "construct_agreeableness",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            measure_ref: "measure_ipip_extraversion_ko_v2",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            validity_start_at_unix_ms: BASE_VALIDITY_START + 1,
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            validity_end_at_unix_ms: BASE_VALIDITY_END + 1,
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            recorded_at_unix_ms: BASE_RECORDED_AT + 1,
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            received_at_unix_ms: BASE_RECEIVED_AT + 1,
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            ingested_at_unix_ms: BASE_INGESTED_AT + 1,
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            timezone_name: "Asia/Tokyo",
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            utc_offset_minutes: 480,
+            ..spec
+        }
+        .build(),
+        ObservationSpec {
+            recorded_at_unix_ms: BASE_RECEIVED_AT + 1,
+            ..spec
+        }
+        .build(),
     ];
-    for candidate in &header_variants {
+    for candidate in &variants {
         assert_conflict(&mut client, "tenant_clinic_seoul", candidate);
     }
     assert_conflict(&mut client, "tenant_clinic_busan", &base);
+}
+
+#[test]
+fn every_membership_dimension_and_source_alias_rejects_rebinding() {
+    let _guard = guard();
+    let mut client = fresh_client();
+    let base = base_record();
+    assert_eq!(
+        persist(&mut client, "tenant_clinic_seoul", &base).unwrap(),
+        LongitudinalObservationPersistenceDisposition::Inserted
+    );
 
     let one_membership = [MembershipShareInput {
         membership_context_ref: "clinic_ward_seoul_01",
         weight_parts_per_10_000: 10_000,
     }];
-    let membership_count_mismatch = variant(
-        BASE_RECORD_REF,
-        BASE_ENROLLMENT_REF,
-        BASE_SOURCE_SYSTEM_REF,
-        BASE_SOURCE_OBSERVATION_REF,
-        BASE_CONSTRUCT_REF,
-        BASE_MEASURE_REF,
-        &one_membership,
-        BASE_VALIDITY_START,
-        BASE_VALIDITY_END,
-        BASE_RECORDED_AT,
-        BASE_RECEIVED_AT,
-        BASE_INGESTED_AT,
-        BASE_TIMEZONE,
-        BASE_OFFSET,
-    );
+    let one_membership_record = ObservationSpec::base(&one_membership).build();
     assert_conflict(
         &mut client,
         "tenant_clinic_seoul",
-        &membership_count_mismatch,
+        &one_membership_record,
     );
 
     let context_mismatch_memberships = [
@@ -480,22 +288,7 @@ fn every_immutable_header_and_membership_dimension_rejects_rebinding() {
             weight_parts_per_10_000: 4_000,
         },
     ];
-    let context_mismatch = variant(
-        BASE_RECORD_REF,
-        BASE_ENROLLMENT_REF,
-        BASE_SOURCE_SYSTEM_REF,
-        BASE_SOURCE_OBSERVATION_REF,
-        BASE_CONSTRUCT_REF,
-        BASE_MEASURE_REF,
-        &context_mismatch_memberships,
-        BASE_VALIDITY_START,
-        BASE_VALIDITY_END,
-        BASE_RECORDED_AT,
-        BASE_RECEIVED_AT,
-        BASE_INGESTED_AT,
-        BASE_TIMEZONE,
-        BASE_OFFSET,
-    );
+    let context_mismatch = ObservationSpec::base(&context_mismatch_memberships).build();
     assert_conflict(&mut client, "tenant_clinic_seoul", &context_mismatch);
 
     let weight_mismatch_memberships = [
@@ -508,40 +301,15 @@ fn every_immutable_header_and_membership_dimension_rejects_rebinding() {
             weight_parts_per_10_000: 5_000,
         },
     ];
-    let weight_mismatch = variant(
-        BASE_RECORD_REF,
-        BASE_ENROLLMENT_REF,
-        BASE_SOURCE_SYSTEM_REF,
-        BASE_SOURCE_OBSERVATION_REF,
-        BASE_CONSTRUCT_REF,
-        BASE_MEASURE_REF,
-        &weight_mismatch_memberships,
-        BASE_VALIDITY_START,
-        BASE_VALIDITY_END,
-        BASE_RECORDED_AT,
-        BASE_RECEIVED_AT,
-        BASE_INGESTED_AT,
-        BASE_TIMEZONE,
-        BASE_OFFSET,
-    );
+    let weight_mismatch = ObservationSpec::base(&weight_mismatch_memberships).build();
     assert_conflict(&mut client, "tenant_clinic_seoul", &weight_mismatch);
 
-    let busan_record = variant(
-        "longitudinal_observation_record_busan_source_alias",
-        BASE_ENROLLMENT_REF,
-        BASE_SOURCE_SYSTEM_REF,
-        BASE_SOURCE_OBSERVATION_REF,
-        BASE_CONSTRUCT_REF,
-        BASE_MEASURE_REF,
-        &memberships,
-        BASE_VALIDITY_START,
-        BASE_VALIDITY_END,
-        BASE_RECORDED_AT,
-        BASE_RECEIVED_AT,
-        BASE_INGESTED_AT,
-        BASE_TIMEZONE,
-        BASE_OFFSET,
-    );
+    let memberships = base_memberships();
+    let busan_record = ObservationSpec {
+        observation_record_ref: "longitudinal_observation_record_busan_source_alias",
+        ..ObservationSpec::base(&memberships)
+    }
+    .build();
     assert_eq!(
         persist(&mut client, "tenant_clinic_busan", &busan_record).unwrap(),
         LongitudinalObservationPersistenceDisposition::Inserted
