@@ -62,6 +62,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Anonymous participant-base persistence now classifies concurrent exact or rebound replays only after the uncommitted winner is observed, keeps database numeric-like rejection identical to Rust `char::is_numeric` (including `½`, `²`, and `Ⅳ`), and records Active PR #250 separately from protected-main truth.
 - Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.

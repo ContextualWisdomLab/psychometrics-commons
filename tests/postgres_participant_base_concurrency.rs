@@ -1,9 +1,10 @@
-//! Real `PostgreSQL` concurrency contract for anonymous participant replay classification.
+//! Deterministic `PostgreSQL` evidence for anonymous participant replay classification.
 //!
-//! These cases deliberately keep the winning insert uncommitted while a second connection
-//! attempts the same `participant_ref`. `PostgreSQL` must make the loser wait for the unique-key
-//! conflict to resolve; the following `READ COMMITTED` statement then sees the committed winner
-//! and classifies the replay instead of reporting corrupt stored identity.
+//! The adapter inserts with `ON CONFLICT DO NOTHING` and then rereads the winner under
+//! `READ COMMITTED`. These cases prove two complementary facts without a fixed sleep:
+//! an uncommitted winner makes a conflicting persist wait (`lock_timeout` SQLSTATE `55P03`),
+//! and a waiting persist classifies the committed winner as Duplicate or ConflictingReplay
+//! rather than inventing corrupt stored identity.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::participant::ParticipantRecord;
@@ -11,7 +12,7 @@ use psychometrics_commons_runtime::postgres_participant::{
     apply_participant_base_migration, persist_anonymous_participant_base,
     ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
 };
-use std::sync::{mpsc, Arc, Barrier};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -34,39 +35,49 @@ fn prepare_schema(client: &mut Client) {
     client
         .batch_execute(
             "DROP TABLE IF EXISTS assessment_participant;\
-             DROP FUNCTION IF EXISTS reject_assessment_participant_mutation() CASCADE;",
+             DROP FUNCTION IF EXISTS reject_assessment_participant_mutation() CASCADE;\
+             DROP FUNCTION IF EXISTS opaque_reference_numeric_like(TEXT);",
         )
         .unwrap();
     apply_participant_base_migration(client).unwrap();
 }
 
-fn wait_for_unique_conflict(observer: &mut Client, contender_pid: i32, winner_pid: i32) {
+fn assert_unique_key_is_held(observer: &mut Client, participant_ref: &str) {
+    observer.batch_execute("SET lock_timeout TO '0';").unwrap();
+    let error = observer
+        .execute(
+            "INSERT INTO assessment_participant \
+             (participant_ref, tenant_ref, created_at_unix_ms) \
+             VALUES ($1, 'tenant_lock_probe', 1)",
+            &[&participant_ref],
+        )
+        .expect_err("an uncommitted winner must block a conflicting unique insert immediately");
+    assert_eq!(
+        error.code().map(postgres::error::SqlState::code),
+        Some("55P03"),
+        "unique-key contention must surface as lock_timeout, not a later classification: {error}"
+    );
+    observer
+        .batch_execute("SET lock_timeout TO DEFAULT;")
+        .unwrap();
+}
+
+fn wait_until_blocked(observer: &mut Client, backend_pid: i32) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let waiting: bool = observer
+        let blocked: bool = observer
             .query_one(
-                "SELECT EXISTS (\
-                    SELECT 1 \
-                    FROM pg_locks AS contender_lock \
-                    JOIN pg_locks AS winner_lock \
-                      ON winner_lock.locktype = 'transactionid' \
-                     AND winner_lock.transactionid = contender_lock.transactionid \
-                    WHERE contender_lock.pid = $1 \
-                      AND contender_lock.locktype = 'transactionid' \
-                      AND contender_lock.granted = FALSE \
-                      AND winner_lock.pid = $2 \
-                      AND winner_lock.granted = TRUE\
-                )",
-                &[&contender_pid, &winner_pid],
+                "SELECT cardinality(pg_blocking_pids($1)) > 0",
+                &[&backend_pid],
             )
             .unwrap()
             .get(0);
-        if waiting {
+        if blocked {
             return;
         }
         assert!(
             Instant::now() < deadline,
-            "contender backend {contender_pid} did not enter an ungranted transaction-id lock on winner backend {winner_pid}"
+            "contender backend {backend_pid} did not become blocked on the uncommitted winner"
         );
         thread::sleep(Duration::from_millis(10));
     }
@@ -76,7 +87,6 @@ fn wait_for_unique_conflict(observer: &mut Client, contender_pid: i32, winner_pi
 enum ReplayOutcome {
     Duplicate,
     ConflictingReplay,
-    Unexpected,
 }
 
 fn race_replay(
@@ -93,14 +103,12 @@ fn race_replay(
         persist_anonymous_participant_base(&mut winner_transaction, &winner).unwrap(),
         ParticipantBasePersistenceDisposition::Inserted
     );
-    let winner_pid: i32 = winner_transaction
-        .query_one("SELECT pg_backend_pid()", &[])
-        .unwrap()
-        .get(0);
 
-    let barrier = Arc::new(Barrier::new(2));
-    let contender_barrier = Arc::clone(&barrier);
+    let mut probe = test_client();
+    assert_unique_key_is_held(&mut probe, participant_ref);
+
     let (pid_sender, pid_receiver) = mpsc::channel();
+    let (ready_sender, ready_receiver) = mpsc::channel();
     let contender = thread::spawn(move || {
         let mut contender_client = test_client();
         let contender_pid: i32 = contender_client
@@ -108,6 +116,7 @@ fn race_replay(
             .unwrap()
             .get(0);
         pid_sender.send(contender_pid).unwrap();
+        ready_receiver.recv().unwrap();
         let contender = ParticipantRecord::new_anonymous(
             participant_ref,
             contender_tenant_ref,
@@ -115,7 +124,6 @@ fn race_replay(
         )
         .unwrap();
         let mut contender_transaction = contender_client.transaction().unwrap();
-        contender_barrier.wait();
         let result = persist_anonymous_participant_base(&mut contender_transaction, &contender);
         contender_transaction.rollback().unwrap();
         match result {
@@ -123,21 +131,57 @@ fn race_replay(
             Err(ParticipantBasePersistenceError::ConflictingReplay) => {
                 ReplayOutcome::ConflictingReplay
             }
-            _ => ReplayOutcome::Unexpected,
+            other => panic!("concurrent persist classified unexpectedly: {other:?}"),
         }
     });
 
     let contender_pid = pid_receiver
         .recv_timeout(Duration::from_secs(2))
-        .expect("contender backend must publish its PostgreSQL PID before the race");
-    barrier.wait();
-    let mut observer = test_client();
-    wait_for_unique_conflict(&mut observer, contender_pid, winner_pid);
+        .expect("contender backend must publish its PostgreSQL PID before persist");
+    ready_sender.send(()).unwrap();
+    wait_until_blocked(&mut probe, contender_pid);
     winner_transaction.commit().unwrap();
 
     contender
         .join()
         .expect("concurrent contender must not panic")
+}
+
+#[test]
+fn uncommitted_winner_makes_conflicting_persist_wait() {
+    let mut winner_client = test_client();
+    prepare_schema(&mut winner_client);
+    let winner = ParticipantRecord::new_anonymous(
+        "participant_concurrency_lock",
+        "tenant_concurrency_demo",
+        40_000,
+    )
+    .unwrap();
+    let mut winner_transaction = winner_client.transaction().unwrap();
+    assert_eq!(
+        persist_anonymous_participant_base(&mut winner_transaction, &winner).unwrap(),
+        ParticipantBasePersistenceDisposition::Inserted
+    );
+
+    let mut contender_client = test_client();
+    contender_client
+        .batch_execute("SET lock_timeout TO '100ms';")
+        .unwrap();
+    let mut contender_transaction = contender_client.transaction().unwrap();
+    let error = persist_anonymous_participant_base(&mut contender_transaction, &winner)
+        .expect_err("conflicting persist must wait on the uncommitted unique key");
+    match error {
+        ParticipantBasePersistenceError::Database(database_error) => {
+            assert_eq!(
+                database_error.code().map(postgres::error::SqlState::code),
+                Some("55P03"),
+                "waiting persist must fail closed as lock_timeout, not as corrupt identity"
+            );
+        }
+        other => panic!("expected a database lock_timeout, got {other:?}"),
+    }
+    contender_transaction.rollback().unwrap();
+    winner_transaction.rollback().unwrap();
 }
 
 #[test]

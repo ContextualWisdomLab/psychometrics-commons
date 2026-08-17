@@ -6,8 +6,12 @@
 //! from its own durable evidence before account-scoped authorization. Raw credentials, Keyverse
 //! subjects, assessment responses, and research linkage identifiers never belong in this table.
 //!
-//! Exact replay requires `READ COMMITTED`: when concurrent creators race on the same participant
-//! reference, the loser must observe the winning row before deciding whether the replay is exact.
+//! Exact replay requires `READ COMMITTED`. `INSERT ... ON CONFLICT DO NOTHING` waits for a
+//! concurrent uncommitted winner of the same `participant_ref`. After that winner commits, the
+//! next statement receives a fresh command snapshot and rereads the stored tenant and creation
+//! time. An exact match is [`ParticipantBasePersistenceDisposition::Duplicate`]. A different
+//! tenant or creation time is [`ParticipantBasePersistenceError::ConflictingReplay`]. A conflict
+//! without a recoverable winner is [`ParticipantBasePersistenceError::CorruptStoredIdentity`].
 
 use crate::participant::ParticipantRecord;
 use crate::reference::normalized_reference;
@@ -104,8 +108,9 @@ pub fn apply_participant_base_migration(
 ///
 /// This boundary intentionally accepts only a record with no current or historical account link.
 /// Call it when the anonymous participant is first created, before any optional Keyverse link is
-/// appended. Exact replay is idempotent. Reusing the same `participant_ref` with another tenant or
-/// creation time fails closed and never rewrites the stored row.
+/// appended. Exact replay is idempotent, including after a concurrent insert waits for the first
+/// writer. Reusing the same `participant_ref` with another tenant or creation time fails closed
+/// and never rewrites the stored row.
 ///
 /// # Errors
 ///
@@ -207,15 +212,12 @@ fn read_conflict_winner(
     transaction: &mut Transaction<'_>,
     participant_ref: &str,
 ) -> Result<Option<(String, i64)>, ParticipantBasePersistenceError> {
-    match transaction.query_opt(
+    let row = transaction.query_opt(
         "SELECT tenant_ref, created_at_unix_ms FROM assessment_participant \
          WHERE participant_ref = $1",
         &[&participant_ref],
-    ) {
-        Ok(Some(row)) => Ok(Some((row.get(0), row.get(1)))),
-        Ok(None) => Ok(None),
-        Err(error) => Err(ParticipantBasePersistenceError::from(error)),
-    }
+    )?;
+    Ok(row.map(|row| (row.get(0), row.get(1))))
 }
 
 fn reconstruct_loaded_base(
@@ -352,6 +354,9 @@ mod tests {
             " participant_public_demo",
             "participant_public_demo ",
             "12",
+            "½",
+            "²",
+            "Ⅳ",
         ] {
             assert!(matches!(
                 required_exact_reference(reference),

@@ -1,8 +1,8 @@
 # As-Built PostgreSQL Schema Map
 
 - Status: Normative evidence map
-- Date: 2026-08-18
-- Protected-main baseline: `46142cdbbe5dd5e900a926b70c700adf1878088a`
+- Date: 2026-08-17
+- Protected-main baseline: `0c695b98f38369db8c80d4f8a54ab1fdb3022716`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
@@ -27,7 +27,7 @@ Other protected-main migrations and their owning adapters remain authoritative e
 
 PR #250 (`automation/participant-base-reconcile-20260818`) adds `migrations/0030_assessment_participant.sql` and `src/postgres_participant.rs` for the stable anonymous-first participant base record. This slice is **Active PR**, not protected-main truth. It stores only the opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time; optional Keyverse link history remains a separate append-only identity-link concern.
 
-The adapter requires `READ COMMITTED`, classifies exact replay separately from conflicting tenant/time rebinding, and reloads only through the exact participant-and-tenant pair. The physical table rejects non-canonical public identities and database mutation paths that would silently rewrite or erase stable participant evidence. Real PostgreSQL persistence and recovery tests exercise replay, cross-tenant absence, physical immutability, restart reconstruction, and safe error contracts. This slice does **not** claim participant HTTP transport, account-link history persistence, or Keyverse federation.
+The adapter requires `READ COMMITTED`, waits for a concurrent uncommitted unique-key winner, then classifies exact replay separately from conflicting tenant/time rebinding. Reload uses only the exact participant-and-tenant pair. The physical table rejects the same numeric-like public identities as Rust `char::is_numeric` and blocks mutation paths that would silently rewrite or erase stable participant evidence. Real PostgreSQL persistence, recovery, numeric-parity, and concurrency tests exercise those contracts. This slice does **not** claim participant HTTP transport, account-link history persistence, or Keyverse federation.
 
 ## Protected-main outbox delivery-lease physical schema
 

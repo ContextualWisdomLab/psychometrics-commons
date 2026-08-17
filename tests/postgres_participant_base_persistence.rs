@@ -369,6 +369,15 @@ fn schema_rejects_unicode_reference_forms_rejected_by_the_domain_contract() {
         "INSERT INTO assessment_participant \
          (participant_ref, tenant_ref, created_at_unix_ms) \
          VALUES (U&'\\0661\\0662\\066B\\0663', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\00BD', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\00B2', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\2163', 'tenant_public_demo', 40000)",
     ] {
         assert!(
             client.batch_execute(statement).is_err(),
@@ -391,4 +400,71 @@ fn schema_rejects_unicode_reference_forms_rejected_by_the_domain_contract() {
     )
     .unwrap()
     .is_none());
+}
+
+#[test]
+fn database_numeric_like_predicate_matches_rust_char_is_numeric() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let numeric_scalars: Vec<String> = (0u32..=0x0010_FFFF)
+        .filter_map(char::from_u32)
+        .filter(|character| character.is_numeric())
+        .map(String::from)
+        .collect();
+    assert!(
+        !numeric_scalars.is_empty(),
+        "rustc must expose a non-empty Unicode numeric set"
+    );
+    for chunk in numeric_scalars.chunks(256) {
+        let all_numeric: bool = client
+            .query_one(
+                "SELECT bool_and(opaque_reference_numeric_like(sample_text)) \
+                 FROM unnest($1::text[]) AS sample_text",
+                &[&chunk],
+            )
+            .unwrap()
+            .get(0);
+        assert!(
+            all_numeric,
+            "PostgreSQL must reject every Rust numeric scalar as numeric-like"
+        );
+    }
+
+    for accepted in [
+        "participant_public_demo",
+        "tenant_1_demo",
+        "Ⅳparticipant",
+        "participant½",
+    ] {
+        let numeric_like: bool = client
+            .query_one("SELECT opaque_reference_numeric_like($1)", &[&accepted])
+            .unwrap()
+            .get(0);
+        assert!(
+            !numeric_like,
+            "mixed opaque references must remain accepted: {accepted}"
+        );
+        assert!(
+            ParticipantRecord::new_anonymous(accepted, "tenant_public_demo", 40_000).is_ok(),
+            "Rust domain must accept the same mixed reference: {accepted}"
+        );
+    }
+
+    for rejected in ["½", "²", "Ⅳ", "12", "1e3"] {
+        let numeric_like: bool = client
+            .query_one("SELECT opaque_reference_numeric_like($1)", &[&rejected])
+            .unwrap()
+            .get(0);
+        assert!(
+            numeric_like,
+            "numeric-only references must be numeric-like: {rejected}"
+        );
+        assert!(
+            ParticipantRecord::new_anonymous(rejected, "tenant_public_demo", 40_000).is_err(),
+            "Rust domain must reject the same numeric-only reference: {rejected}"
+        );
+    }
 }

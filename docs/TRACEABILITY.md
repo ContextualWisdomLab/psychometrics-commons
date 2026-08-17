@@ -1,7 +1,7 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-18
+- Date: 2026-08-17
 - Evaluated protected-main implementation baseline: `0c695b98f38369db8c80d4f8a54ab1fdb3022716`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
@@ -153,7 +153,7 @@ Still-Target logical modules/adapters include remaining aggregate persistence/re
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR #250** anonymous participant-base persistence (`migrations/0030_assessment_participant.sql`, `src/postgres_participant.rs`) is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It persists only opaque product `participant_ref`, exact `tenant_ref`, and server-authoritative creation time, classifies exact replay under `READ COMMITTED`, rejects tenant/time rebinding, and reloads only through the exact participant-and-tenant pair. PostgreSQL 18 + UTF8 prerequisites and concurrent replay classification are machine-checked on the active head. Optional Keyverse link history remains a separate append-only concern.
+**Active PR** #250 anonymous participant-base persistence (`migrations/0030_assessment_participant.sql`, `src/postgres_participant.rs`) is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It persists only opaque product `participant_ref`, exact `tenant_ref`, and server-authoritative creation time, classifies exact replay under `READ COMMITTED` after an `ON CONFLICT` wait, rejects tenant/time rebinding, and reloads only through the exact participant-and-tenant pair. Database numeric-like rejection matches Rust `char::is_numeric` (Nd/Nl/No). PostgreSQL 18 + UTF8 prerequisites, exact numeric parity, and concurrent replay classification are machine-checked on the active head. Optional Keyverse link history remains a separate append-only concern.
 
 ## 5. ADR traceability by concern
 
