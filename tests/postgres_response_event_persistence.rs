@@ -648,6 +648,16 @@ fn inverted_or_zero_event_times_and_time_rebinding_fail_closed() {
             &mut client,
             "session_ipip_ko_time",
             &event,
+            OBSERVED_AT_MS + 1,
+            RECEIVED_AT_MS
+        ),
+        ResponseEventPersistenceError::ConflictingReplay
+    ));
+    assert!(matches!(
+        persist_err_at(
+            &mut client,
+            "session_ipip_ko_time",
+            &event,
             OBSERVED_AT_MS,
             RECEIVED_AT_MS + 1
         ),
