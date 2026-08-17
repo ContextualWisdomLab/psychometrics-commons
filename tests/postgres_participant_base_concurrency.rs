@@ -11,9 +11,9 @@ use psychometrics_commons_runtime::postgres_participant::{
     apply_participant_base_migration, persist_anonymous_participant_base,
     ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
 };
-use std::sync::{Arc, Barrier};
+use std::sync::{mpsc, Arc, Barrier};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const TEST_SCHEMA: &str = "participant_base_concurrency_test";
 
@@ -40,6 +40,42 @@ fn prepare_schema(client: &mut Client) {
     apply_participant_base_migration(client).unwrap();
 }
 
+fn wait_for_unique_conflict(
+    observer: &mut Client,
+    contender_pid: i32,
+    winner_pid: i32,
+) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let waiting: bool = observer
+            .query_one(
+                "SELECT EXISTS (\
+                    SELECT 1 \
+                    FROM pg_locks AS contender_lock \
+                    JOIN pg_locks AS winner_lock \
+                      ON winner_lock.locktype = 'transactionid' \
+                     AND winner_lock.transactionid = contender_lock.transactionid \
+                    WHERE contender_lock.pid = $1 \
+                      AND contender_lock.locktype = 'transactionid' \
+                      AND contender_lock.granted = FALSE \
+                      AND winner_lock.pid = $2 \
+                      AND winner_lock.granted = TRUE\
+                )",
+                &[&contender_pid, &winner_pid],
+            )
+            .unwrap()
+            .get(0);
+        if waiting {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "contender backend {contender_pid} did not enter an ungranted transaction-id lock on winner backend {winner_pid}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReplayOutcome {
     Duplicate,
@@ -61,11 +97,21 @@ fn race_replay(
         persist_anonymous_participant_base(&mut winner_transaction, &winner).unwrap(),
         ParticipantBasePersistenceDisposition::Inserted
     );
+    let winner_pid: i32 = winner_transaction
+        .query_one("SELECT pg_backend_pid()", &[])
+        .unwrap()
+        .get(0);
 
     let barrier = Arc::new(Barrier::new(2));
     let contender_barrier = Arc::clone(&barrier);
+    let (pid_sender, pid_receiver) = mpsc::channel();
     let contender = thread::spawn(move || {
         let mut contender_client = test_client();
+        let contender_pid: i32 = contender_client
+            .query_one("SELECT pg_backend_pid()", &[])
+            .unwrap()
+            .get(0);
+        pid_sender.send(contender_pid).unwrap();
         let contender = ParticipantRecord::new_anonymous(
             participant_ref,
             contender_tenant_ref,
@@ -85,11 +131,12 @@ fn race_replay(
         }
     });
 
+    let contender_pid = pid_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("contender backend must publish its PostgreSQL PID before the race");
     barrier.wait();
-    // Give the contender a deterministic window to enter INSERT ... ON CONFLICT while the
-    // winning unique-key row is still uncommitted. The PostgreSQL conflict itself supplies the
-    // synchronization; this sleep only prevents the winner from committing before the attempt.
-    thread::sleep(Duration::from_millis(100));
+    let mut observer = test_client();
+    wait_for_unique_conflict(&mut observer, contender_pid, winner_pid);
     winner_transaction.commit().unwrap();
 
     contender
