@@ -111,6 +111,94 @@ fn exact_replay_is_idempotent_and_identity_rebinding_fails_closed() {
 }
 
 #[test]
+fn each_stored_identity_and_evidence_mismatch_fails_closed() {
+    let _guard = audit_test_guard();
+    let mut client = test_client();
+    reset_audit_objects(&mut client);
+    apply_audit_evidence_migration(&mut client).unwrap();
+
+    let stored = AuditEvidence::new(AuditEvidenceInput {
+        audit_event_ref: "audit_event_field_mismatch_01",
+        tenant_ref: "tenant_research_alpha",
+        actor_ref: "actor_publisher_alpha",
+        purpose_code: "instrument_publication",
+        action_code: "publish_instrument_release",
+        resource_ref: "instrument_release_big_five_ko_v1",
+        outcome: AuditOutcome::Succeeded,
+        evidence_digest: DIGEST,
+        occurred_at_unix_ms: 1_785_000_000_000,
+    })
+    .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_audit_evidence(&mut transaction, &stored).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let mismatches = [
+        AuditEvidenceInput {
+            tenant_ref: "tenant_research_beta",
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            actor_ref: "actor_publisher_beta",
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            purpose_code: "research_release",
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            action_code: "deny_publication",
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            resource_ref: "instrument_release_big_five_en_v1",
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            outcome: AuditOutcome::Denied,
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            evidence_digest: OTHER_DIGEST,
+            ..stored_input()
+        },
+        AuditEvidenceInput {
+            occurred_at_unix_ms: 1_785_000_000_001,
+            ..stored_input()
+        },
+    ];
+    for input in mismatches {
+        let rebound = AuditEvidence::new(input).unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(
+            matches!(
+                persist_audit_evidence(&mut transaction, &rebound),
+                Err(AuditPersistenceError::ConflictingReplay)
+            ),
+            "rebound {} must fail closed",
+            rebound.audit_event_ref()
+        );
+        transaction.rollback().unwrap();
+    }
+}
+
+fn stored_input() -> AuditEvidenceInput<'static> {
+    AuditEvidenceInput {
+        audit_event_ref: "audit_event_field_mismatch_01",
+        tenant_ref: "tenant_research_alpha",
+        actor_ref: "actor_publisher_alpha",
+        purpose_code: "instrument_publication",
+        action_code: "publish_instrument_release",
+        resource_ref: "instrument_release_big_five_ko_v1",
+        outcome: AuditOutcome::Succeeded,
+        evidence_digest: DIGEST,
+        occurred_at_unix_ms: 1_785_000_000_000,
+    }
+}
+
+#[test]
 fn tenant_scoped_reload_returns_exact_evidence_without_cross_tenant_existence_leak() {
     let _guard = audit_test_guard();
     let mut client = test_client();

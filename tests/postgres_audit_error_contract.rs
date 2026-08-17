@@ -104,6 +104,23 @@ fn persist_and_load_fail_closed_on_range_isolation_and_caller_aliases() {
     ));
     serializable.rollback().unwrap();
 
+    let mut load_isolation = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    let load_isolation_error = load_audit_evidence(
+        &mut load_isolation,
+        "tenant_research_alpha",
+        "audit_event_failed_01",
+    )
+    .expect_err("non-read-committed audit reads must fail closed");
+    assert!(matches!(
+        load_isolation_error,
+        AuditPersistenceError::UnsupportedIsolationLevel
+    ));
+    load_isolation.rollback().unwrap();
+
     {
         let mut transaction = client.transaction().unwrap();
         persist_audit_evidence(&mut transaction, &failed).unwrap();
@@ -208,6 +225,32 @@ fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
     assert!(matches!(
         digest_error,
         AuditPersistenceError::CorruptHistory
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn persist_and_load_map_missing_relation_to_database_error() {
+    let mut client = test_client();
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS audit_missing_relation_test;\
+             SET search_path TO audit_missing_relation_test;",
+        )
+        .unwrap();
+    let evidence = evidence_at("audit_event_missing_01", 1_785_000_000_000);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_audit_evidence(&mut transaction, &evidence),
+        Err(AuditPersistenceError::Database(_))
+    ));
+    assert!(matches!(
+        load_audit_evidence(
+            &mut transaction,
+            "tenant_research_alpha",
+            "audit_event_missing_01"
+        ),
+        Err(AuditPersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
 }

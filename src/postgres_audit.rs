@@ -110,34 +110,7 @@ pub fn persist_audit_evidence(
     let occurred_at_unix_ms = i64::try_from(evidence.occurred_at_unix_ms())
         .map_err(|_| AuditPersistenceError::TimestampOutOfRange)?;
     let inserted_rows = insert_audit_row(transaction, evidence, occurred_at_unix_ms)?;
-    let row = query_required_audit_row(transaction, evidence.audit_event_ref())?;
-
-    let stored_tenant_ref: String = row.get(0);
-    let stored_actor_ref: String = row.get(1);
-    let stored_purpose_code: String = row.get(2);
-    let stored_action_code: String = row.get(3);
-    let stored_resource_ref: String = row.get(4);
-    let stored_outcome_code: String = row.get(5);
-    let stored_evidence_digest: String = row.get(6);
-    let stored_occurred_at_unix_ms: i64 = row.get(7);
-
-    if stored_tenant_ref == evidence.tenant_ref()
-        && stored_actor_ref == evidence.actor_ref()
-        && stored_purpose_code == evidence.purpose_code()
-        && stored_action_code == evidence.action_code()
-        && stored_resource_ref == evidence.resource_ref()
-        && stored_outcome_code == evidence.outcome().as_code()
-        && stored_evidence_digest == evidence.evidence_digest()
-        && stored_occurred_at_unix_ms == occurred_at_unix_ms
-    {
-        Ok(if inserted_rows == 1 {
-            AuditPersistenceDisposition::Inserted
-        } else {
-            AuditPersistenceDisposition::Duplicate
-        })
-    } else {
-        Err(AuditPersistenceError::ConflictingReplay)
-    }
+    classify_persisted_audit(transaction, evidence, occurred_at_unix_ms, inserted_rows)
 }
 
 /// Load one tenant-scoped audit record by opaque event identity.
@@ -188,6 +161,41 @@ pub fn load_audit_evidence(
     })
     .map(Some)
     .map_err(|_| AuditPersistenceError::CorruptHistory)
+}
+
+fn classify_persisted_audit(
+    transaction: &mut Transaction<'_>,
+    evidence: &AuditEvidence,
+    occurred_at_unix_ms: i64,
+    inserted_rows: u64,
+) -> Result<AuditPersistenceDisposition, AuditPersistenceError> {
+    let row = query_required_audit_row(transaction, evidence.audit_event_ref())?;
+    let stored_tenant_ref: String = row.get(0);
+    let stored_actor_ref: String = row.get(1);
+    let stored_purpose_code: String = row.get(2);
+    let stored_action_code: String = row.get(3);
+    let stored_resource_ref: String = row.get(4);
+    let stored_outcome_code: String = row.get(5);
+    let stored_evidence_digest: String = row.get(6);
+    let stored_occurred_at_unix_ms: i64 = row.get(7);
+
+    if stored_tenant_ref == evidence.tenant_ref()
+        && stored_actor_ref == evidence.actor_ref()
+        && stored_purpose_code == evidence.purpose_code()
+        && stored_action_code == evidence.action_code()
+        && stored_resource_ref == evidence.resource_ref()
+        && stored_outcome_code == evidence.outcome().as_code()
+        && stored_evidence_digest == evidence.evidence_digest()
+        && stored_occurred_at_unix_ms == occurred_at_unix_ms
+    {
+        Ok(if inserted_rows == 1 {
+            AuditPersistenceDisposition::Inserted
+        } else {
+            AuditPersistenceDisposition::Duplicate
+        })
+    } else {
+        Err(AuditPersistenceError::ConflictingReplay)
+    }
 }
 
 fn insert_audit_row(
@@ -271,8 +279,8 @@ fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), Audit
 #[cfg(test)]
 mod tests {
     use super::{
-        insert_audit_row, query_optional_audit_row, query_required_audit_row, required_reference,
-        AuditPersistenceError,
+        classify_persisted_audit, insert_audit_row, query_optional_audit_row,
+        query_required_audit_row, required_reference, AuditPersistenceError,
     };
     use crate::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
     use postgres::{Client, NoTls};
@@ -334,6 +342,10 @@ mod tests {
                 "tenant_research_alpha",
                 "audit_event_query_helper_01"
             ),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            classify_persisted_audit(&mut transaction, &evidence, 1_785_000_000_000, 0),
             Err(AuditPersistenceError::Database(_))
         ));
         transaction.rollback().unwrap();
