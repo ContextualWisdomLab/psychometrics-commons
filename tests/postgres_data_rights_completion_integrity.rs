@@ -263,6 +263,47 @@ fn terminal_completion_evidence_cannot_be_rewritten() {
 }
 
 #[test]
+fn terminal_completion_evidence_cannot_be_deleted_without_retained_scopes() {
+    let mut client = client("data_rights_completion_terminal_delete");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_terminal_delete",
+        DataRightsRequestKind::Export,
+    );
+    request
+        .complete("completion_evidence_terminal_delete", &[], 10_300)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_completion(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let error = client
+        .execute(
+            "DELETE FROM data_rights_request_state WHERE request_ref = $1",
+            &[&request.request_ref()],
+        )
+        .expect_err("terminal completion evidence must not be deletable through ordinary SQL");
+    assert_eq!(
+        error
+            .as_db_error()
+            .expect("terminal completion delete should be a PostgreSQL trigger error")
+            .code()
+            .code(),
+        "55000"
+    );
+    let count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM data_rights_request_state WHERE request_ref = $1",
+            &[&request.request_ref()],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 1, "the immutable terminal evidence row must remain stored");
+}
+
+#[test]
 fn retained_scope_evidence_is_immutable_after_completion() {
     let mut client = client("data_rights_completion_retained_scope_immutable");
     let mut request = persist_processing(
