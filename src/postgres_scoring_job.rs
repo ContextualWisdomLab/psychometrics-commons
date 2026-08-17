@@ -2,9 +2,10 @@
 //!
 //! This adapter persists product orchestration state only. Psychometric scoring remains
 //! owned by `fast-mlsirm`. The caller owns the database connection, credentials, and
-//! transaction boundary. Enqueue replay, worker claims, retry transitions, expired-lease
-//! recovery, and terminal outcomes require `READ COMMITTED`; row locks and conditional
-//! updates preserve stale-worker fencing and immutable completion evidence.
+//! transaction boundary. Enqueue replay, named-job claims, claim-next polls, retry
+//! transitions, expired-lease recovery, and terminal outcomes require `READ COMMITTED`;
+//! row locks and conditional updates preserve stale-worker fencing and immutable
+//! completion evidence.
 
 use crate::reference::normalized_reference;
 use crate::scoring_job::{ScoringJob, ScoringJobState};
@@ -76,6 +77,34 @@ impl PersistedScoringLease {
     #[must_use]
     pub const fn expires_at_unix_ms(&self) -> u64 {
         self.expires_at_unix_ms
+    }
+}
+
+/// One due scoring job claimed by a worker that did not already know the job identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClaimedScoringJob {
+    scoring_job_ref: String,
+    scoring_request_ref: String,
+    lease: PersistedScoringLease,
+}
+
+impl ClaimedScoringJob {
+    /// Return the opaque scoring-job identity that this worker now owns.
+    #[must_use]
+    pub fn scoring_job_ref(&self) -> &str {
+        &self.scoring_job_ref
+    }
+
+    /// Return the version-pinned scoring request bound to the claimed job.
+    #[must_use]
+    pub fn scoring_request_ref(&self) -> &str {
+        &self.scoring_request_ref
+    }
+
+    /// Return the fencing lease issued for this claim.
+    #[must_use]
+    pub const fn lease(&self) -> &PersistedScoringLease {
+        &self.lease
     }
 }
 
@@ -335,6 +364,96 @@ pub fn claim_scoring_job(
     } else {
         Err(ScoringJobPersistenceError::NotLeaseable)
     }
+}
+
+/// Atomically claim the oldest due queued or retry-scheduled scoring job.
+///
+/// A worker that only knows its own identity uses this after restart instead of
+/// guessing a `scoring_job_ref`. One `UPDATE` selects the oldest due row with
+/// `FOR UPDATE SKIP LOCKED`, so concurrent workers cannot both receive the same
+/// job. A retry-scheduled row is due only when `claimed_at_unix_ms` is at or
+/// after its persisted due time. An empty due set is `None`, not an invented
+/// job. `READ COMMITTED` is required so skipped locked rows become visible to
+/// the next poll after the owning transaction commits.
+///
+/// # Errors
+///
+/// Returns [`ScoringJobPersistenceError`] for invalid worker/lease identities,
+/// an invalid lease window, unsupported isolation, out-of-range database
+/// values, or a database failure.
+pub fn claim_next_scoring_job(
+    transaction: &mut Transaction<'_>,
+    worker_ref: &str,
+    lease_ref: &str,
+    claimed_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+) -> Result<Option<ClaimedScoringJob>, ScoringJobPersistenceError> {
+    let worker_ref = required_reference(worker_ref)?;
+    let lease_ref = required_reference(lease_ref)?;
+    let claimed_at_unix_ms = postgres_timestamp(claimed_at_unix_ms)?;
+    let expires_at_unix_ms = postgres_timestamp(expires_at_unix_ms)?;
+    if expires_at_unix_ms <= claimed_at_unix_ms {
+        return Err(ScoringJobPersistenceError::InvalidLeaseWindow);
+    }
+    require_read_committed(transaction)?;
+
+    let claimed = transaction.query_opt(
+        "UPDATE scoring_job_state AS claimed \
+         SET scoring_state = 'leased',\
+             attempt_count = attempt_count + 1,\
+             next_attempt_at_unix_ms = NULL,\
+             last_failure_code = NULL,\
+             active_worker_ref = $1,\
+             active_lease_ref = $2,\
+             active_fencing_token = attempt_count + 1,\
+             active_lease_expires_at_unix_ms = $3,\
+             updated_at = clock_timestamp() \
+         FROM (\
+             SELECT scoring_job_ref \
+             FROM scoring_job_state \
+             WHERE (\
+                 scoring_state = 'queued' \
+                 OR (\
+                     scoring_state = 'retry_scheduled' \
+                     AND next_attempt_at_unix_ms <= $4\
+                 )\
+             ) \
+             AND attempt_count < max_attempts \
+             ORDER BY created_at ASC, scoring_job_ref ASC \
+             FOR UPDATE SKIP LOCKED \
+             LIMIT 1\
+         ) AS due \
+         WHERE claimed.scoring_job_ref = due.scoring_job_ref \
+         RETURNING claimed.scoring_job_ref, claimed.scoring_request_ref, \
+                   claimed.attempt_count, claimed.active_fencing_token",
+        &[
+            &worker_ref,
+            &lease_ref,
+            &expires_at_unix_ms,
+            &claimed_at_unix_ms,
+        ],
+    )?;
+
+    let Some(row) = claimed else {
+        return Ok(None);
+    };
+    let scoring_job_ref: String = row.get(0);
+    let scoring_request_ref: String = row.get(1);
+    let attempt_count: i32 = row.get(2);
+    let fencing_token: i64 = row.get(3);
+    debug_assert_eq!(i64::from(attempt_count), fencing_token);
+    Ok(Some(ClaimedScoringJob {
+        scoring_job_ref,
+        scoring_request_ref,
+        lease: PersistedScoringLease {
+            worker_ref: worker_ref.to_owned(),
+            lease_ref: lease_ref.to_owned(),
+            fencing_token: u64::try_from(fencing_token)
+                .map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?,
+            expires_at_unix_ms: u64::try_from(expires_at_unix_ms)
+                .map_err(|_| ScoringJobPersistenceError::ValueOutOfRange)?,
+        },
+    }))
 }
 
 /// Recover one expired leased scoring job into a due retry or quarantine.

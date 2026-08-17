@@ -2,8 +2,8 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
-    claim_scoring_job, persist_scoring_job, record_retryable_scoring_failure,
-    ScoringJobPersistenceError,
+    claim_next_scoring_job, claim_scoring_job, persist_scoring_job,
+    record_retryable_scoring_failure, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
@@ -41,6 +41,19 @@ fn persistence_operations_wrap_missing_table_failures() {
             "scoring_job_dberror",
             "worker_dberror",
             "scoring_lease_dberror",
+            10_000,
+            11_000,
+        ),
+        Err(ScoringJobPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        claim_next_scoring_job(
+            &mut transaction,
+            "worker_dberror",
+            "scoring_lease_dberror_next",
             10_000,
             11_000,
         ),
