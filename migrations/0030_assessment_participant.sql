@@ -4,6 +4,8 @@
 -- Optional Keyverse link history remains a separate append-only identity-link concern.
 -- PostgreSQL 18's pg_unicode_fast collation gives the reference guards stable Unicode
 -- whitespace and decimal-digit classification instead of inheriting host LC_CTYPE behavior.
+-- Once inserted, the participant base evidence is immutable. Account-link changes belong in
+-- separate append-only history rather than rewriting or deleting the stable participant row.
 
 CREATE TABLE IF NOT EXISTS assessment_participant (
     participant_ref TEXT PRIMARY KEY,
@@ -32,3 +34,27 @@ CREATE TABLE IF NOT EXISTS assessment_participant (
         created_at_unix_ms > 0
     )
 );
+
+CREATE OR REPLACE FUNCTION reject_assessment_participant_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RAISE EXCEPTION 'assessment participant base evidence is immutable'
+        USING ERRCODE = '55000';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS assessment_participant_immutable_guard
+    ON assessment_participant;
+CREATE TRIGGER assessment_participant_immutable_guard
+    BEFORE UPDATE OR DELETE ON assessment_participant
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_assessment_participant_mutation();
+
+DROP TRIGGER IF EXISTS assessment_participant_truncate_guard
+    ON assessment_participant;
+CREATE TRIGGER assessment_participant_truncate_guard
+    BEFORE TRUNCATE ON assessment_participant
+    FOR EACH STATEMENT
+    EXECUTE FUNCTION reject_assessment_participant_mutation();
