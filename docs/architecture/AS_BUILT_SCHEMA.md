@@ -17,7 +17,12 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
+<<<<<<< HEAD
 | `integration_consumption` | integration | Implemented subset |
+=======
+| `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
+| `assessment_participant` | participant identity | **Active PR** #237 (not protected-main truth) |
+>>>>>>> 520f15a (docs(schema): map participant base as active physical evidence)
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
@@ -40,6 +45,12 @@ Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_d
 ## Protected-main inbox-consumption physical schema
 
 `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` persist one consumption work item for an existing `integration_inbox` receipt. This is an **Implemented subset** on protected main after #58. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence. Subsequent claim-deadline columns from later inbox-expiry slices remain documented with those slices.
+
+## Active PR participant-base physical schema
+
+PR #237 (`feat/participant-base-persistence-20260817`) `migrations/0030_assessment_participant.sql` and `src/postgres_participant.rs` persist the stable anonymous-first participant base record. This slice is **Active PR**, not protected-main truth. It stores only the opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time; optional Keyverse link history remains a separate append-only identity-link concern. The adapter requires `READ COMMITTED`, classifies exact replay versus conflicting rebinding, and reloads only through the exact participant-and-tenant pair.
+
+The physical table rejects blank, Unicode-whitespace-padded, and Unicode numeric-like public identities using PostgreSQL 18 Unicode classification. Database triggers reject `UPDATE`, `DELETE`, and `TRUNCATE` with SQLSTATE `55000`, so direct SQL cannot silently rebind or erase the stable participant evidence. Real PostgreSQL contract tests exercise those constraints plus reload integrity. The slice does **not** claim participant HTTP transport, account-link history persistence, or Keyverse federation.
 
 ## Protected-main scoring-job physical schema
 
