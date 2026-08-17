@@ -208,14 +208,13 @@ fn completion_evidence(
     })
 }
 
-#[allow(clippy::question_mark)]
 fn classify_replay(
     transaction: &mut Transaction<'_>,
     request: &DataRightsRequest,
     request_kind: &str,
     evidence: &CompletionEvidence<'_>,
 ) -> Result<DataRightsCompletionDisposition, DataRightsPersistenceError> {
-    let row = match transaction.query_opt(
+    let row = transaction.query_opt(
         "SELECT participant_ref, request_kind, scope_ref, current_state,
                 verification_evidence_ref, verified_at_unix_ms,
                 operation_ref, processing_started_at_unix_ms,
@@ -224,10 +223,7 @@ fn classify_replay(
          WHERE request_ref = $1 AND tenant_ref = $2
          FOR UPDATE",
         &[&request.request_ref(), &request.tenant_ref()],
-    ) {
-        Ok(row) => row,
-        Err(error) => return Err(DataRightsPersistenceError::from(error)),
-    };
+    )?;
     let Some(row) = row else {
         return Err(DataRightsPersistenceError::RequestNotFound);
     };
