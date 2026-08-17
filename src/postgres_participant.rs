@@ -330,11 +330,14 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_conflict_winner, identity_link_projection_present, postgres_timestamp,
-        read_conflict_winner, reconstruct_loaded_base, require_stored_base_identity,
-        required_exact_reference, stored_base_identity_matches, stored_timestamp,
-        ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
+        classify_conflict_winner, has_durable_identity_link_projection,
+        identity_link_projection_present, load_anonymous_participant_base,
+        persist_anonymous_participant_base, postgres_timestamp, read_conflict_winner,
+        reconstruct_loaded_base, require_stored_base_identity, required_exact_reference,
+        stored_base_identity_matches, stored_timestamp, ParticipantBasePersistenceDisposition,
+        ParticipantBasePersistenceError,
     };
+    use crate::participant::ParticipantRecord;
     use postgres::{Client, NoTls};
 
     #[test]
@@ -576,5 +579,53 @@ mod tests {
             "PostgreSQL participant base persistence failed"
         );
         assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn persist_and_load_instantiate_library_copies_on_missing_relation() {
+        let participant = ParticipantRecord::new_anonymous(
+            "participant_public_demo",
+            "tenant_public_demo",
+            40_000,
+        )
+        .unwrap();
+        assert!(!has_durable_identity_link_projection(&participant));
+        let mut linked = ParticipantRecord::new_anonymous(
+            "participant_public_demo",
+            "tenant_public_demo",
+            40_000,
+        )
+        .unwrap();
+        linked
+            .link_account(
+                "link_event_demo",
+                "issuer_keyverse_demo",
+                "subject_keyverse_demo",
+                "proof_anonymous_demo",
+                "proof_authenticated_demo",
+                40_100,
+            )
+            .unwrap();
+        assert!(has_durable_identity_link_projection(&linked));
+
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO participant_base_lib_missing;")
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_anonymous_participant_base(&mut transaction, &participant),
+            Err(ParticipantBasePersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            load_anonymous_participant_base(
+                &mut transaction,
+                "participant_public_demo",
+                "tenant_public_demo"
+            ),
+            Err(ParticipantBasePersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
     }
 }
