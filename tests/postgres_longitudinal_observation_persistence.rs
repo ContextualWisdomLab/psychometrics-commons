@@ -213,6 +213,15 @@ fn restart_recovery_rejects_incomplete_persisted_history() {
     let mut client = client();
     reset(&mut client);
     apply_longitudinal_observation_migration(&mut client).unwrap();
+
+    // Simulate externally restored legacy/corrupt evidence without weakening the production
+    // migration: normal writes keep this constraint trigger enabled and cannot commit this state.
+    client
+        .batch_execute(
+            "ALTER TABLE longitudinal_observation \
+             DISABLE TRIGGER longitudinal_observation_membership_total_check;",
+        )
+        .unwrap();
     client
         .execute(
             "INSERT INTO longitudinal_observation (\
@@ -238,6 +247,12 @@ fn restart_recovery_rejects_incomplete_persisted_history() {
                 &540_i16,
                 &Option::<&str>::None,
             ],
+        )
+        .unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE longitudinal_observation \
+             ENABLE TRIGGER longitudinal_observation_membership_total_check;",
         )
         .unwrap();
 
