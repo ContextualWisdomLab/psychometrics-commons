@@ -12,7 +12,7 @@ use psychometrics_commons_runtime::health_process::{
     HEALTH_DATABASE_URL_ENV, HEALTH_LISTEN_ADDR_ENV, HEALTH_LISTEN_PORT_ENV,
 };
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -40,6 +40,37 @@ fn exchange(addr: SocketAddr, request: &str) -> String {
     let mut body = String::new();
     stream.read_to_string(&mut body).unwrap();
     body
+}
+
+#[test]
+fn run_health_process_serves_live_after_a_successful_bind() {
+    let reserved = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+    let addr = reserved.local_addr().unwrap();
+    drop(reserved);
+    let listen = addr.to_string();
+    let _server = thread::spawn(move || {
+        run_health_process(env_lookup(&[(HEALTH_LISTEN_ADDR_ENV, listen.as_str())]))
+    });
+
+    let live = (0..40)
+        .find_map(|_| {
+            thread::sleep(Duration::from_millis(25));
+            let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(50)).ok()?;
+            stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+            stream
+                .write_all(
+                    format!("GET {HEALTH_LIVE_PATH} HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                        .as_bytes(),
+                )
+                .ok()?;
+            stream.shutdown(std::net::Shutdown::Write).ok()?;
+            let mut body = String::new();
+            stream.read_to_string(&mut body).ok()?;
+            Some(body)
+        })
+        .expect("run_health_process must bind and answer GET /live after a successful listen");
+    assert!(live.starts_with("HTTP/1.1 200 OK\r\n"), "{live}");
+    assert!(live.contains("\"live\":true"));
 }
 
 #[test]

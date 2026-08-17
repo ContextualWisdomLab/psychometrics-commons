@@ -190,12 +190,20 @@ pub fn serve_health_http(
 /// # Errors
 ///
 /// Returns the I/O error that stopped the loop.
-pub fn serve_health_http_with<F>(listener: &TcpListener, mut handler: F) -> io::Result<()>
+pub fn serve_health_http_with<F>(listener: &TcpListener, handler: F) -> io::Result<()>
 where
     F: FnMut(&str) -> HealthHttpResponse,
 {
+    serve_health_http_with_accept(|| listener.accept(), handler)
+}
+
+fn serve_health_http_with_accept<A, F>(mut accept: A, mut handler: F) -> io::Result<()>
+where
+    A: FnMut() -> io::Result<(TcpStream, SocketAddr)>,
+    F: FnMut(&str) -> HealthHttpResponse,
+{
     loop {
-        match listener.accept() {
+        match accept() {
             Ok((mut stream, _)) => {
                 // Per-connection I/O never stops later probes; a dropped client
                 // must not take the operator listener down.
@@ -457,15 +465,17 @@ mod tests {
         apply_request_read, backlog_label, bind_health_http, capability_state_label,
         handle_health_http_request, health_ready_response, health_request_required_capabilities,
         health_request_requires_readiness_snapshot, integrity_label, json_string, reason_phrase,
-        serve_health_http_with, should_continue_after_serve_error, RequestReadProgress,
-        ServeIoSource, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH, HEALTH_READY_PATH,
+        serve_health_http, serve_health_http_with_accept, should_continue_after_serve_error,
+        RequestReadProgress, ServeIoSource, HEALTH_HTTP_MAX_REQUEST_BYTES, HEALTH_LIVE_PATH,
+        HEALTH_READY_PATH,
     };
     use crate::health::{
         BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth,
         RuntimeHealthSnapshot,
     };
-    use std::io;
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::io::{self, Write};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+    use std::thread;
 
     #[test]
     fn remaining_labels_and_json_escapes_are_stable() {
@@ -547,12 +557,11 @@ mod tests {
         assert!(not_allowed
             .body()
             .contains("\"title\":\"Method Not Allowed\""));
+        let method_not_allowed_type =
+            "\"type\":\"urn:psychometrics-commons:problem:method-not-allowed\"";
         assert!(
-            not_allowed
-                .body()
-                .contains("\"type\":\"urn:psychometrics-commons:problem:method-not-allowed\""),
-            "health problems must use an explicit product type, not about:blank: {}",
-            not_allowed.body()
+            not_allowed.body().contains(method_not_allowed_type),
+            "health problems must use an explicit product type, not about:blank"
         );
         assert!(!not_allowed.body().contains("about:blank"));
 
@@ -698,11 +707,49 @@ mod tests {
         listener
             .set_nonblocking(true)
             .expect("the test must force accept to return WouldBlock");
-        let error = serve_health_http_with(&listener, |_| {
-            panic!("a fatal accept must not invoke the request handler")
-        })
-        .expect_err("WouldBlock on accept must stop the probe process");
+        let snapshot = RuntimeHealthSnapshot::new(
+            true,
+            BacklogHealth::WithinBounds,
+            DataIntegrityHealth::Verified,
+            Vec::new(),
+        )
+        .unwrap();
+        let error = serve_health_http(&listener, &snapshot)
+            .expect_err("WouldBlock on accept must stop the probe process");
         assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn serve_loop_retries_retryable_accept_errors_then_stops() {
+        let listener =
+            bind_health_http(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        let accepted = listener.accept().unwrap();
+        thread::spawn(move || {
+            let _ = client.write_all(b"GET /live HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        });
+        let snapshot = RuntimeHealthSnapshot::new(
+            true,
+            BacklogHealth::WithinBounds,
+            DataIntegrityHealth::Verified,
+            Vec::new(),
+        )
+        .unwrap();
+        let mut outcomes = vec![
+            Ok(accepted),
+            Err(io::Error::new(io::ErrorKind::Interrupted, "eintr")),
+            Err(io::Error::new(io::ErrorKind::ConnectionAborted, "aborted")),
+            Err(io::Error::new(io::ErrorKind::ConnectionReset, "reset")),
+            Err(io::Error::new(io::ErrorKind::WouldBlock, "done")),
+        ];
+        let error = serve_health_http_with_accept(
+            || outcomes.remove(0),
+            |request| handle_health_http_request(request, &snapshot),
+        )
+        .expect_err("fatal accept must stop after retryable accept errors");
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        assert!(outcomes.is_empty());
     }
 
     #[test]
