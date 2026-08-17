@@ -108,7 +108,10 @@ fn adapter_returns_only_a_result_bound_to_the_exact_request() {
     let result = execute_scoring_request(&SuccessfulEngine, &request).unwrap();
 
     assert_eq!(result.scoring_request_ref(), "scoring_request_primary");
-    assert_eq!(result.response_snapshot_ref(), "response_snapshot_scoring_adapter");
+    assert_eq!(
+        result.response_snapshot_ref(),
+        "response_snapshot_scoring_adapter"
+    );
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].score(), Some(0.42));
 }
