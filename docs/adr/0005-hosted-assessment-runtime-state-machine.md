@@ -91,3 +91,21 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 ## Reversal conditions
 
 Revisit the storage implementation if event volume demands a different backend, but retain state semantics, idempotency, immutable snapshots, and outbox guarantees.
+
+## Standards basis
+
+The hosted session machine exists so administration, completion, scoring dispatch, and result release stay server-authoritative. The *Standards for Educational and Psychological Testing* treat test administration, scoring, reporting, and the rights of test takers as professional obligations: participants must encounter a controlled administration, scores must be produced from the intended procedure, and a released result must match the evidence that supports it (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014). Kane (2013) requires that a released result carry an interpretation/use argument rather than an ad hoc status change.
+
+Numeric scoring is dispatched to the ADR-0004/`fast-mlsirm` kernel only after an immutable response snapshot exists (Embretson & Reise, 2000; Lord, 1980). The session machine does not compute IRT estimates. When the published instrument uses the upstream multilevel latent-space item-response model, that engine is Jeon et al. (2021) as consumed through `fast-mlsirm`.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Embretson, S. E., & Reise, S. P. (2000). *Item response theory for psychologists*. Lawrence Erlbaum Associates.
+
+Jeon, M., Jin, I. H., Schweinberger, M., & Baugh, S. (2021). Mapping unobserved item-respondent interactions: A latent space item response model with interaction map. *Psychometrika, 86*(2), 378–403. https://doi.org/10.1007/s11336-021-09776-z
+
+Kane, M. T. (2013). Validating the interpretations and uses of test scores. *Journal of Educational Measurement, 50*(1), 1–73. https://doi.org/10.1111/jedm.12000
+
+Lord, F. M. (1980). *Applications of item response theory to practical testing problems*. Lawrence Erlbaum Associates.

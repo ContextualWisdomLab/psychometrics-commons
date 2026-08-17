@@ -76,3 +76,21 @@ Raw responses are passed by bounded payload or secure reference according to dep
 ## Reversal conditions
 
 A different engine may replace fast-mlsirm only through the same contracts and after independent recovery, parity, and migration evidence. Historical results continue to reference their original engine artifact.
+
+## Standards basis
+
+This decision exists so that a published numeric score remains scientifically accountable. The *Standards for Educational and Psychological Testing* require validity, reliability/precision, fairness, and score-reporting evidence for the intended interpretation and use (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014). Kane (2013) treats that obligation as an interpretation/use argument: a number is not self-justifying, and the product must pin the evidence that supports the claimed use.
+
+Numeric scores, information, linking, differential item functioning (DIF), uncertainty, and related estimation therefore come from an item-response-theory (IRT) psychometric kernel rather than from product application code or an LLM (Embretson & Reise, 2000; Lord, 1980). Psychometrics Commons orchestrates scoring and persists provenance; it does not reimplement those kernels. When the published instrument uses the upstream multilevel latent-space item-response model, that engine is Jeon et al. (2021) as consumed through `fast-mlsirm`.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Embretson, S. E., & Reise, S. P. (2000). *Item response theory for psychologists*. Lawrence Erlbaum Associates.
+
+Jeon, M., Jin, I. H., Schweinberger, M., & Baugh, S. (2021). Mapping unobserved item-respondent interactions: A latent space item response model with interaction map. *Psychometrika, 86*(2), 378–403. https://doi.org/10.1007/s11336-021-09776-z
+
+Kane, M. T. (2013). Validating the interpretations and uses of test scores. *Journal of Educational Measurement, 50*(1), 1–73. https://doi.org/10.1111/jedm.12000
+
+Lord, F. M. (1980). *Applications of item response theory to practical testing problems*. Lawrence Erlbaum Associates.
