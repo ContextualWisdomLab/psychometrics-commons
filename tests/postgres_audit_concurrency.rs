@@ -78,21 +78,18 @@ fn concurrent_exact_replay_observes_committed_winner_under_read_committed() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut replay_waited_for_winner = false;
     while Instant::now() < deadline {
-        let row = observer
-            .query_opt(
-                "SELECT wait_event_type \
+        let waiting: bool = observer
+            .query_one(
+                "SELECT count(*) > 0 \
                  FROM pg_stat_activity \
                  WHERE application_name = 'audit_concurrency_replay' \
-                   AND state = 'active'",
+                   AND state = 'active' \
+                   AND wait_event_type = 'Lock'",
                 &[],
             )
-            .expect("pg_stat_activity must be readable while waiting for the replay lock");
-        if row
-            .as_ref()
-            .and_then(|row| row.get::<_, Option<String>>(0))
-            .as_deref()
-            == Some("Lock")
-        {
+            .expect("pg_stat_activity must be readable while waiting for the replay lock")
+            .get(0);
+        if waiting {
             replay_waited_for_winner = true;
             break;
         }
