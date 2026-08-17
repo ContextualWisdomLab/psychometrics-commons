@@ -165,7 +165,8 @@ fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
     client
         .batch_execute(
             "ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_occurrence_positive_check;\
-             ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_digest_shape_check;",
+             ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_digest_shape_check;\
+             ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_purpose_code_shape_check;",
         )
         .unwrap();
 
@@ -207,6 +208,25 @@ fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
             ],
         )
         .unwrap();
+    client
+        .execute(
+            "INSERT INTO audit_evidence_record (\
+                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
+                outcome_code, evidence_digest, occurred_at_unix_ms\
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            &[
+                &"audit_event_corrupt_purpose_01",
+                &"tenant_research_alpha",
+                &"actor_publisher_alpha",
+                &"HasUppercase",
+                &"publish_instrument_release",
+                &"instrument_release_big_five_ko_v1",
+                &"succeeded",
+                &DIGEST,
+                &1_785_000_000_000_i64,
+            ],
+        )
+        .unwrap();
 
     let mut transaction = client.transaction().unwrap();
     let time_error = load_audit_evidence(
@@ -224,6 +244,16 @@ fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
     .expect_err("noncanonical stored digest must fail closed");
     assert!(matches!(
         digest_error,
+        AuditPersistenceError::CorruptHistory
+    ));
+    let purpose_error = load_audit_evidence(
+        &mut transaction,
+        "tenant_research_alpha",
+        "audit_event_corrupt_purpose_01",
+    )
+    .expect_err("noncanonical stored purpose must fail closed at reconstruction");
+    assert!(matches!(
+        purpose_error,
         AuditPersistenceError::CorruptHistory
     ));
     transaction.rollback().unwrap();
