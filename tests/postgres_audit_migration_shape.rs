@@ -3,6 +3,37 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migration;
 
+const AUDIT_EVIDENCE_MIGRATION: &str = include_str!("../migrations/0040_audit_evidence_record.sql");
+
+#[test]
+fn migration_serializes_creation_before_observing_relation_state() {
+    let begin = AUDIT_EVIDENCE_MIGRATION
+        .find("BEGIN\n")
+        .expect("migration DO block must have an executable body");
+    let lock = AUDIT_EVIDENCE_MIGRATION
+        .find("PERFORM pg_advisory_xact_lock(hashtext('psychometrics-commons:migration-0040'));")
+        .expect("migration must serialize concurrent first creation with a transaction advisory lock");
+    let relation_refresh = AUDIT_EVIDENCE_MIGRATION
+        .find("relation_ref := to_regclass('audit_evidence_record');")
+        .expect("migration must observe owned relation state after acquiring the lock");
+    let created_table_refresh = AUDIT_EVIDENCE_MIGRATION
+        .find("created_table := relation_ref IS NULL;")
+        .expect("migration must derive creation state from the post-lock relation observation");
+    let first_relation_observation = AUDIT_EVIDENCE_MIGRATION
+        .find("to_regclass('audit_evidence_record')")
+        .expect("migration must inspect the owned relation");
+
+    assert!(lock > begin, "advisory lock must execute inside the migration DO block");
+    assert_eq!(
+        first_relation_observation, relation_refresh,
+        "no relation observation may occur before the migration advisory lock"
+    );
+    assert!(
+        relation_refresh > lock && created_table_refresh > relation_refresh,
+        "relation and creation state must be refreshed only after lock acquisition"
+    );
+}
+
 #[test]
 fn migration_rejects_preexisting_relation_with_wrong_owned_schema() {
     let connection = std::env::var("TEST_DATABASE_URL")
