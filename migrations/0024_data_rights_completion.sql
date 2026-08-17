@@ -4,33 +4,26 @@ ALTER TABLE data_rights_request_state
 ALTER TABLE data_rights_request_state
     ADD COLUMN IF NOT EXISTS completed_at_unix_ms BIGINT;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_record
-        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
-        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
-        WHERE constraint_record.conname = 'data_rights_completion_evidence_ref_format_check'
-          AND table_record.relname = 'data_rights_request_state'
-          AND schema_record.nspname = current_schema()
-    ) THEN
-        ALTER TABLE data_rights_request_state
-            ADD CONSTRAINT data_rights_completion_evidence_ref_format_check
-            CHECK (
-                completion_evidence_ref IS NULL
-                OR (
-                    completion_evidence_ref = btrim(completion_evidence_ref)
-                    AND completion_evidence_ref <> ''
-                    AND NOT (
-                        completion_evidence_ref ~ '[[:digit:]]'
-                        AND completion_evidence_ref ~ '^[[:digit:]+,.eE-]+$'
-                    )
-                )
-            );
-    END IF;
-END
-$$;
+-- Reapplication must replace an earlier revision of this not-yet-released constraint, not merely
+-- trust its name. PostgreSQL 18's pg_unicode_fast collation keeps the physical opaque-reference
+-- boundary aligned with Rust's Unicode whitespace and numeric-like reference guard.
+ALTER TABLE data_rights_request_state
+    DROP CONSTRAINT IF EXISTS data_rights_completion_evidence_ref_format_check;
+ALTER TABLE data_rights_request_state
+    ADD CONSTRAINT data_rights_completion_evidence_ref_format_check
+    CHECK (
+        completion_evidence_ref IS NULL
+        OR (
+            completion_evidence_ref <> ''
+            AND completion_evidence_ref COLLATE "pg_unicode_fast"
+                !~ '(^[[:space:]])|([[:space:]]$)'
+            AND NOT (
+                completion_evidence_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+                AND completion_evidence_ref COLLATE "pg_unicode_fast"
+                    ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+            )
+        )
+    );
 
 DO $$
 BEGIN
@@ -149,14 +142,30 @@ CREATE TABLE IF NOT EXISTS data_rights_retained_scope_evidence (
     CONSTRAINT data_rights_retained_scope_state_check
         CHECK (completion_state = 'partially_completed'),
     CONSTRAINT data_rights_retained_scope_ref_format_check CHECK (
-        retained_scope_ref = btrim(retained_scope_ref)
-        AND retained_scope_ref <> ''
+        retained_scope_ref <> ''
+        AND retained_scope_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
         AND NOT (
-            retained_scope_ref ~ '[[:digit:]]'
-            AND retained_scope_ref ~ '^[[:digit:]+,.eE-]+$'
+            retained_scope_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND retained_scope_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
         )
     )
 );
+
+-- CREATE TABLE IF NOT EXISTS also leaves a same-named older CHECK untouched. Replace that owned
+-- definition on every apply so a partial rollout cannot keep accepting identities the domain rejects.
+ALTER TABLE data_rights_retained_scope_evidence
+    DROP CONSTRAINT IF EXISTS data_rights_retained_scope_ref_format_check;
+ALTER TABLE data_rights_retained_scope_evidence
+    ADD CONSTRAINT data_rights_retained_scope_ref_format_check CHECK (
+        retained_scope_ref <> ''
+        AND retained_scope_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            retained_scope_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND retained_scope_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    );
 
 CREATE OR REPLACE FUNCTION reject_data_rights_retained_scope_mutation()
 RETURNS trigger
