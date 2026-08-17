@@ -99,8 +99,8 @@ fn request<'a>(
     }
 }
 
-fn empty_ledger(session_ref: &str, manifest: InstrumentReleaseManifest) -> ItemDeliveryLedger {
-    let release = published_release_from_manifest(&manifest);
+fn empty_ledger(session_ref: &str, manifest: &InstrumentReleaseManifest) -> ItemDeliveryLedger {
+    let release = published_release_from_manifest(manifest);
     let session = session_with_ref_in_state(&release, session_ref, SessionState::Active);
     ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap()
 }
@@ -148,7 +148,7 @@ fn empty_ledger_persist_is_exactly_idempotent_and_release_rebinding_fails_closed
 
     let ledger = empty_ledger(
         "session_item_delivery_alpha",
-        manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
     );
     {
         let mut transaction = client.transaction().unwrap();
@@ -169,7 +169,7 @@ fn empty_ledger_persist_is_exactly_idempotent_and_release_rebinding_fails_closed
 
     let rebound = empty_ledger(
         "session_item_delivery_alpha",
-        manifest("release_big_five_en_v1", OTHER_DIGEST),
+        &manifest("release_big_five_en_v1", OTHER_DIGEST),
     );
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
@@ -187,7 +187,7 @@ fn tenant_rebinding_fails_closed() {
     apply_item_delivery_migration(&mut client).unwrap();
     let ledger = empty_ledger(
         "session_item_delivery_tenant_rebind",
-        manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
     );
 
     {
@@ -440,7 +440,7 @@ fn item_delivery_persistence_requires_read_committed() {
     apply_item_delivery_migration(&mut client).unwrap();
     let ledger = empty_ledger(
         "session_item_delivery_serializable",
-        manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
     );
     let mut transaction = client
         .build_transaction()
@@ -461,7 +461,7 @@ fn missing_relations_are_database_failures() {
     reset_item_delivery_tables(&mut client);
     let empty = empty_ledger(
         "session_item_delivery_missing_ledger",
-        manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+        &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
     );
     {
         let mut transaction = client.transaction().unwrap();
@@ -572,22 +572,22 @@ fn digest_locale_and_allowed_item_rebinding_fail_closed() {
         &mut client,
         &empty_ledger(
             "session_digest_conflict",
-            manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+            &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
         ),
         &empty_ledger(
             "session_digest_conflict",
-            manifest("release_big_five_ko_v1", OTHER_DIGEST),
+            &manifest("release_big_five_ko_v1", OTHER_DIGEST),
         ),
     );
     persist_then_conflict(
         &mut client,
         &empty_ledger(
             "session_locale_conflict",
-            manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+            &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
         ),
         &empty_ledger(
             "session_locale_conflict",
-            manifest_parts(
+            &manifest_parts(
                 "release_big_five_ko_v1",
                 &["item_version_001", "item_version_002"],
                 "en-US",
@@ -599,11 +599,11 @@ fn digest_locale_and_allowed_item_rebinding_fail_closed() {
         &mut client,
         &empty_ledger(
             "session_allowed_conflict",
-            manifest("release_big_five_ko_v1", RELEASE_DIGEST),
+            &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
         ),
         &empty_ledger(
             "session_allowed_conflict",
-            manifest_parts(
+            &manifest_parts(
                 "release_big_five_ko_v1",
                 &["item_version_001", "item_version_003"],
                 "ko-KR",
