@@ -31,7 +31,9 @@ fn migration_rejects_preexisting_relation_with_wrong_owned_schema() {
 
     let error = apply_audit_evidence_migration(&mut client)
         .expect_err("migration must reject a preexisting relation it does not own exactly");
-    let message = error.to_string();
+    let message = error
+        .as_db_error()
+        .map_or_else(|| error.to_string(), |database| database.message().to_owned());
     assert!(
         message.contains("audit_evidence_record") && message.contains("contract"),
         "migration must identify owned-schema drift instead of silently accepting it: {message}"
