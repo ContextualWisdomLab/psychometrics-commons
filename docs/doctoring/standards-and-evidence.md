@@ -1,7 +1,7 @@
 # Standards and Evidence Baseline
 
 - Status: Living doctoring record
-- Last reviewed: 2026-08-11
+- Last reviewed: 2026-08-18
 - Scope: Psychometrics Commons product, hosted runtime, reference clients, optional AI, identity integration, and assessment governance
 
 This record identifies authoritative standards and primary guidance that materially constrain product design. It is not a certification claim. Each implementation PR that relies on one of these sources must translate the source into a concrete requirement, test, control, or ADR rather than citing it decoratively.
@@ -74,6 +74,17 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
+## PostgreSQL transaction isolation and immutable replay
+
+PostgreSQL 18 `READ COMMITTED` gives each command a fresh snapshot. Psychometrics Commons persistence adapters that use a conflict-tolerant insert followed by an exact-replay verification read therefore require `READ COMMITTED` when that second command must observe a concurrently committed unique-key winner. They fail closed on stronger transaction isolation instead of assuming that a later command receives a newer snapshot. ADR 0015 records the repository transaction boundary, and PostgreSQL integration tests exercise both exact replay and unsupported-isolation rejection.
+
+Product consequences:
+
+- persistence APIs declare their required isolation level as part of the adapter contract;
+- an idempotent replay verifies all immutable identity/evidence fields rather than treating a unique-key conflict as success;
+- unsupported isolation fails before durable mutation where the adapter depends on command-level snapshot refresh;
+- concurrency behavior is verified against the repository-supported PostgreSQL major version rather than inferred from an in-memory mock.
+
 ## Temporal and provenance evidence
 
 Longitudinal observations distinguish validity time from source-recorded time,
@@ -107,6 +118,8 @@ Product consequences:
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
 
+International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
 International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 
 International Organization for Standardization. (2023a). *ISO/IEC 23894:2023 Information technology—Artificial intelligence—Guidance on risk management*. https://www.iso.org/standard/77304.html
@@ -117,12 +130,10 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
-International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+The PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation: Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
-World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
-
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
 
-The PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation: Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
