@@ -141,15 +141,7 @@ pub fn persist_anonymous_participant_base(
         return Ok(ParticipantBasePersistenceDisposition::Inserted);
     }
 
-    let existing = match transaction.query_opt(
-        "SELECT tenant_ref, created_at_unix_ms FROM assessment_participant \
-         WHERE participant_ref = $1",
-        &[&participant_ref],
-    ) {
-        Ok(Some(row)) => Some((row.get::<_, String>(0), row.get::<_, i64>(1))),
-        Ok(None) => None,
-        Err(error) => return Err(ParticipantBasePersistenceError::from(error)),
-    };
+    let existing = read_conflict_winner(transaction, participant_ref)?;
     classify_conflict_winner(
         existing
             .as_ref()
@@ -196,14 +188,12 @@ pub fn load_anonymous_participant_base(
         .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
     required_exact_reference(&stored_tenant_ref)
         .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
-    if !stored_base_identity_matches(
+    require_stored_base_identity(
         &stored_participant_ref,
         &stored_tenant_ref,
         participant_ref,
         tenant_ref,
-    ) {
-        return Err(ParticipantBasePersistenceError::CorruptStoredIdentity);
-    }
+    )?;
     let created_at_unix_ms = stored_timestamp(stored_created_at_unix_ms)?;
     ParticipantRecord::new_anonymous(
         &stored_participant_ref,
@@ -212,6 +202,39 @@ pub fn load_anonymous_participant_base(
     )
     .map(Some)
     .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)
+}
+
+fn read_conflict_winner(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+) -> Result<Option<(String, i64)>, ParticipantBasePersistenceError> {
+    match transaction.query_opt(
+        "SELECT tenant_ref, created_at_unix_ms FROM assessment_participant \
+         WHERE participant_ref = $1",
+        &[&participant_ref],
+    ) {
+        Ok(Some(row)) => Ok(Some((row.get(0), row.get(1)))),
+        Ok(None) => Ok(None),
+        Err(error) => Err(ParticipantBasePersistenceError::from(error)),
+    }
+}
+
+fn require_stored_base_identity(
+    stored_participant_ref: &str,
+    stored_tenant_ref: &str,
+    participant_ref: &str,
+    tenant_ref: &str,
+) -> Result<(), ParticipantBasePersistenceError> {
+    if stored_base_identity_matches(
+        stored_participant_ref,
+        stored_tenant_ref,
+        participant_ref,
+        tenant_ref,
+    ) {
+        Ok(())
+    } else {
+        Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
+    }
 }
 
 fn classify_conflict_winner(
@@ -282,10 +305,11 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_conflict_winner, postgres_timestamp, required_exact_reference,
-        stored_base_identity_matches, stored_timestamp, ParticipantBasePersistenceDisposition,
-        ParticipantBasePersistenceError,
+        classify_conflict_winner, postgres_timestamp, read_conflict_winner,
+        require_stored_base_identity, required_exact_reference, stored_base_identity_matches,
+        stored_timestamp, ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
     };
+    use postgres::{Client, NoTls};
 
     #[test]
     fn exact_reference_guard_rejects_aliases_and_numeric_values() {
@@ -395,6 +419,57 @@ mod tests {
             "participant_public_demo",
             "tenant_public_demo"
         ));
+        assert!(matches!(
+            require_stored_base_identity(
+                "participant_public_demo",
+                "tenant_other_demo",
+                "participant_public_demo",
+                "tenant_public_demo"
+            ),
+            Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
+        ));
+        assert!(require_stored_base_identity(
+            "participant_public_demo",
+            "tenant_public_demo",
+            "participant_public_demo",
+            "tenant_public_demo"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn conflict_winner_lookup_maps_missing_and_absent_rows() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS participant_conflict_winner_test;\
+                 SET search_path TO participant_conflict_winner_test;\
+                 DROP TABLE IF EXISTS assessment_participant;",
+            )
+            .unwrap();
+        let mut missing = client.transaction().unwrap();
+        assert!(matches!(
+            read_conflict_winner(&mut missing, "participant_public_demo"),
+            Err(ParticipantBasePersistenceError::Database(_))
+        ));
+        missing.rollback().unwrap();
+
+        client
+            .batch_execute(
+                "CREATE TABLE assessment_participant (\
+                     participant_ref TEXT PRIMARY KEY,\
+                     tenant_ref TEXT NOT NULL,\
+                     created_at_unix_ms BIGINT NOT NULL\
+                 );",
+            )
+            .unwrap();
+        let mut empty = client.transaction().unwrap();
+        assert!(matches!(
+            read_conflict_winner(&mut empty, "participant_public_demo"),
+            Ok(None)
+        ));
+        empty.rollback().unwrap();
     }
 
     #[test]
