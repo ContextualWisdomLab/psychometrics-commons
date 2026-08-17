@@ -34,18 +34,22 @@ pub fn authorize_data_rights_request(
     )
 }
 
+#[allow(clippy::question_mark)]
 fn authorize_bound_data_rights_request(
     actor: &AuthorizationContext,
     tenant_ref: &str,
     participant_ref: &str,
     request_ref: &str,
 ) -> Result<(), AuthorizationError> {
-    let resource = ResourceScope::participant_owned(
+    let resource = match ResourceScope::participant_owned(
         ResourceKind::DataRightsRequest,
         tenant_ref,
         participant_ref,
         request_ref,
-    )?;
+    ) {
+        Ok(resource) => resource,
+        Err(error) => return Err(error),
+    };
     authorize(actor, &resource, ProductPermission::ManageOwnDataRights)
 }
 
