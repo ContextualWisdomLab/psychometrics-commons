@@ -278,7 +278,28 @@ fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), Audit
 
 #[cfg(test)]
 mod tests {
-    use super::{required_reference, AuditPersistenceError};
+    use super::{
+        classify_persisted_audit, insert_audit_row, query_optional_audit_row,
+        query_required_audit_row, required_reference, AuditPersistenceError,
+    };
+    use crate::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
+    use postgres::{Client, NoTls};
+
+    fn sample_evidence() -> AuditEvidence {
+        AuditEvidence::new(AuditEvidenceInput {
+            audit_event_ref: "audit_event_query_helper_01",
+            tenant_ref: "tenant_research_alpha",
+            actor_ref: "actor_publisher_alpha",
+            purpose_code: "instrument_publication",
+            action_code: "publish_instrument_release",
+            resource_ref: "instrument_release_big_five_ko_v1",
+            outcome: AuditOutcome::Succeeded,
+            evidence_digest:
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            occurred_at_unix_ms: 1_785_000_000_000,
+        })
+        .unwrap()
+    }
 
     #[test]
     fn caller_aliases_fail_closed_before_database_access() {
@@ -292,5 +313,43 @@ mod tests {
             required_reference("audit_event_alpha").unwrap(),
             "audit_event_alpha"
         );
+    }
+
+    #[test]
+    fn audit_row_helpers_map_missing_relations_to_database_errors() {
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
+            return;
+        };
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS audit_query_helper_missing;\
+                 SET search_path TO audit_query_helper_missing;",
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        let evidence = sample_evidence();
+
+        assert!(matches!(
+            insert_audit_row(&mut transaction, &evidence, 1_785_000_000_000),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            query_required_audit_row(&mut transaction, "audit_event_query_helper_01"),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            query_optional_audit_row(
+                &mut transaction,
+                "tenant_research_alpha",
+                "audit_event_query_helper_01"
+            ),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            classify_persisted_audit(&mut transaction, &evidence, 1_785_000_000_000, 0),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
     }
 }
