@@ -173,8 +173,12 @@ fn database_rejects_update_delete_and_truncate_of_audit_history() {
         "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_immutable_01'",
         "TRUNCATE TABLE audit_evidence_record",
     ] {
-        let error = client.execute(statement, &[]).unwrap_err();
-        let message = error.to_string();
+        let error = client
+            .execute(statement, &[])
+            .expect_err("append-only trigger must reject mutation");
+        let message = error
+            .as_db_error()
+            .map_or_else(|| error.to_string(), |database| database.message().to_owned());
         assert!(
             message.contains("audit evidence is append-only"),
             "unexpected mutation error: {message}"
