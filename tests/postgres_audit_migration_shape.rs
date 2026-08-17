@@ -12,7 +12,9 @@ fn migration_serializes_creation_before_observing_relation_state() {
         .expect("migration DO block must have an executable body");
     let lock = AUDIT_EVIDENCE_MIGRATION
         .find("PERFORM pg_advisory_xact_lock(hashtext('psychometrics-commons:migration-0040'));")
-        .expect("migration must serialize concurrent first creation with a transaction advisory lock");
+        .expect(
+            "migration must serialize concurrent first creation with a transaction advisory lock",
+        );
     let relation_refresh = AUDIT_EVIDENCE_MIGRATION
         .find("relation_ref := to_regclass('audit_evidence_record');")
         .expect("migration must observe owned relation state after acquiring the lock");
@@ -23,7 +25,10 @@ fn migration_serializes_creation_before_observing_relation_state() {
         .find("to_regclass('audit_evidence_record')")
         .expect("migration must inspect the owned relation");
 
-    assert!(lock > begin, "advisory lock must execute inside the migration DO block");
+    assert!(
+        lock > begin,
+        "advisory lock must execute inside the migration DO block"
+    );
     assert_eq!(
         first_relation_observation, relation_refresh,
         "no relation observation may occur before the migration advisory lock"
