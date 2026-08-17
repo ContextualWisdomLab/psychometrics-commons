@@ -100,6 +100,26 @@ Product consequences:
 - multiple-membership / multiple-classification structure is retained for TEPP
   rather than flattened in the product ingest (Browne et al., 2001).
 
+## Operational persistence locking
+
+Scoring-job claim-next uses upstream PostgreSQL 18 row locking so a worker that
+only knows its own identity can take the oldest due job without guessing a
+`scoring_job_ref`. `SELECT ... FOR UPDATE SKIP LOCKED` is the documented lock
+clause that lets concurrent pollers skip a row another transaction already
+locked (PostgreSQL Global Development Group, 2026a). Claim classification
+requires `READ COMMITTED` so a skipped row becomes visible after the owning
+transaction commits (PostgreSQL Global Development Group, 2026b). This is
+orchestration locking only. It does not move psychometric arithmetic into the
+product database.
+
+Product consequences:
+
+- `claim_next_scoring_job` returns the stored request pin and fencing lease, or
+  `None` when no job is due;
+- two concurrent workers cannot both lease the same due row;
+- a retry-scheduled row stays unclaimed until its persisted due time;
+- an empty due set does not invent a score.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -132,6 +152,10 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
 International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
+PostgreSQL Global Development Group. (2026a). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+
+PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 

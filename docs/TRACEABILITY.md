@@ -58,7 +58,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
-| Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, claim, retry, terminal outcomes, expired-lease recovery, and cancellation without transferring a fence | live adapter evidence |
+| Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, named claim, claim-next poll, retry, terminal outcomes, expired-lease recovery, and cancellation without transferring a fence | live adapter evidence |
 | Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
@@ -108,7 +108,7 @@ src/lib.rs
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
-├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
+├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/named claim/claim-next/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── reference.rs      # internal opaque-reference normalization
 ├── research_release.rs  # product-side Research Commons release-evidence gate
@@ -133,6 +133,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 ### Active implementation work that is not protected-main truth
 
 **Active PR** #60 exclusive outbox delivery-lease persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Pending outbox rows accept one fenced worker lease, recover expiry from the database clock without transferring the fence, reject a future caller timestamp that would steal a still-live lease, and reject stale or zero-window claims. Live side-effect execution remains outside this slice.
+
+**Active PR** #228 claim-next scoring-job poll is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `claim_next_scoring_job` lets a worker that does not already know the job identity take the oldest due queued or retry-scheduled `scoring_job_state` row with `FOR UPDATE SKIP LOCKED`, receive the bound `scoring_request_ref` and fencing lease, and treat an empty due set as `None`. Prefer this head over composing claim-next onto the #217 stored-request-bind stack. Live `fast-mlsirm` execution, scoring HTTP, and a claim-next loop that calls `run_scoring_worker_attempt_with_result_snapshot` remain later slices. #76 data-rights processing-start persistence is already on protected main.
 
 **Active PR** #235 longitudinal observation-time ingest (`src/longitudinal_observation.rs`) is not protected-main truth. It records validity, recorded, received, and ingested clocks with explicit membership shares and fail-closed source-identity replay. Enrollment state, PostgreSQL persistence, HTTP, Gyeot collection, and TEPP kernels remain outside this slice. Prefer this head over folding observation clocks onto #226, #199, or #184.
 
