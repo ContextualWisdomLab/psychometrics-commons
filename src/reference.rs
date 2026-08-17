@@ -1,15 +1,29 @@
-//! Internal normalization for opaque product references.
+//! Internal validation for opaque product references.
 
-/// Return a trimmed opaque reference or `None` when the input is blank or numeric-like.
+/// Return an opaque reference only when the supplied spelling is already canonical.
 ///
 /// Public references must contain meaningful nonnumeric identity material. The guard
-/// therefore rejects ordinary numbers as well as signed, decimal, scientific-notation,
-/// and Unicode-numeric spellings instead of accepting them as opaque identifiers.
+/// rejects leading or trailing Unicode whitespace rather than silently normalizing a
+/// byte-distinct external identity, and rejects control characters plus Unicode 17.0
+/// `Default_Ignorable_Code_Point` characters anywhere so public identifiers cannot carry
+/// line breaks, NULs, escape sequences, hidden joiners, variation selectors, tag characters,
+/// or bidirectional display controls into audit and transport surfaces. Unicode UTS #39 treats
+/// default-ignorable identifier characters as restricted for security profiles. The guard also
+/// rejects ordinary numbers as well as signed, decimal, scientific-notation, and Unicode-numeric
+/// spellings instead of accepting them as opaque identifiers.
 #[must_use]
-pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
+pub(crate) fn canonical_opaque_reference(reference: &str) -> Option<&str> {
     let normalized = reference.trim();
-    let numeric_like = normalized.chars().any(char::is_numeric)
-        && normalized.chars().all(|character| {
+    if normalized != reference
+        || reference.chars().any(|character| {
+            character.is_control() || is_default_ignorable_identifier_character(character)
+        })
+    {
+        return None;
+    }
+
+    let numeric_like = reference.chars().any(char::is_numeric)
+        && reference.chars().all(|character| {
             character.is_numeric()
                 || matches!(
                     character,
@@ -24,9 +38,39 @@ pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
                         | '\u{FF0C}'
                 )
         });
-    if normalized.is_empty() || numeric_like {
+    if reference.is_empty() || numeric_like {
         None
     } else {
-        Some(normalized)
+        Some(reference)
     }
+}
+
+/// Return whether a character is Unicode 17.0 `Default_Ignorable_Code_Point` evidence.
+///
+/// The ranges mirror the normative Unicode Character Database derived property used by UTS #39
+/// security profiles. Keeping the list explicit avoids silently accepting newly invisible aliases
+/// when the Rust toolchain changes its Unicode tables; a Unicode-version update therefore requires
+/// an intentional source and regression-test change. This does not restrict ordinary visible
+/// scripts used by upstream issuers.
+const fn is_default_ignorable_identifier_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFF8}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
 }

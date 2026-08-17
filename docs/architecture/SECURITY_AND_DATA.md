@@ -101,7 +101,7 @@ sharing_token_audience/expiry if used
 Rules:
 
 - Tenant context for state-changing requests is derived from authenticated authorization, not an untrusted body field or implicit default.
-- Public opaque identifiers are identifiers, not authorization capabilities.
+- Public opaque identifiers are identifiers, not authorization capabilities. Callers must supply the exact issued spelling. Leading or trailing Unicode whitespace, embedded controls, and Unicode 17.0 `Default_Ignorable_Code_Point` characters are rejected instead of being trimmed into another identity, following Unicode identifier-security guidance.
 - Research steward, instrument publisher, participant result owner, and identity administrator are distinct authorities.
 - A sharing link, if introduced, must be revocable, scoped to an exact resource/audience, expire by default, and not reveal raw responses unless explicitly permitted by the participant and product policy.
 
@@ -189,6 +189,7 @@ At minimum as features appear:
 
 - cross-tenant read/write negative tests;
 - object-reference enumeration/authorization tests;
+- public-reference whitespace, control, and default-ignorable alias rejection tests;
 - anonymous-token audience/expiry/replay tests;
 - OIDC issuer/audience/signature/nonce-state tests;
 - account-linking conflict/replay tests;
@@ -222,6 +223,10 @@ The architecture is designed to make SOC 2 and CSAP evidence collection feasible
 ## 12. References
 
 Lodderstedt, T., Bradley, J., Labunets, A., & Fett, D. (2025). *Best Current Practice for OAuth 2.0 Security* (RFC 9700). Internet Engineering Task Force. https://doi.org/10.17487/RFC9700
+
+Unicode Consortium. (2025). *Unicode Standard Annex #39: Unicode security mechanisms* (Version 17.0.0, Revision 32). The Unicode Consortium. https://www.unicode.org/reports/tr39/
+
+Unicode Consortium. (2025). *DerivedCoreProperties.txt* (Unicode Character Database, Version 17.0.0). The Unicode Consortium. https://www.unicode.org/Public/17.0.0/ucd/DerivedCoreProperties.txt
 
 Temoshok, D., Choong, Y.-Y., Galluzzo, R., LaSalle, M., Regenscheid, A., Proud-Madruga, D., Gupta, S., & Lefkovitz, N. (2025). *Digital Identity Guidelines* (NIST SP 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 

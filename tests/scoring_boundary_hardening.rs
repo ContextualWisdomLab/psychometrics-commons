@@ -1,4 +1,4 @@
-//! Fail-first regressions for scoring provenance binding and reference normalization.
+//! Fail-first regressions for scoring provenance binding and reference validation.
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{
@@ -31,15 +31,31 @@ fn ledger_with_one_response() -> ResponseLedger {
 
 fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
     ScoringRequestInput {
-        scoring_request_ref: "  scoring_request_ref  ",
+        scoring_request_ref: "scoring_request_ref",
         response_snapshot_ref,
-        assessment_spec_ref: "  assessment_spec_ref  ",
-        instrument_version_ref: "  instrument_version_ref  ",
-        scoring_version_ref: "  scoring_version_ref  ",
-        calibration_reference: "  calibration_reference  ",
-        norm_version_ref: Some("  norm_version_ref  "),
+        assessment_spec_ref: "assessment_spec_ref",
+        instrument_version_ref: "instrument_version_ref",
+        scoring_version_ref: "scoring_version_ref",
+        calibration_reference: "calibration_reference",
+        norm_version_ref: Some("norm_version_ref"),
         requested_output_schema_version: 1,
     }
+}
+
+fn scoring_result_fixture() -> (ScoringRequest, ScoringResult) {
+    let snapshot = ledger_with_one_response()
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
+        .unwrap();
+    let request =
+        ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
+    let result = ScoringResult::new(
+        "scoring_result_ref",
+        &request,
+        ENGINE_DIGEST,
+        vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
+    )
+    .unwrap();
+    (request, result)
 }
 
 #[test]
@@ -73,7 +89,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
 #[test]
 fn scoring_dispatch_rejects_snapshot_reference_substitution() {
     let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "  response_snapshot_ref  ")
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
 
     assert_eq!(snapshot.snapshot_ref(), Some("response_snapshot_ref"));
@@ -90,13 +106,50 @@ fn scoring_dispatch_rejects_snapshot_reference_substitution() {
 }
 
 #[test]
-fn accepted_scoring_references_are_trimmed_before_identity_comparison_or_storage() {
+fn scoring_dispatch_rejects_whitespace_aliases_before_identity_comparison() {
     let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "  response_snapshot_ref  ")
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
-    let request =
-        ScoringRequest::from_snapshot(&snapshot, scoring_input(" response_snapshot_ref ")).unwrap();
 
+    let mut cases = Vec::new();
+
+    let mut input = scoring_input("response_snapshot_ref");
+    input.scoring_request_ref = " scoring_request_ref ";
+    cases.push(input);
+
+    let mut input = scoring_input(" response_snapshot_ref ");
+    input.assessment_spec_ref = "assessment_spec_ref";
+    cases.push(input);
+
+    let mut input = scoring_input("response_snapshot_ref");
+    input.assessment_spec_ref = " assessment_spec_ref ";
+    cases.push(input);
+
+    let mut input = scoring_input("response_snapshot_ref");
+    input.instrument_version_ref = " instrument_version_ref ";
+    cases.push(input);
+
+    let mut input = scoring_input("response_snapshot_ref");
+    input.scoring_version_ref = " scoring_version_ref ";
+    cases.push(input);
+
+    let mut input = scoring_input("response_snapshot_ref");
+    input.calibration_reference = " calibration_reference ";
+    cases.push(input);
+
+    let mut input = scoring_input("response_snapshot_ref");
+    input.norm_version_ref = Some(" norm_version_ref ");
+    cases.push(input);
+
+    for input in cases {
+        assert_eq!(
+            ScoringRequest::from_snapshot(&snapshot, input),
+            Err(ScoringContractError::EmptyReference)
+        );
+    }
+
+    let request =
+        ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
     assert_eq!(request.scoring_request_ref(), "scoring_request_ref");
     assert_eq!(request.response_snapshot_ref(), "response_snapshot_ref");
     assert_eq!(request.assessment_spec_ref(), "assessment_spec_ref");
@@ -107,32 +160,88 @@ fn accepted_scoring_references_are_trimmed_before_identity_comparison_or_storage
 }
 
 #[test]
-fn result_identity_and_consent_comparisons_use_normalized_references() {
-    let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
-    let request =
-        ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
-    let result = ScoringResult::new(
-        " scoring_result_ref ",
-        &request,
-        ENGINE_DIGEST,
-        vec![ScoreObservation::scored(" construct_ref ", 1.0, None).unwrap()],
-    )
-    .unwrap();
+fn scoring_result_references_require_canonical_spelling() {
+    let (request, result) = scoring_result_fixture();
 
     assert_eq!(result.scoring_result_ref(), "scoring_result_ref");
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].construct_ref(), "construct_ref");
 
+    assert_eq!(
+        ScoringResult::new(
+            " scoring_result_ref ",
+            &request,
+            ENGINE_DIGEST,
+            vec![ScoreObservation::scored("construct_ref_2", 1.0, None).unwrap()],
+        ),
+        Err(ScoringContractError::EmptyReference)
+    );
+    assert_eq!(
+        ScoreObservation::scored(" construct_ref ", 1.0, None),
+        Err(ScoringContractError::EmptyReference)
+    );
+}
+
+#[test]
+fn result_identity_and_consent_comparisons_require_canonical_references() {
+    let (request, result) = scoring_result_fixture();
+
+    for input in [
+        ResultSnapshotInput {
+            result_snapshot_ref: " result_snapshot_ref ",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: " participant_ref ",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: " narrative_version_ref ",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &[" consent_ref "],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: Some(" prior_result_ref "),
+        },
+    ] {
+        assert_eq!(
+            ResultSnapshot::new(&request, &result, input),
+            Err(ResultSnapshotError::EmptyReference)
+        );
+    }
+
     let duplicate = ResultSnapshot::new(
         &request,
         &result,
         ResultSnapshotInput {
-            result_snapshot_ref: " result_snapshot_ref ",
-            participant_ref: " participant_ref ",
-            narrative_version_ref: " narrative_version_ref ",
-            consent_snapshot_refs: &["consent_ref", " consent_ref "],
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref", "consent_ref"],
             created_at_unix_ms: 1,
             supersedes_ref: None,
         },
@@ -144,10 +253,10 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
         &request,
         &result,
         ResultSnapshotInput {
-            result_snapshot_ref: " result_snapshot_ref ",
-            participant_ref: " participant_ref ",
-            narrative_version_ref: " narrative_version_ref ",
-            consent_snapshot_refs: &[" consent_ref "],
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
             created_at_unix_ms: 1,
             supersedes_ref: Some("result_snapshot_ref"),
         },
@@ -155,22 +264,22 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
     .unwrap_err();
     assert_eq!(self_supersession, ResultSnapshotError::SelfSupersession);
 
-    let normalized = ResultSnapshot::new(
+    let canonical = ResultSnapshot::new(
         &request,
         &result,
         ResultSnapshotInput {
-            result_snapshot_ref: " result_snapshot_ref ",
-            participant_ref: " participant_ref ",
-            narrative_version_ref: " narrative_version_ref ",
-            consent_snapshot_refs: &[" consent_ref "],
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
             created_at_unix_ms: 1,
-            supersedes_ref: Some(" prior_result_ref "),
+            supersedes_ref: Some("prior_result_ref"),
         },
     )
     .unwrap();
-    assert_eq!(normalized.result_snapshot_ref(), "result_snapshot_ref");
-    assert_eq!(normalized.participant_ref(), "participant_ref");
-    assert_eq!(normalized.narrative_version_ref(), "narrative_version_ref");
-    assert_eq!(normalized.consent_snapshot_refs(), ["consent_ref"]);
-    assert_eq!(normalized.supersedes_ref(), Some("prior_result_ref"));
+    assert_eq!(canonical.result_snapshot_ref(), "result_snapshot_ref");
+    assert_eq!(canonical.participant_ref(), "participant_ref");
+    assert_eq!(canonical.narrative_version_ref(), "narrative_version_ref");
+    assert_eq!(canonical.consent_snapshot_refs(), ["consent_ref"]);
+    assert_eq!(canonical.supersedes_ref(), Some("prior_result_ref"));
 }

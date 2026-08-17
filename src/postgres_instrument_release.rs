@@ -7,7 +7,7 @@
 //! to the exact-replay classifier.
 
 use crate::instrument::{InstrumentRelease, InstrumentReleaseManifest, PublicationState};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -263,7 +263,7 @@ fn publication_state_name(state: PublicationState) -> &'static str {
 }
 
 fn required_reference(reference: &str) -> Result<&str, InstrumentReleasePersistenceError> {
-    normalized_reference(reference).ok_or(InstrumentReleasePersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(InstrumentReleasePersistenceError::InvalidReference)
 }
 
 fn postgres_timestamp(timestamp: u64) -> Result<i64, InstrumentReleasePersistenceError> {

@@ -16,11 +16,25 @@ fn durable_snapshot_reference_must_be_opaque() {
 }
 
 #[test]
-fn durable_snapshot_reference_is_trimmed_before_becoming_identity() {
+fn durable_snapshot_reference_rejects_whitespace_aliases() {
     let ledger = ResponseLedger::new("session_ref").unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, " snapshot_ref_a ")
-        .unwrap();
 
+    for snapshot_ref in [
+        " snapshot_ref_a",
+        "snapshot_ref_a ",
+        "\tsnapshot_ref_a",
+        "snapshot_ref_a\n",
+        "\u{00a0}snapshot_ref_a",
+    ] {
+        assert_eq!(
+            ledger.freeze_as(SessionState::Completed, snapshot_ref),
+            Err(WriteError::InvalidReference),
+            "snapshot identity must reject non-canonical spelling {snapshot_ref:?}",
+        );
+    }
+
+    let snapshot = ledger
+        .freeze_as(SessionState::Completed, "snapshot_ref_a")
+        .unwrap();
     assert_eq!(snapshot.snapshot_ref(), Some("snapshot_ref_a"));
 }

@@ -6,7 +6,7 @@
 //! recovery, and terminal outcomes require `READ COMMITTED`; row locks and conditional
 //! updates preserve stale-worker fencing and immutable completion evidence.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::scoring_job::{ScoringJob, ScoringJobState};
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
@@ -734,7 +734,7 @@ fn require_current_scoring_lease(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ScoringJobPersistenceError> {
-    normalized_reference(reference).ok_or(ScoringJobPersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ScoringJobPersistenceError::InvalidReference)
 }
 
 fn postgres_timestamp(timestamp: u64) -> Result<i64, ScoringJobPersistenceError> {

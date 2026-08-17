@@ -8,7 +8,7 @@
 //! external request into a product command. The explicit expiry lets those adapters reject stale
 //! authority before forwarding a command to the participant's assessment-session resource.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -16,7 +16,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AnonymousSessionContextError {
-    /// A tenant, participant, session, or evidence reference was blank or numeric-only.
+    /// A reference was blank, numeric-only, whitespace-padded, or control/default-ignorable.
     InvalidReference,
     /// The server-authoritative validity boundary was zero.
     InvalidValidityBoundary,
@@ -26,7 +26,7 @@ impl Display for AnonymousSessionContextError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "anonymous-session references must be opaque non-numeric values"
+                "anonymous-session references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidValidityBoundary => {
                 "anonymous-session validity boundary must be greater than zero"
@@ -55,12 +55,17 @@ pub struct AnonymousSessionContext {
 }
 
 impl AnonymousSessionContext {
-    /// Create a normalized anonymous-session authorization context.
+    /// Create a canonical anonymous-session authorization context.
+    ///
+    /// Canonical spelling means each reference is supplied exactly as stored: it is non-empty,
+    /// is not numeric-only, has no leading or trailing whitespace, and contains no control or
+    /// Unicode default-ignorable characters. The constructor does not trim aliases into a match
+    /// because authorization and idempotency use exact reference bytes.
     ///
     /// # Errors
     ///
     /// Returns [`AnonymousSessionContextError::InvalidReference`] when any reference
-    /// is not an opaque product reference, or
+    /// is blank, numeric-only, whitespace-padded, or control/default-ignorable, or
     /// [`AnonymousSessionContextError::InvalidValidityBoundary`] when
     /// `valid_until_unix_ms` is zero.
     pub fn new(
@@ -158,9 +163,9 @@ impl AnonymousSessionContext {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
-    normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
-    normalized_reference(candidate) == Some(candidate) && stored == candidate
+    canonical_opaque_reference(candidate) == Some(candidate) && stored == candidate
 }

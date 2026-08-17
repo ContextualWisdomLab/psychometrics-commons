@@ -20,7 +20,7 @@ fn deletion_request(request_ref: &str, requested_at_unix_ms: u64) -> DataRightsR
 fn rejected_request_preserves_durable_evidence_and_is_terminal() {
     let mut request = deletion_request("rejected_request_ref", 10_000);
 
-    request.reject(" rejection_evidence_ref ", 10_100).unwrap();
+    request.reject("rejection_evidence_ref", 10_100).unwrap();
     assert_eq!(request.state(), DataRightsState::Rejected);
     assert_eq!(
         request.rejection_evidence_ref(),
@@ -79,7 +79,7 @@ fn processing_failure_preserves_durable_evidence_and_is_terminal() {
     request.verify_identity("verification_ref", 13_050).unwrap();
     request.start_processing("operation_ref", 13_100).unwrap();
 
-    request.fail(" failure_evidence_ref ", 13_200).unwrap();
+    request.fail("failure_evidence_ref", 13_200).unwrap();
     assert_eq!(request.state(), DataRightsState::Failed);
     assert_eq!(request.failure_evidence_ref(), Some("failure_evidence_ref"));
     assert_eq!(request.failed_at_unix_ms(), Some(13_200));
@@ -144,6 +144,10 @@ fn terminal_evidence_rejects_invalid_references_and_non_monotonic_time() {
         Err(DataRightsError::InvalidReference)
     );
     assert_eq!(
+        rejection.reject(" rejection_ref ", 17_100),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
         rejection.reject("rejection_ref", 0),
         Err(DataRightsError::InvalidTimestamp)
     );
@@ -157,6 +161,10 @@ fn terminal_evidence_rejects_invalid_references_and_non_monotonic_time() {
     failure.start_processing("operation_ref", 18_100).unwrap();
     assert_eq!(
         failure.fail("12345", 18_200),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        failure.fail(" failure_ref ", 18_200),
         Err(DataRightsError::InvalidReference)
     );
     assert_eq!(

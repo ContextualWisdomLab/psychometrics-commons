@@ -6,7 +6,7 @@
 //! This module validates those references only. It does not publish artifacts or call the
 //! external research catalog.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -182,7 +182,7 @@ impl Display for ResearchReleaseGateError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "research release references must be opaque non-numeric values"
+                "research release references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidManifestDigest => {
                 "research release manifest digest must be canonical sha256 evidence"
@@ -248,7 +248,7 @@ pub fn approve_research_release(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResearchReleaseGateError> {
-    normalized_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {

@@ -14,7 +14,7 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
     for (error, expected_message) in [
         (
             ResponseSnapshotPersistenceError::InvalidReference,
-            "response snapshot persistence references must be opaque durable values",
+            "response snapshot persistence references must be exact safe opaque durable values",
         ),
         (
             ResponseSnapshotPersistenceError::ConflictingReplay,

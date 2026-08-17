@@ -5,7 +5,7 @@
 //! Persistence adapters must preserve these state, attempt, time-bound lease,
 //! and fencing invariants with real database concurrency evidence.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -426,7 +426,7 @@ pub enum ScoringJobError {
 impl Display for ScoringJobError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "scoring job references must be opaque non-numeric values",
+            Self::InvalidReference => "scoring job references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::InvalidAttemptLimit => "scoring job maximum attempts must be greater than zero",
             Self::InvalidTimestamp => "scoring job timestamps must be greater than zero",
             Self::InvalidLeaseWindow => "scoring lease expiry must be later than claim time",
@@ -448,7 +448,7 @@ impl Display for ScoringJobError {
 impl Error for ScoringJobError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringJobError> {
-    normalized_reference(reference).ok_or(ScoringJobError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ScoringJobError::InvalidReference)
 }
 
 const fn require_timestamp(timestamp: u64) -> Result<(), ScoringJobError> {

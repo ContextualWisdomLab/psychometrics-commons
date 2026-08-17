@@ -8,7 +8,7 @@
 use crate::data_rights::{DataRightsRequest, DataRightsRequestKind, DataRightsState};
 use crate::integration::IntegrationEvent;
 use crate::postgres_integration::{enqueue_outbox_event, PersistenceError};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{Client, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -89,7 +89,7 @@ impl Display for DataRightsPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "data-rights propagation references must be opaque non-numeric values"
+                "data-rights propagation references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidRequestState => {
                 "data-rights persistence received a request in a state this operation does not accept"
@@ -207,7 +207,7 @@ pub fn persist_requested_data_rights_with_propagation(
                 &[
                     &request.request_ref(),
                     &request.tenant_ref(),
-                    &normalized_reference(target.dependent_system_ref)
+                    &canonical_opaque_reference(target.dependent_system_ref)
                         .ok_or(DataRightsPersistenceError::InvalidReference)?,
                     &target.event.source(),
                     &target.event.event_ref(),
@@ -243,7 +243,7 @@ pub fn persist_data_rights_identity_verification(
         request.state(),
         request
             .verification_evidence_ref()
-            .and_then(normalized_reference),
+            .and_then(canonical_opaque_reference),
         request.verified_at_unix_ms(),
     ) {
         (DataRightsState::IdentityVerified, Some(evidence_ref), Some(verified_at_ms)) => {
@@ -411,7 +411,7 @@ fn validate_targets(
     let mut systems = Vec::with_capacity(targets.len());
     let mut event_refs = Vec::with_capacity(targets.len());
     for target in targets {
-        let system = normalized_reference(target.dependent_system_ref)
+        let system = canonical_opaque_reference(target.dependent_system_ref)
             .ok_or(DataRightsPersistenceError::InvalidReference)?;
         if systems.contains(&system) {
             return Err(DataRightsPersistenceError::DuplicateTarget);

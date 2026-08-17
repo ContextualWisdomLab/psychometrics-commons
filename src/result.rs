@@ -5,7 +5,7 @@
 //! presentation and consent references, but it does not recompute psychometric
 //! values or mutate a historical snapshot when norms or narratives change.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::scoring::{ScoreObservation, ScoringRequest, ScoringResult};
 use std::collections::HashSet;
 use std::error::Error;
@@ -53,21 +53,22 @@ pub struct ResultSnapshot {
 impl ResultSnapshot {
     /// Create a result snapshot by copying the scoring request and engine output.
     ///
-    /// All product-owned references are normalized before they become identity-
-    /// bearing state. Scientific provenance is copied verbatim from the already
-    /// validated scoring request/result boundary.
+    /// Product-owned references must already use their exact opaque spelling
+    /// before they become identity-bearing state. Scientific provenance is copied
+    /// verbatim from the already validated scoring request/result boundary.
     ///
     /// # Errors
     ///
     /// Returns [`ResultSnapshotError::ScoringRequestMismatch`] when `result`
     /// belongs to another scoring request, [`ResultSnapshotError::EmptyReference`]
-    /// for any blank required/supersession/consent reference,
+    /// for any blank, whitespace-padded, control-bearing, or numeric-like
+    /// required/supersession/consent reference,
     /// [`ResultSnapshotError::MissingConsentSnapshot`] when no consent evidence
     /// is supplied, [`ResultSnapshotError::DuplicateConsentSnapshot`] when the
-    /// same normalized consent reference appears more than once,
+    /// same consent reference appears more than once,
     /// [`ResultSnapshotError::InvalidCreationTime`] when creation time is zero,
-    /// or [`ResultSnapshotError::SelfSupersession`] when a normalized snapshot
-    /// reference claims to supersede itself.
+    /// or [`ResultSnapshotError::SelfSupersession`] when a snapshot reference
+    /// claims to supersede itself.
     pub fn new(
         request: &ScoringRequest,
         result: &ScoringResult,
@@ -231,7 +232,7 @@ impl ResultSnapshot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResultSnapshotError {
-    /// A required or supplied optional reference is blank.
+    /// A required or supplied optional reference is blank, noncanonical, or numeric-like.
     EmptyReference,
     /// Result publication was attempted without any consent snapshot evidence.
     MissingConsentSnapshot,
@@ -249,7 +250,7 @@ impl Display for ResultSnapshotError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyReference => {
-                formatter.write_str("result snapshot references must not be empty")
+                formatter.write_str("result snapshot references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters")
             }
             Self::MissingConsentSnapshot => formatter
                 .write_str("result snapshots require at least one consent snapshot reference"),
@@ -270,5 +271,5 @@ impl Display for ResultSnapshotError {
 impl Error for ResultSnapshotError {}
 
 fn required_reference(reference: &str) -> Result<&str, ResultSnapshotError> {
-    normalized_reference(reference).ok_or(ResultSnapshotError::EmptyReference)
+    canonical_opaque_reference(reference).ok_or(ResultSnapshotError::EmptyReference)
 }

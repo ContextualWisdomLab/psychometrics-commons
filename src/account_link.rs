@@ -8,7 +8,7 @@
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::participant::{AccountLinkError, ParticipantRecord};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -38,7 +38,7 @@ impl Display for AccountLinkAuthorizationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "authenticated account-control references must be canonical opaque non-numeric values"
+                "authenticated account-control references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidValidityBoundary => {
                 "authenticated account-control validity must end after Unix epoch zero"
@@ -213,8 +213,8 @@ pub fn link_authenticated_account(
 }
 
 fn required_reference(reference: &str) -> Result<&str, AccountLinkAuthorizationError> {
-    let normalized =
-        normalized_reference(reference).ok_or(AccountLinkAuthorizationError::InvalidReference)?;
+    let normalized = canonical_opaque_reference(reference)
+        .ok_or(AccountLinkAuthorizationError::InvalidReference)?;
     if normalized != reference {
         return Err(AccountLinkAuthorizationError::InvalidReference);
     }

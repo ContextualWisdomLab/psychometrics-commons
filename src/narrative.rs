@@ -5,7 +5,7 @@
 //! alter deterministic style assignment. It defines the canonical behavior-affecting identity
 //! and SHA-256 assignment key that ADR-0018 requires before persistence or public APIs.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -186,7 +186,7 @@ impl Display for StyleAssignmentIdentityError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "style-assignment references must be opaque non-numeric values"
+                "style-assignment references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::NonCanonicalToken => {
                 "style-assignment digests and locale must be nonblank canonical tokens"
@@ -280,7 +280,7 @@ impl StyleAssignmentIdentity<'_> {
 }
 
 fn required_reference(reference: &str) -> Result<&str, StyleAssignmentIdentityError> {
-    normalized_reference(reference).ok_or(StyleAssignmentIdentityError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(StyleAssignmentIdentityError::InvalidReference)
 }
 
 fn required_exact_token(token: &str) -> Result<&str, StyleAssignmentIdentityError> {

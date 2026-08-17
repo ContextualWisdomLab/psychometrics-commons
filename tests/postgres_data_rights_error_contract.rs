@@ -15,7 +15,7 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
     for (error, expected_message) in [
         (
             DataRightsPersistenceError::InvalidReference,
-            "data-rights propagation references must be opaque non-numeric values",
+            "data-rights propagation references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             DataRightsPersistenceError::InvalidRequestState,
