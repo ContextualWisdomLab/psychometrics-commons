@@ -177,8 +177,7 @@ pub fn load_current_result_snapshot_for_session(
             (SELECT COUNT(*) FROM result_snapshot WHERE session_ref = $1)::bigint",
         &[&session_ref],
     )?;
-    let tip_count = usize::try_from(counts.get::<_, i64>(0))
-        .map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)?;
+    let tip_count = stored_nonnegative_count(counts.get(0))?;
     let session_has_snapshots = counts.get::<_, i64>(1) > 0;
     match classify_current_session_tips(tip_count, session_has_snapshots)? {
         CurrentSessionTipPlan::Absent => Ok(None),
@@ -510,6 +509,10 @@ enum CurrentSessionTipPlan {
     LoadUniqueTip,
 }
 
+fn stored_nonnegative_count(value: i64) -> Result<usize, ResultSnapshotPersistenceError> {
+    usize::try_from(value).map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)
+}
+
 fn classify_current_session_tips(
     tip_count: usize,
     session_has_snapshots: bool,
@@ -551,8 +554,9 @@ mod reference_guard_tests {
     use super::{
         classify_current_session_tips, durable_evidence_error, observation_disposition_name,
         observation_from_stored, observation_order, postgres_timestamp,
-        require_contiguous_observation_order, required_reference, stored_schema_version,
-        stored_timestamp, CurrentSessionTipPlan, ResultSnapshotPersistenceError,
+        require_contiguous_observation_order, required_reference, stored_nonnegative_count,
+        stored_schema_version, stored_timestamp, CurrentSessionTipPlan,
+        ResultSnapshotPersistenceError,
     };
     use crate::result::ResultSnapshotError;
     use crate::scoring::ObservationDisposition;
@@ -742,6 +746,12 @@ mod reference_guard_tests {
         ));
         assert!(matches!(
             classify_current_session_tips(2, true),
+            Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+        ));
+        assert_eq!(stored_nonnegative_count(0).unwrap(), 0);
+        assert_eq!(stored_nonnegative_count(1).unwrap(), 1);
+        assert!(matches!(
+            stored_nonnegative_count(-1),
             Err(ResultSnapshotPersistenceError::InconsistentEvidence)
         ));
     }
