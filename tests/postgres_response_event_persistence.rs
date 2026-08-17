@@ -477,6 +477,10 @@ fn missing_relation_and_gapped_history_fail_closed() {
         persist_err(&mut client, "session_ipip_ko_missing", &event),
         ResponseEventPersistenceError::Database(_)
     ));
+    assert!(matches!(
+        load_receipts_err(&mut client, "session_ipip_ko_missing"),
+        ResponseEventPersistenceError::Database(_)
+    ));
 
     apply_response_event_migration(&mut client).unwrap();
     persist_ok(&mut client, "session_ipip_ko_gap", &event);

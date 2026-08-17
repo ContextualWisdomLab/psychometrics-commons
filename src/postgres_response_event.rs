@@ -389,6 +389,10 @@ fn unix_ms_from_system_time(time: SystemTime) -> Result<u64, ResponseEventPersis
     let duration = time
         .duration_since(UNIX_EPOCH)
         .map_err(|_| ResponseEventPersistenceError::InvalidTimestamp)?;
+    millis_from_duration(duration)
+}
+
+fn millis_from_duration(duration: Duration) -> Result<u64, ResponseEventPersistenceError> {
     let unix_ms = duration
         .as_secs()
         .checked_mul(1_000)
@@ -415,7 +419,7 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        map_rebuild_error, postgres_sequence, postgres_timestamptz,
+        map_rebuild_error, millis_from_duration, postgres_sequence, postgres_timestamptz,
         require_contiguous_receipt_history, required_reference, unix_ms_from_system_time,
         ResponseEventPersistenceError, ResponseEventReceipt,
     };
@@ -460,23 +464,14 @@ mod reference_guard_tests {
             unix_ms_from_system_time(UNIX_EPOCH + Duration::from_secs(1_700_000_000)).unwrap(),
             1_700_000_000_000
         );
-        let overflow_secs = u64::MAX / 1_000 + 1;
-        if let Some(far_future) = UNIX_EPOCH.checked_add(Duration::from_secs(overflow_secs)) {
-            assert!(matches!(
-                unix_ms_from_system_time(far_future),
-                Err(ResponseEventPersistenceError::InvalidTimestamp)
-            ));
-        }
-        let add_overflow_secs = u64::MAX / 1_000;
-        if let Some(near_max) = UNIX_EPOCH
-            .checked_add(Duration::from_secs(add_overflow_secs))
-            .and_then(|time| time.checked_add(Duration::from_millis(616)))
-        {
-            assert!(matches!(
-                unix_ms_from_system_time(near_max),
-                Err(ResponseEventPersistenceError::InvalidTimestamp)
-            ));
-        }
+        assert!(matches!(
+            millis_from_duration(Duration::from_secs(u64::MAX / 1_000 + 1)),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert!(matches!(
+            millis_from_duration(Duration::from_millis(0)),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
     }
 
     #[test]
