@@ -75,6 +75,24 @@ class ReleaseLegalReadinessTests(unittest.TestCase):
             self.assertFalse(evidence["ready"])
             self.assertIn("escapes the repository root", evidence["blockers"][-1])
 
+    def test_declared_license_file_must_be_manifest_relative_not_absolute(self) -> None:
+        """Cargo license-file metadata is relative to Cargo.toml and cannot be an absolute alias."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            absolute_license = root / "legal" / "source-license.txt"
+            absolute_license.parent.mkdir()
+            absolute_license.write_text("reviewed fixture terms\n", encoding="utf-8")
+            root = self.fixture_root(
+                directory,
+                [f'license-file = "{absolute_license.as_posix()}"'],
+            )
+
+            evidence = evaluate_repository(root)
+
+            self.assertFalse(evidence["ready"])
+            self.assertIsNone(evidence["cargo_license_file_resolved"])
+            self.assertIn("license-file is missing", evidence["blockers"][-1])
+
     def test_standard_license_symlink_cannot_escape_repository(self) -> None:
         """A conventional filename is not evidence when its resolved file is outside the source tree."""
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
