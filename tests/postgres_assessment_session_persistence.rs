@@ -989,3 +989,97 @@ fn command_persist_and_load_surface_database_failures() {
     );
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn command_persist_surfaces_update_and_insert_sinks() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let created = created_session(
+        "ses_command_sink_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut activated = created.clone();
+    activated
+        .apply_command("cmd_activate_sink_alpha", 1, SessionCommand::Activate)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_assessment_session(&mut transaction, &created).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    client
+        .batch_execute(
+            "CREATE FUNCTION assessment_session_update_sink() RETURNS trigger \
+             LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'session update sink'; END $$;
+             CREATE TRIGGER assessment_session_update_sink
+             BEFORE UPDATE ON assessment_session
+             FOR EACH ROW EXECUTE FUNCTION assessment_session_update_sink();",
+        )
+        .unwrap();
+    let mut update_transaction = client.transaction().unwrap();
+    assert_session_database_error(
+        &persist_assessment_session_commands(&mut update_transaction, &created).unwrap_err(),
+    );
+    update_transaction.rollback().unwrap();
+    client
+        .batch_execute(
+            "DROP TRIGGER assessment_session_update_sink ON assessment_session;
+             DROP FUNCTION assessment_session_update_sink();",
+        )
+        .unwrap();
+
+    client
+        .batch_execute(
+            "CREATE FUNCTION assessment_session_command_insert_sink() RETURNS trigger \
+             LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'command insert sink'; END $$;
+             CREATE TRIGGER assessment_session_command_insert_sink
+             BEFORE INSERT ON assessment_session_command
+             FOR EACH ROW EXECUTE FUNCTION assessment_session_command_insert_sink();",
+        )
+        .unwrap();
+    let mut insert_transaction = client.transaction().unwrap();
+    assert_session_database_error(
+        &persist_assessment_session_commands(&mut insert_transaction, &activated).unwrap_err(),
+    );
+    insert_transaction.rollback().unwrap();
+    client
+        .batch_execute(
+            "DROP TRIGGER assessment_session_command_insert_sink ON assessment_session_command;
+             DROP FUNCTION assessment_session_command_insert_sink();",
+        )
+        .unwrap();
+
+    {
+        let mut first = client.transaction().unwrap();
+        persist_assessment_session_commands(&mut first, &activated).unwrap();
+        first.commit().unwrap();
+    }
+    client
+        .batch_execute(
+            "CREATE FUNCTION assessment_session_command_select_sink() RETURNS trigger \
+             LANGUAGE plpgsql AS $$ BEGIN
+                 PERFORM set_config('search_path', 'pg_temp', true);
+                 RETURN NULL;
+             END $$;
+             CREATE TRIGGER assessment_session_command_select_sink
+             AFTER INSERT ON assessment_session_command
+             FOR EACH STATEMENT EXECUTE FUNCTION assessment_session_command_select_sink();",
+        )
+        .unwrap();
+    let mut replay = client.transaction().unwrap();
+    let replay_error = persist_assessment_session_commands(&mut replay, &activated);
+    replay.rollback().unwrap();
+    client
+        .batch_execute(
+            "DROP TRIGGER IF EXISTS assessment_session_command_select_sink ON assessment_session_command;
+             DROP FUNCTION IF EXISTS assessment_session_command_select_sink();",
+        )
+        .unwrap();
+    if let Err(error) = replay_error {
+        assert_session_database_error(&error);
+    }
+}
