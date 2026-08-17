@@ -187,7 +187,11 @@ fn persist(
     }
 }
 
-fn assert_conflict(client: &mut Client, tenant_ref: &str, candidate: &LongitudinalObservationRecord) {
+fn assert_conflict(
+    client: &mut Client,
+    tenant_ref: &str,
+    candidate: &LongitudinalObservationRecord,
+) {
     assert!(matches!(
         persist(client, tenant_ref, candidate),
         Err(LongitudinalObservationPersistenceError::ConflictingReplay)
@@ -567,11 +571,7 @@ fn corrupted_sequence_and_anomaly_evidence_fail_closed_after_restart() {
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        load_longitudinal_observation(
-            &mut transaction,
-            "tenant_clinic_seoul",
-            BASE_RECORD_REF
-        ),
+        load_longitudinal_observation(&mut transaction, "tenant_clinic_seoul", BASE_RECORD_REF),
         Err(LongitudinalObservationPersistenceError::CorruptHistory)
     ));
     transaction.rollback().unwrap();
@@ -592,11 +592,7 @@ fn corrupted_sequence_and_anomaly_evidence_fail_closed_after_restart() {
         .unwrap();
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        load_longitudinal_observation(
-            &mut transaction,
-            "tenant_clinic_seoul",
-            BASE_RECORD_REF
-        ),
+        load_longitudinal_observation(&mut transaction, "tenant_clinic_seoul", BASE_RECORD_REF),
         Err(LongitudinalObservationPersistenceError::CorruptHistory)
     ));
     transaction.rollback().unwrap();
