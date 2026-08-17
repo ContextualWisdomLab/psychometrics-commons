@@ -702,12 +702,24 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        bind_session_http, declared_request_end, decode_request_bytes, json_string,
-        parse_create_body, parse_json_string, parse_request_line, parse_string_object,
+        bind_session_http, declared_request_end, decode_request_bytes, handle_session_http_request,
+        json_string, parse_create_body, parse_json_string, parse_request_line, parse_string_object,
         reason_phrase, reject_full_request_buffer, reject_oversized_request, request_body,
         split_target, valid_idempotency_key, write_http_response, write_session_bytes,
-        SessionHttpResponse,
+        MemorySessionHttpPort, PostgresSessionHttpPort, SessionHttpPort, SessionHttpResponse,
+        DIGEST,
     };
+    use crate::instrument::{
+        InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
+        PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
+    };
+    use crate::postgres_assessment_session::{
+        apply_assessment_session_migration, AssessmentSessionStartError,
+    };
+    use crate::postgres_instrument_release::{
+        apply_instrument_release_migration, persist_instrument_release,
+    };
+    use postgres::{Client, NoTls};
     use std::io::Write;
     use std::net::{SocketAddr, TcpStream};
 
@@ -1156,5 +1168,168 @@ mod tests {
             ),
             std::io::ErrorKind::InvalidData
         );
+        assert_eq!(
+            framing_kind(
+                b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_bad_utf8\r\nX-Bad: \xff\r\n\r\n"
+            ),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn library_create_reloads_over_get_and_rejects_numeric_start_identity() {
+        let mut port = MemorySessionHttpPort::published();
+        let created = handle_session_http_request(
+            &create_request("ses_lib_reload", "ko-KR"),
+            &mut port,
+            20_000,
+        );
+        assert_eq!(created.status(), 201);
+        assert_eq!(created.content_type(), "application/json");
+        let loaded = handle_session_http_request(
+            "GET /v1/sessions/ses_lib_reload HTTP/1.1\r\n\r\n",
+            &mut port,
+            20_000,
+        );
+        assert_eq!(loaded.status(), 200);
+        assert_eq!(loaded.content_type(), "application/json");
+        assert_eq!(loaded.body(), created.body());
+
+        let colonless = handle_session_http_request(
+            "POST /v1/sessions HTTP/1.1\r\nX-Trace-Id\r\nIdempotency-Key: ses_nocolon\r\n\r\n{\"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}",
+            &mut port,
+            20_000,
+        );
+        assert_eq!(colonless.status(), 201);
+        assert_eq!(colonless.content_type(), "application/json");
+
+        assert!(matches!(
+            port.start_from_stored_release(
+                "12",
+                "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                "release_big_five_ko_v1",
+                "ko-KR",
+                21_000,
+            ),
+            Err(AssessmentSessionStartError::InvalidReference)
+        ));
+    }
+
+    fn published_release_for_http_port() -> InstrumentRelease {
+        let mut published = InstrumentRelease::new(
+            InstrumentReleaseManifest::new(
+                "release_big_five_ko_v1",
+                "instrument_big_five",
+                "instrument_version_big_five_ko_v1",
+                "construct_big_five",
+                &["item_version_001", "item_version_002"],
+                "ko-KR",
+                "assessment_spec_big_five_v1",
+                "scoring_version_big_five_v1",
+                "calibration_big_five_ko_v1",
+                Some("norm_version_big_five_ko_v1"),
+                "narrative_version_big_five_v1",
+                &["consent_service_v1"],
+                "intended_use_self_reflection_v1",
+                "limitations_nonclinical_v1",
+                DIGEST,
+            )
+            .unwrap(),
+            10_000,
+        )
+        .unwrap();
+        published
+            .apply_command(
+                "publication_review_http_port",
+                PublicationCommand::SubmitReview,
+                10_100,
+            )
+            .unwrap();
+        published
+            .bind_publication_evidence(
+                PublicationEvidenceRecord::new(
+                    "publication_evidence_big_five_ko_v1",
+                    "evidence_policy_self_reflection_v1",
+                    "release_big_five_ko_v1",
+                    "instrument_version_big_five_ko_v1",
+                    &["item_version_001", "item_version_002"],
+                    DIGEST,
+                    "ko-KR",
+                    "intended_use_self_reflection_v1",
+                    "assessment_spec_big_five_v1",
+                    "scoring_version_big_five_v1",
+                    "calibration_big_five_ko_v1",
+                    Some("norm_version_big_five_ko_v1"),
+                    "limitations_nonclinical_v1",
+                    PublicationEvidenceProvenance::new(
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                        "population_general_adult_v1",
+                        "administration_web_self_report_v1",
+                        "measurement_model_big_five_v1",
+                        10_050,
+                        None,
+                    )
+                    .unwrap(),
+                    &["rights_ipip_big_five_v1"],
+                    &["recovery_big_five_ko_v1"],
+                    &["approval_psychometrics_big_five_ko_v1"],
+                    PublicationEvidenceStatus::Approved,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        published
+            .apply_command(
+                "publication_publish_http_port",
+                PublicationCommand::Publish,
+                10_200,
+            )
+            .unwrap();
+        published
+    }
+
+    #[test]
+    fn persist_backed_http_port_starts_and_reloads_from_the_library() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS session_http_port_library CASCADE; \
+                 CREATE SCHEMA session_http_port_library; \
+                 SET search_path TO session_http_port_library;",
+            )
+            .unwrap();
+        apply_instrument_release_migration(&mut client).unwrap();
+        apply_assessment_session_migration(&mut client).unwrap();
+        let mut transaction = client.transaction().unwrap();
+        persist_instrument_release(&mut transaction, &published_release_for_http_port()).unwrap();
+        transaction.commit().unwrap();
+
+        let mut transaction = client.transaction().unwrap();
+        let created = {
+            let mut port = PostgresSessionHttpPort::new(&mut transaction);
+            handle_session_http_request(
+                &create_request("ses_port_library", "ko-KR"),
+                &mut port,
+                20_000,
+            )
+        };
+        assert_eq!(created.status(), 201);
+        assert_eq!(created.content_type(), "application/json");
+        transaction.commit().unwrap();
+
+        let mut transaction = client.transaction().unwrap();
+        let loaded = {
+            let mut port = PostgresSessionHttpPort::new(&mut transaction);
+            handle_session_http_request(
+                "GET /v1/sessions/ses_port_library HTTP/1.1\r\n\r\n",
+                &mut port,
+                20_000,
+            )
+        };
+        assert_eq!(loaded.status(), 200);
+        assert_eq!(loaded.content_type(), "application/json");
+        assert_eq!(loaded.body(), created.body());
+        transaction.commit().unwrap();
     }
 }

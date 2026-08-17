@@ -1008,11 +1008,13 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_assessment_session_migration, first_insert_seal_allows_exact_replay,
+        apply_assessment_session_migration, created_session_for_start_from_published_snapshot,
+        first_insert_seal_allows_exact_replay, load_assessment_session, persist_assessment_session,
         published_snapshot_matches_session, reject_stale_command_prefix,
-        start_created_assessment_session, stored_start_identity_matches,
-        AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
-        AssessmentSessionStartError, StartedSessionReplayRequest,
+        start_created_assessment_session, start_created_assessment_session_from_stored_release,
+        stored_start_identity_matches, AssessmentSessionPersistenceDisposition,
+        AssessmentSessionPersistenceError, AssessmentSessionStartError,
+        StartedSessionReplayRequest,
     };
     use crate::instrument::{
         InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -2220,6 +2222,147 @@ mod tests {
         let mut transaction = client.transaction().unwrap();
         assert!(matches!(
             load_command_replay_row(&mut transaction, "ses_replay_missing", "cmd_missing"),
+            Err(AssessmentSessionPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn published_snapshot_start_matches_created_session_and_rejects_rebinding() {
+        let snapshot = published_snapshot_for_session_match();
+        let started = created_session_for_start_from_published_snapshot(
+            "ses_snapshot_start_alpha",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &snapshot,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        assert_eq!(started.session_ref(), "ses_snapshot_start_alpha");
+        assert_eq!(started.locale(), "ko-KR");
+        assert_eq!(started.state(), SessionState::Created);
+        assert!(matches!(
+            created_session_for_start_from_published_snapshot(
+                "ses_snapshot_start_alpha",
+                "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                &snapshot,
+                "en-US",
+                20_000,
+            ),
+            Err(AssessmentSessionStartError::LocaleMismatch)
+        ));
+        assert!(matches!(
+            created_session_for_start_from_published_snapshot(
+                "12",
+                "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                &snapshot,
+                "ko-KR",
+                20_000,
+            ),
+            Err(AssessmentSessionStartError::InvalidReference)
+        ));
+    }
+
+    #[test]
+    fn stored_release_start_and_corrupt_identity_fail_closed_from_the_library() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS assessment_session_library_start CASCADE; \
+                 CREATE SCHEMA assessment_session_library_start; \
+                 SET search_path TO assessment_session_library_start;",
+            )
+            .unwrap();
+        apply_instrument_release_migration(&mut client).unwrap();
+        apply_assessment_session_migration(&mut client).unwrap();
+
+        let published = published_release_for_unpublished_memory_start();
+        let mut transaction = client.transaction().unwrap();
+        persist_instrument_release(&mut transaction, &published).unwrap();
+        let (started, inserted) = start_created_assessment_session_from_stored_release(
+            &mut transaction,
+            "ses_library_stored_start",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            "release_big_five_ko_v1",
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        assert_eq!(inserted, AssessmentSessionPersistenceDisposition::Inserted);
+        assert_eq!(started.session_ref(), "ses_library_stored_start");
+        let (replayed, disposition) = start_created_assessment_session_from_stored_release(
+            &mut transaction,
+            "ses_library_stored_start",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            "release_big_five_ko_v1",
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        assert_eq!(
+            disposition,
+            AssessmentSessionPersistenceDisposition::Duplicate
+        );
+        assert_eq!(replayed.session_ref(), started.session_ref());
+        assert!(matches!(
+            start_created_assessment_session_from_stored_release(
+                &mut transaction,
+                "ses_library_stored_start",
+                "ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "release_big_five_ko_v1",
+                "ko-KR",
+                20_000,
+            ),
+            Err(AssessmentSessionStartError::Persistence(
+                AssessmentSessionPersistenceError::ConflictingReplay
+            ))
+        ));
+        transaction.commit().unwrap();
+
+        client
+            .batch_execute(
+                "INSERT INTO assessment_session (\
+                     session_ref, participant_ref, instrument_release_ref, \
+                     instrument_version_ref, instrument_release_content_digest, \
+                     locale, session_state, created_at_unix_ms\
+                 ) VALUES (\
+                     'ses_library_numeric_participant', '12', \
+                     'release_big_five_ko_v1', 'instrument_version_big_five_ko_v1', \
+                     'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
+                     'ko-KR', 'created', 20000\
+                 );",
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            load_assessment_session(&mut transaction, "ses_library_numeric_participant"),
+            Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
+        ));
+        transaction.rollback().unwrap();
+
+        client
+            .execute(
+                "UPDATE instrument_release SET publication_state = 'suspended' WHERE release_ref = $1",
+                &[&"release_big_five_ko_v1"],
+            )
+            .unwrap();
+        client
+            .batch_execute("ALTER TABLE assessment_session DROP COLUMN participant_ref;")
+            .unwrap();
+        let replay = AssessmentSession::from_persisted_created(
+            "ses_library_stored_start",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            "release_big_five_ko_v1",
+            "instrument_version_big_five_ko_v1",
+            REPLAY_DIGEST,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_assessment_session(&mut transaction, &replay),
             Err(AssessmentSessionPersistenceError::Database(_))
         ));
         transaction.rollback().unwrap();
