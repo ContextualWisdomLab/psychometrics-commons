@@ -288,12 +288,7 @@ fn classify_existing_event(
     observed_at: SystemTime,
     received_at: SystemTime,
 ) -> Result<ResponseEventPersistenceDisposition, ResponseEventPersistenceError> {
-    let row = transaction.query_one(
-        "SELECT session_ref, client_event_ref, item_version_ref, payload_digest, \
-                server_sequence, observed_at, received_at \
-         FROM response_event WHERE response_event_ref = $1",
-        &[&server_event_ref],
-    )?;
+    let row = query_existing_event_row(transaction, server_event_ref)?;
     let stored_session: String = row.get(0);
     let stored_client: String = row.get(1);
     let stored_item: String = row.get(2);
@@ -312,6 +307,21 @@ fn classify_existing_event(
         Ok(ResponseEventPersistenceDisposition::Duplicate)
     } else {
         Err(ResponseEventPersistenceError::ConflictingReplay)
+    }
+}
+
+fn query_existing_event_row(
+    transaction: &mut Transaction<'_>,
+    server_event_ref: &str,
+) -> Result<postgres::Row, ResponseEventPersistenceError> {
+    match transaction.query_one(
+        "SELECT session_ref, client_event_ref, item_version_ref, payload_digest, \
+                server_sequence, observed_at, received_at \
+         FROM response_event WHERE response_event_ref = $1",
+        &[&server_event_ref],
+    ) {
+        Ok(row) => Ok(row),
+        Err(error) => Err(ResponseEventPersistenceError::from(error)),
     }
 }
 
@@ -420,12 +430,13 @@ fn require_read_committed(
 mod reference_guard_tests {
     use super::{
         map_rebuild_error, millis_from_duration, postgres_sequence, postgres_timestamptz,
-        require_contiguous_receipt_history, required_reference, unix_ms_from_system_time,
-        ResponseEventPersistenceError, ResponseEventReceipt,
+        query_existing_event_row, require_contiguous_receipt_history, required_reference,
+        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
     use crate::session::SessionState;
+    use postgres::{Client, NoTls};
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
@@ -554,6 +565,21 @@ mod reference_guard_tests {
         assert_eq!(receipt.event(), &event);
         assert_eq!(receipt.observed_at_unix_ms(), 1_700_000_000_000);
         assert_eq!(receipt.received_at_unix_ms(), 1_700_000_000_250);
+    }
+
+    #[test]
+    fn existing_event_lookup_maps_missing_relation_to_database_error() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO response_event_query_helper_missing;")
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            query_existing_event_row(&mut transaction, "server_event_item_01"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
     }
 
     #[test]
