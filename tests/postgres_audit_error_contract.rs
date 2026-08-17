@@ -150,18 +150,16 @@ fn persist_rejects_stronger_isolation_while_load_accepts_it() {
     transaction.rollback().unwrap();
 }
 
-#[test]
-fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
-    let mut client = test_client();
+fn prepare_unconstrained_audit_schema(client: &mut Client, schema: &str) {
     client
-        .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS audit_corrupt_history_test;\
-             SET search_path TO audit_corrupt_history_test;\
+        .batch_execute(&format!(
+            "CREATE SCHEMA IF NOT EXISTS {schema};\
+             SET search_path TO {schema};\
              DROP TABLE IF EXISTS audit_evidence_record CASCADE;\
-             DROP FUNCTION IF EXISTS reject_audit_evidence_mutation() CASCADE;",
-        )
+             DROP FUNCTION IF EXISTS reject_audit_evidence_mutation() CASCADE;"
+        ))
         .unwrap();
-    apply_audit_evidence_migration(&mut client).unwrap();
+    apply_audit_evidence_migration(client).unwrap();
     client
         .batch_execute(
             "ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_occurrence_positive_check;\
@@ -169,7 +167,15 @@ fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
              ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_purpose_code_shape_check;",
         )
         .unwrap();
+}
 
+fn insert_corrupt_audit_row(
+    client: &mut Client,
+    audit_event_ref: &str,
+    purpose_code: &str,
+    evidence_digest: &str,
+    occurred_at_unix_ms: i64,
+) {
     client
         .execute(
             "INSERT INTO audit_evidence_record (\
@@ -177,86 +183,80 @@ fn load_fails_closed_on_corrupt_stored_timestamp_and_digest() {
                 outcome_code, evidence_digest, occurred_at_unix_ms\
              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
             &[
-                &"audit_event_corrupt_time_01",
+                &audit_event_ref,
                 &"tenant_research_alpha",
                 &"actor_publisher_alpha",
-                &"instrument_publication",
+                &purpose_code,
                 &"publish_instrument_release",
                 &"instrument_release_big_five_ko_v1",
                 &"succeeded",
-                &DIGEST,
-                &-1_i64,
+                &evidence_digest,
+                &occurred_at_unix_ms,
             ],
         )
         .unwrap();
-    client
-        .execute(
-            "INSERT INTO audit_evidence_record (\
-                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
-                outcome_code, evidence_digest, occurred_at_unix_ms\
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            &[
-                &"audit_event_corrupt_digest_01",
-                &"tenant_research_alpha",
-                &"actor_publisher_alpha",
-                &"instrument_publication",
-                &"publish_instrument_release",
-                &"instrument_release_big_five_ko_v1",
-                &"succeeded",
-                &"sha256:not-a-canonical-digest",
-                &1_785_000_000_000_i64,
-            ],
-        )
-        .unwrap();
-    client
-        .execute(
-            "INSERT INTO audit_evidence_record (\
-                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
-                outcome_code, evidence_digest, occurred_at_unix_ms\
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-            &[
-                &"audit_event_corrupt_purpose_01",
-                &"tenant_research_alpha",
-                &"actor_publisher_alpha",
-                &"HasUppercase",
-                &"publish_instrument_release",
-                &"instrument_release_big_five_ko_v1",
-                &"succeeded",
-                &DIGEST,
-                &1_785_000_000_000_i64,
-            ],
-        )
-        .unwrap();
+}
 
+fn load_must_report_corrupt_history(client: &mut Client, audit_event_ref: &str, reason: &str) {
     let mut transaction = client.transaction().unwrap();
-    let time_error = load_audit_evidence(
-        &mut transaction,
-        "tenant_research_alpha",
-        "audit_event_corrupt_time_01",
-    )
-    .expect_err("negative stored event time must fail closed");
-    assert!(matches!(time_error, AuditPersistenceError::CorruptHistory));
-    let digest_error = load_audit_evidence(
-        &mut transaction,
-        "tenant_research_alpha",
-        "audit_event_corrupt_digest_01",
-    )
-    .expect_err("noncanonical stored digest must fail closed");
-    assert!(matches!(
-        digest_error,
-        AuditPersistenceError::CorruptHistory
-    ));
-    let purpose_error = load_audit_evidence(
-        &mut transaction,
-        "tenant_research_alpha",
-        "audit_event_corrupt_purpose_01",
-    )
-    .expect_err("noncanonical stored purpose must fail closed at reconstruction");
-    assert!(matches!(
-        purpose_error,
-        AuditPersistenceError::CorruptHistory
-    ));
+    let error = load_audit_evidence(&mut transaction, "tenant_research_alpha", audit_event_ref)
+        .expect_err(reason);
+    assert!(matches!(error, AuditPersistenceError::CorruptHistory));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_fails_closed_on_corrupt_stored_timestamp() {
+    let mut client = test_client();
+    prepare_unconstrained_audit_schema(&mut client, "audit_corrupt_time_test");
+    insert_corrupt_audit_row(
+        &mut client,
+        "audit_event_corrupt_time_01",
+        "instrument_publication",
+        DIGEST,
+        -1_i64,
+    );
+    load_must_report_corrupt_history(
+        &mut client,
+        "audit_event_corrupt_time_01",
+        "negative stored event time must fail closed",
+    );
+}
+
+#[test]
+fn load_fails_closed_on_corrupt_stored_digest() {
+    let mut client = test_client();
+    prepare_unconstrained_audit_schema(&mut client, "audit_corrupt_digest_test");
+    insert_corrupt_audit_row(
+        &mut client,
+        "audit_event_corrupt_digest_01",
+        "instrument_publication",
+        "sha256:not-a-canonical-digest",
+        1_785_000_000_000_i64,
+    );
+    load_must_report_corrupt_history(
+        &mut client,
+        "audit_event_corrupt_digest_01",
+        "noncanonical stored digest must fail closed",
+    );
+}
+
+#[test]
+fn load_fails_closed_on_corrupt_stored_purpose() {
+    let mut client = test_client();
+    prepare_unconstrained_audit_schema(&mut client, "audit_corrupt_purpose_test");
+    insert_corrupt_audit_row(
+        &mut client,
+        "audit_event_corrupt_purpose_01",
+        "HasUppercase",
+        DIGEST,
+        1_785_000_000_000_i64,
+    );
+    load_must_report_corrupt_history(
+        &mut client,
+        "audit_event_corrupt_purpose_01",
+        "noncanonical stored purpose must fail closed at reconstruction",
+    );
 }
 
 #[test]

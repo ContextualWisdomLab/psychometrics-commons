@@ -90,6 +90,23 @@ fn identity_aliases_numeric_ids_and_blank_references_fail_closed() {
 }
 
 #[test]
+fn purpose_and_action_codes_may_include_digits_after_a_leading_letter() {
+    let evidence = AuditEvidence::new(input(
+        "audit_event_code_digit_01",
+        "tenant_research_alpha",
+        "actor_publisher_alpha",
+        "instrument_publication_v2",
+        "publish_instrument_release_v3",
+        "instrument_release_big_five_ko_v1",
+        1_785_000_000_000,
+    ))
+    .expect("lowercase machine tokens may include digits after the leading letter");
+
+    assert_eq!(evidence.purpose_code(), "instrument_publication_v2");
+    assert_eq!(evidence.action_code(), "publish_instrument_release_v3");
+}
+
+#[test]
 fn purpose_and_action_codes_are_stable_lowercase_ascii_tokens() {
     for invalid_code in ["", "Instrument_Publication", "has-hyphen", "has space", "å"] {
         let mut invalid_purpose = input(
