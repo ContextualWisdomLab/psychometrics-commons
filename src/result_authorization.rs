@@ -93,4 +93,13 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn bound_result_authorizes_the_exact_stored_identity() {
+        let actor = actor();
+        assert_eq!(
+            authorize_bound_result(&actor, "tenant_alpha", "participant_alpha", "result_alpha",),
+            Ok(())
+        );
+    }
 }
