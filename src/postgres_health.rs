@@ -5,11 +5,18 @@
 //! can safely accept product-owned state changes. It does not own credentials,
 //! connection pooling, migrations, backup, or recovery.
 
-use crate::health::{CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError};
+use crate::health::{
+    BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError,
+};
 use postgres::GenericClient;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
 
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
+
+const BACKLOG_HEALTH_INDEX_MIGRATION: &str =
+    include_str!("../migrations/0020_backlog_health_indexes.sql");
 
 /// Capability identity used by operation-scoped runtime readiness.
 pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operational_store";
@@ -78,6 +85,175 @@ impl PostgresRuntimeHealth {
     }
 }
 
+/// Operator-supplied bounds used to classify durable integration backlog evidence.
+///
+/// The repository deliberately provides no universal defaults. Hosted, community,
+/// and enterprise operators must derive these values from their measured workload,
+/// topology, alert policy, and recovery evidence rather than treating architecture
+/// prose as an SLO commitment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IntegrationBacklogPolicy {
+    /// Largest pending outbox population still accepted for new state-changing work.
+    pub max_pending_outbox_count: u64,
+    /// Largest age in milliseconds of the oldest pending outbox event.
+    pub max_pending_outbox_age_ms: u64,
+    /// Largest quarantined outbox population still accepted under this operator policy.
+    pub max_quarantined_outbox_count: u64,
+    /// Largest pending-or-processing inbox-consumption population still accepted.
+    pub max_active_consumption_count: u64,
+    /// Largest age in milliseconds of the oldest pending-or-processing consumption.
+    pub max_active_consumption_age_ms: u64,
+    /// Largest quarantined inbox-consumption population still accepted.
+    pub max_quarantined_consumption_count: u64,
+}
+
+/// Aggregate, content-free evidence read from the durable integration tables.
+///
+/// Only counts and server-authoritative event times are exposed. The probe never
+/// returns assessment responses, event payloads, tenant identities, subjects, or
+/// restricted research linkage values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresIntegrationBacklogEvidence {
+    pending_outbox_count: u64,
+    quarantined_outbox_count: u64,
+    active_consumption_count: u64,
+    quarantined_consumption_count: u64,
+    oldest_pending_outbox_event_at_unix_ms: Option<u64>,
+    oldest_active_consumption_event_at_unix_ms: Option<u64>,
+}
+
+impl PostgresIntegrationBacklogEvidence {
+    /// Return the number of durable outbox events still awaiting delivery.
+    #[must_use]
+    pub const fn pending_outbox_count(self) -> u64 {
+        self.pending_outbox_count
+    }
+
+    /// Return the number of outbox events quarantined for operator attention.
+    #[must_use]
+    pub const fn quarantined_outbox_count(self) -> u64 {
+        self.quarantined_outbox_count
+    }
+
+    /// Return pending plus processing inbox side-effect consumptions.
+    #[must_use]
+    pub const fn active_consumption_count(self) -> u64 {
+        self.active_consumption_count
+    }
+
+    /// Return the number of quarantined inbox side-effect consumptions.
+    #[must_use]
+    pub const fn quarantined_consumption_count(self) -> u64 {
+        self.quarantined_consumption_count
+    }
+
+    /// Return the oldest pending outbox event time, or `None` when no event is pending.
+    #[must_use]
+    pub const fn oldest_pending_outbox_event_at_unix_ms(self) -> Option<u64> {
+        self.oldest_pending_outbox_event_at_unix_ms
+    }
+
+    /// Return the oldest pending/processing inbox-consumption event time, if any.
+    #[must_use]
+    pub const fn oldest_active_consumption_event_at_unix_ms(self) -> Option<u64> {
+        self.oldest_active_consumption_event_at_unix_ms
+    }
+}
+
+/// Operator-supplied bounds for participant data-rights request and propagation backlogs.
+///
+/// Data-rights timeliness is a deployment and governance policy, not a hard-coded product
+/// constant. Callers provide evidence-backed limits for their named deployment profile.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DataRightsBacklogPolicy {
+    /// Largest non-terminal participant request population still accepted.
+    pub max_active_request_count: u64,
+    /// Largest age in milliseconds of the oldest non-terminal request.
+    pub max_active_request_age_ms: u64,
+    /// Largest pending downstream propagation population still accepted.
+    pub max_pending_propagation_count: u64,
+    /// Largest age in milliseconds of the oldest pending downstream propagation.
+    pub max_pending_propagation_age_ms: u64,
+    /// Largest quarantined downstream propagation population still accepted.
+    pub max_quarantined_propagation_count: u64,
+}
+
+/// Aggregate participant-rights backlog evidence without participant or tenant identifiers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PostgresDataRightsBacklogEvidence {
+    active_request_count: u64,
+    pending_propagation_count: u64,
+    quarantined_propagation_count: u64,
+    oldest_active_request_at_unix_ms: Option<u64>,
+    oldest_pending_propagation_event_at_unix_ms: Option<u64>,
+}
+
+impl PostgresDataRightsBacklogEvidence {
+    /// Return the number of requested, identity-verified, or processing requests.
+    #[must_use]
+    pub const fn active_request_count(self) -> u64 {
+        self.active_request_count
+    }
+
+    /// Return the number of downstream propagation records awaiting delivery.
+    #[must_use]
+    pub const fn pending_propagation_count(self) -> u64 {
+        self.pending_propagation_count
+    }
+
+    /// Return the number of downstream propagation records quarantined for intervention.
+    #[must_use]
+    pub const fn quarantined_propagation_count(self) -> u64 {
+        self.quarantined_propagation_count
+    }
+
+    /// Return the oldest original request time among non-terminal participant requests.
+    #[must_use]
+    pub const fn oldest_active_request_at_unix_ms(self) -> Option<u64> {
+        self.oldest_active_request_at_unix_ms
+    }
+
+    /// Return the oldest event time among pending downstream propagations.
+    #[must_use]
+    pub const fn oldest_pending_propagation_event_at_unix_ms(self) -> Option<u64> {
+        self.oldest_pending_propagation_event_at_unix_ms
+    }
+}
+
+/// Fail-closed error while reading durable backlog evidence.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum PostgresBacklogProbeError {
+    /// A stored event time violated the positive-millisecond persistence contract.
+    InvalidStoredValue,
+    /// `PostgreSQL` could not execute the aggregate backlog probe.
+    Database(postgres::Error),
+}
+
+impl Display for PostgresBacklogProbeError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidStoredValue => "stored backlog evidence violates the persistence contract",
+            Self::Database(_) => "PostgreSQL backlog probe failed",
+        })
+    }
+}
+
+impl Error for PostgresBacklogProbeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            Self::InvalidStoredValue => None,
+        }
+    }
+}
+
+impl From<postgres::Error> for PostgresBacklogProbeError {
+    fn from(error: postgres::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
 /// Classify server-version and transaction-read-only evidence without performing I/O.
 ///
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
@@ -126,6 +302,223 @@ pub fn probe_postgres_runtime(
         server_version_num,
         transaction_read_only,
     ))
+}
+
+/// Apply partial indexes that keep operational-backlog readiness probes bounded.
+///
+/// Call this after the integration, inbox-consumption, and data-rights migrations
+/// so an existing installation receives the same readiness indexes as a newly
+/// initialized database. The statements are idempotent (`CREATE INDEX IF NOT EXISTS`).
+/// Directory-order recovery still applies `0020` as a file; this function is the
+/// product-owned apply path that callers must use instead of a private `include_str!`.
+///
+/// # Errors
+///
+/// Returns the `PostgreSQL` driver error when a required relation is missing or
+/// the index statements cannot be executed.
+pub fn apply_backlog_health_index_migration(
+    client: &mut impl GenericClient,
+) -> Result<(), postgres::Error> {
+    client.batch_execute(BACKLOG_HEALTH_INDEX_MIGRATION)
+}
+
+/// Probe aggregate outbox and inbox-consumption backlog evidence in one database snapshot.
+///
+/// This function intentionally does not classify the result against a universal threshold.
+/// It reads only aggregate counts and the oldest server-authoritative event time from the
+/// existing product-owned integration tables. Missing tables or query failures are errors,
+/// and invalid non-positive stored event times fail closed instead of being normalized.
+///
+/// # Errors
+///
+/// Returns [`PostgresBacklogProbeError::InvalidStoredValue`] when a stored oldest-event
+/// timestamp violates the positive-millisecond contract, or
+/// [`PostgresBacklogProbeError::Database`] when the aggregate query cannot be executed.
+pub fn probe_postgres_integration_backlog(
+    client: &mut impl GenericClient,
+) -> Result<PostgresIntegrationBacklogEvidence, PostgresBacklogProbeError> {
+    let row = client.query_one(
+        "SELECT \
+             (SELECT COUNT(*)::BIGINT FROM integration_outbox WHERE current_state = 'pending'), \
+             (SELECT COUNT(*)::BIGINT FROM integration_outbox WHERE current_state = 'quarantined'), \
+             (SELECT MIN(latest_event_at_unix_ms) FROM integration_outbox WHERE current_state = 'pending'), \
+             (SELECT COUNT(*)::BIGINT FROM integration_consumption \
+                 WHERE consumption_state IN ('pending', 'processing')), \
+             (SELECT COUNT(*)::BIGINT FROM integration_consumption \
+                 WHERE consumption_state = 'quarantined'), \
+             (SELECT MIN(latest_event_at_unix_ms) FROM integration_consumption \
+                 WHERE consumption_state IN ('pending', 'processing'))",
+        &[],
+    )?;
+
+    let pending_outbox_count: i64 = row.get(0);
+    let quarantined_outbox_count: i64 = row.get(1);
+    let oldest_pending_outbox_event_at_unix_ms: Option<i64> = row.get(2);
+    let active_consumption_count: i64 = row.get(3);
+    let quarantined_consumption_count: i64 = row.get(4);
+    let oldest_active_consumption_event_at_unix_ms: Option<i64> = row.get(5);
+
+    Ok(PostgresIntegrationBacklogEvidence {
+        pending_outbox_count: pending_outbox_count.cast_unsigned(),
+        quarantined_outbox_count: quarantined_outbox_count.cast_unsigned(),
+        active_consumption_count: active_consumption_count.cast_unsigned(),
+        quarantined_consumption_count: quarantined_consumption_count.cast_unsigned(),
+        oldest_pending_outbox_event_at_unix_ms: positive_optional_millis(
+            oldest_pending_outbox_event_at_unix_ms,
+        )?,
+        oldest_active_consumption_event_at_unix_ms: positive_optional_millis(
+            oldest_active_consumption_event_at_unix_ms,
+        )?,
+    })
+}
+
+/// Classify aggregate integration backlog evidence against one explicit operator policy.
+///
+/// A zero observation time or a stored event apparently occurring after the observation
+/// is `Unknown`, not healthy. Otherwise any count or age beyond the supplied policy is
+/// `Stalled`. No default SLO, alert threshold, or recovery promise is inferred here.
+#[must_use]
+pub fn classify_postgres_integration_backlog(
+    evidence: &PostgresIntegrationBacklogEvidence,
+    observed_at_unix_ms: u64,
+    policy: &IntegrationBacklogPolicy,
+) -> BacklogHealth {
+    if observed_at_unix_ms == 0
+        || evidence
+            .oldest_pending_outbox_event_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+        || evidence
+            .oldest_active_consumption_event_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+    {
+        return BacklogHealth::Unknown;
+    }
+
+    if evidence.pending_outbox_count > policy.max_pending_outbox_count
+        || evidence.quarantined_outbox_count > policy.max_quarantined_outbox_count
+        || evidence.active_consumption_count > policy.max_active_consumption_count
+        || evidence.quarantined_consumption_count > policy.max_quarantined_consumption_count
+    {
+        return BacklogHealth::Stalled;
+    }
+
+    if age_exceeds(
+        evidence.oldest_pending_outbox_event_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_pending_outbox_age_ms,
+    ) || age_exceeds(
+        evidence.oldest_active_consumption_event_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_active_consumption_age_ms,
+    ) {
+        return BacklogHealth::Stalled;
+    }
+
+    BacklogHealth::WithinBounds
+}
+
+/// Probe participant data-rights request and propagation backlog evidence.
+///
+/// Active request age is measured from the original request time, so a recent lifecycle
+/// transition cannot hide a participant request that has remained unresolved for too long.
+/// Propagation age is measured from the latest durable propagation event. The query exposes
+/// only aggregate counts and timestamps, never participant, tenant, scope, or payload data.
+///
+/// # Errors
+///
+/// Returns [`PostgresBacklogProbeError::InvalidStoredValue`] for non-positive oldest
+/// timestamps, or [`PostgresBacklogProbeError::Database`] when the query cannot execute.
+pub fn probe_postgres_data_rights_backlog(
+    client: &mut impl GenericClient,
+) -> Result<PostgresDataRightsBacklogEvidence, PostgresBacklogProbeError> {
+    let row = client.query_one(
+        "SELECT \
+             (SELECT COUNT(*)::BIGINT FROM data_rights_request_state \
+                 WHERE current_state IN ('requested', 'identity_verified', 'processing')), \
+             (SELECT MIN(requested_at_unix_ms) FROM data_rights_request_state \
+                 WHERE current_state IN ('requested', 'identity_verified', 'processing')), \
+             (SELECT COUNT(*)::BIGINT FROM data_rights_propagation_state \
+                 WHERE current_state = 'pending'), \
+             (SELECT COUNT(*)::BIGINT FROM data_rights_propagation_state \
+                 WHERE current_state = 'quarantined'), \
+             (SELECT MIN(latest_event_at_unix_ms) FROM data_rights_propagation_state \
+                 WHERE current_state = 'pending')",
+        &[],
+    )?;
+
+    let active_request_count: i64 = row.get(0);
+    let oldest_active_request_at_unix_ms: Option<i64> = row.get(1);
+    let pending_propagation_count: i64 = row.get(2);
+    let quarantined_propagation_count: i64 = row.get(3);
+    let oldest_pending_propagation_event_at_unix_ms: Option<i64> = row.get(4);
+
+    Ok(PostgresDataRightsBacklogEvidence {
+        active_request_count: active_request_count.cast_unsigned(),
+        pending_propagation_count: pending_propagation_count.cast_unsigned(),
+        quarantined_propagation_count: quarantined_propagation_count.cast_unsigned(),
+        oldest_active_request_at_unix_ms: positive_optional_millis(
+            oldest_active_request_at_unix_ms,
+        )?,
+        oldest_pending_propagation_event_at_unix_ms: positive_optional_millis(
+            oldest_pending_propagation_event_at_unix_ms,
+        )?,
+    })
+}
+
+/// Classify participant data-rights backlog evidence against an explicit operator policy.
+///
+/// Missing observation time or future-dated durable evidence produces `Unknown`. Excess
+/// request/propagation counts, quarantine population, or age produce `Stalled`. Otherwise
+/// the measured data-rights backlog is within the caller's declared operating bounds.
+#[must_use]
+pub fn classify_postgres_data_rights_backlog(
+    evidence: &PostgresDataRightsBacklogEvidence,
+    observed_at_unix_ms: u64,
+    policy: &DataRightsBacklogPolicy,
+) -> BacklogHealth {
+    if observed_at_unix_ms == 0
+        || evidence
+            .oldest_active_request_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+        || evidence
+            .oldest_pending_propagation_event_at_unix_ms
+            .is_some_and(|timestamp| timestamp > observed_at_unix_ms)
+    {
+        return BacklogHealth::Unknown;
+    }
+
+    if evidence.active_request_count > policy.max_active_request_count
+        || evidence.pending_propagation_count > policy.max_pending_propagation_count
+        || evidence.quarantined_propagation_count > policy.max_quarantined_propagation_count
+    {
+        return BacklogHealth::Stalled;
+    }
+
+    if age_exceeds(
+        evidence.oldest_active_request_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_active_request_age_ms,
+    ) || age_exceeds(
+        evidence.oldest_pending_propagation_event_at_unix_ms,
+        observed_at_unix_ms,
+        policy.max_pending_propagation_age_ms,
+    ) {
+        return BacklogHealth::Stalled;
+    }
+
+    BacklogHealth::WithinBounds
+}
+
+fn positive_optional_millis(value: Option<i64>) -> Result<Option<u64>, PostgresBacklogProbeError> {
+    match value {
+        Some(value) if value > 0 => Ok(Some(value.cast_unsigned())),
+        Some(_) => Err(PostgresBacklogProbeError::InvalidStoredValue),
+        None => Ok(None),
+    }
+}
+
+fn age_exceeds(oldest_event_at: Option<u64>, observed_at: u64, maximum_age: u64) -> bool {
+    oldest_event_at.is_some_and(|timestamp| observed_at.saturating_sub(timestamp) > maximum_age)
 }
 
 /// Probe whether every caller-declared relation required by this application build exists.

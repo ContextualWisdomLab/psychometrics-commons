@@ -39,7 +39,7 @@ The implementation must distinguish at least:
 - **liveness** — process can make progress / is not irrecoverably wedged;
 - **readiness** — mandatory dependencies for the selected profile are available enough to accept new work safely;
 - **capability health** — optional/independent capabilities such as authenticated linking, scoring, AI narrative, research registration, or temporal analysis;
-- **backlog health** — durable work is within measured operating bounds and not silently stalled;
+- **backlog health** — durable work is within measured operating bounds and not silently stalled. When a PostgreSQL operational-backlog probe is present, it classifies aggregate outbox, inbox-consumption, and data-rights counts/ages against caller-supplied policy only and must not expose payloads, tenant identities, or restricted linkage values. Apply `migrations/0020_backlog_health_indexes.sql` through `apply_backlog_health_index_migration` after the owning table migrations so readiness probes stay bounded as terminal history grows;
 - **data integrity health** — migrations/schema/digests/reconciliation do not indicate incompatible or corrupt state.
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
@@ -229,6 +229,10 @@ Never collapse these maturity levels. SOC 2/CSAP readiness work may map evidence
 
 ## 15. References
 
+Beyer, B., Jones, C., Petoff, J., & Murphy, N. R. (Eds.). (2016). *Site reliability engineering: How Google runs production systems*. O'Reilly Media.
+
 International Organization for Standardization & International Electrotechnical Commission. (2023). *ISO/IEC 25010:2023 Systems and software engineering—Systems and software Quality Requirements and Evaluation (SQuaRE)—Product quality model*.
+
+National Institute of Standards and Technology. (2020). *Security and privacy controls for information systems and organizations* (NIST SP 800-53 Rev. 5). https://doi.org/10.6028/NIST.SP.800-53r5
 
 National Institute of Standards and Technology. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST SP 800-218). https://doi.org/10.6028/NIST.SP.800-218
