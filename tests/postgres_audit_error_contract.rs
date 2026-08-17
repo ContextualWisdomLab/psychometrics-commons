@@ -206,6 +206,31 @@ fn load_must_report_corrupt_history(client: &mut Client, audit_event_ref: &str, 
 }
 
 #[test]
+fn persist_maps_aborted_transaction_isolation_probe_to_database_error() {
+    let mut client = test_client();
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS audit_aborted_tx_test;\
+             SET search_path TO audit_aborted_tx_test;\
+             DROP TABLE IF EXISTS audit_evidence_record CASCADE;\
+             DROP FUNCTION IF EXISTS reject_audit_evidence_mutation() CASCADE;",
+        )
+        .unwrap();
+    apply_audit_evidence_migration(&mut client).unwrap();
+
+    let evidence = evidence_at("audit_event_aborted_01", 1_785_000_000_000);
+    let mut transaction = client.transaction().unwrap();
+    assert!(transaction
+        .batch_execute("SELECT 1 FROM audit_aborted_missing_relation")
+        .is_err());
+    assert!(matches!(
+        persist_audit_evidence(&mut transaction, &evidence),
+        Err(AuditPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn load_fails_closed_on_corrupt_stored_timestamp() {
     let mut client = test_client();
     prepare_unconstrained_audit_schema(&mut client, "audit_corrupt_time_test");

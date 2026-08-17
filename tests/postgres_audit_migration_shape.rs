@@ -76,3 +76,34 @@ fn migration_rejects_preexisting_relation_with_wrong_owned_schema() {
         "migration must identify owned-schema drift instead of silently accepting it: {message}"
     );
 }
+
+#[test]
+fn migration_applies_inside_the_caller_transaction() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS audit_migration_transaction_test CASCADE;\
+             CREATE SCHEMA audit_migration_transaction_test;\
+             SET search_path TO audit_migration_transaction_test;",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    apply_audit_evidence_migration(&mut transaction)
+        .expect("audit migration must apply inside the caller transaction");
+    transaction.commit().unwrap();
+
+    let count: i64 = client
+        .query_one(
+            "SELECT count(*)::bigint FROM information_schema.tables \
+             WHERE table_schema = 'audit_migration_transaction_test' \
+               AND table_name = 'audit_evidence_record'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 1);
+}

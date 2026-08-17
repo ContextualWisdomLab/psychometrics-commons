@@ -108,7 +108,14 @@ fn purpose_and_action_codes_may_include_digits_after_a_leading_letter() {
 
 #[test]
 fn purpose_and_action_codes_are_stable_lowercase_ascii_tokens() {
-    for invalid_code in ["", "Instrument_Publication", "has-hyphen", "has space", "å"] {
+    for invalid_code in [
+        "",
+        "Instrument_Publication",
+        "has-hyphen",
+        "has space",
+        "å",
+        "2instrument_publication",
+    ] {
         let mut invalid_purpose = input(
             "audit_event_code_01",
             "tenant_research_alpha",
