@@ -41,10 +41,19 @@ fn migration_rejects_unicode_numeric_like_reference_aliases() {
     apply_response_event_migration(&mut client).unwrap();
 
     let columns = [
-        ("response_event_ref", "response_event_response_event_ref_format_check"),
+        (
+            "response_event_ref",
+            "response_event_response_event_ref_format_check",
+        ),
         ("session_ref", "response_event_session_ref_format_check"),
-        ("client_event_ref", "response_event_client_event_ref_format_check"),
-        ("item_version_ref", "response_event_item_version_ref_format_check"),
+        (
+            "client_event_ref",
+            "response_event_client_event_ref_format_check",
+        ),
+        (
+            "item_version_ref",
+            "response_event_item_version_ref_format_check",
+        ),
     ];
     let numeric_like_aliases = ["12．34", "12٫34", "12٬34", "12，34"];
     let mut case_index = 0_i64;
@@ -81,7 +90,9 @@ fn migration_rejects_unicode_numeric_like_reference_aliases() {
                         &case_index,
                     ],
                 )
-                .expect_err("Unicode numeric-like aliases must fail the owned reference constraint");
+                .expect_err(
+                    "Unicode numeric-like aliases must fail the owned reference constraint",
+                );
             assert_eq!(
                 error
                     .as_db_error()
