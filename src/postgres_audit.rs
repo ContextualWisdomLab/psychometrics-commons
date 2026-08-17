@@ -186,10 +186,10 @@ pub fn load_audit_evidence(
     let tenant_ref = required_reference(tenant_ref)?;
     let audit_event_ref = required_reference(audit_event_ref)?;
     let row = transaction.query_opt(
-        "SELECT actor_ref, purpose_code, action_code, resource_ref, outcome_code,\
-                evidence_digest, occurred_at_unix_ms\
-         FROM audit_evidence_record\
-         WHERE tenant_ref = $1 AND audit_event_ref = $2",
+        r#"SELECT actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+                  evidence_digest, occurred_at_unix_ms
+           FROM audit_evidence_record
+           WHERE tenant_ref = $1 AND audit_event_ref = $2"#,
         &[&tenant_ref, &audit_event_ref],
     )?;
     let Some(row) = row else {
