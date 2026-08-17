@@ -130,6 +130,49 @@ fn participant_identity_rebinding_fails_closed_without_rewriting_the_row() {
 }
 
 #[test]
+fn participant_base_evidence_is_immutable_at_the_database_boundary() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let participant = anonymous_participant();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_anonymous_participant_base(&mut transaction, &participant).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    for statement in [
+        "UPDATE assessment_participant SET tenant_ref = 'tenant_rebound_demo' \
+         WHERE participant_ref = 'participant_public_demo'",
+        "DELETE FROM assessment_participant \
+         WHERE participant_ref = 'participant_public_demo'",
+        "TRUNCATE assessment_participant",
+    ] {
+        let error = client
+            .batch_execute(statement)
+            .expect_err("participant base evidence must reject destructive mutation");
+        assert_eq!(
+            error.code().map(|code| code.code()),
+            Some("55000"),
+            "immutability rejection must use SQLSTATE 55000: {statement}"
+        );
+    }
+
+    let loaded = load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .unwrap()
+    .expect("rejected mutation must leave the original participant evidence intact");
+    assert_eq!(loaded.participant_ref(), "participant_public_demo");
+    assert_eq!(loaded.tenant_ref(), "tenant_public_demo");
+    assert_eq!(loaded.created_at_unix_ms(), 40_000);
+}
+
+#[test]
 fn linked_records_cannot_be_misrepresented_as_complete_base_only_state() {
     let _guard = participant_base_test_guard();
     let mut client = test_client();
