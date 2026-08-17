@@ -1,7 +1,7 @@
-//! Real PostgreSQL concurrency contract for anonymous participant replay classification.
+//! Real `PostgreSQL` concurrency contract for anonymous participant replay classification.
 //!
 //! These cases deliberately keep the winning insert uncommitted while a second connection
-//! attempts the same `participant_ref`. PostgreSQL must make the loser wait for the unique-key
+//! attempts the same `participant_ref`. `PostgreSQL` must make the loser wait for the unique-key
 //! conflict to resolve; the following `READ COMMITTED` statement then sees the committed winner
 //! and classifies the replay instead of reporting corrupt stored identity.
 
@@ -40,11 +40,7 @@ fn prepare_schema(client: &mut Client) {
     apply_participant_base_migration(client).unwrap();
 }
 
-fn wait_for_unique_conflict(
-    observer: &mut Client,
-    contender_pid: i32,
-    winner_pid: i32,
-) {
+fn wait_for_unique_conflict(observer: &mut Client, contender_pid: i32, winner_pid: i32) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let waiting: bool = observer
