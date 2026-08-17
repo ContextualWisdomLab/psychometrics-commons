@@ -192,6 +192,80 @@ fn claim_next_skips_a_retry_that_is_not_due_and_claims_the_queued_job() {
 }
 
 #[test]
+fn claim_next_claims_a_due_retry_before_newer_queued_work() {
+    let _guard = claim_next_test_guard();
+    let mut client = test_client();
+    reset_scoring_job_table(&mut client);
+    apply_scoring_job_migration(&mut client).unwrap();
+    persist_queued(
+        &mut client,
+        "scoring_job_claim_next_due_retry",
+        "scoring_request_claim_next_due_retry",
+    );
+    {
+        let mut transaction = client.transaction().unwrap();
+        let lease = claim_scoring_job(
+            &mut transaction,
+            "scoring_job_claim_next_due_retry",
+            "worker_claim_next_retry_setup",
+            "lease_claim_next_retry_setup",
+            10_000,
+            30_000,
+        )
+        .unwrap();
+        assert_eq!(lease.fencing_token(), 1);
+        assert_eq!(
+            record_retryable_scoring_failure(
+                &mut transaction,
+                "scoring_job_claim_next_due_retry",
+                lease.fencing_token(),
+                "provider_timeout",
+                20_000,
+                50_000,
+            )
+            .unwrap(),
+            ScoringJobState::RetryScheduled
+        );
+        transaction.commit().unwrap();
+    }
+    persist_queued(
+        &mut client,
+        "scoring_job_claim_next_newer_queued",
+        "scoring_request_claim_next_newer_queued",
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    let claimed = claim_next_scoring_job(
+        &mut transaction,
+        "worker_claim_next_retry_resume",
+        "lease_claim_next_retry_resume",
+        50_000,
+        70_000,
+    )
+    .unwrap()
+    .expect("a retry at its due time must be claimable after restart");
+    transaction.commit().unwrap();
+
+    assert_eq!(
+        claimed.scoring_job_ref(),
+        "scoring_job_claim_next_due_retry"
+    );
+    assert_eq!(
+        claimed.scoring_request_ref(),
+        "scoring_request_claim_next_due_retry"
+    );
+    assert_eq!(claimed.lease().fencing_token(), 2);
+    assert_eq!(
+        job_state(&mut client, "scoring_job_claim_next_due_retry"),
+        "leased"
+    );
+    assert_eq!(
+        job_state(&mut client, "scoring_job_claim_next_newer_queued"),
+        "queued"
+    );
+}
+
+#[test]
 fn concurrent_claim_next_workers_receive_distinct_due_jobs() {
     let _guard = claim_next_test_guard();
     let mut setup_client = test_client();
