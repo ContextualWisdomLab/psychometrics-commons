@@ -166,7 +166,7 @@ pub fn load_current_result_snapshot_for_session(
 ) -> Result<Option<ResultSnapshot>, ResultSnapshotPersistenceError> {
     require_read_committed(transaction)?;
     let session_ref = required_reference(session_ref)?;
-    let counts = transaction.query_one(
+    let counts = match transaction.query_one(
         "SELECT \
             (SELECT COUNT(*) FROM result_snapshot \
              WHERE session_ref = $1 \
@@ -176,7 +176,10 @@ pub fn load_current_result_snapshot_for_session(
                ))::bigint, \
             (SELECT COUNT(*) FROM result_snapshot WHERE session_ref = $1)::bigint",
         &[&session_ref],
-    )?;
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(ResultSnapshotPersistenceError::from(error)),
+    };
     let tip_count = stored_nonnegative_count(counts.get(0))?;
     let session_has_snapshots = counts.get::<_, i64>(1) > 0;
     match classify_current_session_tips(tip_count, session_has_snapshots)? {
@@ -561,7 +564,7 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        classify_current_session_tips, durable_evidence_error,
+        apply_result_snapshot_migration, classify_current_session_tips, durable_evidence_error,
         load_current_result_snapshot_for_session, load_unique_session_tip_ref,
         observation_disposition_name, observation_from_stored, observation_order,
         postgres_timestamp, require_contiguous_observation_order, required_reference,
@@ -794,6 +797,62 @@ mod reference_guard_tests {
             load_unique_session_tip_ref(&mut transaction, "session_ipip_ko_quick"),
             Err(ResultSnapshotPersistenceError::Database(_))
         ));
+        transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn current_session_tip_lookup_loads_unique_stored_tip_from_library() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS result_snapshot_unique_tip_ok CASCADE; \
+                 CREATE SCHEMA result_snapshot_unique_tip_ok; \
+                 SET search_path TO result_snapshot_unique_tip_ok;",
+            )
+            .unwrap();
+        apply_result_snapshot_migration(&mut client).unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            load_current_result_snapshot_for_session(&mut transaction, "session_ipip_ko_quick"),
+            Ok(None)
+        ));
+        transaction
+            .batch_execute(
+                "INSERT INTO result_snapshot (\
+                     result_snapshot_ref, participant_ref, scoring_result_ref, session_ref, \
+                     response_snapshot_ref, assessment_spec_ref, instrument_version_ref, \
+                     scoring_version_ref, calibration_reference, requested_output_schema_version, \
+                     narrative_version_ref, consent_snapshot_refs, engine_artifact_digest, \
+                     created_at_unix_ms\
+                 ) VALUES (\
+                     'result_snapshot_unique_tip', 'participant_result_one', \
+                     'scoring_result_result_one', 'session_ipip_ko_quick', \
+                     'response_snapshot_result_one', 'assessment_spec_big_five_v1', \
+                     'instrument_version_big_five_ko_v1', 'scoring_version_big_five_v1', \
+                     'calibration_big_five_ko_v1', 1, 'narrative_version_big_five_v1', \
+                     ARRAY['consent_snapshot_service_v1'], \
+                     'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
+                     70000\
+                 ); \
+                 INSERT INTO result_snapshot_observation (\
+                     result_snapshot_ref, observation_order, construct_ref, \
+                     observation_disposition, score, standard_error\
+                 ) VALUES (\
+                     'result_snapshot_unique_tip', 0, 'construct_big_five', 'scored', 0.25, 0.05\
+                 );",
+            )
+            .unwrap();
+        assert_eq!(
+            load_unique_session_tip_ref(&mut transaction, "session_ipip_ko_quick").unwrap(),
+            "result_snapshot_unique_tip"
+        );
+        assert!(load_current_result_snapshot_for_session(
+            &mut transaction,
+            "session_ipip_ko_quick"
+        )
+        .unwrap()
+        .is_some());
         transaction.rollback().unwrap();
     }
 }
