@@ -98,6 +98,11 @@ fn urn_problem_types_follow_rfc8141_optional_component_syntax() {
     }
 
     for invalid_type in [
+        "urn:example:/problem",
+        "urn:example:problem?+/resolver",
+        "urn:example:problem?+?resolver",
+        "urn:example:problem?=/version",
+        "urn:example:problem?=?version",
         "urn:example:problem?version=2",
         "urn:example:problem?+",
         "urn:example:problem?=",
