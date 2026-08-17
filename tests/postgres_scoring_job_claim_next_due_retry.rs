@@ -33,7 +33,8 @@ fn persist_queued(client: &mut Client, job_ref: &str, request_ref: &str) {
 fn state_and_fence(client: &mut Client, job_ref: &str) -> (String, i64) {
     let row = client
         .query_one(
-            "SELECT scoring_state, fencing_token FROM scoring_job_state WHERE scoring_job_ref = $1",
+            "SELECT scoring_state, COALESCE(active_fencing_token, 0) \
+             FROM scoring_job_state WHERE scoring_job_ref = $1",
             &[&job_ref],
         )
         .unwrap();
