@@ -432,8 +432,8 @@ mod reference_guard_tests {
         apply_response_event_migration, classify_existing_event, load_response_event_receipts,
         load_response_ledger, map_rebuild_error, millis_from_duration, next_contiguous_sequence,
         persist_response_event, postgres_sequence, postgres_timestamptz, query_existing_event_row,
-        require_contiguous_receipt_history, required_reference, unix_ms_from_system_time,
-        ResponseEventPersistenceError, ResponseEventReceipt,
+        require_contiguous_receipt_history, require_read_committed, required_reference,
+        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
@@ -739,7 +739,14 @@ mod reference_guard_tests {
             load_error,
             ResponseEventPersistenceError::UnsupportedIsolationLevel
         ));
+        assert!(matches!(
+            require_read_committed(&mut serializable),
+            Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
+        ));
         serializable.rollback().unwrap();
+        let mut committed = client.transaction().unwrap();
+        assert!(require_read_committed(&mut committed).is_ok());
+        committed.rollback().unwrap();
     }
 
     #[test]
