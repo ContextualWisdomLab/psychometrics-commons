@@ -89,6 +89,18 @@ class ReleaseLegalReadinessTests(unittest.TestCase):
             self.assertEqual(evidence["standard_license_files"], [])
             self.assertIn("no discoverable license file", evidence["blockers"][0])
 
+    def test_symlink_loop_is_a_blocker_not_an_unhandled_preflight_crash(self) -> None:
+        """Malformed filesystem evidence must fail closed instead of escaping machine-readable output."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.fixture_root(directory, ['license = "LicenseRef-Reviewed-Terms"'])
+            (root / "LICENSE").symlink_to("LICENSE")
+
+            evidence = evaluate_repository(root)
+
+            self.assertFalse(evidence["ready"])
+            self.assertEqual(evidence["standard_license_files"], [])
+            self.assertIn("no discoverable license file", evidence["blockers"][0])
+
     def test_declared_nonstandard_license_file_can_supply_explicit_file_evidence(self) -> None:
         """Cargo's reviewed license-file is acceptable even when its name is nonstandard."""
         with tempfile.TemporaryDirectory() as directory:
