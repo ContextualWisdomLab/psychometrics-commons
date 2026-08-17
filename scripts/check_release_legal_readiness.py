@@ -54,8 +54,11 @@ def _nonempty_string(value: object) -> str | None:
 
 def _resolved_repo_file(root: Path, relative_path: str) -> Path | None:
     """Return non-empty terms evidence only when the resolved regular file stays in the repository."""
-    root_resolved = root.resolve()
-    candidate = (root / relative_path).resolve()
+    try:
+        root_resolved = root.resolve()
+        candidate = (root / relative_path).resolve()
+    except (OSError, RuntimeError):
+        return None
     try:
         candidate.relative_to(root_resolved)
     except ValueError:
