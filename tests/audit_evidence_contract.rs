@@ -4,8 +4,7 @@ use psychometrics_commons_runtime::audit::{
     AuditEvidence, AuditEvidenceError, AuditEvidenceInput, AuditOutcome,
 };
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn input<'a>(
     event_ref: &'a str,
@@ -49,10 +48,7 @@ fn privileged_product_action_keeps_exact_purpose_actor_resource_and_digest() {
     assert_eq!(evidence.actor_ref(), "actor_publisher_alpha");
     assert_eq!(evidence.purpose_code(), "instrument_publication");
     assert_eq!(evidence.action_code(), "publish_instrument_release");
-    assert_eq!(
-        evidence.resource_ref(),
-        "instrument_release_big_five_ko_v1"
-    );
+    assert_eq!(evidence.resource_ref(), "instrument_release_big_five_ko_v1");
     assert_eq!(evidence.outcome(), AuditOutcome::Succeeded);
     assert_eq!(evidence.outcome().as_code(), "succeeded");
     assert_eq!(evidence.evidence_digest(), DIGEST);
