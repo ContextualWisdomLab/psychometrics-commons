@@ -137,6 +137,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #132 (successor to #122) PostgreSQL-backed operator health HTTP is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Operators start the process with `run_health_process` after setting `HEALTH_LISTEN_ADDR` or `PORT`. GET `/live` answers process liveness without store I/O even when `DATABASE_URL` is down. GET `/ready` observes a live operational snapshot after accept; a bare `/ready` requires `postgres_operational_store`. Caller-measured `HEALTH_BACKLOG_HEALTH` is required before readiness can be true. Driver errors are not exposed. Public/admin product routes, measured backlog thresholds, TLS, and deployment-profile evidence remain outside this slice.
 
+**Active PR** #60 exclusive outbox delivery-lease persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Pending outbox rows accept one fenced worker lease, recover expiry from the database clock without transferring the fence, reject a future caller timestamp that would steal a still-live lease, and reject stale or zero-window claims. Live side-effect execution remains outside this slice.
+
 ## 5. ADR traceability by concern
 
 | Concern | Governing ADR(s) |

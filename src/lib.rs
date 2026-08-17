@@ -8,10 +8,12 @@
 //! contracts rather than reimplemented here.
 
 pub mod account_link;
+pub mod anonymous_credential;
 pub mod anonymous_session;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
+pub mod data_rights_authorization;
 pub mod deterministic_narrative;
 pub mod health;
 pub mod health_http;
@@ -38,6 +40,7 @@ mod reference;
 pub mod research_release;
 pub mod response;
 pub mod result;
+pub mod result_authorization;
 pub mod scoring;
 pub mod scoring_job;
 pub mod session;
