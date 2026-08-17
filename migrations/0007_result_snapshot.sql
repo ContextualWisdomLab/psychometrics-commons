@@ -133,6 +133,9 @@ CREATE TABLE IF NOT EXISTS result_snapshot (
     CONSTRAINT result_snapshot_pkey PRIMARY KEY (result_snapshot_ref)
 );
 
+CREATE INDEX IF NOT EXISTS result_snapshot_session_ref_idx
+    ON result_snapshot (session_ref);
+
 CREATE TABLE IF NOT EXISTS result_snapshot_observation (
     result_snapshot_ref TEXT CONSTRAINT result_snapshot_observation_snapshot_ref_not_null NOT NULL,
     observation_order INTEGER

@@ -28,6 +28,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ResultSnapshotPersistenceError::UnsupportedIsolationLevel,
             "result snapshot persistence requires read committed isolation",
         ),
+        (
+            ResultSnapshotPersistenceError::InconsistentEvidence,
+            "durable result evidence cannot reconstruct the published snapshot",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());

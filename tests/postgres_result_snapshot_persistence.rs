@@ -2,7 +2,8 @@
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::{
-    apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
+    apply_result_snapshot_migration, load_current_result_snapshot_for_session,
+    load_result_snapshot, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
     ResultSnapshotPersistenceError,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
@@ -449,4 +450,544 @@ fn observation_insert_failure_is_a_database_failure() {
         ResultSnapshotPersistenceError::Database(_)
     ));
     cleanup_result_snapshot_fault_injection(&mut client);
+}
+
+fn load_ok(client: &mut Client, result_snapshot_ref: &str) -> Option<ResultSnapshot> {
+    let mut transaction = client.transaction().unwrap();
+    let snapshot = load_result_snapshot(&mut transaction, result_snapshot_ref).unwrap();
+    transaction.commit().unwrap();
+    snapshot
+}
+
+fn load_current_ok(client: &mut Client, session_ref: &str) -> Option<ResultSnapshot> {
+    let mut transaction = client.transaction().unwrap();
+    let snapshot = load_current_result_snapshot_for_session(&mut transaction, session_ref).unwrap();
+    transaction.commit().unwrap();
+    snapshot
+}
+
+fn multi_observation_snapshot(result_snapshot_ref: &str) -> ResultSnapshot {
+    snapshot_named(
+        "session_result_gap",
+        result_snapshot_ref,
+        ENGINE_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        None,
+        vec![
+            ScoreObservation::scored("construct_extraversion", 0.5, Some(0.04)).unwrap(),
+            ScoreObservation::without_score(
+                "construct_openness",
+                ObservationDisposition::Abstained,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_agreeableness",
+                ObservationDisposition::Failed,
+            )
+            .unwrap(),
+        ],
+    )
+}
+
+#[test]
+fn persisted_result_reloads_the_same_published_snapshot() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let successor = snapshot_named(
+        "session_result_reload",
+        "result_snapshot_reload",
+        ENGINE_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        Some("result_snapshot_predecessor"),
+        vec![
+            ScoreObservation::scored("construct_extraversion", 0.5, Some(0.04)).unwrap(),
+            ScoreObservation::without_score(
+                "construct_openness",
+                ObservationDisposition::Abstained,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_agreeableness",
+                ObservationDisposition::Failed,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_conscientiousness",
+                ObservationDisposition::Excluded,
+            )
+            .unwrap(),
+        ],
+    );
+    persist_ok(
+        &mut client,
+        &default_snapshot("result_snapshot_predecessor"),
+    );
+    persist_ok(&mut client, &successor);
+
+    let reloaded = load_ok(&mut client, "result_snapshot_reload").expect("stored result");
+    assert_eq!(reloaded, successor);
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_result_snapshot(&mut transaction, &reloaded).unwrap(),
+            ResultSnapshotPersistenceDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+}
+
+#[test]
+fn missing_or_empty_result_identity_does_not_invent_a_score() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    assert!(load_ok(&mut client, "result_snapshot_absent").is_none());
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "12"),
+        Err(ResultSnapshotPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_succeeds_under_stronger_isolation() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let snapshot = default_snapshot("result_snapshot_serializable_load");
+    persist_ok(&mut client, &snapshot);
+
+    let mut absent = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(
+        load_result_snapshot(&mut absent, "result_snapshot_absent_rr")
+            .unwrap()
+            .is_none()
+    );
+    absent.commit().unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    let loaded = load_result_snapshot(&mut transaction, "result_snapshot_serializable_load")
+        .unwrap()
+        .expect("stored snapshot must load under SERIALIZABLE");
+    transaction.commit().unwrap();
+    assert_eq!(loaded, snapshot);
+}
+
+#[test]
+fn load_rejects_header_without_copied_observations() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(&mut client, &default_snapshot("result_snapshot_gap"));
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot_observation DISABLE TRIGGER USER; \
+             DELETE FROM result_snapshot_observation \
+             WHERE result_snapshot_ref = 'result_snapshot_gap'; \
+             ALTER TABLE result_snapshot_observation ENABLE TRIGGER USER;",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_gap"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_result_relation_on_load_is_a_database_failure() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_missing_header"),
+        Err(ResultSnapshotPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_observation_relation_on_load_is_a_database_failure() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &default_snapshot("result_snapshot_missing_obs"),
+    );
+    client
+        .batch_execute("DROP TABLE result_snapshot_observation;")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_missing_obs"),
+        Err(ResultSnapshotPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_rejects_gapped_observation_order() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &multi_observation_snapshot("result_snapshot_order_gap"),
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot_observation DISABLE TRIGGER USER; \
+             DELETE FROM result_snapshot_observation \
+             WHERE result_snapshot_ref = 'result_snapshot_order_gap' \
+               AND observation_order = 1; \
+             ALTER TABLE result_snapshot_observation ENABLE TRIGGER USER;",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_order_gap"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn load_rejects_schema_version_outside_u16() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &default_snapshot("result_snapshot_schema_overflow"),
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot DISABLE TRIGGER USER; \
+             UPDATE result_snapshot \
+             SET requested_output_schema_version = 70000 \
+             WHERE result_snapshot_ref = 'result_snapshot_schema_overflow'; \
+             ALTER TABLE result_snapshot ENABLE TRIGGER USER;",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_result_snapshot(&mut transaction, "result_snapshot_schema_overflow"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn current_session_result_reloads_the_published_tip() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let predecessor = snapshot_named(
+        "session_result_current",
+        "result_snapshot_current_predecessor",
+        ENGINE_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        None,
+        vec![ScoreObservation::scored("construct_big_five", 0.21, Some(0.05)).unwrap()],
+    );
+    let successor = snapshot_named(
+        "session_result_current",
+        "result_snapshot_current_tip",
+        OTHER_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        Some("result_snapshot_current_predecessor"),
+        vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+    );
+    persist_ok(&mut client, &predecessor);
+    persist_ok(&mut client, &successor);
+
+    let reloaded =
+        load_current_ok(&mut client, "session_result_current").expect("published session tip");
+    assert_eq!(reloaded, successor);
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_result_snapshot(&mut transaction, &reloaded).unwrap(),
+            ResultSnapshotPersistenceDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+}
+
+#[test]
+fn session_without_result_does_not_invent_a_score() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    assert!(load_current_ok(&mut client, "session_result_absent").is_none());
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "12"),
+        Err(ResultSnapshotPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn two_current_session_results_fail_closed() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_two_tips",
+            "result_snapshot_tip_alpha",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            None,
+            vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+        ),
+    );
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_two_tips",
+            "result_snapshot_tip_beta",
+            OTHER_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            None,
+            vec![ScoreObservation::scored("construct_big_five", 0.31, Some(0.06)).unwrap()],
+        ),
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_two_tips"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn cyclic_session_supersession_fails_closed_instead_of_looking_absent() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_cycle",
+            "result_snapshot_cycle_alpha",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_cycle_beta"),
+            vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+        ),
+    );
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_cycle",
+            "result_snapshot_cycle_beta",
+            OTHER_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_cycle_alpha"),
+            vec![ScoreObservation::scored("construct_big_five", 0.31, Some(0.06)).unwrap()],
+        ),
+    );
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_cycle"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn current_session_load_succeeds_under_stronger_isolation() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let snapshot = snapshot_named(
+        "session_result_serializable",
+        "result_snapshot_session_serializable",
+        ENGINE_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        None,
+        vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+    );
+    persist_ok(&mut client, &snapshot);
+
+    let mut absent = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(
+        load_current_result_snapshot_for_session(&mut absent, "session_result_absent_rr")
+            .unwrap()
+            .is_none()
+    );
+    absent.commit().unwrap();
+
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    let loaded =
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_serializable")
+            .unwrap()
+            .expect("unique session tip must load under SERIALIZABLE");
+    transaction.commit().unwrap();
+    assert_eq!(loaded, snapshot);
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_serializable_cycle_a",
+            "result_snapshot_serializable_cycle_a",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_serializable_cycle_b"),
+            vec![ScoreObservation::scored("construct_big_five", 0.21, Some(0.05)).unwrap()],
+        ),
+    );
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_serializable_cycle_a",
+            "result_snapshot_serializable_cycle_b",
+            OTHER_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_serializable_cycle_a"),
+            vec![ScoreObservation::scored("construct_big_five", 0.22, Some(0.05)).unwrap()],
+        ),
+    );
+    let mut corrupt = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(
+            &mut corrupt,
+            "session_result_serializable_cycle_a"
+        ),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    corrupt.rollback().unwrap();
+}
+
+#[test]
+fn current_session_load_rejects_gapped_published_tip() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &multi_observation_snapshot("result_snapshot_session_gap"),
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot_observation DISABLE TRIGGER USER; \
+             DELETE FROM result_snapshot_observation \
+             WHERE result_snapshot_ref = 'result_snapshot_session_gap' \
+               AND observation_order = 1; \
+             ALTER TABLE result_snapshot_observation ENABLE TRIGGER USER;",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_gap"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn current_session_load_rejects_blank_observation_construct() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_disposition",
+            "result_snapshot_disposition",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            None,
+            vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+        ),
+    );
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot_observation DISABLE TRIGGER ALL; \
+             ALTER TABLE result_snapshot_observation \
+             DROP CONSTRAINT result_snapshot_observation_construct_ref_format_check; \
+             UPDATE result_snapshot_observation \
+             SET construct_ref = '' \
+             WHERE result_snapshot_ref = 'result_snapshot_disposition'; \
+             ALTER TABLE result_snapshot_observation ENABLE TRIGGER ALL;",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_disposition"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_result_relation_on_session_load_is_a_database_failure() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_missing_header"),
+        Err(ResultSnapshotPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
 }
