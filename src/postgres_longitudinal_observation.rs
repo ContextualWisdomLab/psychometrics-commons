@@ -4,7 +4,10 @@
 //! collection owner and TEPP remains the temporal and multiple-membership
 //! analysis owner.
 
-use crate::longitudinal_observation::{ClockAnomaly, LongitudinalObservationRecord};
+use crate::longitudinal_observation::{
+    ClockAnomaly, LongitudinalObservationInput, LongitudinalObservationRecord,
+    LongitudinalObservationSet, MembershipShareInput, ObservationTimeInput,
+};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -33,6 +36,8 @@ pub enum LongitudinalObservationPersistenceError {
     InvalidNumericRange,
     /// An observation or tenant-scoped source identity was replayed with different evidence.
     ConflictingReplay,
+    /// Persisted rows cannot be reconstructed into one valid immutable domain record.
+    CorruptHistory,
     /// Persistence requires PostgreSQL `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// PostgreSQL rejected or could not execute the operation.
@@ -50,6 +55,9 @@ impl Display for LongitudinalObservationPersistenceError {
             }
             Self::ConflictingReplay => {
                 "longitudinal observation identity was replayed with conflicting immutable evidence"
+            }
+            Self::CorruptHistory => {
+                "stored longitudinal observation evidence cannot be reconstructed safely"
             }
             Self::UnsupportedIsolationLevel => {
                 "longitudinal observation persistence requires read committed isolation"
@@ -163,6 +171,98 @@ pub fn persist_longitudinal_observation(
     Ok(LongitudinalObservationPersistenceDisposition::Inserted)
 }
 
+/// Load one immutable observation after process restart within a tenant boundary.
+///
+/// The loader rebuilds the public domain record through the same validation path
+/// used for fresh ingestion. Tenant mismatch and a missing record return `None`;
+/// incomplete, non-contiguous, numerically invalid, or internally inconsistent
+/// stored evidence fails closed as [`LongitudinalObservationPersistenceError::CorruptHistory`].
+///
+/// # Errors
+///
+/// Returns [`LongitudinalObservationPersistenceError`] for noncanonical references,
+/// corrupt stored evidence, or a database failure.
+pub fn load_longitudinal_observation(
+    transaction: &mut Transaction<'_>,
+    tenant_ref: &str,
+    observation_record_ref: &str,
+) -> Result<Option<LongitudinalObservationRecord>, LongitudinalObservationPersistenceError> {
+    let tenant_ref = required_reference(tenant_ref)?;
+    let observation_record_ref = required_reference(observation_record_ref)?;
+    let row = transaction.query_opt(
+        "SELECT enrollment_ref, source_system_ref, source_observation_ref, construct_ref, \
+                measure_ref, validity_start_at_unix_ms, validity_end_at_unix_ms, \
+                recorded_at_unix_ms, received_at_unix_ms, ingested_at_unix_ms, \
+                timezone_name, utc_offset_minutes, clock_anomaly_code \
+         FROM longitudinal_observation \
+         WHERE tenant_ref = $1 AND observation_record_ref = $2",
+        &[&tenant_ref, &observation_record_ref],
+    )?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let membership_rows = transaction.query(
+        "SELECT membership_sequence, membership_context_ref, weight_parts_per_10_000 \
+         FROM longitudinal_membership_share \
+         WHERE observation_record_ref = $1 ORDER BY membership_sequence",
+        &[&observation_record_ref],
+    )?;
+    let mut stored_memberships = Vec::with_capacity(membership_rows.len());
+    for (index, membership_row) in membership_rows.iter().enumerate() {
+        require_membership_sequence(membership_row.get(0), index + 1)?;
+        let membership_context_ref: String = membership_row.get(1);
+        let weight_parts_per_10_000 = database_u16(membership_row.get(2))?;
+        stored_memberships.push((membership_context_ref, weight_parts_per_10_000));
+    }
+    let membership_inputs = stored_memberships
+        .iter()
+        .map(
+            |(membership_context_ref, weight_parts_per_10_000)| MembershipShareInput {
+                membership_context_ref,
+                weight_parts_per_10_000: *weight_parts_per_10_000,
+            },
+        )
+        .collect::<Vec<_>>();
+
+    let enrollment_ref: String = row.get(0);
+    let source_system_ref: String = row.get(1);
+    let source_observation_ref: String = row.get(2);
+    let construct_ref: String = row.get(3);
+    let measure_ref: String = row.get(4);
+    let validity_start_at_unix_ms = database_u64(row.get(5))?;
+    let validity_end_at_unix_ms = database_u64(row.get(6))?;
+    let recorded_at_unix_ms = database_u64(row.get(7))?;
+    let received_at_unix_ms = database_u64(row.get(8))?;
+    let ingested_at_unix_ms = database_u64(row.get(9))?;
+    let timezone_name: String = row.get(10);
+    let utc_offset_minutes: i16 = row.get(11);
+    let stored_anomaly_code: Option<String> = row.get(12);
+
+    let record = LongitudinalObservationSet::new()
+        .ingest(LongitudinalObservationInput {
+            observation_record_ref,
+            enrollment_ref: &enrollment_ref,
+            source_system_ref: &source_system_ref,
+            source_observation_ref: &source_observation_ref,
+            construct_ref: &construct_ref,
+            measure_ref: &measure_ref,
+            membership_shares: &membership_inputs,
+            time: ObservationTimeInput {
+                validity_start_at_unix_ms,
+                validity_end_at_unix_ms,
+                recorded_at_unix_ms,
+                received_at_unix_ms,
+                ingested_at_unix_ms,
+                timezone_name: &timezone_name,
+                utc_offset_minutes,
+            },
+        })
+        .map_err(|_| LongitudinalObservationPersistenceError::CorruptHistory)?;
+    require_clock_anomaly_code(stored_anomaly_code.as_deref(), record.clock_anomaly())?;
+    Ok(Some(record))
+}
+
 fn classify_existing(
     transaction: &mut Transaction<'_>,
     tenant_ref: &str,
@@ -230,9 +330,7 @@ fn classify_existing(
     Ok(LongitudinalObservationPersistenceDisposition::Duplicate)
 }
 
-fn required_reference(
-    reference: &str,
-) -> Result<&str, LongitudinalObservationPersistenceError> {
+fn required_reference(reference: &str) -> Result<&str, LongitudinalObservationPersistenceError> {
     match normalized_reference(reference) {
         Some(normalized) if normalized == reference => Ok(reference),
         _ => Err(LongitudinalObservationPersistenceError::InvalidReference),
@@ -245,12 +343,42 @@ fn clock_anomaly_code(anomaly: Option<ClockAnomaly>) -> Option<&'static str> {
     })
 }
 
+fn require_clock_anomaly_code(
+    stored_code: Option<&str>,
+    anomaly: Option<ClockAnomaly>,
+) -> Result<(), LongitudinalObservationPersistenceError> {
+    if stored_code == clock_anomaly_code(anomaly) {
+        Ok(())
+    } else {
+        Err(LongitudinalObservationPersistenceError::CorruptHistory)
+    }
+}
+
 fn postgres_u64(value: u64) -> Result<i64, LongitudinalObservationPersistenceError> {
     i64::try_from(value).map_err(|_| LongitudinalObservationPersistenceError::InvalidNumericRange)
 }
 
 fn postgres_usize(value: usize) -> Result<i64, LongitudinalObservationPersistenceError> {
     i64::try_from(value).map_err(|_| LongitudinalObservationPersistenceError::InvalidNumericRange)
+}
+
+fn database_u64(value: i64) -> Result<u64, LongitudinalObservationPersistenceError> {
+    u64::try_from(value).map_err(|_| LongitudinalObservationPersistenceError::CorruptHistory)
+}
+
+fn database_u16(value: i32) -> Result<u16, LongitudinalObservationPersistenceError> {
+    u16::try_from(value).map_err(|_| LongitudinalObservationPersistenceError::CorruptHistory)
+}
+
+fn require_membership_sequence(
+    stored_sequence: i64,
+    expected_sequence: usize,
+) -> Result<(), LongitudinalObservationPersistenceError> {
+    if stored_sequence == postgres_usize(expected_sequence)? {
+        Ok(())
+    } else {
+        Err(LongitudinalObservationPersistenceError::CorruptHistory)
+    }
 }
 
 fn require_read_committed(
@@ -268,14 +396,18 @@ fn require_read_committed(
 #[cfg(test)]
 mod numeric_guard_tests {
     use super::{
-        postgres_u64, postgres_usize, required_reference,
-        LongitudinalObservationPersistenceError,
+        database_u16, database_u64, postgres_u64, postgres_usize, require_clock_anomaly_code,
+        require_membership_sequence, required_reference, LongitudinalObservationPersistenceError,
     };
+    use crate::longitudinal_observation::ClockAnomaly;
     use std::error::Error;
 
     #[test]
     fn reference_numeric_conversion_and_error_sources_fail_closed() {
-        assert_eq!(required_reference("tenant_clinic_seoul").unwrap(), "tenant_clinic_seoul");
+        assert_eq!(
+            required_reference("tenant_clinic_seoul").unwrap(),
+            "tenant_clinic_seoul"
+        );
         assert!(matches!(
             required_reference(" tenant_clinic_seoul "),
             Err(LongitudinalObservationPersistenceError::InvalidReference)
@@ -296,8 +428,35 @@ mod numeric_guard_tests {
                 Err(LongitudinalObservationPersistenceError::InvalidNumericRange)
             ));
         }
+        assert_eq!(database_u64(7).unwrap(), 7);
+        assert!(matches!(
+            database_u64(-1),
+            Err(LongitudinalObservationPersistenceError::CorruptHistory)
+        ));
+        assert_eq!(database_u16(10_000).unwrap(), 10_000);
+        assert!(matches!(
+            database_u16(-1),
+            Err(LongitudinalObservationPersistenceError::CorruptHistory)
+        ));
+        assert!(require_membership_sequence(1, 1).is_ok());
+        assert!(matches!(
+            require_membership_sequence(2, 1),
+            Err(LongitudinalObservationPersistenceError::CorruptHistory)
+        ));
+        assert!(require_clock_anomaly_code(None, None).is_ok());
+        assert!(require_clock_anomaly_code(
+            Some("recorded_after_received"),
+            Some(ClockAnomaly::RecordedAfterReceived)
+        )
+        .is_ok());
+        assert!(matches!(
+            require_clock_anomaly_code(None, Some(ClockAnomaly::RecordedAfterReceived)),
+            Err(LongitudinalObservationPersistenceError::CorruptHistory)
+        ));
         let error = LongitudinalObservationPersistenceError::ConflictingReplay;
         assert!(Error::source(&error).is_none());
         assert!(error.to_string().contains("conflicting"));
+        let corrupt = LongitudinalObservationPersistenceError::CorruptHistory;
+        assert!(corrupt.to_string().contains("reconstructed"));
     }
 }
