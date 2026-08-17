@@ -62,8 +62,8 @@ ALTER TABLE data_rights_request_state
 
 -- Once the request has crossed into a completion state, its terminal completion row is evidence,
 -- not mutable workflow state. The normal processing -> terminal transition is unaffected because
--- this guard evaluates the OLD row. Later direct SQL cannot rewrite completion evidence, clocks,
--- identity, or terminal state while still satisfying the CHECK constraints above.
+-- this guard evaluates the OLD row. Later direct SQL cannot rewrite or ordinarily delete completion
+-- evidence, clocks, identity, or terminal state while still satisfying the CHECK constraints above.
 CREATE OR REPLACE FUNCTION reject_data_rights_terminal_completion_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -82,6 +82,17 @@ DROP TRIGGER IF EXISTS data_rights_terminal_completion_immutable_guard
 CREATE TRIGGER data_rights_terminal_completion_immutable_guard
     BEFORE UPDATE ON data_rights_request_state
     FOR EACH ROW
+    EXECUTE FUNCTION reject_data_rights_terminal_completion_mutation();
+
+-- A completed row without retained-scope children previously had no foreign-key blocker and could
+-- be removed by ordinary DELETE even though this migration treats terminal completion as immutable
+-- evidence. Keep non-terminal lifecycle cleanup unchanged while failing closed on terminal DELETE.
+DROP TRIGGER IF EXISTS data_rights_terminal_completion_delete_guard
+    ON data_rights_request_state;
+CREATE TRIGGER data_rights_terminal_completion_delete_guard
+    BEFORE DELETE ON data_rights_request_state
+    FOR EACH ROW
+    WHEN (OLD.current_state IN ('completed', 'partially_completed'))
     EXECUTE FUNCTION reject_data_rights_terminal_completion_mutation();
 
 -- The unique key is referenced by the retained-scope foreign key after that table exists, so unlike
