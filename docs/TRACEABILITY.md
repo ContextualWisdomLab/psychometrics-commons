@@ -37,7 +37,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Purpose-specific consent | PRD §5, §9.6 | TRD §12 | ADR-0006 | **Implemented** domain contract in `src/consent.rs` plus `migrations/0005_consent_lifecycle.sql` / `src/postgres_consent.rs` purpose-specific ledgers; HTTP transport remains Target |
 | Explicit research contribution + withdrawal | PRD §5 | TRD §12, §14–15 | ADR-0006, ADR-0007 | **Implemented** product-domain lifecycle in `src/consent.rs`; dataset snapshot/release integration is Target |
 | Participant export/deletion | PRD §3.1, §9, §11 | TRD §13 | ADR-0006 | **Implemented** domain lifecycle in `src/data_rights.rs` plus `migrations/0003_data_rights_propagation.sql` and `src/postgres_data_rights.rs`; dependent-system execution remains Target |
-| Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | Partially implemented via research-contribution identity separation; restricted linkage persistence is Target |
+| Research identity separation | PRD §5, §11 | TRD §14; ERD restricted linkage | ADR-0003, ADR-0006, ADR-0007, ADR-0020 | **Partially implemented**: research-contribution identity separation exists on evaluated main; **Active PR** #187 restricted linkage persistence binds one operational participant to a program-scoped research identity, keeps multiple programs from collapsing into one pseudonym, and loads only `public_research_identity` columns by program |
 | Research release manifests | PRD §5 | TRD §15 | ADR-0007, ADR-0010 | Target; semantic-data-portal is External dependency |
 | Durable outbox/inbox delivery semantics | PRD §7, §9 | TRD §19–20 | ADR-0014, ADR-0015 | **Partially implemented**: domain contracts in `src/integration.rs`; PostgreSQL 18 outbox/inbox identity, delivery-attempt persistence, and inbox consumption distinct from receipt; live side-effect execution remains Target |
 | Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; HTTP probes, measured thresholds, and deployment evidence remain Target |
@@ -108,9 +108,11 @@ src/lib.rs
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
+├── postgres_research_identity_linkage.rs  # Active PR #187 restricted operational-to-research identity persistence (not protected-main truth)
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── reference.rs      # internal opaque-reference normalization
+├── research_identity_linkage.rs  # Active PR #187 restricted linkage domain and public-release projection (not protected-main truth)
 ├── research_release.rs  # product-side Research Commons release-evidence gate
 ├── response.rs       # idempotent response ledger + immutable response snapshots
 ├── result.rs         # immutable result provenance/supersession
@@ -125,14 +127,15 @@ migrations/
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
 ├── 0011_scoring_request.sql
-└── 0012_integration_consumption.sql
+├── 0012_integration_consumption.sql
+└── 0025_research_identity_linkage.sql  # Active PR #187 restricted linkage persistence (not protected-main truth)
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #76 data-rights processing-start persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Identity-verified requests persist an immutable operation identity and processing-start time under `FOR UPDATE` so later lifecycle composition cannot race the classified row. Dependent-system execution remains outside this slice.
+**Active PR** #187 restricted research-identity linkage persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Prefer this head over #175 and #162. Operators persist one operational participant to one program-scoped research identity, load the restricted mapping only for authorized research work, and publish only `public_research_identity` columns. A release fixture loads those columns by program from the public view and cannot look up a restricted linkage identity. A second program keeps a distinct research identity. Public releases, Keyverse subjects, and linkage-key material stay outside this slice.
 
 ## 5. ADR traceability by concern
 
