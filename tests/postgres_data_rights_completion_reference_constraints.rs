@@ -4,7 +4,7 @@
 //! physical completion schema must preserve the same boundary even when migration 0024 is
 //! reapplied over an earlier, weaker revision of its named CHECK constraints.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_data_rights::{
@@ -34,6 +34,18 @@ fn test_client(schema_prefix: &str) -> Client {
     apply_data_rights_migration(&mut client).unwrap();
     apply_data_rights_processing_migration(&mut client).unwrap();
     client
+}
+
+fn cleanup_schema(client: &mut Client) {
+    let schema: String = client
+        .query_one("SELECT current_schema()", &[])
+        .expect("test schema should remain discoverable")
+        .get(0);
+    client
+        .batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA IF EXISTS {schema} CASCADE;"
+        ))
+        .expect("isolated reference-constraint schema should be removed");
 }
 
 fn persist_processing(client: &mut Client, request_ref: &str) -> DataRightsRequest {
@@ -147,11 +159,21 @@ fn reapply_rejects_unicode_aliases_for_completion_evidence() {
              SET completion_evidence_ref = {invalid_ref}
              WHERE request_ref = 'data_rights_request_completion_ref'"
         );
-        assert!(
-            client.batch_execute(&statement).is_err(),
-            "completion evidence must preserve the domain's Unicode opaque-reference boundary: {invalid_ref}"
+        let error = client.batch_execute(&statement).expect_err(
+            "completion evidence must preserve the domain's Unicode opaque-reference boundary",
+        );
+        let database_error = error
+            .as_db_error()
+            .expect("completion-evidence rejection should come from a PostgreSQL CHECK");
+        assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
+        assert_eq!(
+            database_error.constraint(),
+            Some("data_rights_completion_evidence_ref_format_check"),
+            "unexpected rejection path for completion evidence alias {invalid_ref}"
         );
     }
+
+    cleanup_schema(&mut client);
 }
 
 #[test]
@@ -175,9 +197,19 @@ fn reapply_rejects_unicode_aliases_for_retained_scope_evidence() {
                  {invalid_ref}
              )"
         );
-        assert!(
-            client.batch_execute(&statement).is_err(),
-            "retained-scope evidence must preserve the domain's Unicode opaque-reference boundary: {invalid_ref}"
+        let error = client.batch_execute(&statement).expect_err(
+            "retained-scope evidence must preserve the domain's Unicode opaque-reference boundary",
+        );
+        let database_error = error
+            .as_db_error()
+            .expect("retained-scope rejection should come from a PostgreSQL CHECK");
+        assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
+        assert_eq!(
+            database_error.constraint(),
+            Some("data_rights_retained_scope_ref_format_check"),
+            "unexpected rejection path for retained-scope alias {invalid_ref}"
         );
     }
+
+    cleanup_schema(&mut client);
 }
