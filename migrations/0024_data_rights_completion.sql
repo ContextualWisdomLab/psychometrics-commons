@@ -25,87 +25,43 @@ ALTER TABLE data_rights_request_state
         )
     );
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_record
-        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
-        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
-        WHERE constraint_record.conname = 'data_rights_completed_time_positive_check'
-          AND table_record.relname = 'data_rights_request_state'
-          AND schema_record.nspname = current_schema()
-    ) THEN
-        ALTER TABLE data_rights_request_state
-            ADD CONSTRAINT data_rights_completed_time_positive_check
-            CHECK (completed_at_unix_ms IS NULL OR completed_at_unix_ms > 0);
-    END IF;
-END
-$$;
+-- These owned completion checks are still unreleased. Reapply their exact current definitions so
+-- a partially rolled-out schema cannot keep a weaker same-named revision.
+ALTER TABLE data_rights_request_state
+    DROP CONSTRAINT IF EXISTS data_rights_completed_time_positive_check;
+ALTER TABLE data_rights_request_state
+    ADD CONSTRAINT data_rights_completed_time_positive_check
+    CHECK (completed_at_unix_ms IS NULL OR completed_at_unix_ms > 0);
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_record
-        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
-        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
-        WHERE constraint_record.conname = 'data_rights_completion_presence_check'
-          AND table_record.relname = 'data_rights_request_state'
-          AND schema_record.nspname = current_schema()
-    ) THEN
-        ALTER TABLE data_rights_request_state
-            ADD CONSTRAINT data_rights_completion_presence_check
-            CHECK ((completion_evidence_ref IS NULL) = (completed_at_unix_ms IS NULL));
-    END IF;
-END
-$$;
+ALTER TABLE data_rights_request_state
+    DROP CONSTRAINT IF EXISTS data_rights_completion_presence_check;
+ALTER TABLE data_rights_request_state
+    ADD CONSTRAINT data_rights_completion_presence_check
+    CHECK ((completion_evidence_ref IS NULL) = (completed_at_unix_ms IS NULL));
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_record
-        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
-        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
-        WHERE constraint_record.conname = 'data_rights_completion_state_evidence_check'
-          AND table_record.relname = 'data_rights_request_state'
-          AND schema_record.nspname = current_schema()
-    ) THEN
-        ALTER TABLE data_rights_request_state
-            ADD CONSTRAINT data_rights_completion_state_evidence_check
-            CHECK (
-                (current_state IN ('completed', 'partially_completed'))
-                = (completion_evidence_ref IS NOT NULL AND completed_at_unix_ms IS NOT NULL)
-            );
-    END IF;
-END
-$$;
+ALTER TABLE data_rights_request_state
+    DROP CONSTRAINT IF EXISTS data_rights_completion_state_evidence_check;
+ALTER TABLE data_rights_request_state
+    ADD CONSTRAINT data_rights_completion_state_evidence_check
+    CHECK (
+        (current_state IN ('completed', 'partially_completed'))
+        = (completion_evidence_ref IS NOT NULL AND completed_at_unix_ms IS NOT NULL)
+    );
 
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_record
-        JOIN pg_class AS table_record ON table_record.oid = constraint_record.conrelid
-        JOIN pg_namespace AS schema_record ON schema_record.oid = table_record.relnamespace
-        WHERE constraint_record.conname = 'data_rights_completion_after_processing_check'
-          AND table_record.relname = 'data_rights_request_state'
-          AND schema_record.nspname = current_schema()
-    ) THEN
-        ALTER TABLE data_rights_request_state
-            ADD CONSTRAINT data_rights_completion_after_processing_check
-            CHECK (
-                completed_at_unix_ms IS NULL
-                OR (
-                    processing_started_at_unix_ms IS NOT NULL
-                    AND completed_at_unix_ms >= processing_started_at_unix_ms
-                )
-            );
-    END IF;
-END
-$$;
+ALTER TABLE data_rights_request_state
+    DROP CONSTRAINT IF EXISTS data_rights_completion_after_processing_check;
+ALTER TABLE data_rights_request_state
+    ADD CONSTRAINT data_rights_completion_after_processing_check
+    CHECK (
+        completed_at_unix_ms IS NULL
+        OR (
+            processing_started_at_unix_ms IS NOT NULL
+            AND completed_at_unix_ms >= processing_started_at_unix_ms
+        )
+    );
 
+-- The unique key is referenced by the retained-scope foreign key after that table exists, so unlike
+-- the CHECK constraints above it is dependency-sensitive and must not be dropped on reapplication.
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -140,16 +96,7 @@ CREATE TABLE IF NOT EXISTS data_rights_retained_scope_evidence (
     CONSTRAINT data_rights_retained_scope_kind_check
         CHECK (request_kind = 'deletion'),
     CONSTRAINT data_rights_retained_scope_state_check
-        CHECK (completion_state = 'partially_completed'),
-    CONSTRAINT data_rights_retained_scope_ref_format_check CHECK (
-        retained_scope_ref <> ''
-        AND retained_scope_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
-        AND NOT (
-            retained_scope_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
-            AND retained_scope_ref COLLATE "pg_unicode_fast"
-                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
-        )
-    )
+        CHECK (completion_state = 'partially_completed')
 );
 
 -- CREATE TABLE IF NOT EXISTS also leaves a same-named older CHECK untouched. Replace that owned
