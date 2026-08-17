@@ -287,3 +287,71 @@ fn migration_is_idempotent_and_database_constraints_reject_bad_machine_evidence(
         0
     );
 }
+
+#[test]
+fn database_reference_guards_match_domain_opacity_boundary() {
+    let _guard = audit_test_guard();
+    let mut client = test_client();
+    reset_audit_objects(&mut client);
+    apply_audit_evidence_migration(&mut client).unwrap();
+
+    let invalid_references = [
+        (
+            "12",
+            "tenant_research_alpha",
+            "actor_publisher_alpha",
+            "instrument_release_big_five_ko_v1",
+        ),
+        (
+            "audit_event_unicode_space_01",
+            "\u{00a0}tenant_research_alpha",
+            "actor_publisher_alpha",
+            "instrument_release_big_five_ko_v1",
+        ),
+        (
+            "audit_event_arabic_decimal_01",
+            "tenant_research_alpha",
+            "12\u{066b}3",
+            "instrument_release_big_five_ko_v1",
+        ),
+        (
+            "audit_event_fullwidth_decimal_01",
+            "tenant_research_alpha",
+            "actor_publisher_alpha",
+            "12\u{ff0e}3",
+        ),
+    ];
+
+    for (audit_event_ref, tenant_ref, actor_ref, resource_ref) in invalid_references {
+        let result = client.execute(
+            "INSERT INTO audit_evidence_record (\
+                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
+                outcome_code, evidence_digest, occurred_at_unix_ms\
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            &[
+                &audit_event_ref,
+                &tenant_ref,
+                &actor_ref,
+                &"instrument_publication",
+                &"publish_instrument_release",
+                &resource_ref,
+                &"succeeded",
+                &DIGEST,
+                &1_785_000_000_000_i64,
+            ],
+        );
+        assert!(
+            result.is_err(),
+            "database must reject a reference spelling rejected by normalized_reference: {audit_event_ref:?} {tenant_ref:?} {actor_ref:?} {resource_ref:?}"
+        );
+    }
+
+    assert_eq!(
+        client
+            .query_one("SELECT count(*) FROM audit_evidence_record", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0,
+        "invalid direct writes must not leave unreloadable audit history"
+    );
+}
