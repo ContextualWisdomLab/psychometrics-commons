@@ -103,6 +103,15 @@ fn persist_processing(
     request
 }
 
+fn assert_completion_conflicting_replay(client: &mut Client, request: &DataRightsRequest) {
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, request),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+}
+
 #[test]
 fn deletion_completion_persists_retention_evidence_and_replays_exactly() {
     let mut client = ready_client("data_rights_completion_deletion");
@@ -667,12 +676,7 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
     participant_mismatch
         .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
         .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_data_rights_completion(&mut transaction, &participant_mismatch),
-        Err(DataRightsPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
+    assert_completion_conflicting_replay(&mut client, &participant_mismatch);
 
     let mut scope_mismatch = DataRightsRequest::new(
         "data_rights_request_completion",
@@ -692,12 +696,7 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
     scope_mismatch
         .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
         .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_data_rights_completion(&mut transaction, &scope_mismatch),
-        Err(DataRightsPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
+    assert_completion_conflicting_replay(&mut client, &scope_mismatch);
 
     let mut verification_mismatch = new_request(
         "data_rights_request_completion",
@@ -712,12 +711,7 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
     verification_mismatch
         .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
         .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_data_rights_completion(&mut transaction, &verification_mismatch),
-        Err(DataRightsPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
+    assert_completion_conflicting_replay(&mut client, &verification_mismatch);
 
     let mut verified_time_mismatch = new_request(
         "data_rights_request_completion",
@@ -732,12 +726,7 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
     verified_time_mismatch
         .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
         .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_data_rights_completion(&mut transaction, &verified_time_mismatch),
-        Err(DataRightsPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
+    assert_completion_conflicting_replay(&mut client, &verified_time_mismatch);
 
     let mut export = new_request(
         "data_rights_request_completion",
@@ -750,10 +739,5 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
     export
         .complete("completion_evidence_alpha", &[], 10_300)
         .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_data_rights_completion(&mut transaction, &export),
-        Err(DataRightsPersistenceError::ConflictingReplay)
-    ));
-    transaction.rollback().unwrap();
+    assert_completion_conflicting_replay(&mut client, &export);
 }
