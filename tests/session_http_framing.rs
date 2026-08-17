@@ -148,12 +148,11 @@ fn listener_reloads_a_created_session_over_get() {
         reload_response.starts_with("HTTP/1.1 200 OK\r\n"),
         "GET must reload the session created on the same port: {reload_response}"
     );
-    assert!(matches!(
-        AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay),
-        AssessmentSessionStartError::Persistence(
-            AssessmentSessionPersistenceError::ConflictingReplay
-        )
-    ));
+    assert_eq!(
+        AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay)
+            .to_string(),
+        "session start could not persist the created session; retry the exact start or repair the store"
+    );
 }
 
 #[test]

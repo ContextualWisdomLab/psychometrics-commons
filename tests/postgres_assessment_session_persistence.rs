@@ -14,7 +14,7 @@ use psychometrics_commons_runtime::postgres_assessment_session::{
     AssessmentSessionPersistenceError, AssessmentSessionStartError,
 };
 use psychometrics_commons_runtime::postgres_instrument_release::{
-    apply_instrument_release_migration, persist_instrument_release,
+    apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
@@ -395,6 +395,14 @@ fn start_replays_exact_session_after_stored_release_is_suspended() {
             AssessmentSessionPersistenceError::ConflictingReplay
         ))
     ));
+    assert_eq!(
+        AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay)
+            .to_string(),
+        AssessmentSessionStartError::Persistence(
+            AssessmentSessionPersistenceError::ConflictingReplay
+        )
+        .to_string()
+    );
     transaction.commit().unwrap();
 
     assert_eq!(
@@ -416,6 +424,99 @@ fn start_replays_exact_session_after_stored_release_is_suspended() {
         .unwrap()
         .get(0);
     assert_eq!(new_count, 0, "a later suspend must not mint a second start");
+}
+
+#[test]
+fn start_maps_identity_and_missing_release_query_failures() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+    apply_assessment_session_migration(&mut client).unwrap();
+    let published = published_release("release_big_five_ko_v1", VALID_DIGEST);
+    let mut transaction = client.transaction().unwrap();
+    persist_instrument_release(&mut transaction, &published).unwrap();
+    transaction.commit().unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_zero_clock_memory",
+            PARTICIPANT_REF,
+            &published,
+            "ko-KR",
+            0,
+        )
+        .unwrap_err()
+        .to_string(),
+        AssessmentSessionStartError::InvalidTimestamp.to_string()
+    );
+    transaction.rollback().unwrap();
+
+    let draft =
+        InstrumentRelease::new(manifest("release_big_five_ko_v1", VALID_DIGEST), 10_000).unwrap();
+    client
+        .batch_execute("DROP TABLE instrument_release CASCADE;")
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        start_created_assessment_session(
+            &mut transaction,
+            "ses_start_draft_missing_release",
+            PARTICIPANT_REF,
+            &draft,
+            "ko-KR",
+            21_000,
+        )
+        .unwrap_err()
+        .to_string(),
+        "session start could not persist the created session; retry the exact start or repair the store"
+    );
+    assert_eq!(
+        start_created_assessment_session_from_stored_release(
+            &mut transaction,
+            "ses_start_stored_missing_release",
+            PARTICIPANT_REF,
+            "release_big_five_ko_v1",
+            "ko-KR",
+            21_100,
+        )
+        .unwrap_err()
+        .to_string(),
+        "session start could not persist the created session; retry the exact start or repair the store"
+    );
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn start_error_from_maps_release_query_failures() {
+    assert_eq!(
+        AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidReference)
+            .to_string(),
+        AssessmentSessionStartError::InvalidReference.to_string()
+    );
+    assert_eq!(
+        AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidLocale).to_string(),
+        AssessmentSessionStartError::LocaleMismatch.to_string()
+    );
+    assert_eq!(
+        AssessmentSessionStartError::from(InstrumentReleaseQueryError::LocaleMismatch).to_string(),
+        AssessmentSessionStartError::LocaleMismatch.to_string()
+    );
+    assert_eq!(
+        AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidStoredValue)
+            .to_string(),
+        AssessmentSessionStartError::InvalidStoredRelease.to_string()
+    );
+    assert_eq!(
+        AssessmentSessionStartError::from(InstrumentReleaseQueryError::NotFound).to_string(),
+        AssessmentSessionStartError::InstrumentReleaseUnavailable.to_string()
+    );
+    assert_eq!(
+        AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::InvalidReference)
+            .to_string(),
+        AssessmentSessionPersistenceError::InvalidStartRelease.to_string()
+    );
 }
 
 #[test]
