@@ -19,6 +19,7 @@ pub mod health;
 pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
+pub mod longitudinal_observation;
 pub mod narrative;
 pub mod participant;
 pub mod postgres_consent;

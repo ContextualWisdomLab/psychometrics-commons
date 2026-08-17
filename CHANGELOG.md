@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Longitudinal observation ingest keeps validity, recorded, received, and ingested clocks plus explicit membership shares so an offline Seoul-clinic EMA cannot collapse into one timestamp or one primary group.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
@@ -59,6 +60,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
