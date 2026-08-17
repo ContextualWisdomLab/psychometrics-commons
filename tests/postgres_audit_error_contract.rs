@@ -3,8 +3,9 @@
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
 use psychometrics_commons_runtime::postgres_audit::{
-    apply_audit_evidence_migration, load_audit_evidence, persist_audit_evidence,
-    AuditPersistenceError,
+    apply_audit_evidence_migration, classify_persisted_audit, insert_audit_row,
+    load_audit_evidence, persist_audit_evidence, query_optional_audit_row,
+    query_required_audit_row, AuditPersistenceError,
 };
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -290,7 +291,9 @@ fn persist_and_load_map_missing_relation_to_database_error() {
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS audit_missing_relation_test;\
-             SET search_path TO audit_missing_relation_test;",
+             SET search_path TO audit_missing_relation_test;\
+             DROP TABLE IF EXISTS audit_evidence_record CASCADE;\
+             DROP FUNCTION IF EXISTS reject_audit_evidence_mutation() CASCADE;",
         )
         .unwrap();
     let evidence = evidence_at("audit_event_missing_01", 1_785_000_000_000);
@@ -308,4 +311,43 @@ fn persist_and_load_map_missing_relation_to_database_error() {
         Err(AuditPersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn audit_row_helpers_map_missing_relations_to_database_errors() {
+    let mut client = test_client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS audit_query_helper_missing CASCADE;\
+             CREATE SCHEMA audit_query_helper_missing;\
+             SET search_path TO audit_query_helper_missing;",
+        )
+        .unwrap();
+    let evidence = evidence_at("audit_event_query_helper_01", 1_785_000_000_000);
+    let mut transaction = client.transaction().unwrap();
+
+    assert!(matches!(
+        insert_audit_row(&mut transaction, &evidence, 1_785_000_000_000),
+        Err(AuditPersistenceError::Database(_))
+    ));
+    assert!(matches!(
+        query_required_audit_row(&mut transaction, "audit_event_query_helper_01"),
+        Err(AuditPersistenceError::Database(_))
+    ));
+    assert!(matches!(
+        query_optional_audit_row(
+            &mut transaction,
+            "tenant_research_alpha",
+            "audit_event_query_helper_01"
+        ),
+        Err(AuditPersistenceError::Database(_))
+    ));
+    assert!(matches!(
+        classify_persisted_audit(&mut transaction, &evidence, 1_785_000_000_000, 0),
+        Err(AuditPersistenceError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+    client
+        .batch_execute("DROP SCHEMA IF EXISTS audit_query_helper_missing CASCADE;")
+        .unwrap();
 }

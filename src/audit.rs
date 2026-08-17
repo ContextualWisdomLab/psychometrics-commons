@@ -200,6 +200,7 @@ pub enum AuditEvidenceError {
 }
 
 impl Display for AuditEvidenceError {
+    /// Write the stable operator-facing construction error.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
@@ -217,8 +218,13 @@ impl Display for AuditEvidenceError {
     }
 }
 
+/// Marker implementation so construction errors participate in [`Error`].
 impl Error for AuditEvidenceError {}
 
+/// Accept only a product reference that is already exactly canonical.
+///
+/// This wrapper uses the shared `normalized_reference` boundary and then rejects
+/// any spelling that would silently alias after trimming.
 fn required_reference(reference: &str) -> Result<&str, AuditEvidenceError> {
     match normalized_reference(reference) {
         Some(normalized) if normalized == reference => Ok(reference),
@@ -226,12 +232,18 @@ fn required_reference(reference: &str) -> Result<&str, AuditEvidenceError> {
     }
 }
 
+/// Return whether a purpose or action code is a stable lowercase machine token.
+///
+/// The first character must be ASCII `a-z`. Later characters may add digits or
+/// `_`, which keeps versioned tokens such as `publish_instrument_release_v2`
+/// valid without allowing uppercase aliases.
 fn valid_machine_code(code: &str) -> bool {
     let mut bytes = code.bytes();
     matches!(bytes.next(), Some(b'a'..=b'z'))
         && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
 
+/// Return whether supporting evidence already uses canonical lowercase `SHA-256` form.
 fn canonical_sha256_digest(digest: &str) -> bool {
     let Some(hexadecimal) = digest.strip_prefix("sha256:") else {
         return false;
@@ -242,10 +254,12 @@ fn canonical_sha256_digest(digest: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
+/// Unit coverage for outcome-code reconstruction without a database.
 #[cfg(test)]
 mod tests {
     use super::{AuditEvidenceError, AuditOutcome};
 
+    /// Unknown persisted outcome codes must fail closed.
     #[test]
     fn persisted_outcome_codes_round_trip_and_unknown_values_fail_closed() {
         for outcome in [

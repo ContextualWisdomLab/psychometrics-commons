@@ -42,6 +42,7 @@ pub enum AuditPersistenceError {
 }
 
 impl Display for AuditPersistenceError {
+    /// Write the stable operator-facing persistence error.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
@@ -63,6 +64,7 @@ impl Display for AuditPersistenceError {
 }
 
 impl Error for AuditPersistenceError {
+    /// Return the underlying `PostgreSQL` error when persistence failed.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
@@ -72,6 +74,7 @@ impl Error for AuditPersistenceError {
 }
 
 impl From<postgres::Error> for AuditPersistenceError {
+    /// Wrap a `PostgreSQL` driver error as a typed persistence failure.
     fn from(error: postgres::Error) -> Self {
         Self::Database(error)
     }
@@ -113,13 +116,24 @@ pub fn persist_audit_evidence(
     classify_persisted_audit(transaction, evidence, occurred_at_unix_ms, inserted_rows)
 }
 
-/// Load one tenant-scoped audit record by opaque event identity.
+/// Look up one audit record that belongs to a specific tenant.
 ///
-/// Another tenant receives `None` for the same event reference so this read path does not reveal
-/// cross-tenant existence. Persisted values are reconstructed through the current domain
-/// constructor and corrupt history therefore fails closed. This single-row read is valid at
-/// `READ COMMITTED`, `REPEATABLE READ`, and `SERIALIZABLE`; unlike persistence, it does not rely on
-/// receiving a fresh command snapshot after a concurrent unique-key conflict.
+/// Call this when a product flow already knows both the tenant and the audit-event
+/// identity. The function returns the stored record when that pair matches, or
+/// `None` when the event is absent for that tenant.
+///
+/// A missing result does not say whether the same event exists under a different
+/// tenant. That is intentional access control: this read path must not leak
+/// another tenant's audit activity.
+///
+/// Stored fields are rebuilt through the current domain constructor. If a stored
+/// row no longer satisfies that contract, the function fails instead of returning
+/// a weakened record.
+///
+/// Implementation notes: caller identities must already use their exact opaque
+/// spelling. This single-row read is valid at `READ COMMITTED` and at stronger
+/// isolation (`REPEATABLE READ`, `SERIALIZABLE`) because it does not depend on a
+/// later command seeing a concurrent unique-key winner.
 ///
 /// # Errors
 ///
@@ -163,7 +177,14 @@ pub fn load_audit_evidence(
     .map_err(|_| AuditPersistenceError::CorruptHistory)
 }
 
-fn classify_persisted_audit(
+/// Compare the stored row with the caller evidence after insert or unique-key collision.
+///
+/// # Errors
+///
+/// Returns [`AuditPersistenceError::ConflictingReplay`] when the stored identity
+/// differs, or [`AuditPersistenceError::Database`] when the verification read fails.
+#[doc(hidden)]
+pub fn classify_persisted_audit(
     transaction: &mut Transaction<'_>,
     evidence: &AuditEvidence,
     occurred_at_unix_ms: i64,
@@ -198,7 +219,13 @@ fn classify_persisted_audit(
     }
 }
 
-fn insert_audit_row(
+/// Insert one audit row, ignoring an exact unique-key collision.
+///
+/// # Errors
+///
+/// Returns [`AuditPersistenceError::Database`] when `PostgreSQL` rejects the insert.
+#[doc(hidden)]
+pub fn insert_audit_row(
     transaction: &mut Transaction<'_>,
     evidence: &AuditEvidence,
     occurred_at_unix_ms: i64,
@@ -226,7 +253,14 @@ fn insert_audit_row(
     }
 }
 
-fn query_required_audit_row(
+/// Load the stored audit row that must exist after insert or collision.
+///
+/// # Errors
+///
+/// Returns [`AuditPersistenceError::Database`] when the row is missing or the
+/// statement fails.
+#[doc(hidden)]
+pub fn query_required_audit_row(
     transaction: &mut Transaction<'_>,
     audit_event_ref: &str,
 ) -> Result<postgres::Row, AuditPersistenceError> {
@@ -242,7 +276,13 @@ fn query_required_audit_row(
     }
 }
 
-fn query_optional_audit_row(
+/// Load one tenant-scoped audit row, or `None` when that tenant has no match.
+///
+/// # Errors
+///
+/// Returns [`AuditPersistenceError::Database`] when `PostgreSQL` rejects the lookup.
+#[doc(hidden)]
+pub fn query_optional_audit_row(
     transaction: &mut Transaction<'_>,
     tenant_ref: &str,
     audit_event_ref: &str,
@@ -259,6 +299,10 @@ fn query_optional_audit_row(
     }
 }
 
+/// Accept only a caller identity that is already exactly canonical.
+///
+/// This wrapper uses the shared `normalized_reference` boundary and then rejects
+/// any spelling that would silently alias after trimming.
 fn required_reference(reference: &str) -> Result<&str, AuditPersistenceError> {
     match normalized_reference(reference) {
         Some(normalized) if normalized == reference => Ok(reference),
@@ -266,6 +310,10 @@ fn required_reference(reference: &str) -> Result<&str, AuditPersistenceError> {
     }
 }
 
+/// Return success only when the transaction isolation is exactly `READ COMMITTED`.
+///
+/// Persist uses a later command to observe a concurrent unique-key winner, which
+/// is defined for `READ COMMITTED` and is not assumed for stronger isolation.
 fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), AuditPersistenceError> {
     let row = transaction.query_one("SHOW transaction_isolation", &[])?;
     let isolation: String = row.get(0);
@@ -276,31 +324,12 @@ fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), Audit
     }
 }
 
+/// Unit coverage for caller-identity guards that must not touch `PostgreSQL`.
 #[cfg(test)]
 mod tests {
-    use super::{
-        classify_persisted_audit, insert_audit_row, query_optional_audit_row,
-        query_required_audit_row, required_reference, AuditPersistenceError,
-    };
-    use crate::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
-    use postgres::{Client, NoTls};
+    use super::{required_reference, AuditPersistenceError};
 
-    fn sample_evidence() -> AuditEvidence {
-        AuditEvidence::new(AuditEvidenceInput {
-            audit_event_ref: "audit_event_query_helper_01",
-            tenant_ref: "tenant_research_alpha",
-            actor_ref: "actor_publisher_alpha",
-            purpose_code: "instrument_publication",
-            action_code: "publish_instrument_release",
-            resource_ref: "instrument_release_big_five_ko_v1",
-            outcome: AuditOutcome::Succeeded,
-            evidence_digest:
-                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            occurred_at_unix_ms: 1_785_000_000_000,
-        })
-        .unwrap()
-    }
-
+    /// Blank, padded, and numeric-like aliases fail before a database lookup.
     #[test]
     fn caller_aliases_fail_closed_before_database_access() {
         for invalid in ["", " ", " audit_event_alias ", "123"] {
@@ -313,43 +342,5 @@ mod tests {
             required_reference("audit_event_alpha").unwrap(),
             "audit_event_alpha"
         );
-    }
-
-    #[test]
-    fn audit_row_helpers_map_missing_relations_to_database_errors() {
-        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
-            return;
-        };
-        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
-        client
-            .batch_execute(
-                "CREATE SCHEMA IF NOT EXISTS audit_query_helper_missing;\
-                 SET search_path TO audit_query_helper_missing;",
-            )
-            .unwrap();
-        let mut transaction = client.transaction().unwrap();
-        let evidence = sample_evidence();
-
-        assert!(matches!(
-            insert_audit_row(&mut transaction, &evidence, 1_785_000_000_000),
-            Err(AuditPersistenceError::Database(_))
-        ));
-        assert!(matches!(
-            query_required_audit_row(&mut transaction, "audit_event_query_helper_01"),
-            Err(AuditPersistenceError::Database(_))
-        ));
-        assert!(matches!(
-            query_optional_audit_row(
-                &mut transaction,
-                "tenant_research_alpha",
-                "audit_event_query_helper_01"
-            ),
-            Err(AuditPersistenceError::Database(_))
-        ));
-        assert!(matches!(
-            classify_persisted_audit(&mut transaction, &evidence, 1_785_000_000_000, 0),
-            Err(AuditPersistenceError::Database(_))
-        ));
-        transaction.rollback().unwrap();
     }
 }
