@@ -429,10 +429,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        classify_existing_event, map_rebuild_error, millis_from_duration, postgres_sequence,
-        postgres_timestamptz, query_existing_event_row, require_contiguous_receipt_history,
-        required_reference, unix_ms_from_system_time, ResponseEventPersistenceError,
-        ResponseEventReceipt,
+        apply_response_event_migration, classify_existing_event, map_rebuild_error,
+        millis_from_duration, next_contiguous_sequence, postgres_sequence, postgres_timestamptz,
+        query_existing_event_row, require_contiguous_receipt_history, required_reference,
+        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
@@ -602,6 +602,57 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::Database(_))
         ));
         transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn next_contiguous_sequence_instantiates_empty_prefix_and_missing_relation() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS response_event_next_sequence_test;\
+                 SET search_path TO response_event_next_sequence_test;\
+                 DROP TABLE IF EXISTS response_event;",
+            )
+            .unwrap();
+        let mut missing = client.transaction().unwrap();
+        let missing_error = next_contiguous_sequence(&mut missing, "session_ipip_ko_quick")
+            .expect_err("missing relation must fail closed");
+        assert!(matches!(
+            missing_error,
+            ResponseEventPersistenceError::Database(_)
+        ));
+        assert_eq!(
+            missing_error.to_string(),
+            "PostgreSQL response-event persistence failed"
+        );
+        missing.rollback().unwrap();
+
+        apply_response_event_migration(&mut client).unwrap();
+        let mut empty = client.transaction().unwrap();
+        assert_eq!(
+            next_contiguous_sequence(&mut empty, "session_ipip_ko_quick").unwrap(),
+            1
+        );
+        empty
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_01', 'session_ipip_ko_quick', 'client_event_item_01', \
+                     'item_version_n1_ko', \
+                     'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', \
+                     1, TIMESTAMPTZ '2023-11-14 22:13:20+00', TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            next_contiguous_sequence(&mut empty, "session_ipip_ko_quick").unwrap(),
+            2
+        );
+        empty.rollback().unwrap();
     }
 
     #[test]
