@@ -1,14 +1,14 @@
 # As-Built PostgreSQL Schema Map
 
 - Status: Normative evidence map
-- Date: 2026-08-16
-- Protected-main baseline: `a7637351be8f0f90c12651d3bcafd959bc52ac81`
+- Date: 2026-08-17
+- Protected-main baseline: `22dc8ed9534b34ebc027a23db895a2726ca8a411`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
 ## Protected-main physical schema
 
-Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, instrument releases, consent, item-delivery evidence, response snapshots, result snapshots, scoring requests, inbox consumption, and data-rights verification/processing-start. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
+Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, instrument releases, consent, item-delivery evidence, response snapshots, result snapshots, scoring requests, inbox consumption, and data-rights verification/processing-start/propagation. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
@@ -20,10 +20,11 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_request` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `consent_ledger` / `consent_event` | consent | Implemented subset |
-| `item_delivery_event` | item delivery | Implemented subset |
+| `item_delivery_ledger` / `item_delivery_event` | item delivery | Implemented subset |
 | `response_snapshot` / `response_snapshot_entry` | response | Implemented subset |
 | `result_snapshot` / `result_snapshot_observation` | result | Implemented subset |
 | `data_rights_request_state` | data rights | Implemented subset through processing-start |
+| `data_rights_propagation_state` | data rights propagation | Implemented subset |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
