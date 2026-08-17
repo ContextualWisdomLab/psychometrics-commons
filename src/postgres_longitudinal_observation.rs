@@ -210,7 +210,7 @@ pub fn load_longitudinal_observation(
     )?;
     let mut stored_memberships = Vec::with_capacity(membership_rows.len());
     for (index, membership_row) in membership_rows.iter().enumerate() {
-        require_membership_sequence(membership_row.get(0), index + 1)?;
+        require_membership_sequence(membership_row.get(0), postgres_usize(index + 1)?)?;
         let membership_context_ref: String = membership_row.get(1);
         let weight_parts_per_10_000 = database_u16(membership_row.get(2))?;
         stored_memberships.push((membership_context_ref, weight_parts_per_10_000));
@@ -372,9 +372,9 @@ fn database_u16(value: i32) -> Result<u16, LongitudinalObservationPersistenceErr
 
 fn require_membership_sequence(
     stored_sequence: i64,
-    expected_sequence: usize,
+    expected_sequence: i64,
 ) -> Result<(), LongitudinalObservationPersistenceError> {
-    if stored_sequence == postgres_usize(expected_sequence)? {
+    if stored_sequence == expected_sequence {
         Ok(())
     } else {
         Err(LongitudinalObservationPersistenceError::CorruptHistory)
