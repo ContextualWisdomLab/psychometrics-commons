@@ -103,3 +103,22 @@ fn numeric_tenant_reference_fails_closed_before_write() {
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn padded_tenant_alias_fails_closed_on_persist() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_item_delivery_migration(&mut client).unwrap();
+    let ledger =
+        ItemDeliveryLedger::from_manifest("session_padded_persist_tenant", &manifest()).unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(
+        matches!(
+            persist_item_delivery_ledger(&mut transaction, " tenant_alpha", &ledger),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ),
+        "a padded persist tenant must not be stored as the trimmed tenant identity"
+    );
+    transaction.rollback().unwrap();
+}

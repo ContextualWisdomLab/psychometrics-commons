@@ -498,7 +498,7 @@ For effects fully owned by the same PostgreSQL transaction, the domain side effe
 - External systems are accessed through versioned adapters; direct database joins across bounded contexts are forbidden.
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
 - Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
-- `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land.
+- `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence. Item-delivery persist is on protected main; Active reload reconstructs stored sequence after restart. HTTP item-delivery sequences remain target.
 
 ## 14. Reference
 
