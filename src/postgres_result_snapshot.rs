@@ -552,7 +552,8 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        classify_current_session_tips, durable_evidence_error, observation_disposition_name,
+        classify_current_session_tips, durable_evidence_error,
+        load_current_result_snapshot_for_session, observation_disposition_name,
         observation_from_stored, observation_order, postgres_timestamp,
         require_contiguous_observation_order, required_reference, stored_nonnegative_count,
         stored_schema_version, stored_timestamp, CurrentSessionTipPlan,
@@ -560,6 +561,7 @@ mod reference_guard_tests {
     };
     use crate::result::ResultSnapshotError;
     use crate::scoring::ObservationDisposition;
+    use postgres::{Client, NoTls};
 
     #[test]
     fn blank_numeric_overflow_and_disposition_names_are_classified() {
@@ -754,5 +756,20 @@ mod reference_guard_tests {
             stored_nonnegative_count(-1),
             Err(ResultSnapshotPersistenceError::InconsistentEvidence)
         ));
+    }
+
+    #[test]
+    fn current_session_tip_lookup_maps_missing_relation_to_database_error() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO result_snapshot_current_tip_missing;")
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            load_current_result_snapshot_for_session(&mut transaction, "session_ipip_ko_quick"),
+            Err(ResultSnapshotPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
     }
 }
