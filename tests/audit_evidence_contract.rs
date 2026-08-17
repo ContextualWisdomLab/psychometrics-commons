@@ -13,7 +13,6 @@ fn input<'a>(
     purpose_code: &'a str,
     action_code: &'a str,
     resource_ref: &'a str,
-    evidence_digest: &'a str,
     occurred_at_unix_ms: u64,
 ) -> AuditEvidenceInput<'a> {
     AuditEvidenceInput {
@@ -24,7 +23,7 @@ fn input<'a>(
         action_code,
         resource_ref,
         outcome: AuditOutcome::Succeeded,
-        evidence_digest,
+        evidence_digest: DIGEST,
         occurred_at_unix_ms,
     }
 }
@@ -38,7 +37,6 @@ fn privileged_product_action_keeps_exact_purpose_actor_resource_and_digest() {
         "instrument_publication",
         "publish_instrument_release",
         "instrument_release_big_five_ko_v1",
-        DIGEST,
         1_785_000_000_000,
     ))
     .unwrap();
@@ -64,7 +62,6 @@ fn denied_action_is_still_durable_audit_evidence_without_sensitive_payload() {
         "research_release_access",
         "read_restricted_linkage",
         "research_linkage_alpha",
-        DIGEST,
         1_785_000_000_001,
     );
     denied.outcome = AuditOutcome::Denied;
@@ -85,7 +82,6 @@ fn identity_aliases_numeric_ids_and_blank_references_fail_closed() {
             "instrument_publication",
             "publish_instrument_release",
             "instrument_release_big_five_ko_v1",
-            DIGEST,
             1_785_000_000_000,
         ))
         .unwrap_err();
@@ -103,7 +99,6 @@ fn purpose_and_action_codes_are_stable_lowercase_ascii_tokens() {
             invalid_code,
             "publish_instrument_release",
             "instrument_release_big_five_ko_v1",
-            DIGEST,
             1_785_000_000_000,
         );
         assert_eq!(
@@ -118,7 +113,6 @@ fn purpose_and_action_codes_are_stable_lowercase_ascii_tokens() {
             "instrument_publication",
             invalid_code,
             "instrument_release_big_five_ko_v1",
-            DIGEST,
             1_785_000_000_000,
         );
         assert_eq!(
@@ -136,18 +130,18 @@ fn digest_and_server_time_fail_closed() {
         "sha256:deadbeef",
         "md5:0123456789abcdef0123456789abcdef",
     ] {
+        let mut invalid = input(
+            "audit_event_digest_01",
+            "tenant_research_alpha",
+            "actor_publisher_alpha",
+            "instrument_publication",
+            "publish_instrument_release",
+            "instrument_release_big_five_ko_v1",
+            1_785_000_000_000,
+        );
+        invalid.evidence_digest = invalid_digest;
         assert_eq!(
-            AuditEvidence::new(input(
-                "audit_event_digest_01",
-                "tenant_research_alpha",
-                "actor_publisher_alpha",
-                "instrument_publication",
-                "publish_instrument_release",
-                "instrument_release_big_five_ko_v1",
-                invalid_digest,
-                1_785_000_000_000,
-            ))
-            .unwrap_err(),
+            AuditEvidence::new(invalid).unwrap_err(),
             AuditEvidenceError::InvalidDigest
         );
     }
@@ -160,7 +154,6 @@ fn digest_and_server_time_fail_closed() {
             "instrument_publication",
             "publish_instrument_release",
             "instrument_release_big_five_ko_v1",
-            DIGEST,
             0,
         ))
         .unwrap_err(),
