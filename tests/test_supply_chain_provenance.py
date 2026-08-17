@@ -106,12 +106,17 @@ class SupplyChainProvenanceContract(unittest.TestCase):
     def test_attestation_credentials_exist_only_on_protected_main_push(self) -> None:
         """OIDC and only the permissions required for binary attestation stay on protected main."""
         text = self.workflow_text()
+        top_permissions = mapping_block(text, "permissions", 0)
         jobs = mapping_block(text, "jobs", 0)
         package_job = mapping_block(jobs, "package", 2)
         attest_job = mapping_block(jobs, "attest", 2)
         package_permissions = mapping_block(package_job, "permissions", 4)
         attest_permissions = mapping_block(attest_job, "permissions", 4)
 
+        self.assertEqual(
+            [line.strip() for line in top_permissions.splitlines() if line.strip()],
+            ["contents: read"],
+        )
         self.assertEqual(
             [line.strip() for line in package_permissions.splitlines() if line.strip()],
             ["contents: read"],
