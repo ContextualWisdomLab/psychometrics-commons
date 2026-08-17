@@ -106,24 +106,24 @@ pub fn persist_audit_evidence(
     let occurred_at_unix_ms = i64::try_from(evidence.occurred_at_unix_ms())
         .map_err(|_| AuditPersistenceError::TimestampOutOfRange)?;
     let row = transaction.query_one(
-        "WITH inserted AS (\
-             INSERT INTO audit_evidence_record (\
-                 audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
-                 outcome_code, evidence_digest, occurred_at_unix_ms\
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)\
-             ON CONFLICT (audit_event_ref) DO NOTHING\
-             RETURNING tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
-                       outcome_code, evidence_digest, occurred_at_unix_ms, TRUE AS inserted\
-         )\
-         SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,\
-                evidence_digest, occurred_at_unix_ms, inserted\
-         FROM inserted\
-         UNION ALL\
-         SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,\
-                evidence_digest, occurred_at_unix_ms, FALSE AS inserted\
-         FROM audit_evidence_record\
-         WHERE audit_event_ref = $1\
-         LIMIT 1",
+        r#"WITH inserted AS (
+             INSERT INTO audit_evidence_record (
+                 audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
+                 outcome_code, evidence_digest, occurred_at_unix_ms
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (audit_event_ref) DO NOTHING
+             RETURNING tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
+                       outcome_code, evidence_digest, occurred_at_unix_ms, TRUE AS inserted
+         )
+         SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+                evidence_digest, occurred_at_unix_ms, inserted
+         FROM inserted
+         UNION ALL
+         SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+                evidence_digest, occurred_at_unix_ms, FALSE AS inserted
+         FROM audit_evidence_record
+         WHERE audit_event_ref = $1
+         LIMIT 1"#,
         &[
             &evidence.audit_event_ref(),
             &evidence.tenant_ref(),
