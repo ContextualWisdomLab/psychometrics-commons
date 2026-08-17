@@ -49,10 +49,15 @@ fn concurrent_exact_replay_observes_committed_winner_under_read_committed() {
     );
 
     let replay = first.clone();
-    let replay_connection = format!("{connection} application_name=audit_concurrency_replay");
+    let mut replay_config: postgres::Config = connection
+        .parse()
+        .expect("TEST_DATABASE_URL must parse as a postgres URL or libpq keyword/value string");
+    replay_config.application_name("audit_concurrency_replay");
     let (started_sender, started_receiver) = mpsc::channel();
     let replay_thread = thread::spawn(move || {
-        let mut replay_client = Client::connect(&replay_connection, NoTls).unwrap();
+        let mut replay_client = replay_config
+            .connect(NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable for the replay session");
         replay_client
             .batch_execute("SET search_path TO audit_concurrency_test;")
             .unwrap();
@@ -75,13 +80,13 @@ fn concurrent_exact_replay_observes_committed_winner_under_read_committed() {
     while Instant::now() < deadline {
         let row = observer
             .query_opt(
-                "SELECT wait_event_type\
-                 FROM pg_stat_activity\
-                 WHERE application_name = 'audit_concurrency_replay'\
+                "SELECT wait_event_type \
+                 FROM pg_stat_activity \
+                 WHERE application_name = 'audit_concurrency_replay' \
                    AND state = 'active'",
                 &[],
             )
-            .unwrap();
+            .expect("pg_stat_activity must be readable while waiting for the replay lock");
         if row
             .as_ref()
             .and_then(|row| row.get::<_, Option<String>>(0))
