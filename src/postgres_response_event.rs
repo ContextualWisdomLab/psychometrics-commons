@@ -429,10 +429,11 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        apply_response_event_migration, classify_existing_event, map_rebuild_error,
-        millis_from_duration, next_contiguous_sequence, postgres_sequence, postgres_timestamptz,
-        query_existing_event_row, require_contiguous_receipt_history, required_reference,
-        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
+        apply_response_event_migration, classify_existing_event, load_response_event_receipts,
+        load_response_ledger, map_rebuild_error, millis_from_duration, next_contiguous_sequence,
+        persist_response_event, postgres_sequence, postgres_timestamptz, query_existing_event_row,
+        require_contiguous_receipt_history, required_reference, unix_ms_from_system_time,
+        ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
@@ -653,6 +654,43 @@ mod reference_guard_tests {
             2
         );
         empty.rollback().unwrap();
+    }
+
+    #[test]
+    fn persist_and_load_instantiate_library_copies_on_missing_relation() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO response_event_persist_load_missing;")
+            .unwrap();
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_response_event(
+                &mut transaction,
+                "session_ipip_ko_quick",
+                &event,
+                1_700_000_000_000,
+                1_700_000_000_250,
+            ),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            load_response_event_receipts(&mut transaction, "session_ipip_ko_quick"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            load_response_ledger(&mut transaction, "session_ipip_ko_quick"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
     }
 
     #[test]
