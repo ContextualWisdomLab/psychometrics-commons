@@ -108,6 +108,52 @@ fn offline_seoul_clinic_ingest_keeps_four_clocks_and_both_memberships() {
 }
 
 #[test]
+fn same_enrollment_keeps_distinct_source_systems_and_later_pings() {
+    let shares = seoul_clinic_shares();
+    let mut observations = LongitudinalObservationSet::new();
+    observations
+        .ingest(evening_mood_input(
+            "observation_record_evening_android",
+            "gyeot_obs_android_88f2",
+            &shares,
+            evening_mood_times(),
+        ))
+        .expect("first Android evening row");
+
+    let mut ios = evening_mood_input(
+        "observation_record_evening_ios",
+        "gyeot_obs_ios_12ab",
+        &shares,
+        evening_mood_times(),
+    );
+    ios.source_system_ref = "gyeot_ema_ios";
+    ios.time.received_at_unix_ms = RECEIVED_AT_UNIX_MS + 60_000;
+    ios.time.ingested_at_unix_ms = INGESTED_AT_UNIX_MS + 60_000;
+    let ios_row = observations
+        .ingest(ios)
+        .expect("the same clinic enrollment can ingest an iOS copy without collapsing source systems");
+    assert_eq!(ios_row.source_system_ref(), "gyeot_ema_ios");
+    assert_eq!(ios_row.source_observation_ref(), "gyeot_obs_ios_12ab");
+
+    let mut later_android = evening_mood_times();
+    later_android.received_at_unix_ms = RECEIVED_AT_UNIX_MS + 120_000;
+    later_android.ingested_at_unix_ms = INGESTED_AT_UNIX_MS + 120_000;
+    let second_android = observations
+        .ingest(evening_mood_input(
+            "observation_record_evening_android_2",
+            "gyeot_obs_android_88f3",
+            &shares,
+            later_android,
+        ))
+        .expect("a later Android ping is a new source observation, not a rewrite");
+    assert_eq!(
+        second_android.source_observation_ref(),
+        "gyeot_obs_android_88f3"
+    );
+    assert_eq!(observations.len(), 3);
+}
+
+#[test]
 fn exact_source_replay_is_idempotent_and_conflict_fails_closed() {
     let shares = seoul_clinic_shares();
     let mut observations = LongitudinalObservationSet::new();
