@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- PostgreSQL scoring-request reload reconstructs the version-pinned dispatch identity after process restart so a worker can recover AssessmentSpec, instrument, scoring, calibration, and optional norm pins without inventing a score. Blank stored pins fail closed as corrupt history. A well-formed stored schema major this runtime does not implement fails closed as unsupported stored schema so an operator upgrades the worker instead of quarantining intact evidence.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.

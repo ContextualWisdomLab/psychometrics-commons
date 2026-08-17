@@ -94,6 +94,24 @@ Product consequences:
 - analysis-set digests bind the exact observations and time semantics consumed by
   temporal, multilevel, cross-classified, or multiple-membership analysis.
 
+## PostgreSQL transaction isolation
+
+PostgreSQL 18 documents `READ COMMITTED` as the default isolation level in which
+each statement sees only rows committed before that statement began (PostgreSQL
+Global Development Group, 2026). Product persist and restart-reload adapters that
+classify unique-key races or reconstruct immutable identities therefore require
+`READ COMMITTED` and fail closed on a stronger isolation level that can hide a
+concurrent committed insert from the classifier.
+
+Product consequences:
+
+- scoring-request reload reconstructs the version-pinned dispatch identity under
+  `READ COMMITTED` after a share lock on the request row;
+- a missing request is absent rather than an invented scoring pin;
+- unsupported stored schema versions fail closed as unsupported stored schema
+  instead of being coerced into the current output contract or quarantined as
+  corrupt history;
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -118,6 +136,8 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
 International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
+PostgreSQL Global Development Group. (2026). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
