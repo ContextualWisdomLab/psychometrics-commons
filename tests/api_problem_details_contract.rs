@@ -54,6 +54,7 @@ fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
         "urn:x:value",
         "urn:example:",
         "urn:example:bad value",
+        "urn:example:bad value?=version",
         "urn:example:%zz",
     ] {
         assert_eq!(
