@@ -184,24 +184,14 @@ pub fn load_anonymous_participant_base(
     let stored_participant_ref: String = row.get(0);
     let stored_tenant_ref: String = row.get(1);
     let stored_created_at_unix_ms: i64 = row.get(2);
-    required_exact_reference(&stored_participant_ref)
-        .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
-    required_exact_reference(&stored_tenant_ref)
-        .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
-    require_stored_base_identity(
+    reconstruct_loaded_base(
         &stored_participant_ref,
         &stored_tenant_ref,
+        stored_created_at_unix_ms,
         participant_ref,
         tenant_ref,
-    )?;
-    let created_at_unix_ms = stored_timestamp(stored_created_at_unix_ms)?;
-    ParticipantRecord::new_anonymous(
-        &stored_participant_ref,
-        &stored_tenant_ref,
-        created_at_unix_ms,
     )
     .map(Some)
-    .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)
 }
 
 fn read_conflict_winner(
@@ -217,6 +207,32 @@ fn read_conflict_winner(
         Ok(None) => Ok(None),
         Err(error) => Err(ParticipantBasePersistenceError::from(error)),
     }
+}
+
+fn reconstruct_loaded_base(
+    stored_participant_ref: &str,
+    stored_tenant_ref: &str,
+    stored_created_at_unix_ms: i64,
+    participant_ref: &str,
+    tenant_ref: &str,
+) -> Result<crate::participant::ParticipantRecord, ParticipantBasePersistenceError> {
+    required_exact_reference(stored_participant_ref)
+        .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
+    required_exact_reference(stored_tenant_ref)
+        .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
+    require_stored_base_identity(
+        stored_participant_ref,
+        stored_tenant_ref,
+        participant_ref,
+        tenant_ref,
+    )?;
+    let created_at_unix_ms = stored_timestamp(stored_created_at_unix_ms)?;
+    crate::participant::ParticipantRecord::new_anonymous(
+        stored_participant_ref,
+        stored_tenant_ref,
+        created_at_unix_ms,
+    )
+    .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)
 }
 
 fn require_stored_base_identity(
@@ -306,8 +322,9 @@ fn require_read_committed(
 mod tests {
     use super::{
         classify_conflict_winner, postgres_timestamp, read_conflict_winner,
-        require_stored_base_identity, required_exact_reference, stored_base_identity_matches,
-        stored_timestamp, ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
+        reconstruct_loaded_base, require_stored_base_identity, required_exact_reference,
+        stored_base_identity_matches, stored_timestamp, ParticipantBasePersistenceDisposition,
+        ParticipantBasePersistenceError,
     };
     use postgres::{Client, NoTls};
 
@@ -435,6 +452,24 @@ mod tests {
             "tenant_public_demo"
         )
         .is_ok());
+        assert!(reconstruct_loaded_base(
+            "participant_public_demo",
+            "tenant_public_demo",
+            40_000,
+            "participant_public_demo",
+            "tenant_public_demo",
+        )
+        .is_ok());
+        assert!(matches!(
+            reconstruct_loaded_base(
+                "participant_public_demo",
+                "tenant_other_demo",
+                40_000,
+                "participant_public_demo",
+                "tenant_public_demo",
+            ),
+            Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
+        ));
     }
 
     #[test]
