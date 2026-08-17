@@ -116,15 +116,7 @@ pub fn persist_anonymous_participant_base(
     participant: &ParticipantRecord,
 ) -> Result<ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError> {
     require_read_committed(transaction)?;
-    if !participant.link_history().is_empty()
-        || !participant.link_end_history().is_empty()
-        || participant.linked_issuer_ref().is_some()
-        || participant.linked_subject_ref().is_some()
-        || participant.link_event_ref().is_some()
-        || participant.anonymous_proof_ref().is_some()
-        || participant.authenticated_proof_ref().is_some()
-        || participant.linked_at_unix_ms().is_some()
-    {
+    if has_durable_identity_link_projection(participant) {
         return Err(ParticipantBasePersistenceError::LinkedRecordRequiresIdentityHistory);
     }
 
@@ -192,6 +184,23 @@ pub fn load_anonymous_participant_base(
         tenant_ref,
     )
     .map(Some)
+}
+
+fn has_durable_identity_link_projection(participant: &ParticipantRecord) -> bool {
+    identity_link_projection_present([
+        !participant.link_history().is_empty(),
+        !participant.link_end_history().is_empty(),
+        participant.linked_issuer_ref().is_some(),
+        participant.linked_subject_ref().is_some(),
+        participant.link_event_ref().is_some(),
+        participant.anonymous_proof_ref().is_some(),
+        participant.authenticated_proof_ref().is_some(),
+        participant.linked_at_unix_ms().is_some(),
+    ])
+}
+
+fn identity_link_projection_present(flags: [bool; 8]) -> bool {
+    flags.into_iter().any(|flag| flag)
 }
 
 fn read_conflict_winner(
@@ -321,10 +330,10 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_conflict_winner, postgres_timestamp, read_conflict_winner,
-        reconstruct_loaded_base, require_stored_base_identity, required_exact_reference,
-        stored_base_identity_matches, stored_timestamp, ParticipantBasePersistenceDisposition,
-        ParticipantBasePersistenceError,
+        classify_conflict_winner, identity_link_projection_present, postgres_timestamp,
+        read_conflict_winner, reconstruct_loaded_base, require_stored_base_identity,
+        required_exact_reference, stored_base_identity_matches, stored_timestamp,
+        ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError,
     };
     use postgres::{Client, NoTls};
 
@@ -421,6 +430,14 @@ mod tests {
             Err(ParticipantBasePersistenceError::ConflictingReplay)
         ));
         assert!(matches!(
+            classify_conflict_winner(
+                Some(("tenant_public_demo", 40_001)),
+                "tenant_public_demo",
+                40_000
+            ),
+            Err(ParticipantBasePersistenceError::ConflictingReplay)
+        ));
+        assert!(matches!(
             classify_conflict_winner(None, "tenant_public_demo", 40_000),
             Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
         ));
@@ -433,6 +450,12 @@ mod tests {
         assert!(!stored_base_identity_matches(
             "participant_public_demo",
             "tenant_other_demo",
+            "participant_public_demo",
+            "tenant_public_demo"
+        ));
+        assert!(!stored_base_identity_matches(
+            "participant_other_demo",
+            "tenant_public_demo",
             "participant_public_demo",
             "tenant_public_demo"
         ));
@@ -470,6 +493,35 @@ mod tests {
             ),
             Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
         ));
+    }
+
+    #[test]
+    fn each_identity_link_projection_flag_rejects_base_only_persist() {
+        for index in 0..8 {
+            let mut flags = [false; 8];
+            flags[index] = true;
+            assert!(
+                identity_link_projection_present(flags),
+                "flag {index} must reject base-only persist"
+            );
+        }
+        assert!(!identity_link_projection_present([false; 8]));
+        for (stored_participant_ref, stored_tenant_ref, stored_created_at_unix_ms) in [
+            (" ", "tenant_public_demo", 40_000_i64),
+            ("participant_public_demo", " ", 40_000),
+            ("participant_public_demo", "tenant_public_demo", -1),
+        ] {
+            assert!(matches!(
+                reconstruct_loaded_base(
+                    stored_participant_ref,
+                    stored_tenant_ref,
+                    stored_created_at_unix_ms,
+                    "participant_public_demo",
+                    "tenant_public_demo",
+                ),
+                Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
+            ));
+        }
     }
 
     #[test]
