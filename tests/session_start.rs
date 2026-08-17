@@ -195,7 +195,7 @@ fn start_errors_tell_the_caller_what_to_do_next() {
         AssessmentSessionStartError::InvalidStoredRelease.to_string(),
         "repair the stored instrument release before starting a new session"
     );
-    let persistence = AssessmentSessionStartError::Persistence(
+    let persistence = AssessmentSessionStartError::from(
         psychometrics_commons_runtime::postgres_assessment_session::AssessmentSessionPersistenceError::ConflictingReplay,
     );
     assert_eq!(

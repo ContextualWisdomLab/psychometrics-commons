@@ -1,5 +1,8 @@
 //! Public session HTTP must read the declared request body before dispatch.
 
+use psychometrics_commons_runtime::postgres_assessment_session::{
+    AssessmentSessionPersistenceError, AssessmentSessionStartError,
+};
 use psychometrics_commons_runtime::session_http::{
     accept_one_session_http, bind_session_http, handle_session_http_request, MemorySessionHttpPort,
     SESSION_COLLECTION_PATH,
@@ -101,6 +104,12 @@ fn listener_rejects_invalid_and_oversized_content_length() {
         ),
         std::io::ErrorKind::InvalidData
     );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_bad_body\r\nContent-Length: 2\r\n\r\n\xff\xfe"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
 }
 
 #[test]
@@ -139,6 +148,12 @@ fn listener_reloads_a_created_session_over_get() {
         reload_response.starts_with("HTTP/1.1 200 OK\r\n"),
         "GET must reload the session created on the same port: {reload_response}"
     );
+    assert!(matches!(
+        AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay),
+        AssessmentSessionStartError::Persistence(
+            AssessmentSessionPersistenceError::ConflictingReplay
+        )
+    ));
 }
 
 #[test]

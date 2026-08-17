@@ -169,28 +169,28 @@ fn start_and_load_errors_map_to_buyer_actions() {
         status(&mut port, &create_request("ses_repair", "ko-KR"), 20_000),
         409
     );
-    port.next_start_error = Some(AssessmentSessionStartError::Persistence(
+    port.next_start_error = Some(AssessmentSessionStartError::from(
         AssessmentSessionPersistenceError::ConflictingReplay,
     ));
     assert_eq!(
         status(&mut port, &create_request(SESSION, "ko-KR"), 20_000),
         409
     );
-    port.next_start_error = Some(AssessmentSessionStartError::Persistence(
+    port.next_start_error = Some(AssessmentSessionStartError::from(
         AssessmentSessionPersistenceError::UnpublishedStart,
     ));
     assert_eq!(
         status(&mut port, &create_request("ses_unpub", "ko-KR"), 20_000),
         409
     );
-    port.next_start_error = Some(AssessmentSessionStartError::Persistence(
+    port.next_start_error = Some(AssessmentSessionStartError::from(
         AssessmentSessionPersistenceError::InvalidStartRelease,
     ));
     assert_eq!(
         status(&mut port, &create_request("ses_mismatch", "ko-KR"), 20_000),
         409
     );
-    port.next_start_error = Some(AssessmentSessionStartError::Persistence(
+    port.next_start_error = Some(AssessmentSessionStartError::from(
         AssessmentSessionPersistenceError::UnsupportedIsolationLevel,
     ));
     assert_eq!(
