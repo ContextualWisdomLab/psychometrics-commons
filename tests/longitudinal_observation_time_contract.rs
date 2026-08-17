@@ -154,6 +154,37 @@ fn same_enrollment_keeps_distinct_source_systems_and_later_pings() {
 }
 
 #[test]
+fn distinct_enrollments_keep_the_same_source_observation_identity() {
+    let shares = seoul_clinic_shares();
+    let mut observations = LongitudinalObservationSet::new();
+    observations
+        .ingest(evening_mood_input(
+            "observation_record_evening_ward_a",
+            "gyeot_obs_phone_88f2",
+            &shares,
+            evening_mood_times(),
+        ))
+        .expect("first clinic enrollment");
+
+    let mut later = evening_mood_times();
+    later.received_at_unix_ms = RECEIVED_AT_UNIX_MS + 60_000;
+    later.ingested_at_unix_ms = INGESTED_AT_UNIX_MS + 60_000;
+    let mut other_enrollment = evening_mood_input(
+        "observation_record_evening_ward_b",
+        "gyeot_obs_phone_88f2",
+        &shares,
+        later,
+    );
+    other_enrollment.enrollment_ref = "enrollment_seoul_clinic_2026q4";
+    let other = observations
+        .ingest(other_enrollment)
+        .expect("a second enrollment may reuse the vendor observation id without colliding");
+    assert_eq!(other.enrollment_ref(), "enrollment_seoul_clinic_2026q4");
+    assert_eq!(other.source_observation_ref(), "gyeot_obs_phone_88f2");
+    assert_eq!(observations.len(), 2);
+}
+
+#[test]
 fn exact_source_replay_is_idempotent_and_conflict_fails_closed() {
     let shares = seoul_clinic_shares();
     let mut observations = LongitudinalObservationSet::new();
