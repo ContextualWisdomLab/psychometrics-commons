@@ -597,7 +597,6 @@ fn completion_schema_rejects_invalid_evidence_and_retention_scope() {
         evidence_database_error.constraint(),
         Some("data_rights_completion_evidence_ref_format_check")
     );
-
     let time_error = client
         .execute(
             "UPDATE data_rights_request_state
@@ -650,35 +649,95 @@ fn stored_identity_field_mismatches_fail_closed_on_completion_replay() {
         transaction.commit().unwrap();
     }
 
-    let tampers = [
-        "UPDATE data_rights_request_state SET participant_ref = 'participant_other' \
-         WHERE request_ref = 'data_rights_request_completion'",
-        "UPDATE data_rights_request_state SET scope_ref = 'scope_other' \
-         WHERE request_ref = 'data_rights_request_completion'",
-        "UPDATE data_rights_request_state SET verification_evidence_ref = 'verification_other' \
-         WHERE request_ref = 'data_rights_request_completion'",
-        "UPDATE data_rights_request_state SET verified_at_unix_ms = 1 \
-         WHERE request_ref = 'data_rights_request_completion'",
-    ];
-    let restore = "UPDATE data_rights_request_state SET \
-         participant_ref = 'participant_alpha', \
-         scope_ref = 'scope_alpha', \
-         verification_evidence_ref = 'verification_evidence_alpha', \
-         verified_at_unix_ms = 10100 \
-         WHERE request_ref = 'data_rights_request_completion'";
-    for sql in tampers {
-        client.batch_execute(sql).unwrap();
-        let mut transaction = client.transaction().unwrap();
-        assert!(
-            matches!(
-                persist_data_rights_completion(&mut transaction, &request),
-                Err(DataRightsPersistenceError::ConflictingReplay)
-            ),
-            "expected conflicting replay for {sql}"
-        );
-        transaction.rollback().unwrap();
-        client.batch_execute(restore).unwrap();
-    }
+    let mut participant_mismatch = DataRightsRequest::new(
+        "data_rights_request_completion",
+        "tenant_alpha",
+        "participant_other",
+        DataRightsRequestKind::Deletion,
+        "scope_alpha",
+        10_000,
+    )
+    .unwrap();
+    participant_mismatch
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    participant_mismatch
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    participant_mismatch
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &participant_mismatch),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut scope_mismatch = DataRightsRequest::new(
+        "data_rights_request_completion",
+        "tenant_alpha",
+        "participant_alpha",
+        DataRightsRequestKind::Deletion,
+        "scope_other",
+        10_000,
+    )
+    .unwrap();
+    scope_mismatch
+        .verify_identity("verification_evidence_alpha", 10_100)
+        .unwrap();
+    scope_mismatch
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    scope_mismatch
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &scope_mismatch),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut verification_mismatch = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    verification_mismatch
+        .verify_identity("verification_other", 10_100)
+        .unwrap();
+    verification_mismatch
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    verification_mismatch
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &verification_mismatch),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let mut verified_time_mismatch = new_request(
+        "data_rights_request_completion",
+        DataRightsRequestKind::Deletion,
+    );
+    verified_time_mismatch
+        .verify_identity("verification_evidence_alpha", 10_101)
+        .unwrap();
+    verified_time_mismatch
+        .start_processing("operation_alpha", 10_200)
+        .unwrap();
+    verified_time_mismatch
+        .complete("completion_evidence_alpha", &["retention_legal"], 10_300)
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_data_rights_completion(&mut transaction, &verified_time_mismatch),
+        Err(DataRightsPersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
 
     let mut export = new_request(
         "data_rights_request_completion",
