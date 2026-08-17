@@ -1,8 +1,9 @@
 //! `PostgreSQL` persistence for immutable normalized longitudinal observations.
 //!
-//! Commons persists tenant-bound ingestion evidence only. Gyeot remains the
-//! collection owner and TEPP remains the temporal and multiple-membership
-//! analysis owner.
+//! Commons persists tenant-bound ingestion evidence only. Gyeot is the collection
+//! service that captures longitudinal observations, while TEPP is the analysis
+//! service responsible for temporal and multiple-membership models. This module
+//! stores the normalized evidence without taking over either service's responsibility.
 
 use crate::longitudinal_observation::{
     ClockAnomaly, LongitudinalObservationInput, LongitudinalObservationRecord,
@@ -30,7 +31,7 @@ pub enum LongitudinalObservationPersistenceDisposition {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum LongitudinalObservationPersistenceError {
-    /// The tenant reference was blank, numeric-like, padded, or otherwise noncanonical.
+    /// A tenant or observation-record reference was blank, numeric-like, padded, or noncanonical.
     InvalidReference,
     /// A Rust clock or sequence cannot be represented by `PostgreSQL` `bigint`.
     InvalidNumericRange,
@@ -48,7 +49,7 @@ impl Display for LongitudinalObservationPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "longitudinal observation tenant must use its exact opaque reference"
+                "longitudinal observation tenant and record references must use their exact opaque form"
             }
             Self::InvalidNumericRange => {
                 "longitudinal observation clocks or membership sequence exceed the PostgreSQL bigint range"
@@ -83,6 +84,10 @@ impl From<postgres::Error> for LongitudinalObservationPersistenceError {
 }
 
 /// Apply the idempotent longitudinal-observation migration.
+///
+/// The migration uses unqualified database object names. Callers must set the
+/// intended PostgreSQL `search_path` before applying it and use the same schema
+/// context for related persistence queries.
 ///
 /// # Errors
 ///
