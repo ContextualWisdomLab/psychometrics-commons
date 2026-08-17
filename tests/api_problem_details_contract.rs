@@ -82,6 +82,36 @@ fn problem_type_requires_an_explicit_structurally_valid_product_identifier() {
 }
 
 #[test]
+fn urn_problem_types_follow_rfc8141_optional_component_syntax() {
+    for valid_type in [
+        "urn:example:problem#details",
+        "urn:example:problem?=version=2",
+        "urn:example:problem?+resolver=primary",
+        "urn:example:problem?+resolver=primary?=version=2#details",
+        "urn:example:problem/path?+resolve/to?next?=version/2?draft#section?one",
+    ] {
+        assert!(
+            ApiProblem::new(valid_type, 403, TITLE, DETAIL, CODE).is_ok(),
+            "RFC 8141 URN {valid_type:?} must be accepted"
+        );
+    }
+
+    for invalid_type in [
+        "urn:example:problem?version=2",
+        "urn:example:problem?+",
+        "urn:example:problem?=",
+        "urn:example:problem#one#two",
+        "urn:example:problem?=version#one#two",
+    ] {
+        assert_eq!(
+            ApiProblem::new(invalid_type, 403, TITLE, DETAIL, CODE),
+            Err(ApiProblemContractError::InvalidTypeUri),
+            "malformed RFC 8141 URN {invalid_type:?} must fail closed"
+        );
+    }
+}
+
+#[test]
 fn machine_code_is_lowercase_ascii_and_stable_for_clients() {
     for invalid_code in [
         "",
