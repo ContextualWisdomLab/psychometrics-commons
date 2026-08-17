@@ -68,7 +68,7 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
 }
 
 #[test]
-fn persist_and_load_fail_closed_on_range_isolation_and_caller_aliases() {
+fn persist_rejects_stronger_isolation_while_load_accepts_it() {
     let mut client = test_client();
     client
         .batch_execute(
@@ -91,40 +91,40 @@ fn persist_and_load_fail_closed_on_range_isolation_and_caller_aliases() {
     transaction.rollback().unwrap();
 
     let failed = evidence_at("audit_event_failed_01", 1_785_000_000_000);
-    let mut serializable = client
+    let mut repeatable_write = client
         .build_transaction()
         .isolation_level(IsolationLevel::RepeatableRead)
         .start()
         .unwrap();
-    let isolation_error = persist_audit_evidence(&mut serializable, &failed)
+    let isolation_error = persist_audit_evidence(&mut repeatable_write, &failed)
         .expect_err("non-read-committed audit writes must fail closed");
     assert!(matches!(
         isolation_error,
         AuditPersistenceError::UnsupportedIsolationLevel
     ));
-    serializable.rollback().unwrap();
-
-    let mut load_isolation = client
-        .build_transaction()
-        .isolation_level(IsolationLevel::RepeatableRead)
-        .start()
-        .unwrap();
-    let load_isolation_error = load_audit_evidence(
-        &mut load_isolation,
-        "tenant_research_alpha",
-        "audit_event_failed_01",
-    )
-    .expect_err("non-read-committed audit reads must fail closed");
-    assert!(matches!(
-        load_isolation_error,
-        AuditPersistenceError::UnsupportedIsolationLevel
-    ));
-    load_isolation.rollback().unwrap();
+    repeatable_write.rollback().unwrap();
 
     {
         let mut transaction = client.transaction().unwrap();
         persist_audit_evidence(&mut transaction, &failed).unwrap();
         transaction.commit().unwrap();
+    }
+
+    for isolation in [IsolationLevel::RepeatableRead, IsolationLevel::Serializable] {
+        let mut stronger_read = client
+            .build_transaction()
+            .isolation_level(isolation)
+            .start()
+            .unwrap();
+        let loaded = load_audit_evidence(
+            &mut stronger_read,
+            "tenant_research_alpha",
+            "audit_event_failed_01",
+        )
+        .expect("single-row audit reads must remain valid at stronger isolation")
+        .expect("persisted audit evidence must remain visible to the stronger-isolation reader");
+        assert_eq!(loaded.outcome(), AuditOutcome::Failed);
+        stronger_read.rollback().unwrap();
     }
 
     let mut transaction = client.transaction().unwrap();
