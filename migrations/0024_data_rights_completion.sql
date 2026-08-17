@@ -60,6 +60,30 @@ ALTER TABLE data_rights_request_state
         )
     );
 
+-- Once the request has crossed into a completion state, its terminal completion row is evidence,
+-- not mutable workflow state. The normal processing -> terminal transition is unaffected because
+-- this guard evaluates the OLD row. Later direct SQL cannot rewrite completion evidence, clocks,
+-- identity, or terminal state while still satisfying the CHECK constraints above.
+CREATE OR REPLACE FUNCTION reject_data_rights_terminal_completion_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.current_state IN ('completed', 'partially_completed') THEN
+        RAISE EXCEPTION 'data-rights terminal completion evidence is immutable'
+            USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS data_rights_terminal_completion_immutable_guard
+    ON data_rights_request_state;
+CREATE TRIGGER data_rights_terminal_completion_immutable_guard
+    BEFORE UPDATE ON data_rights_request_state
+    FOR EACH ROW
+    EXECUTE FUNCTION reject_data_rights_terminal_completion_mutation();
+
 -- The unique key is referenced by the retained-scope foreign key after that table exists, so unlike
 -- the CHECK constraints above it is dependency-sensitive and must not be dropped on reapplication.
 DO $$
