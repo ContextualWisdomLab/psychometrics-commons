@@ -61,6 +61,35 @@ Sync outages leave bounded local queues and clear user state. Clock anomalies ar
 - **TEPP collects mobile observations directly:** couples modeling to client lifecycle.
 - **One timestamp and one group per observation:** scientifically invalid for the intended designs.
 
+## As-built versus target
+
+Active PR #226 adds the product enrollment primitive in `src/longitudinal.rs`. It is `IMPLEMENTED_ON_ACTIVE_PR`, not protected-main truth, until the exact reviewed head is merged. Do not treat #184 as the landing vehicle; that head authorized collection from enrollment state alone. Do not treat #199 as the landing vehicle; that head still authorized collection from a caller-supplied enroll-time snapshot.
+
+As-built on this PR:
+
+- enrollment requires a tenant-owned `ParticipantRecord` plus an active `ConsentPurpose::LongitudinalObservation` grant and fails closed when that grant is missing or revoked;
+- `authorize_collection` re-checks the current consent ledger and the tenant-owned `ParticipantRecord`, so a later revoke or a second clinic fails closed even if the enrollment is still `Enrolled` and the enroll-time snapshot still looks granted;
+- research refusal does not block personal EMA/ESM enrollment;
+- work/home and other membership contexts stay distinct and reject duplicates;
+- pause, resume, and withdraw are fail-closed and do not erase enrollment evidence.
+
+Still target:
+
+- PostgreSQL enrollment/observation persistence;
+- live Gyeot collection and TEPP analysis adapters;
+- HTTP enrollment transport;
+- observation-time fields (`observed_at`, `recorded_at`, `received_at`, `available_at`, `valid_from` / `valid_to`) on ingested records.
+
+## References
+
+Bolger, N., & Laurenceau, J.-P. (2013). *Intensive longitudinal methods: An introduction to diary and experience sampling research*. Guilford Press.
+
+Curran, P. J., & Bauer, D. J. (2011). The disaggregation of within-person and between-person effects in longitudinal models of change. *Annual Review of Psychology, 62*, 583–619. https://doi.org/10.1146/annurev.psych.093008.100356
+
+Diez Roux, A. V. (2002). A glossary for multilevel analysis. *Journal of Epidemiology & Community Health, 56*(8), 588–594. https://doi.org/10.1136/jech.56.8.588
+
+Hamaker, E. L., & Wichers, M. (2017). No time like the present: Discovering the hidden dynamics in intensive longitudinal data. *Current Directions in Psychological Science, 26*(1), 10–15. https://doi.org/10.1177/0963721416666518
+
 ## Reversal conditions
 
 Collection or analysis implementations may change if their contracts remain stable. Revisit the boundary only if one component ceases independent use and the combined ownership demonstrably reduces rather than increases coupling.
