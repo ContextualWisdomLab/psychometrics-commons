@@ -215,7 +215,11 @@ fn retained_scope_evidence_is_immutable_after_completion() {
         DataRightsRequestKind::Deletion,
     );
     request
-        .complete("completion_evidence_immutable", &["retention_legal"], 10_300)
+        .complete(
+            "completion_evidence_immutable",
+            &["retention_legal"],
+            10_300,
+        )
         .unwrap();
     {
         let mut transaction = client.transaction().unwrap();
