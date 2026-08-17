@@ -1,11 +1,12 @@
 //! Regression tests for result reads bound to authoritative participant ownership.
 
 use psychometrics_commons_runtime::authorization::{
-    authorize_result_read, AuthorizationContext, AuthorizationError, ProductRole,
+    AuthorizationContext, AuthorizationError, ProductRole,
 };
 use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
+use psychometrics_commons_runtime::result_authorization::authorize_result_read;
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
