@@ -57,7 +57,10 @@ fn urn_problem_types_cover_namespace_and_specific_string_edges() {
         "urn:example:a@b/c:d!$&'()*+,;=-._~09AZaz",
         "urn:example:%2F",
     ] {
-        assert!(problem(valid_type).is_ok(), "{valid_type:?} must be accepted");
+        assert!(
+            problem(valid_type).is_ok(),
+            "{valid_type:?} must be accepted"
+        );
     }
 
     for invalid_type in [
