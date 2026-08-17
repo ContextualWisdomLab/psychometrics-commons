@@ -5,6 +5,8 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "LICENSE*"
+      - "COPYING*"
       - "rust-toolchain.toml"
       - "src/**"
       - "migrations/**"
@@ -24,6 +26,8 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "LICENSE*"
+      - "COPYING*"
       - "rust-toolchain.toml"
       - "src/**"
       - "migrations/**"
