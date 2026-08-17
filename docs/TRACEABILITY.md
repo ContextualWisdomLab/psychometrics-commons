@@ -52,7 +52,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
-| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | **Active PR** persist/load created-session identity, sealed stored-publication start, and persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}`; command HTTP and tenant isolation remain missing |
+| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation; persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` on protected main | command HTTP and tenant isolation remain missing |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
@@ -63,7 +63,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
 | Instrument release bytes/version/item order are immutable | TRD §7 | `src/instrument.rs` + publication contract tests; `src/postgres_instrument_release.rs` persists immutable manifest columns | API publication integration |
-| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch | **Active PR** stored-publication start lock plus persist-backed HTTP create/reload (`start_created_assessment_session_from_stored_release`); load still restores created identity without re-checking current eligibility; command HTTP remains missing |
+| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch; stored-publication start lock plus persist-backed HTTP create/reload (`start_created_assessment_session_from_stored_release`) are on protected main | load still restores created identity without re-checking current eligibility; command HTTP remains missing |
 | Publication event replay is idempotent/conflicting reuse fails closed | TRD §7 | `src/instrument.rs` | durable DB uniqueness/concurrency test |
 | Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | `src/instrument.rs` binds approved evidence status, provenance/scope, mandatory evidence references, validity window, and immutable release identity before publication/reactivation | persistence/API publication integration and real instrument-specific evidence artifacts |
 | Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID | append-only identity-link persistence + unlink/relink/recovery audit tests |
@@ -93,7 +93,7 @@ Current protected-main Rust module surface on `085ef4b4714796a77fd4645eeb46b028f
 
 ```text
 src/lib.rs
-├── anonymous_authorization.rs  # Active PR #225 supplied-record anonymous session command authorization (not protected-main truth)
+├── anonymous_authorization.rs  # supplied-record anonymous session command authorization
 ├── authorization.rs  # fail-closed tenant/task authorization context and gates
 ├── consent.rs        # purpose-specific consent + research contribution lifecycle
 ├── data_rights.rs    # export/deletion lifecycle and retention evidence
@@ -134,9 +134,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
-
-**Active PR** #242 append-only product audit evidence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/audit.rs`, `src/postgres_audit.rs`, and `migrations/0040_audit_evidence_record.sql` persist tenant-scoped purpose/action/outcome/digest records, keep exact replay idempotent, fail closed on conflicting identity or corrupt history, and hide cross-tenant existence. HTTP/event transport and privileged-access policy adapters remain outside this slice.
+**Active PR** #242 append-only product audit evidence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/audit.rs`, `src/postgres_audit.rs`, and `migrations/0040_audit_evidence_record.sql` persist tenant-scoped purpose/action/outcome/digest records, keep exact replay idempotent, fail closed on conflicting identity or corrupt history, and hide cross-tenant existence. HTTP/event transport and privileged-access policy adapters remain outside this slice. #228 claim-next scoring-job poll, #235 observation-time ingest, #232 persist-backed session HTTP, and #225 supplied-record anonymous command authorization are already on protected main. Persist/reload of `assessment_participant` remains Target.
 
 ## 5. ADR traceability by concern
 
