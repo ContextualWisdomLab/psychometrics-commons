@@ -8,8 +8,8 @@
 
 DO $audit_evidence_schema$
 DECLARE
-    relation_ref REGCLASS := to_regclass('audit_evidence_record');
-    created_table BOOLEAN := relation_ref IS NULL;
+    relation_ref REGCLASS;
+    created_table BOOLEAN;
     actual_columns TEXT[];
     actual_defaults TEXT[];
     actual_constraint_names TEXT[];
@@ -19,6 +19,10 @@ DECLARE
     constraint_manifest_prefix CONSTANT TEXT :=
         'psychometrics-commons:migration-0040:constraint-manifest:';
 BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('psychometrics-commons:migration-0040'));
+    relation_ref := to_regclass('audit_evidence_record');
+    created_table := relation_ref IS NULL;
+
     IF created_table THEN
         EXECUTE $create_audit_evidence_record$
 CREATE TABLE audit_evidence_record (
