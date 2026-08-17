@@ -231,8 +231,7 @@ fn valid_urn_problem_type(remainder: &str) -> bool {
             .map_or((resolver_and_query, None), |(resolver, query)| {
                 (resolver, Some(query))
             });
-        return valid_urn_rq_component(resolver)
-            && query.is_none_or(valid_urn_rq_component);
+        return valid_urn_rq_component(resolver) && query.is_none_or(valid_urn_rq_component);
     }
     if let Some(query) = optional_components.strip_prefix("?=") {
         return valid_urn_rq_component(query);
