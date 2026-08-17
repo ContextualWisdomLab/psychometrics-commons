@@ -384,6 +384,11 @@ erDiagram
       string payload_digest
       timestamp occurred_at
       timestamp published_at
+      string lease_worker_ref
+      string lease_ref
+      int lease_fencing_token
+      timestamp lease_expires_at
+      int delivery_lease_generation
     }
 
     integration_delivery_attempt {
@@ -428,7 +433,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
-- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
+- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main. Exclusive outbox delivery-lease columns (`lease_worker_ref`, `lease_ref`, `lease_fencing_token`, `lease_expires_at`, `delivery_lease_generation`) and database-clock expiry recovery exist only on Active PR #60 until merged. `integration_consumption` pending/processing/completed/quarantined persistence is already on protected main.
 
 This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
 
