@@ -11,8 +11,7 @@ use postgres::{GenericClient, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-const AUDIT_EVIDENCE_MIGRATION: &str =
-    include_str!("../migrations/0040_audit_evidence_record.sql");
+const AUDIT_EVIDENCE_MIGRATION: &str = include_str!("../migrations/0040_audit_evidence_record.sql");
 
 /// Outcome of persisting one immutable audit record.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -204,8 +203,8 @@ pub fn load_audit_evidence(
     let outcome_code: String = row.get(4);
     let evidence_digest: String = row.get(5);
     let occurred_at_unix_ms: i64 = row.get(6);
-    let occurred_at_unix_ms = u64::try_from(occurred_at_unix_ms)
-        .map_err(|_| AuditPersistenceError::CorruptHistory)?;
+    let occurred_at_unix_ms =
+        u64::try_from(occurred_at_unix_ms).map_err(|_| AuditPersistenceError::CorruptHistory)?;
     let outcome = AuditOutcome::from_code(&outcome_code)
         .map_err(|_| AuditPersistenceError::CorruptHistory)?;
 
@@ -231,9 +230,7 @@ fn required_reference(reference: &str) -> Result<&str, AuditPersistenceError> {
     }
 }
 
-fn require_read_committed(
-    transaction: &mut Transaction<'_>,
-) -> Result<(), AuditPersistenceError> {
+fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), AuditPersistenceError> {
     let row = transaction.query_one("SHOW transaction_isolation", &[])?;
     let isolation: String = row.get(0);
     if isolation == "read committed" {
