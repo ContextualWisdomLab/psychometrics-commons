@@ -13,6 +13,9 @@ fn ready_client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     client
+        .batch_execute("SET lock_timeout TO '60s'")
+        .expect("database-lock waits should have a finite CI bound");
+    client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL temporal-integrity test lock should be acquired");
     client
