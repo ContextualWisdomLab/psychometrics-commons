@@ -35,7 +35,7 @@ pub enum AuditPersistenceError {
     CorruptHistory,
     /// The Unix-millisecond event time cannot be represented by the database schema.
     TimestampOutOfRange,
-    /// Audit persistence requires `PostgreSQL` `READ COMMITTED` isolation.
+    /// Audit persistence writes require `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
     /// `PostgreSQL` rejected or could not execute the operation.
     Database(postgres::Error),
@@ -117,19 +117,19 @@ pub fn persist_audit_evidence(
 ///
 /// Another tenant receives `None` for the same event reference so this read path does not reveal
 /// cross-tenant existence. Persisted values are reconstructed through the current domain
-/// constructor and corrupt history therefore fails closed.
+/// constructor and corrupt history therefore fails closed. This single-row read is valid at
+/// `READ COMMITTED`, `REPEATABLE READ`, and `SERIALIZABLE`; unlike persistence, it does not rely on
+/// receiving a fresh command snapshot after a concurrent unique-key conflict.
 ///
 /// # Errors
 ///
 /// Returns [`AuditPersistenceError::InvalidReference`] for malformed caller aliases,
-/// [`AuditPersistenceError::UnsupportedIsolationLevel`] outside `READ COMMITTED`,
 /// [`AuditPersistenceError::CorruptHistory`] for unsupported stored evidence, or a database error.
 pub fn load_audit_evidence(
     transaction: &mut Transaction<'_>,
     tenant_ref: &str,
     audit_event_ref: &str,
 ) -> Result<Option<AuditEvidence>, AuditPersistenceError> {
-    require_read_committed(transaction)?;
     let tenant_ref = required_reference(tenant_ref)?;
     let audit_event_ref = required_reference(audit_event_ref)?;
     let Some(row) = query_optional_audit_row(transaction, tenant_ref, audit_event_ref)? else {
