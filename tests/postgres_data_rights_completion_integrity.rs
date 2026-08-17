@@ -1,6 +1,6 @@
 //! Database-boundary invariants for data-rights completion evidence.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_data_rights::{
@@ -105,14 +105,22 @@ fn retained_scope_row_cannot_be_attached_to_completed_export() {
         transaction.commit().unwrap();
     }
 
-    assert!(client
+    let error = client
         .execute(
             "INSERT INTO data_rights_retained_scope_evidence
                 (request_ref, tenant_ref, retained_scope_ref)
              VALUES ($1, $2, 'retention_legal')",
             &[&request.request_ref(), &request.tenant_ref()],
         )
-        .is_err());
+        .expect_err("retained scope must reference a partially completed deletion");
+    let database_error = error
+        .as_db_error()
+        .expect("retained-scope parent rejection should be a PostgreSQL foreign-key error");
+    assert_eq!(database_error.code(), &SqlState::FOREIGN_KEY_VIOLATION);
+    assert_eq!(
+        database_error.constraint(),
+        Some("data_rights_retained_scope_request_fk")
+    );
 }
 
 #[test]
@@ -171,14 +179,20 @@ fn terminal_states_cannot_exist_without_completion_evidence() {
     );
 
     for terminal_state in ["completed", "partially_completed"] {
-        assert!(
-            client
-                .execute(
-                    "UPDATE data_rights_request_state SET current_state = $1 WHERE request_ref = $2",
-                    &[&terminal_state, &request.request_ref()],
-                )
-                .is_err(),
-            "terminal state {terminal_state} must require durable completion evidence"
+        let error = client
+            .execute(
+                "UPDATE data_rights_request_state SET current_state = $1 WHERE request_ref = $2",
+                &[&terminal_state, &request.request_ref()],
+            )
+            .expect_err("terminal state must require durable completion evidence");
+        let database_error = error
+            .as_db_error()
+            .expect("terminal-state rejection should be a PostgreSQL CHECK error");
+        assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
+        assert_eq!(
+            database_error.constraint(),
+            Some("data_rights_completion_state_evidence_check"),
+            "unexpected rejection path for terminal state {terminal_state}"
         );
     }
 }
@@ -192,17 +206,22 @@ fn completion_evidence_cannot_exist_before_terminal_state() {
         DataRightsRequestKind::Deletion,
     );
 
-    assert!(
-        client
-            .execute(
-                "UPDATE data_rights_request_state
-                 SET completion_evidence_ref = 'completion_evidence_direct',
-                     completed_at_unix_ms = 10300
-                 WHERE request_ref = $1",
-                &[&request.request_ref()],
-            )
-            .is_err(),
-        "processing rows must not carry terminal completion evidence"
+    let error = client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET completion_evidence_ref = 'completion_evidence_direct',
+                 completed_at_unix_ms = 10300
+             WHERE request_ref = $1",
+            &[&request.request_ref()],
+        )
+        .expect_err("processing rows must not carry terminal completion evidence");
+    let database_error = error
+        .as_db_error()
+        .expect("premature completion evidence should be rejected by a PostgreSQL CHECK");
+    assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
+    assert_eq!(
+        database_error.constraint(),
+        Some("data_rights_completion_state_evidence_check")
     );
 }
 
@@ -227,24 +246,50 @@ fn retained_scope_evidence_is_immutable_after_completion() {
         transaction.commit().unwrap();
     }
 
-    assert!(client
+    let update_error = client
         .execute(
             "UPDATE data_rights_retained_scope_evidence
              SET retained_scope_ref = 'retention_rewritten'
              WHERE request_ref = $1 AND retained_scope_ref = 'retention_legal'",
             &[&request.request_ref()],
         )
-        .is_err());
-    assert!(client
+        .expect_err("retained-scope update must be rejected by the immutability trigger");
+    assert_eq!(
+        update_error
+            .as_db_error()
+            .expect("update rejection should be a PostgreSQL trigger error")
+            .code()
+            .code(),
+        "55000"
+    );
+
+    let delete_error = client
         .execute(
             "DELETE FROM data_rights_retained_scope_evidence
              WHERE request_ref = $1 AND retained_scope_ref = 'retention_legal'",
             &[&request.request_ref()],
         )
-        .is_err());
-    assert!(client
+        .expect_err("retained-scope delete must be rejected by the immutability trigger");
+    assert_eq!(
+        delete_error
+            .as_db_error()
+            .expect("delete rejection should be a PostgreSQL trigger error")
+            .code()
+            .code(),
+        "55000"
+    );
+
+    let truncate_error = client
         .batch_execute("TRUNCATE TABLE data_rights_retained_scope_evidence")
-        .is_err());
+        .expect_err("retained-scope truncate must be rejected by the immutability trigger");
+    assert_eq!(
+        truncate_error
+            .as_db_error()
+            .expect("truncate rejection should be a PostgreSQL trigger error")
+            .code()
+            .code(),
+        "55000"
+    );
 
     let retained: String = client
         .query_one(
