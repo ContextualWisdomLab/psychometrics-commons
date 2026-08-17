@@ -157,6 +157,21 @@ fn authorized_actor_cannot_receive_an_export_from_another_result() {
 }
 
 #[test]
+fn authorized_actor_rejects_same_result_reference_with_another_export_owner() {
+    let snapshot = result_snapshot("result_snapshot_alpha", "participant_alpha", "alpha");
+    let other_owner_snapshot =
+        result_snapshot("result_snapshot_alpha", "participant_other", "other_owner");
+    let wrong_export = personal_export(&other_owner_snapshot, "result_export_other_owner");
+    let participant = participant("participant_alpha", "tenant_alpha");
+    let actor = actor("tenant_alpha", "participant_alpha");
+
+    assert_eq!(
+        authorize_result_export_read(&actor, &participant, &snapshot, &wrong_export),
+        Err(ResultExportAuthorizationError::ExportBindingMismatch)
+    );
+}
+
+#[test]
 fn participant_record_must_own_the_result_before_export_access() {
     let snapshot = result_snapshot("result_snapshot_alpha", "participant_alpha", "alpha");
     let export = personal_export(&snapshot, "result_export_alpha");
@@ -173,9 +188,8 @@ fn participant_record_must_own_the_result_before_export_access() {
 
 #[test]
 fn export_authorization_errors_keep_safe_operator_text_and_sources() {
-    let authorization = ResultExportAuthorizationError::Authorization(
-        AuthorizationError::CrossTenantDenied,
-    );
+    let authorization =
+        ResultExportAuthorizationError::Authorization(AuthorizationError::CrossTenantDenied);
     assert_eq!(
         authorization.to_string(),
         "resource tenant does not match the authenticated tenant"
