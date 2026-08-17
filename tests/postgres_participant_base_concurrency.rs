@@ -53,8 +53,9 @@ fn race_replay(
     contender_tenant_ref: &'static str,
     contender_created_at_unix_ms: u64,
 ) -> ReplayOutcome {
-    let winner = ParticipantRecord::new_anonymous(participant_ref, "tenant_concurrency_demo", 40_000)
-        .unwrap();
+    let winner =
+        ParticipantRecord::new_anonymous(participant_ref, "tenant_concurrency_demo", 40_000)
+            .unwrap();
     let mut winner_transaction = winner_client.transaction().unwrap();
     assert_eq!(
         persist_anonymous_participant_base(&mut winner_transaction, &winner).unwrap(),
@@ -91,7 +92,9 @@ fn race_replay(
     thread::sleep(Duration::from_millis(100));
     winner_transaction.commit().unwrap();
 
-    contender.join().expect("concurrent contender must not panic")
+    contender
+        .join()
+        .expect("concurrent contender must not panic")
 }
 
 #[test]
