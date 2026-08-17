@@ -52,7 +52,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
-| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | persistence/API concurrency test |
+| Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | **Active PR** persist/load created-session identity, sealed stored-publication start, and persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}`; command HTTP and tenant isolation remain missing |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
@@ -63,7 +63,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
 | Instrument release bytes/version/item order are immutable | TRD §7 | `src/instrument.rs` + publication contract tests; `src/postgres_instrument_release.rs` persists immutable manifest columns | API publication integration |
-| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch | session-creation persistence/API integration test |
+| Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch | **Active PR** stored-publication start lock plus persist-backed HTTP create/reload (`start_created_assessment_session_from_stored_release`); load still restores created identity without re-checking current eligibility; command HTTP remains missing |
 | Publication event replay is idempotent/conflicting reuse fails closed | TRD §7 | `src/instrument.rs` | durable DB uniqueness/concurrency test |
 | Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | `src/instrument.rs` binds approved evidence status, provenance/scope, mandatory evidence references, validity window, and immutable release identity before publication/reactivation | persistence/API publication integration and real instrument-specific evidence artifacts |
 | Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID | append-only identity-link persistence + unlink/relink/recovery audit tests |
@@ -128,15 +128,15 @@ migrations/
 └── 0012_integration_consumption.sql
 ```
 
-Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
+Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration. Active PR #232 adds persist-backed session HTTP on the #218 sealed start path (`src/session_http.rs`, `openapi/sessions.yaml`); those files are not protected-main truth.
 
 ### Active implementation work that is not protected-main truth
 
+**Active PR** #232 persist-backed session HTTP on the sealed start path is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` call `start_created_assessment_session_from_stored_release` / `load_assessment_session`. `Idempotency-Key` is the durable session reference. Exact replay after later persist Suspend or Retire returns the original session. A new session after that later persist fails closed. RFC 9457 problem details tell the buyer the next action. Command HTTP, tenant isolation, and leftover #149 / #161 / #219 / #218 / #209 / #205 / #198 remain outside this slice.
+
 **Active PR** #60 exclusive outbox delivery-lease persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Pending outbox rows accept one fenced worker lease, recover expiry from the database clock without transferring the fence, reject a future caller timestamp that would steal a still-live lease, and reject stale or zero-window claims. Live side-effect execution remains outside this slice.
 
-**Active PR** #228 claim-next scoring-job poll is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `claim_next_scoring_job` lets a worker that does not already know the job identity take the oldest due queued or retry-scheduled `scoring_job_state` row with `FOR UPDATE SKIP LOCKED`, receive the bound `scoring_request_ref` and fencing lease, and treat an empty due set as `None`. Prefer this head over composing claim-next onto the #217 stored-request-bind stack. Live `fast-mlsirm` execution, scoring HTTP, and a claim-next loop that calls `run_scoring_worker_attempt_with_result_snapshot` remain later slices. #76 data-rights processing-start persistence is already on protected main.
-
-**Active PR** #235 longitudinal observation-time ingest (`src/longitudinal_observation.rs`) is not protected-main truth. It records validity, recorded, received, and ingested clocks with explicit membership shares and fail-closed source-identity replay. Enrollment state, PostgreSQL persistence, HTTP, Gyeot collection, and TEPP kernels remain outside this slice. Prefer this head over folding observation clocks onto #226, #199, or #184.
+Protected-main `0c695b98f38369db8c80d4f8a54ab1fdb3022716` now includes #228 claim-next scoring-job poll (`claim_next_scoring_job` takes the oldest due queued or retry-scheduled row with `FOR UPDATE SKIP LOCKED`) and #235 longitudinal observation-time ingest. Those slices are no longer Active PR work on this branch. Live `fast-mlsirm` execution, scoring HTTP, a claim-next loop that calls `run_scoring_worker_attempt_with_result_snapshot`, enrollment persistence, Gyeot collection, and TEPP kernels remain later slices.
 
 ## 5. ADR traceability by concern
 
