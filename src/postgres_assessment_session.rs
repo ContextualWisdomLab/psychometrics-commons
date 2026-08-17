@@ -1008,16 +1008,22 @@ fn require_read_committed(
 #[cfg(test)]
 mod tests {
     use super::{
-        first_insert_seal_allows_exact_replay, published_snapshot_matches_session,
-        reject_stale_command_prefix, stored_start_identity_matches,
-        AssessmentSessionPersistenceError, AssessmentSessionStartError,
-        StartedSessionReplayRequest,
+        apply_assessment_session_migration, first_insert_seal_allows_exact_replay,
+        published_snapshot_matches_session, reject_stale_command_prefix,
+        start_created_assessment_session, stored_start_identity_matches,
+        AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
+        AssessmentSessionStartError, StartedSessionReplayRequest,
     };
-    use crate::instrument::InstrumentReleaseManifest;
+    use crate::instrument::{
+        InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
+        PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
+    };
     use crate::postgres_instrument_release::{
+        apply_instrument_release_migration, persist_instrument_release,
         InstrumentReleaseQueryError, PublishedInstrumentReleaseSnapshot,
     };
     use crate::session::{AssessmentSession, SessionCommand, SessionCreationError, SessionState};
+    use postgres::{Client, NoTls};
 
     const REPLAY_DIGEST: &str =
         "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -1562,6 +1568,32 @@ mod tests {
                 "non-publication persist errors must not be rewritten as exact replay: {error}"
             );
         }
+        let source = postgres::Config::new()
+            .host("/no/such/psychometrics-commons.socket")
+            .port(1)
+            .user("postgres")
+            .dbname("psychometrics_commons_test")
+            .connect_timeout(std::time::Duration::from_millis(50))
+            .connect(postgres::NoTls)
+            .map(|_| ())
+            .expect_err("missing local socket must fail closed");
+        let database = AssessmentSessionPersistenceError::from(source);
+        assert!(!first_insert_seal_allows_exact_replay(&database));
+        let query_source = postgres::Config::new()
+            .host("/no/such/psychometrics-commons.socket")
+            .port(1)
+            .user("postgres")
+            .dbname("psychometrics_commons_test")
+            .connect_timeout(std::time::Duration::from_millis(50))
+            .connect(postgres::NoTls)
+            .map(|_| ())
+            .expect_err("missing local socket must fail closed");
+        assert!(matches!(
+            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::from(
+                query_source
+            )),
+            AssessmentSessionPersistenceError::Database(_)
+        ));
     }
 
     #[test]
@@ -1672,6 +1704,158 @@ mod tests {
             Err(AssessmentSessionStartError::Persistence(
                 AssessmentSessionPersistenceError::Database(_)
             ))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    fn published_release_for_unpublished_memory_start() -> InstrumentRelease {
+        let mut published = InstrumentRelease::new(
+            InstrumentReleaseManifest::new(
+                "release_big_five_ko_v1",
+                "instrument_big_five",
+                "instrument_version_big_five_ko_v1",
+                "construct_big_five",
+                &["item_version_001", "item_version_002"],
+                "ko-KR",
+                "assessment_spec_big_five_v1",
+                "scoring_version_big_five_v1",
+                "calibration_big_five_ko_v1",
+                Some("norm_version_big_five_ko_v1"),
+                "narrative_version_big_five_v1",
+                &["consent_service_v1"],
+                "intended_use_self_reflection_v1",
+                "limitations_nonclinical_v1",
+                REPLAY_DIGEST,
+            )
+            .unwrap(),
+            10_000,
+        )
+        .unwrap();
+        published
+            .apply_command(
+                "publication_review_unpublished_memory",
+                PublicationCommand::SubmitReview,
+                10_100,
+            )
+            .unwrap();
+        published
+            .bind_publication_evidence(
+                PublicationEvidenceRecord::new(
+                    "publication_evidence_big_five_ko_v1",
+                    "evidence_policy_self_reflection_v1",
+                    "release_big_five_ko_v1",
+                    "instrument_version_big_five_ko_v1",
+                    &["item_version_001", "item_version_002"],
+                    REPLAY_DIGEST,
+                    "ko-KR",
+                    "intended_use_self_reflection_v1",
+                    "assessment_spec_big_five_v1",
+                    "scoring_version_big_five_v1",
+                    "calibration_big_five_ko_v1",
+                    Some("norm_version_big_five_ko_v1"),
+                    "limitations_nonclinical_v1",
+                    PublicationEvidenceProvenance::new(
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                        "population_general_adult_v1",
+                        "administration_web_self_report_v1",
+                        "measurement_model_big_five_v1",
+                        10_050,
+                        None,
+                    )
+                    .unwrap(),
+                    &["rights_ipip_big_five_v1"],
+                    &["recovery_big_five_ko_v1"],
+                    &["approval_psychometrics_big_five_ko_v1"],
+                    PublicationEvidenceStatus::Approved,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        published
+            .apply_command(
+                "publication_publish_unpublished_memory",
+                PublicationCommand::Publish,
+                10_200,
+            )
+            .unwrap();
+        published
+    }
+
+    #[test]
+    fn unpublished_in_memory_start_replays_exact_stored_session() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS assessment_session_unpublished_memory CASCADE; \
+                 CREATE SCHEMA assessment_session_unpublished_memory; \
+                 SET search_path TO assessment_session_unpublished_memory;",
+            )
+            .unwrap();
+        apply_instrument_release_migration(&mut client).unwrap();
+        apply_assessment_session_migration(&mut client).unwrap();
+
+        let published = published_release_for_unpublished_memory_start();
+        let mut transaction = client.transaction().unwrap();
+        persist_instrument_release(&mut transaction, &published).unwrap();
+        let (started, inserted) = start_created_assessment_session(
+            &mut transaction,
+            "ses_unpublished_memory_replay",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &published,
+            "ko-KR",
+            20_000,
+        )
+        .unwrap();
+        assert_eq!(inserted, AssessmentSessionPersistenceDisposition::Inserted);
+        assert_eq!(started.session_ref(), "ses_unpublished_memory_replay");
+        transaction.commit().unwrap();
+
+        let draft = InstrumentRelease::new(published.manifest().clone(), 10_000).unwrap();
+        let mut suspended = published;
+        suspended
+            .apply_command(
+                "publication_suspend_unpublished_memory",
+                PublicationCommand::Suspend,
+                10_300,
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        let (replayed, disposition) = start_created_assessment_session(
+            &mut transaction,
+            "ses_unpublished_memory_replay",
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            &suspended,
+            "ko-KR",
+            20_000,
+        )
+        .expect("a buyer who already started must retry after the in-memory catalog is suspended");
+        assert_eq!(
+            disposition,
+            AssessmentSessionPersistenceDisposition::Duplicate
+        );
+        assert_eq!(replayed.session_ref(), "ses_unpublished_memory_replay");
+        assert!(matches!(
+            start_created_assessment_session(
+                &mut transaction,
+                "ses_unpublished_memory_new",
+                "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                &draft,
+                "ko-KR",
+                21_000,
+            ),
+            Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
+        ));
+        assert!(matches!(
+            start_created_assessment_session(
+                &mut transaction,
+                "ses_unpublished_memory_new",
+                "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+                &suspended,
+                "ko-KR",
+                21_000,
+            ),
+            Err(AssessmentSessionStartError::InstrumentReleaseUnavailable)
         ));
         transaction.rollback().unwrap();
     }

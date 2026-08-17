@@ -28,21 +28,19 @@ fn listener_waits_for_a_fragmented_content_length_body() {
         body.len()
     );
 
-    let client = std::thread::spawn(move || {
-        let mut stream = TcpStream::connect(address).unwrap();
-        stream.write_all(headers.as_bytes()).unwrap();
-        stream.flush().unwrap();
-        std::thread::sleep(Duration::from_millis(100));
-        stream.write_all(body.as_bytes()).unwrap();
-        stream.shutdown(Shutdown::Write).unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        response
+    let server = std::thread::spawn(move || {
+        let mut port = MemorySessionHttpPort::published();
+        accept_one_session_http(&listener, &mut port, 20_000).unwrap();
     });
-
-    let mut port = MemorySessionHttpPort::published();
-    accept_one_session_http(&listener, &mut port, 20_000).unwrap();
-    let response = client.join().unwrap();
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream.write_all(headers.as_bytes()).unwrap();
+    stream.flush().unwrap();
+    std::thread::sleep(Duration::from_millis(150));
+    stream.write_all(body.as_bytes()).unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap();
     assert!(
         response.starts_with("HTTP/1.1 201 Created\r\n"),
         "fragmented request body must be read before dispatch: {response}"

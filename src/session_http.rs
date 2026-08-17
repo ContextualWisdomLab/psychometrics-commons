@@ -846,6 +846,51 @@ mod tests {
     }
 
     #[test]
+    fn listener_waits_until_content_length_body_arrives() {
+        use crate::session_http::{
+            accept_one_session_http, handle_session_http_request, MemorySessionHttpPort,
+        };
+        use std::io::{Read, Write};
+        use std::net::Shutdown;
+        use std::time::Duration;
+
+        let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = "{\"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}";
+        let headers = format!(
+            "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_wait_body\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let server = std::thread::spawn(move || {
+            let mut port = MemorySessionHttpPort::published();
+            accept_one_session_http(&listener, &mut port, 20_000).unwrap();
+            port
+        });
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream.write_all(headers.as_bytes()).unwrap();
+        stream.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        stream.write_all(body.as_bytes()).unwrap();
+        stream.shutdown(Shutdown::Write).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        let mut port = server.join().unwrap();
+        assert!(
+            response.starts_with("HTTP/1.1 201 Created\r\n"),
+            "server must wait for the declared body before dispatch: {response}"
+        );
+        let replay = handle_session_http_request(
+            &format!(
+                "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_wait_body\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+            &mut port,
+            20_000,
+        );
+        assert_eq!(replay.status(), 200);
+    }
+
+    #[test]
     fn bind_accepts_one_loopback_create() {
         use crate::session_http::{
             accept_one_session_http, handle_session_http_request, MemorySessionHttpPort,
@@ -948,6 +993,20 @@ mod tests {
             405
         );
         assert_eq!(
+            handle_session_http_request("GET /v1/sessions/ HTTP/1.1\r\n\r\n", &mut port, 20_000)
+                .status(),
+            404
+        );
+        assert_eq!(
+            handle_session_http_request(
+                "GET /v1/sessions/ses_x/commands HTTP/1.1\r\n\r\n",
+                &mut port,
+                20_000
+            )
+            .status(),
+            404
+        );
+        assert_eq!(
             handle_session_http_request(
                 "GET /v1/sessions/ses_missing HTTP/1.1\r\n\r\n",
                 &mut port,
@@ -978,6 +1037,19 @@ mod tests {
             409
         );
         port.published = true;
+        let created = handle_session_http_request(
+            &create_request("ses_conflict", "ko-KR"),
+            &mut port,
+            20_000,
+        );
+        assert_eq!(created.status(), 201);
+        let conflict = handle_session_http_request(
+            "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_conflict\r\n\r\n{\"participant_ref\":\"ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}",
+            &mut port,
+            20_000,
+        );
+        assert_eq!(conflict.status(), 409);
+        assert!(conflict.body().contains("idempotency-conflict"));
 
         for (error, expected) in [
             (AssessmentSessionStartError::InvalidReference, 400),

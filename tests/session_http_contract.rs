@@ -265,6 +265,29 @@ fn memory_port_records_exact_replay_disposition() {
 }
 
 #[test]
+fn reused_idempotency_key_with_a_different_participant_is_conflict() {
+    let mut port = MemorySessionHttpPort::published();
+    let created = handle_session_http_request(&create_request(SESSION, "ko-KR"), &mut port, 20_000);
+    assert_eq!(created.status(), 201);
+    let conflict = handle_session_http_request(
+        &format!(
+            "POST {SESSION_COLLECTION_PATH} HTTP/1.1\r\n\
+             Idempotency-Key: {SESSION}\r\n\
+             \r\n\
+             {{\"participant_ref\":\"ptc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"instrument_release_ref\":\"{RELEASE}\",\"locale\":\"ko-KR\"}}"
+        ),
+        &mut port,
+        20_000,
+    );
+    assert_eq!(conflict.status(), 409);
+    assert_eq!(conflict.content_type(), "application/problem+json");
+    assert!(conflict.body().contains("idempotency-conflict"));
+    assert!(conflict
+        .body()
+        .contains("Idempotency-Key was reused with a different session create body"));
+}
+
+#[test]
 fn get_rejects_empty_and_nested_session_paths() {
     let mut port = MemorySessionHttpPort::published();
     assert_eq!(
