@@ -438,7 +438,7 @@ mod reference_guard_tests {
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
     use crate::session::SessionState;
-    use postgres::{Client, NoTls};
+    use postgres::{Client, IsolationLevel, NoTls};
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
@@ -691,6 +691,55 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::Database(_))
         ));
         transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn persist_and_load_instantiate_unsupported_isolation_in_the_library() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS response_event_isolation_lib_test;\
+                 SET search_path TO response_event_isolation_lib_test;",
+            )
+            .unwrap();
+        apply_response_event_migration(&mut client).unwrap();
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_iso",
+            "client_event_item_iso",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let mut serializable = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::RepeatableRead)
+            .start()
+            .unwrap();
+        let persist_error = persist_response_event(
+            &mut serializable,
+            "session_ipip_ko_iso",
+            &event,
+            1_700_000_000_000,
+            1_700_000_000_250,
+        )
+        .expect_err("lib persist must reject stronger isolation");
+        assert!(matches!(
+            persist_error,
+            ResponseEventPersistenceError::UnsupportedIsolationLevel
+        ));
+        assert_eq!(
+            persist_error.to_string(),
+            "response event persistence requires read committed isolation"
+        );
+        let load_error = load_response_event_receipts(&mut serializable, "session_ipip_ko_iso")
+            .expect_err("lib load must reject stronger isolation");
+        assert!(matches!(
+            load_error,
+            ResponseEventPersistenceError::UnsupportedIsolationLevel
+        ));
+        serializable.rollback().unwrap();
     }
 
     #[test]
