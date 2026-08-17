@@ -166,29 +166,35 @@ pub fn load_current_result_snapshot_for_session(
 ) -> Result<Option<ResultSnapshot>, ResultSnapshotPersistenceError> {
     require_read_committed(transaction)?;
     let session_ref = required_reference(session_ref)?;
-    let tips = transaction.query(
-        "SELECT result_snapshot_ref \
-         FROM result_snapshot \
-         WHERE session_ref = $1 \
-           AND result_snapshot_ref NOT IN ( \
-               SELECT supersedes_ref FROM result_snapshot \
-               WHERE session_ref = $1 AND supersedes_ref IS NOT NULL \
-           )",
+    let counts = transaction.query_one(
+        "SELECT \
+            (SELECT COUNT(*) FROM result_snapshot \
+             WHERE session_ref = $1 \
+               AND result_snapshot_ref NOT IN ( \
+                   SELECT supersedes_ref FROM result_snapshot \
+                   WHERE session_ref = $1 AND supersedes_ref IS NOT NULL \
+               ))::bigint, \
+            (SELECT COUNT(*) FROM result_snapshot WHERE session_ref = $1)::bigint",
         &[&session_ref],
     )?;
-    let session_has_snapshots = if tips.is_empty() {
-        let row = transaction.query_one(
-            "SELECT EXISTS(SELECT 1 FROM result_snapshot WHERE session_ref = $1)",
-            &[&session_ref],
-        )?;
-        row.get(0)
-    } else {
-        true
-    };
-    match classify_current_session_tips(tips.len(), session_has_snapshots)? {
+    let tip_count = usize::try_from(counts.get::<_, i64>(0))
+        .map_err(|_| ResultSnapshotPersistenceError::InconsistentEvidence)?;
+    let session_has_snapshots = counts.get::<_, i64>(1) > 0;
+    match classify_current_session_tips(tip_count, session_has_snapshots)? {
         CurrentSessionTipPlan::Absent => Ok(None),
         CurrentSessionTipPlan::LoadUniqueTip => {
-            let snapshot_ref: String = tips[0].get(0);
+            let snapshot_ref: String = transaction
+                .query_one(
+                    "SELECT result_snapshot_ref \
+                     FROM result_snapshot \
+                     WHERE session_ref = $1 \
+                       AND result_snapshot_ref NOT IN ( \
+                           SELECT supersedes_ref FROM result_snapshot \
+                           WHERE session_ref = $1 AND supersedes_ref IS NOT NULL \
+                       )",
+                    &[&session_ref],
+                )?
+                .get(0);
             load_result_snapshot(transaction, &snapshot_ref)
         }
     }

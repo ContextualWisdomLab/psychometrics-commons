@@ -869,6 +869,39 @@ fn current_session_load_rejects_gapped_published_tip() {
 }
 
 #[test]
+fn current_session_load_rejects_blank_observation_construct() {
+    let _guard = result_snapshot_test_guard();
+    let mut client = test_client();
+    reset_result_snapshot_tables(&mut client);
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_disposition",
+            "result_snapshot_disposition",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            None,
+            vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+        ),
+    );
+    client
+        .batch_execute(
+            "UPDATE result_snapshot_observation \
+             SET construct_ref = '' \
+             WHERE result_snapshot_ref = 'result_snapshot_disposition';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_disposition"),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn missing_result_relation_on_session_load_is_a_database_failure() {
     let _guard = result_snapshot_test_guard();
     let mut client = test_client();
