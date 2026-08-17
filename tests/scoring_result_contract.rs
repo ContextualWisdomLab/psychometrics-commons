@@ -1,5 +1,7 @@
 //! Integration tests for scoring-dispatch and immutable result provenance.
 
+mod common;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
@@ -61,6 +63,16 @@ fn scoring_result() -> ScoringResult {
         vec![scored_observation()],
     )
     .unwrap()
+}
+
+fn result_session(
+    request: &ScoringRequest,
+) -> psychometrics_commons_runtime::session::AssessmentSession {
+    common::scoring_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    )
 }
 
 #[test]
@@ -295,7 +307,8 @@ fn result_input<'a>() -> ResultSnapshotInput<'a> {
 fn result_snapshot_copies_scientific_provenance_without_recomputing_scores() {
     let request = scoring_request();
     let result = scoring_result();
-    let snapshot = ResultSnapshot::new(&request, &result, result_input()).unwrap();
+    let session = result_session(&request);
+    let snapshot = ResultSnapshot::new(&session, &request, &result, result_input()).unwrap();
 
     assert_eq!(snapshot.result_snapshot_ref(), "result_snapshot_ref");
     assert_eq!(snapshot.participant_ref(), "participant_ref");
@@ -323,15 +336,17 @@ fn result_snapshot_copies_scientific_provenance_without_recomputing_scores() {
 fn result_snapshot_accepts_first_result_without_supersession() {
     let request = scoring_request();
     let result = scoring_result();
+    let session = result_session(&request);
     let mut input = result_input();
     input.supersedes_ref = None;
-    let snapshot = ResultSnapshot::new(&request, &result, input).unwrap();
+    let snapshot = ResultSnapshot::new(&session, &request, &result, input).unwrap();
     assert_eq!(snapshot.supersedes_ref(), None);
 }
 
 #[test]
 fn result_snapshot_rejects_mismatched_scoring_request() {
     let first_request = scoring_request();
+    let session = result_session(&first_request);
     let mut second_input = scoring_input();
     second_input.scoring_request_ref = "other_request_ref";
     let second_request =
@@ -344,7 +359,7 @@ fn result_snapshot_rejects_mismatched_scoring_request() {
     )
     .unwrap();
 
-    let error = ResultSnapshot::new(&first_request, &result, result_input()).unwrap_err();
+    let error = ResultSnapshot::new(&session, &first_request, &result, result_input()).unwrap_err();
     assert_eq!(error, ResultSnapshotError::ScoringRequestMismatch);
     assert_eq!(
         error.to_string(),
@@ -356,10 +371,11 @@ fn result_snapshot_rejects_mismatched_scoring_request() {
 fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
     let request = scoring_request();
     let result = scoring_result();
+    let session = result_session(&request);
 
     let mut blank_ref = result_input();
     blank_ref.participant_ref = " ";
-    let empty_error = ResultSnapshot::new(&request, &result, blank_ref).unwrap_err();
+    let empty_error = ResultSnapshot::new(&session, &request, &result, blank_ref).unwrap_err();
     assert_eq!(empty_error, ResultSnapshotError::EmptyReference);
     assert_eq!(
         empty_error.to_string(),
@@ -368,7 +384,7 @@ fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
 
     let mut no_consents = result_input();
     no_consents.consent_snapshot_refs = &[];
-    let consent_error = ResultSnapshot::new(&request, &result, no_consents).unwrap_err();
+    let consent_error = ResultSnapshot::new(&session, &request, &result, no_consents).unwrap_err();
     assert_eq!(consent_error, ResultSnapshotError::MissingConsentSnapshot);
     assert_eq!(
         consent_error.to_string(),
@@ -378,13 +394,14 @@ fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
     let mut blank_consent = result_input();
     blank_consent.consent_snapshot_refs = &["service_consent_ref", ""];
     assert_eq!(
-        ResultSnapshot::new(&request, &result, blank_consent).unwrap_err(),
+        ResultSnapshot::new(&session, &request, &result, blank_consent).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
 
     let mut duplicate_consent = result_input();
     duplicate_consent.consent_snapshot_refs = &["service_consent_ref", "service_consent_ref"];
-    let duplicate_error = ResultSnapshot::new(&request, &result, duplicate_consent).unwrap_err();
+    let duplicate_error =
+        ResultSnapshot::new(&session, &request, &result, duplicate_consent).unwrap_err();
     assert_eq!(
         duplicate_error,
         ResultSnapshotError::DuplicateConsentSnapshot
@@ -396,7 +413,7 @@ fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
 
     let mut invalid_time = result_input();
     invalid_time.created_at_unix_ms = 0;
-    let time_error = ResultSnapshot::new(&request, &result, invalid_time).unwrap_err();
+    let time_error = ResultSnapshot::new(&session, &request, &result, invalid_time).unwrap_err();
     assert_eq!(time_error, ResultSnapshotError::InvalidCreationTime);
     assert_eq!(
         time_error.to_string(),
@@ -406,13 +423,14 @@ fn result_snapshot_rejects_invalid_identity_consent_time_or_supersession() {
     let mut blank_supersedes = result_input();
     blank_supersedes.supersedes_ref = Some(" ");
     assert_eq!(
-        ResultSnapshot::new(&request, &result, blank_supersedes).unwrap_err(),
+        ResultSnapshot::new(&session, &request, &result, blank_supersedes).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
 
     let mut self_supersedes = result_input();
     self_supersedes.supersedes_ref = Some("result_snapshot_ref");
-    let supersession_error = ResultSnapshot::new(&request, &result, self_supersedes).unwrap_err();
+    let supersession_error =
+        ResultSnapshot::new(&session, &request, &result, self_supersedes).unwrap_err();
     assert_eq!(supersession_error, ResultSnapshotError::SelfSupersession);
     assert_eq!(
         supersession_error.to_string(),

@@ -1,5 +1,7 @@
 //! Fail-first regressions for scoring provenance binding and reference normalization.
 
+mod common;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
@@ -120,12 +122,18 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
         vec![ScoreObservation::scored(" construct_ref ", 1.0, None).unwrap()],
     )
     .unwrap();
+    let session = common::scoring_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
 
     assert_eq!(result.scoring_result_ref(), "scoring_result_ref");
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].construct_ref(), "construct_ref");
 
     let duplicate = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {
@@ -141,6 +149,7 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
     assert_eq!(duplicate, ResultSnapshotError::DuplicateConsentSnapshot);
 
     let self_supersession = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {
@@ -156,6 +165,7 @@ fn result_identity_and_consent_comparisons_use_normalized_references() {
     assert_eq!(self_supersession, ResultSnapshotError::SelfSupersession);
 
     let normalized = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {
