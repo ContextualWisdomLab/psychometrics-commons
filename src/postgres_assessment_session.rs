@@ -11,7 +11,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const ASSESSMENT_SESSION_MIGRATION: &str =
-    include_str!("../migrations/0022_assessment_session.sql");
+    include_str!("../migrations/0023_assessment_session.sql");
 
 /// Outcome of persisting one created assessment session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

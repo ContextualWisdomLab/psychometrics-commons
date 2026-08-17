@@ -66,7 +66,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Active PR assessment-session physical schema
 
-This branch's `migrations/0022_assessment_session.sql` and `src/postgres_assessment_session.rs` persist one created assessment-session identity bound to a published locale-specific release. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, content-digest, locale, created state, and creation time. Exact replay is idempotent. Rebinding any stored field fails closed. Later lifecycle states, command history, and HTTP session transport remain outside this slice.
+This branch's `migrations/0023_assessment_session.sql` and `src/postgres_assessment_session.rs` persist one created assessment-session identity bound to a published locale-specific release. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, content-digest, locale, created state, and creation time. Exact replay is idempotent. Rebinding any stored field fails closed. Later lifecycle states, command history, and HTTP session transport remain outside this slice.
 
 ## Logical-to-physical mapping rule
 
