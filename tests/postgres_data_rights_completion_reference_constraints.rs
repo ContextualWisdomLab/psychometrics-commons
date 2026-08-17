@@ -149,6 +149,14 @@ fn reapply_rejects_unicode_aliases_for_completion_evidence() {
         "data_rights_request_completion_ref",
     );
 
+    // The terminal-row trigger correctly rejects every mutation first. Disable that guard only in
+    // this isolated schema so this test reaches and verifies the independently required CHECK.
+    client
+        .batch_execute(
+            "ALTER TABLE data_rights_request_state
+             DISABLE TRIGGER data_rights_terminal_completion_immutable_guard;",
+        )
+        .unwrap();
     for invalid_ref in [
         "U&'\\00A0completion_evidence_alpha'",
         "U&'12\\066B3'",
@@ -172,6 +180,12 @@ fn reapply_rejects_unicode_aliases_for_completion_evidence() {
             "unexpected rejection path for completion evidence alias {invalid_ref}"
         );
     }
+    client
+        .batch_execute(
+            "ALTER TABLE data_rights_request_state
+             ENABLE TRIGGER data_rights_terminal_completion_immutable_guard;",
+        )
+        .unwrap();
 
     cleanup_schema(&mut client);
 }
