@@ -429,11 +429,12 @@ fn require_read_committed(
 #[cfg(test)]
 mod reference_guard_tests {
     use super::{
-        apply_response_event_migration, classify_existing_event, load_response_event_receipts,
-        load_response_ledger, map_rebuild_error, millis_from_duration, next_contiguous_sequence,
-        persist_response_event, postgres_sequence, postgres_timestamptz, query_existing_event_row,
-        require_contiguous_receipt_history, require_read_committed, required_reference,
-        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
+        apply_response_event_migration, classify_existing_event, classify_unique_violation,
+        load_response_event_receipts, load_response_ledger, map_rebuild_error,
+        millis_from_duration, next_contiguous_sequence, persist_response_event, postgres_sequence,
+        postgres_timestamptz, query_existing_event_row, require_contiguous_receipt_history,
+        require_read_committed, required_reference, unix_ms_from_system_time,
+        ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
@@ -772,5 +773,76 @@ mod reference_guard_tests {
                 ResponseEventPersistenceError::ConflictingReplay
             ));
         }
+    }
+
+    #[test]
+    fn unique_violation_classifier_is_instantiated_in_the_library() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS response_event_unique_classify_lib;\
+                 SET search_path TO response_event_unique_classify_lib;\
+                 DROP TABLE IF EXISTS response_event;",
+            )
+            .unwrap();
+        apply_response_event_migration(&mut client).unwrap();
+        client
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_01', 'session_ipip_ko_quick', 'client_event_item_01', \
+                     'item_version_n1_ko', \
+                     'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', \
+                     1, TIMESTAMPTZ '2023-11-14 22:13:20+00', TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap();
+        let client_conflict = client
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_02', 'session_ipip_ko_quick', 'client_event_item_01', \
+                     'item_version_n1_ko', \
+                     'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', \
+                     2, TIMESTAMPTZ '2023-11-14 22:13:21+00', TIMESTAMPTZ '2023-11-14 22:13:21.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            classify_unique_violation(client_conflict),
+            ResponseEventPersistenceError::ConflictingReplay
+        ));
+        let sequence_conflict = client
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_03', 'session_ipip_ko_quick', 'client_event_item_03', \
+                     'item_version_n1_ko', \
+                     'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', \
+                     1, TIMESTAMPTZ '2023-11-14 22:13:21+00', TIMESTAMPTZ '2023-11-14 22:13:21.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            classify_unique_violation(sequence_conflict),
+            ResponseEventPersistenceError::SequenceConflict
+        ));
+        let missing = client
+            .query_one("SELECT * FROM response_event_unique_classify_missing", &[])
+            .unwrap_err();
+        assert!(matches!(
+            classify_unique_violation(missing),
+            ResponseEventPersistenceError::Database(_)
+        ));
     }
 }
