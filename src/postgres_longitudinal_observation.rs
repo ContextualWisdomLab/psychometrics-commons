@@ -32,15 +32,15 @@ pub enum LongitudinalObservationPersistenceDisposition {
 pub enum LongitudinalObservationPersistenceError {
     /// The tenant reference was blank, numeric-like, padded, or otherwise noncanonical.
     InvalidReference,
-    /// A Rust clock or sequence cannot be represented by PostgreSQL `bigint`.
+    /// A Rust clock or sequence cannot be represented by `PostgreSQL` `bigint`.
     InvalidNumericRange,
     /// An observation or tenant-scoped source identity was replayed with different evidence.
     ConflictingReplay,
     /// Persisted rows cannot be reconstructed into one valid immutable domain record.
     CorruptHistory,
-    /// Persistence requires PostgreSQL `READ COMMITTED` isolation.
+    /// Persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
-    /// PostgreSQL rejected or could not execute the operation.
+    /// `PostgreSQL` rejected or could not execute the operation.
     Database(postgres::Error),
 }
 
@@ -86,7 +86,7 @@ impl From<postgres::Error> for LongitudinalObservationPersistenceError {
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL error when the schema cannot be installed.
+/// Returns the `PostgreSQL` error when the schema cannot be installed.
 pub fn apply_longitudinal_observation_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
