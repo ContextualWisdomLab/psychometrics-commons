@@ -75,10 +75,11 @@ impl ApiProblem {
     /// Create one validated public problem definition.
     ///
     /// `type_uri` must be an explicit product identifier using either a structurally valid HTTPS
-    /// URI with a non-empty registered-name host or a URN with a valid namespace identifier and
-    /// non-empty namespace-specific string. `status` must be from 400 through 599. `title` and
-    /// `detail` must contain non-whitespace static text. `code` must start with an ASCII lowercase
-    /// letter and may then contain only ASCII lowercase letters, digits, or underscores.
+    /// URI with a non-empty registered-name host or a structurally valid RFC 8141 URN. A URN may
+    /// include its optional resolver (`?+`), query (`?=`), and fragment (`#`) components. `status`
+    /// must be from 400 through 599. `title` and `detail` must contain non-whitespace static text.
+    /// `code` must start with an ASCII lowercase letter and may then contain only ASCII lowercase
+    /// letters, digits, or underscores.
     ///
     /// Requiring static title/detail text is intentional: transport code must map internal errors
     /// to reviewed public wording rather than forwarding database, provider, credential, response,
@@ -194,11 +195,49 @@ fn valid_registered_host(host: &str) -> bool {
 }
 
 fn valid_urn_problem_type(remainder: &str) -> bool {
-    let Some((namespace_id, namespace_specific_string)) = remainder.split_once(':') else {
+    let Some((namespace_id, namestring)) = remainder.split_once(':') else {
         return false;
     };
-    valid_urn_namespace_id(namespace_id)
-        && valid_urn_namespace_specific_string(namespace_specific_string)
+    if !valid_urn_namespace_id(namespace_id) {
+        return false;
+    }
+
+    // RFC 8141: assigned-name [ "?+" r-component ] [ "?=" q-component ] [ "#" fragment ].
+    // The NSS is deliberately parsed before the optional components because a literal '?' is not
+    // valid NSS data; it is meaningful only as the beginning of one of those component markers.
+    let (assigned_and_rq, fragment) = namestring
+        .split_once('#')
+        .map_or((namestring, None), |(before, fragment)| {
+            (before, Some(fragment))
+        });
+    if fragment
+        .is_some_and(|fragment| !valid_percent_encoded_ascii(fragment, is_query_or_fragment_byte))
+    {
+        return false;
+    }
+
+    let Some(component_start) = assigned_and_rq.find('?') else {
+        return valid_urn_namespace_specific_string(assigned_and_rq);
+    };
+    let namespace_specific_string = &assigned_and_rq[..component_start];
+    if !valid_urn_namespace_specific_string(namespace_specific_string) {
+        return false;
+    }
+
+    let optional_components = &assigned_and_rq[component_start..];
+    if let Some(resolver_and_query) = optional_components.strip_prefix("?+") {
+        let (resolver, query) = resolver_and_query
+            .split_once("?=")
+            .map_or((resolver_and_query, None), |(resolver, query)| {
+                (resolver, Some(query))
+            });
+        return valid_urn_rq_component(resolver)
+            && query.is_none_or(valid_urn_rq_component);
+    }
+    if let Some(query) = optional_components.strip_prefix("?=") {
+        return valid_urn_rq_component(query);
+    }
+    false
 }
 
 fn valid_urn_namespace_id(namespace_id: &str) -> bool {
@@ -221,6 +260,10 @@ fn valid_urn_namespace_specific_string(value: &str) -> bool {
     valid_percent_encoded_ascii(value, |byte| {
         is_unreserved(byte) || is_sub_delimiter(byte) || matches!(byte, b':' | b'@' | b'/')
     })
+}
+
+fn valid_urn_rq_component(value: &str) -> bool {
+    !value.is_empty() && valid_percent_encoded_ascii(value, is_query_or_fragment_byte)
 }
 
 fn valid_https_suffix(value: &str) -> bool {
@@ -341,6 +384,11 @@ mod tests {
             "urn:-a:value",
             "urn:a-:value",
             "urn:example:bad value",
+            "urn:example:problem?bare",
+            "urn:example:problem?+",
+            "urn:example:problem?=",
+            "urn:example:problem#one#two",
+            "urn:example:problem?+resolver?=%zz",
         ] {
             assert_eq!(
                 ApiProblem::new(invalid_type, 403, "Denied", "Public detail.", "denied"),
@@ -356,6 +404,10 @@ mod tests {
             "urn:example:problem:v1",
             "urn:example:problem/v1",
             "urn:example:a@b",
+            "urn:example:problem#details",
+            "urn:example:problem?=version=2",
+            "urn:example:problem?+resolver=primary",
+            "urn:example:problem?+resolver=primary?=version=2#details",
         ] {
             assert!(
                 ApiProblem::new(valid_type, 403, "Denied", "Public detail.", "denied").is_ok(),
