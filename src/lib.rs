@@ -13,6 +13,7 @@ pub mod anonymous_session;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
+pub mod data_rights_authorization;
 pub mod deterministic_narrative;
 pub mod health;
 pub mod instrument;
