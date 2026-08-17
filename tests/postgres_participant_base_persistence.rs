@@ -130,6 +130,69 @@ fn participant_identity_rebinding_fails_closed_without_rewriting_the_row() {
 }
 
 #[test]
+fn migration_reapply_strengthens_an_earlier_participant_constraint_revision() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    client
+        .batch_execute(
+            "CREATE TABLE assessment_participant (\
+                 participant_ref TEXT PRIMARY KEY,\
+                 tenant_ref TEXT NOT NULL,\
+                 created_at_unix_ms BIGINT NOT NULL,\
+                 CONSTRAINT assessment_participant_ref_format_check CHECK (\
+                     participant_ref = btrim(participant_ref)\
+                     AND participant_ref <> ''\
+                     AND NOT (\
+                         participant_ref ~ '[[:digit:]]'\
+                         AND participant_ref ~ '^[[:digit:]+,.eE-]+$'\
+                     )\
+                 ),\
+                 CONSTRAINT assessment_participant_tenant_ref_format_check CHECK (\
+                     tenant_ref = btrim(tenant_ref)\
+                     AND tenant_ref <> ''\
+                     AND NOT (\
+                         tenant_ref ~ '[[:digit:]]'\
+                         AND tenant_ref ~ '^[[:digit:]+,.eE-]+$'\
+                     )\
+                 ),\
+                 CONSTRAINT assessment_participant_created_time_positive_check CHECK (\
+                     created_at_unix_ms > 0\
+                 )\
+             );\
+             INSERT INTO assessment_participant\
+                 (participant_ref, tenant_ref, created_at_unix_ms)\
+             VALUES ('participant_existing_demo', 'tenant_existing_demo', 39000);",
+        )
+        .unwrap();
+
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let loaded = load_anonymous_participant_base(
+        &mut client,
+        "participant_existing_demo",
+        "tenant_existing_demo",
+    )
+    .unwrap()
+    .expect("a valid row from the earlier migration revision must survive strengthening");
+    assert_eq!(loaded.created_at_unix_ms(), 39_000);
+
+    for statement in [
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('participant_nbsp_demo', U&'\\00A0tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'12\\066B3', 'tenant_public_demo', 40000)",
+    ] {
+        assert!(
+            client.batch_execute(statement).is_err(),
+            "reapplied migration must replace the earlier weaker identity constraint: {statement}"
+        );
+    }
+}
+
+#[test]
 fn participant_base_evidence_is_immutable_at_the_database_boundary() {
     let _guard = participant_base_test_guard();
     let mut client = test_client();
