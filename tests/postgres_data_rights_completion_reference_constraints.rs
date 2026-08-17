@@ -1,4 +1,4 @@
-//! PostgreSQL reference-shape contracts for durable data-rights completion evidence.
+//! `PostgreSQL` reference-shape contracts for durable data-rights completion evidence.
 //!
 //! The Rust domain rejects Unicode-whitespace aliases and Unicode numeric-like references. The
 //! physical completion schema must preserve the same boundary even when migration 0024 is
