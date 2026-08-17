@@ -1,8 +1,8 @@
-//! Executable PostgreSQL prerequisites for product-owned persistence migrations.
+//! Executable `PostgreSQL` prerequisites for product-owned persistence migrations.
 //!
-//! `migrations/0030_assessment_participant.sql` uses the PostgreSQL 18
+//! `migrations/0030_assessment_participant.sql` uses the `PostgreSQL` 18
 //! `pg_unicode_fast` collation. The runtime contract therefore fails closed when
-//! CI or a deployment points the persistence suite at another PostgreSQL major
+//! CI or a deployment points the persistence suite at another `PostgreSQL` major
 //! or at a non-UTF-8 database.
 
 use postgres::{Client, NoTls};
