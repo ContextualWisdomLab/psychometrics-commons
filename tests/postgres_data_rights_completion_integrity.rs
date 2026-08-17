@@ -300,7 +300,10 @@ fn terminal_completion_evidence_cannot_be_deleted_without_retained_scopes() {
         )
         .unwrap()
         .get(0);
-    assert_eq!(count, 1, "the immutable terminal evidence row must remain stored");
+    assert_eq!(
+        count, 1,
+        "the immutable terminal evidence row must remain stored"
+    );
 }
 
 #[test]
