@@ -6,8 +6,9 @@ use psychometrics_commons_runtime::longitudinal_observation::{
     MembershipShareInput, ObservationTimeInput,
 };
 use psychometrics_commons_runtime::postgres_longitudinal_observation::{
-    apply_longitudinal_observation_migration, persist_longitudinal_observation,
-    LongitudinalObservationPersistenceDisposition, LongitudinalObservationPersistenceError,
+    apply_longitudinal_observation_migration, load_longitudinal_observation,
+    persist_longitudinal_observation, LongitudinalObservationPersistenceDisposition,
+    LongitudinalObservationPersistenceError,
 };
 use std::sync::{Mutex, MutexGuard};
 
@@ -95,6 +96,25 @@ fn persist(
     }
 }
 
+fn load(
+    client: &mut Client,
+    tenant_ref: &str,
+    observation_record_ref: &str,
+) -> Result<Option<LongitudinalObservationRecord>, LongitudinalObservationPersistenceError> {
+    let mut tx = client.transaction().unwrap();
+    let result = load_longitudinal_observation(&mut tx, tenant_ref, observation_record_ref);
+    match result {
+        Ok(record) => {
+            tx.commit().unwrap();
+            Ok(record)
+        }
+        Err(error) => {
+            tx.rollback().unwrap();
+            Err(error)
+        }
+    }
+}
+
 #[test]
 fn seoul_multiple_membership_observation_is_tenant_bound_durable_and_idempotent() {
     let _guard = guard();
@@ -136,6 +156,99 @@ fn seoul_multiple_membership_observation_is_tenant_bound_durable_and_idempotent(
     assert_eq!(memberships[0].get::<_, i32>(1), 6_000);
     assert_eq!(memberships[1].get::<_, String>(0), "night_shift_team_alpha");
     assert_eq!(memberships[1].get::<_, i32>(1), 4_000);
+}
+
+#[test]
+fn restart_recovery_is_exact_and_tenant_scoped() {
+    let _guard = guard();
+    let mut client = client();
+    reset(&mut client);
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+    let record = observation(
+        "longitudinal_observation_record_recovery",
+        "construct_extraversion",
+    );
+    persist(&mut client, "tenant_clinic_seoul", &record).unwrap();
+
+    assert_eq!(
+        load(
+            &mut client,
+            "tenant_clinic_seoul",
+            "longitudinal_observation_record_recovery"
+        )
+        .unwrap(),
+        Some(record)
+    );
+    assert_eq!(
+        load(
+            &mut client,
+            "tenant_clinic_busan",
+            "longitudinal_observation_record_recovery"
+        )
+        .unwrap(),
+        None
+    );
+    assert_eq!(
+        load(
+            &mut client,
+            "tenant_clinic_seoul",
+            "longitudinal_observation_record_missing"
+        )
+        .unwrap(),
+        None
+    );
+    assert!(matches!(
+        load(
+            &mut client,
+            " tenant_clinic_seoul ",
+            "longitudinal_observation_record_recovery"
+        ),
+        Err(LongitudinalObservationPersistenceError::InvalidReference)
+    ));
+}
+
+#[test]
+fn restart_recovery_rejects_incomplete_persisted_history() {
+    let _guard = guard();
+    let mut client = client();
+    reset(&mut client);
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+    client
+        .execute(
+            "INSERT INTO longitudinal_observation (\
+                 observation_record_ref, tenant_ref, enrollment_ref, source_system_ref, \
+                 source_observation_ref, construct_ref, measure_ref, validity_start_at_unix_ms, \
+                 validity_end_at_unix_ms, recorded_at_unix_ms, received_at_unix_ms, \
+                 ingested_at_unix_ms, timezone_name, utc_offset_minutes, clock_anomaly_code\
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+            &[
+                &"longitudinal_observation_record_corrupt",
+                &"tenant_clinic_seoul",
+                &"longitudinal_enrollment_ko_corrupt",
+                &"gyeot_mobile_collection",
+                &"gyeot_observation_corrupt",
+                &"construct_extraversion",
+                &"measure_ipip_extraversion_ko_v1",
+                &1_776_661_900_000_i64,
+                &1_776_662_200_000_i64,
+                &1_776_662_200_000_i64,
+                &1_776_662_260_000_i64,
+                &1_776_662_270_000_i64,
+                &"Asia/Seoul",
+                &540_i16,
+                &Option::<&str>::None,
+            ],
+        )
+        .unwrap();
+
+    assert!(matches!(
+        load(
+            &mut client,
+            "tenant_clinic_seoul",
+            "longitudinal_observation_record_corrupt"
+        ),
+        Err(LongitudinalObservationPersistenceError::CorruptHistory)
+    ));
 }
 
 #[test]
