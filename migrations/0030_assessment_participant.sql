@@ -35,6 +35,43 @@ CREATE TABLE IF NOT EXISTS assessment_participant (
     )
 );
 
+-- CREATE TABLE IF NOT EXISTS does not reconcile constraints from an earlier revision of this
+-- not-yet-released migration. Reapplication therefore replaces the owned checks with the exact
+-- current definitions. Existing rows are validated while each stricter constraint is added, so
+-- incompatible historical evidence fails the migration rather than remaining silently accepted.
+ALTER TABLE assessment_participant
+    DROP CONSTRAINT IF EXISTS assessment_participant_ref_format_check;
+ALTER TABLE assessment_participant
+    ADD CONSTRAINT assessment_participant_ref_format_check CHECK (
+        participant_ref <> ''
+        AND participant_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            participant_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND participant_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    );
+
+ALTER TABLE assessment_participant
+    DROP CONSTRAINT IF EXISTS assessment_participant_tenant_ref_format_check;
+ALTER TABLE assessment_participant
+    ADD CONSTRAINT assessment_participant_tenant_ref_format_check CHECK (
+        tenant_ref <> ''
+        AND tenant_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            tenant_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND tenant_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    );
+
+ALTER TABLE assessment_participant
+    DROP CONSTRAINT IF EXISTS assessment_participant_created_time_positive_check;
+ALTER TABLE assessment_participant
+    ADD CONSTRAINT assessment_participant_created_time_positive_check CHECK (
+        created_at_unix_ms > 0
+    );
+
 CREATE OR REPLACE FUNCTION reject_assessment_participant_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
