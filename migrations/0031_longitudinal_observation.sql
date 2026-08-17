@@ -58,11 +58,7 @@ CREATE TABLE IF NOT EXISTS longitudinal_observation (
         AND utc_offset_minutes BETWEEN -720 AND 840
     ),
     CONSTRAINT longitudinal_observation_anomaly_check CHECK (
-        (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
-        OR (
-            clock_anomaly_code = 'recorded_after_received'
-            AND recorded_at_unix_ms > received_at_unix_ms
-        )
+        clock_anomaly_code IS NULL OR clock_anomaly_code = 'recorded_after_received'
     )
 );
 
@@ -103,11 +99,7 @@ ALTER TABLE longitudinal_observation
     DROP CONSTRAINT IF EXISTS longitudinal_observation_anomaly_check;
 ALTER TABLE longitudinal_observation
     ADD CONSTRAINT longitudinal_observation_anomaly_check CHECK (
-        (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
-        OR (
-            clock_anomaly_code = 'recorded_after_received'
-            AND recorded_at_unix_ms > received_at_unix_ms
-        )
+        clock_anomaly_code IS NULL OR clock_anomaly_code = 'recorded_after_received'
     );
 
 ALTER TABLE longitudinal_membership_share
@@ -116,6 +108,57 @@ ALTER TABLE longitudinal_membership_share
     ADD CONSTRAINT longitudinal_membership_reference_check CHECK (
         longitudinal_reference_is_valid(membership_context_ref)
     );
+
+-- Existing rows from a partial pre-merge rollout must already satisfy the clock/code relation.
+-- Fail the migration before installing the insert guard if they do not.
+DO $longitudinal_anomaly_preflight$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM longitudinal_observation
+        WHERE NOT (
+            (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
+            OR (
+                clock_anomaly_code = 'recorded_after_received'
+                AND recorded_at_unix_ms > received_at_unix_ms
+            )
+        )
+    ) THEN
+        RAISE EXCEPTION 'stored longitudinal observation clock anomaly evidence is inconsistent'
+            USING ERRCODE = '23514',
+                  CONSTRAINT = 'longitudinal_observation_anomaly_check';
+    END IF;
+END;
+$longitudinal_anomaly_preflight$;
+
+-- Legitimate rows are append-only. Enforce the clock/code relation on INSERT; UPDATE is already
+-- prohibited by the immutable-row trigger below. Keeping the consistency guard INSERT-only also
+-- lets corruption-recovery tests deliberately disable immutability and prove loaders fail closed.
+CREATE OR REPLACE FUNCTION validate_longitudinal_observation_anomaly_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF (
+        (NEW.clock_anomaly_code IS NULL AND NEW.recorded_at_unix_ms <= NEW.received_at_unix_ms)
+        OR (
+            NEW.clock_anomaly_code = 'recorded_after_received'
+            AND NEW.recorded_at_unix_ms > NEW.received_at_unix_ms
+        )
+    ) THEN
+        RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION 'longitudinal observation clock anomaly code does not match clock order'
+        USING ERRCODE = '23514',
+              CONSTRAINT = 'longitudinal_observation_anomaly_check';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS longitudinal_observation_anomaly_insert ON longitudinal_observation;
+CREATE TRIGGER longitudinal_observation_anomaly_insert
+BEFORE INSERT ON longitudinal_observation
+FOR EACH ROW EXECUTE FUNCTION validate_longitudinal_observation_anomaly_insert();
 
 CREATE OR REPLACE FUNCTION reject_longitudinal_mutation()
 RETURNS trigger
