@@ -59,6 +59,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Item-delivery ledgers now bind to the authoritative assessment session, reject isolated release/version/digest/locale mismatches, and reject a reused content digest that enlarges, shrinks, or reorders the item-version set both at ledger construction and on later `deliver` calls.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.
