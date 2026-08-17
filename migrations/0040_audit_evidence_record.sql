@@ -3,6 +3,8 @@
 -- `occurred_at_unix_ms` is the server-observed action time carried by the domain record.
 -- `recorded_at` is independent database system-recorded time so operators can distinguish event
 -- time from durable receipt time during incident review.
+-- PostgreSQL 18's pg_unicode_fast collation keeps direct-SQL reference guards aligned with the
+-- product domain's Unicode whitespace and numeric-like opacity boundary.
 
 CREATE TABLE IF NOT EXISTS audit_evidence_record (
     audit_event_ref TEXT PRIMARY KEY,
@@ -15,14 +17,42 @@ CREATE TABLE IF NOT EXISTS audit_evidence_record (
     evidence_digest TEXT NOT NULL,
     occurred_at_unix_ms BIGINT NOT NULL,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT transaction_timestamp(),
-    CONSTRAINT audit_evidence_event_ref_shape_check
-        CHECK (audit_event_ref = btrim(audit_event_ref) AND length(audit_event_ref) > 0),
-    CONSTRAINT audit_evidence_tenant_ref_shape_check
-        CHECK (tenant_ref = btrim(tenant_ref) AND length(tenant_ref) > 0),
-    CONSTRAINT audit_evidence_actor_ref_shape_check
-        CHECK (actor_ref = btrim(actor_ref) AND length(actor_ref) > 0),
-    CONSTRAINT audit_evidence_resource_ref_shape_check
-        CHECK (resource_ref = btrim(resource_ref) AND length(resource_ref) > 0),
+    CONSTRAINT audit_evidence_event_ref_shape_check CHECK (
+        audit_event_ref <> ''
+        AND audit_event_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            audit_event_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND audit_event_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    ),
+    CONSTRAINT audit_evidence_tenant_ref_shape_check CHECK (
+        tenant_ref <> ''
+        AND tenant_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            tenant_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND tenant_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    ),
+    CONSTRAINT audit_evidence_actor_ref_shape_check CHECK (
+        actor_ref <> ''
+        AND actor_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            actor_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND actor_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    ),
+    CONSTRAINT audit_evidence_resource_ref_shape_check CHECK (
+        resource_ref <> ''
+        AND resource_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND NOT (
+            resource_ref COLLATE "pg_unicode_fast" ~ '[[:digit:]]'
+            AND resource_ref COLLATE "pg_unicode_fast"
+                ~ '^[[:digit:]+,.eE\u066B\u066C\uFF0E\uFF0C-]+$'
+        )
+    ),
     CONSTRAINT audit_evidence_purpose_code_shape_check
         CHECK (purpose_code ~ '^[a-z][a-z0-9_]*$'),
     CONSTRAINT audit_evidence_action_code_shape_check
