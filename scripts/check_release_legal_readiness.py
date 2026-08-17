@@ -53,10 +53,13 @@ def _nonempty_string(value: object) -> str | None:
 
 
 def _resolved_repo_file(root: Path, relative_path: str) -> Path | None:
-    """Return non-empty terms evidence only when the resolved regular file stays in the repository."""
+    """Return non-empty repository-relative terms evidence or fail closed."""
+    path = Path(relative_path)
+    if path.is_absolute():
+        return None
     try:
         root_resolved = root.resolve()
-        candidate = (root / relative_path).resolve()
+        candidate = (root / path).resolve()
     except (OSError, RuntimeError):
         return None
     try:
@@ -101,7 +104,7 @@ def evaluate_repository(root: Path) -> dict[str, object]:
         )
     if license_file_value is not None and declared_license_file is None:
         blockers.append(
-            "Cargo.toml license-file is missing, empty, not a regular file, unreadable, or escapes the repository root"
+            "Cargo.toml license-file is missing, empty, absolute, not a regular file, unreadable, or escapes the repository root"
         )
 
     evidence: dict[str, object] = {
