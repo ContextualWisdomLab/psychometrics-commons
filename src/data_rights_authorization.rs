@@ -1,10 +1,22 @@
-//! Authoritative authorization composition for participant-owned data-rights requests.
+//! Authorization for one participant-owned data-rights request using stored identity.
 //!
-//! A data-rights request already stores its tenant, participant owner, and opaque
-//! request identity. Adapters must authorize against those stored values rather than
-//! reconstructing a generic resource scope from request parameters or the actor.
-//! Doing so keeps export/deletion access purpose-bound and prevents a confused
-//! deputy from rebinding a request to the caller's own identity.
+//! A [`DataRightsRequest`] is the authoritative stored record for its tenant, participant
+//! owner, and request identifier. That identifier is *opaque*: callers treat it as an
+//! issued label and must not infer meaning or sequence from it. API or persistence boundary
+//! code (often called an *adapter*) must use those stored values instead of rebuilding the
+//! authorization target from URL fields, request bodies, or the authenticated actor.
+//!
+//! Authorization evaluates a *resource scope*: the tenant, participant owner, resource
+//! kind, and exact request identifier that together describe what is being accessed. Using
+//! the stored request prevents a *confused deputy* defect, where trusted server code is
+//! tricked into acting on a different request because caller-controlled identity fields were
+//! substituted for the stored ones. Invalid or incomplete bindings *fail closed*: access is
+//! denied rather than guessed or defaulted.
+//!
+//! The architecture boundary and unchanged ownership are documented in
+//! `docs/architecture/DATA_RIGHTS_AUTHORIZATION.md`. This module adds no credential,
+//! permission, lifecycle, or database ownership; it composes the existing product-owned
+//! `ManageOwnDataRights` permission with the stored data-rights request.
 
 use crate::authorization::{
     authorize, AuthorizationContext, AuthorizationError, ProductPermission, ResourceKind,
@@ -14,14 +26,17 @@ use crate::data_rights::DataRightsRequest;
 
 /// Authorize the authenticated participant to manage one stored data-rights request.
 ///
-/// Tenant, participant owner, and resource identity are read directly from the
-/// request aggregate before `ManageOwnDataRights` is evaluated.
+/// The stored request is the domain record (sometimes called an *aggregate*) that owns the
+/// tenant, participant, and request identifiers used here. The function builds the
+/// authorization target only from that record, then evaluates [`ProductPermission::ManageOwnDataRights`].
+/// It does not trust copies of those identifiers supplied by a caller.
 ///
 /// # Errors
 ///
-/// Returns [`AuthorizationError`] when the authenticated tenant or participant does
-/// not own the stored request, when participant identity is missing, or when a
-/// fail-closed authorization invariant is violated.
+/// Returns [`AuthorizationError`] when the authenticated tenant or participant does not own
+/// the stored request, participant identity is missing, an identifier is invalid, or another
+/// authorization invariant cannot be proven. In all such cases access is denied instead of
+/// falling back to a guessed/default identity.
 pub fn authorize_data_rights_request(
     actor: &AuthorizationContext,
     request: &DataRightsRequest,
