@@ -217,8 +217,7 @@ fn unsupported_isolation_and_corrupt_stored_outcome_fail_closed() {
 
     client
         .batch_execute(
-            "ALTER TABLE audit_evidence_record\
-             DROP CONSTRAINT audit_evidence_outcome_allowed_check;",
+            "ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_outcome_allowed_check;",
         )
         .unwrap();
     client
