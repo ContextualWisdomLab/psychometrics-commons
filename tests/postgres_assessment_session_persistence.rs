@@ -490,33 +490,81 @@ fn start_maps_identity_and_missing_release_query_failures() {
 
 #[test]
 fn start_error_from_maps_release_query_failures() {
+    for (query, expected) in [
+        (
+            InstrumentReleaseQueryError::InvalidReference,
+            AssessmentSessionStartError::InvalidReference,
+        ),
+        (
+            InstrumentReleaseQueryError::InvalidLocale,
+            AssessmentSessionStartError::LocaleMismatch,
+        ),
+        (
+            InstrumentReleaseQueryError::LocaleMismatch,
+            AssessmentSessionStartError::LocaleMismatch,
+        ),
+        (
+            InstrumentReleaseQueryError::NotFound,
+            AssessmentSessionStartError::InstrumentReleaseUnavailable,
+        ),
+        (
+            InstrumentReleaseQueryError::NotPublished,
+            AssessmentSessionStartError::InstrumentReleaseUnavailable,
+        ),
+        (
+            InstrumentReleaseQueryError::InvalidStoredValue,
+            AssessmentSessionStartError::InvalidStoredRelease,
+        ),
+    ] {
+        let mapped = AssessmentSessionStartError::from(query);
+        assert_eq!(mapped.to_string(), expected.to_string());
+        assert!(std::error::Error::source(&mapped).is_none());
+    }
+
+    for query in [
+        InstrumentReleaseQueryError::InvalidLocale,
+        InstrumentReleaseQueryError::LocaleMismatch,
+        InstrumentReleaseQueryError::InvalidStoredValue,
+        InstrumentReleaseQueryError::InvalidReference,
+    ] {
+        let mapped = AssessmentSessionPersistenceError::from(query);
+        assert_eq!(
+            mapped.to_string(),
+            AssessmentSessionPersistenceError::InvalidStartRelease.to_string()
+        );
+        assert!(std::error::Error::source(&mapped).is_none());
+    }
+    for query in [
+        InstrumentReleaseQueryError::NotFound,
+        InstrumentReleaseQueryError::NotPublished,
+    ] {
+        let mapped = AssessmentSessionPersistenceError::from(query);
+        assert_eq!(
+            mapped.to_string(),
+            AssessmentSessionPersistenceError::UnpublishedStart.to_string()
+        );
+        assert!(std::error::Error::source(&mapped).is_none());
+    }
+
+    let source = postgres::Config::new()
+        .host("/no/such/psychometrics-commons.socket")
+        .port(1)
+        .user("postgres")
+        .dbname("psychometrics_commons_test")
+        .connect_timeout(std::time::Duration::from_millis(50))
+        .connect(NoTls)
+        .map(|_| ())
+        .expect_err("missing local socket must fail closed");
+    let start = AssessmentSessionStartError::from(InstrumentReleaseQueryError::from(source));
+    assert!(matches!(
+        start,
+        AssessmentSessionStartError::Persistence(AssessmentSessionPersistenceError::Database(_))
+    ));
     assert_eq!(
-        AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidReference)
-            .to_string(),
-        AssessmentSessionStartError::InvalidReference.to_string()
+        start.to_string(),
+        "session start could not persist the created session; retry the exact start or repair the store"
     );
-    assert_eq!(
-        AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidLocale).to_string(),
-        AssessmentSessionStartError::LocaleMismatch.to_string()
-    );
-    assert_eq!(
-        AssessmentSessionStartError::from(InstrumentReleaseQueryError::LocaleMismatch).to_string(),
-        AssessmentSessionStartError::LocaleMismatch.to_string()
-    );
-    assert_eq!(
-        AssessmentSessionStartError::from(InstrumentReleaseQueryError::InvalidStoredValue)
-            .to_string(),
-        AssessmentSessionStartError::InvalidStoredRelease.to_string()
-    );
-    assert_eq!(
-        AssessmentSessionStartError::from(InstrumentReleaseQueryError::NotFound).to_string(),
-        AssessmentSessionStartError::InstrumentReleaseUnavailable.to_string()
-    );
-    assert_eq!(
-        AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::InvalidReference)
-            .to_string(),
-        AssessmentSessionPersistenceError::InvalidStartRelease.to_string()
-    );
+    assert!(std::error::Error::source(&start).is_some());
 }
 
 #[test]

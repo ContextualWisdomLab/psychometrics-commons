@@ -140,15 +140,16 @@ impl From<postgres::Error> for AssessmentSessionPersistenceError {
 }
 
 impl From<InstrumentReleaseQueryError> for AssessmentSessionPersistenceError {
+    // LLVM JSON line coverage attributes a `|` or-pattern only to the last arm.
+    #[allow(clippy::match_same_arms)]
     fn from(error: InstrumentReleaseQueryError) -> Self {
         match error {
-            InstrumentReleaseQueryError::NotFound | InstrumentReleaseQueryError::NotPublished => {
-                Self::UnpublishedStart
-            }
-            InstrumentReleaseQueryError::InvalidLocale
-            | InstrumentReleaseQueryError::LocaleMismatch
-            | InstrumentReleaseQueryError::InvalidStoredValue
-            | InstrumentReleaseQueryError::InvalidReference => Self::InvalidStartRelease,
+            InstrumentReleaseQueryError::NotFound => Self::UnpublishedStart,
+            InstrumentReleaseQueryError::NotPublished => Self::UnpublishedStart,
+            InstrumentReleaseQueryError::InvalidLocale => Self::InvalidStartRelease,
+            InstrumentReleaseQueryError::LocaleMismatch => Self::InvalidStartRelease,
+            InstrumentReleaseQueryError::InvalidStoredValue => Self::InvalidStartRelease,
+            InstrumentReleaseQueryError::InvalidReference => Self::InvalidStartRelease,
             InstrumentReleaseQueryError::Database(error) => Self::Database(error),
         }
     }
@@ -228,14 +229,15 @@ impl From<AssessmentSessionPersistenceError> for AssessmentSessionStartError {
 }
 
 impl From<InstrumentReleaseQueryError> for AssessmentSessionStartError {
+    // LLVM JSON line coverage attributes a `|` or-pattern only to the last arm.
+    #[allow(clippy::match_same_arms)]
     fn from(error: InstrumentReleaseQueryError) -> Self {
         match error {
             InstrumentReleaseQueryError::InvalidReference => Self::InvalidReference,
-            InstrumentReleaseQueryError::InvalidLocale
-            | InstrumentReleaseQueryError::LocaleMismatch => Self::LocaleMismatch,
-            InstrumentReleaseQueryError::NotFound | InstrumentReleaseQueryError::NotPublished => {
-                Self::InstrumentReleaseUnavailable
-            }
+            InstrumentReleaseQueryError::InvalidLocale => Self::LocaleMismatch,
+            InstrumentReleaseQueryError::LocaleMismatch => Self::LocaleMismatch,
+            InstrumentReleaseQueryError::NotFound => Self::InstrumentReleaseUnavailable,
+            InstrumentReleaseQueryError::NotPublished => Self::InstrumentReleaseUnavailable,
             InstrumentReleaseQueryError::InvalidStoredValue => Self::InvalidStoredRelease,
             InstrumentReleaseQueryError::Database(error) => {
                 Self::Persistence(AssessmentSessionPersistenceError::from(error))
@@ -1496,24 +1498,26 @@ mod tests {
 
     #[test]
     fn persist_maps_unpublished_stored_release_to_first_insert_seal() {
-        assert!(matches!(
-            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::NotPublished),
-            AssessmentSessionPersistenceError::UnpublishedStart
-        ));
-        assert!(matches!(
-            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::NotFound),
-            AssessmentSessionPersistenceError::UnpublishedStart
-        ));
+        assert_eq!(
+            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::NotPublished)
+                .to_string(),
+            AssessmentSessionPersistenceError::UnpublishedStart.to_string()
+        );
+        assert_eq!(
+            AssessmentSessionPersistenceError::from(InstrumentReleaseQueryError::NotFound)
+                .to_string(),
+            AssessmentSessionPersistenceError::UnpublishedStart.to_string()
+        );
         for error in [
             InstrumentReleaseQueryError::InvalidLocale,
             InstrumentReleaseQueryError::LocaleMismatch,
             InstrumentReleaseQueryError::InvalidStoredValue,
             InstrumentReleaseQueryError::InvalidReference,
         ] {
-            assert!(matches!(
-                AssessmentSessionPersistenceError::from(error),
-                AssessmentSessionPersistenceError::InvalidStartRelease
-            ));
+            assert_eq!(
+                AssessmentSessionPersistenceError::from(error).to_string(),
+                AssessmentSessionPersistenceError::InvalidStartRelease.to_string()
+            );
         }
         assert_eq!(
             AssessmentSessionPersistenceError::UnpublishedStart.to_string(),
