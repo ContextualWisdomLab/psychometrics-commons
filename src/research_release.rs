@@ -290,19 +290,25 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     FORBIDDEN_PUBLIC_RELEASE_COLUMNS.contains(&normalized.as_str())
 }
 
-/// Fold ASCII case and camelCase so CSV/JSON export aliases match the denylist.
+/// Fold ASCII case and camelCase/PascalCase acronym boundaries so CSV/JSON export aliases match the denylist.
 ///
 /// `researchParticipantRef` becomes `research_participant_ref` and stays
-/// allowed. `assessmentParticipantRef` becomes `assessment_participant_ref`
-/// and is rejected.
+/// allowed. `assessmentPARTICIPANTRef` becomes `assessment_participant_ref`
+/// and is rejected rather than bypassing the denylist through an uppercase run.
 fn normalize_public_release_column(column_name: &str) -> String {
     let trimmed = column_name.trim();
     let mut normalized = String::with_capacity(trimmed.len() + 4);
     let mut previous: Option<char> = None;
-    for current in trimmed.chars() {
-        if current.is_ascii_uppercase()
-            && previous.is_some_and(|prior| prior.is_ascii_lowercase() || prior.is_ascii_digit())
-        {
+    let mut characters = trimmed.chars().peekable();
+
+    while let Some(current) = characters.next() {
+        let next = characters.peek().copied();
+        let starts_new_word = previous
+            .is_some_and(|prior| prior.is_ascii_lowercase() || prior.is_ascii_digit())
+            || (previous.is_some_and(|prior| prior.is_ascii_uppercase())
+                && next.is_some_and(|following| following.is_ascii_lowercase()));
+
+        if current.is_ascii_uppercase() && starts_new_word {
             normalized.push('_');
         }
         normalized.push(current.to_ascii_lowercase());
