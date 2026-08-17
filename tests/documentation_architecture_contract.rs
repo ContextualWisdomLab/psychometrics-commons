@@ -253,7 +253,7 @@ fn traceability_distinguishes_current_implementation_from_targets() {
         .expect("traceability must define the active implementation-work section");
     let pr_entry = active_work
         .lines()
-        .find(|line| line.contains("**Active PR**"))
+        .find(|line| line.contains("**Active PR"))
         .expect("active implementation work must contain an Active PR entry");
     assert!(
         pr_entry.contains("not protected-main truth") && !pr_entry.contains("**Implemented**"),
