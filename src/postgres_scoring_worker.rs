@@ -89,11 +89,9 @@ pub enum ScoringWorkerCommitError {
     /// The supplied event identity is not the stable job and outcome key.
     Identity(ScoringWorkerError),
     /// The engine or planner could not produce a typed terminal attempt.
-    ///
-    /// [`ScoringWorkerError::MismatchedScoringResult`] is a persisted
-    /// job/request integrity failure, not a retryable engine outage. Use
-    /// [`Self::is_stored_request_integrity_failure`] when selecting recovery.
     Planning(ScoringWorkerError),
+    /// The durable scoring job names a different request than the worker supplied.
+    StoredRequestMismatch,
     /// The persisted scoring request could not be reconstructed.
     Request(ScoringRequestPersistenceError),
     /// The scoring job row is missing, so the worker cannot bind a request pin.
@@ -119,10 +117,7 @@ impl ScoringWorkerCommitError {
     /// treated as a transient `fast-mlsirm`, transport, or planner outage.
     #[must_use]
     pub const fn is_stored_request_integrity_failure(&self) -> bool {
-        matches!(
-            self,
-            Self::Planning(ScoringWorkerError::MismatchedScoringResult)
-        )
+        matches!(self, Self::StoredRequestMismatch)
     }
 }
 
@@ -132,11 +127,11 @@ impl Display for ScoringWorkerCommitError {
             Self::Identity(_) => {
                 "scoring worker must reuse the stable job and outcome event identity"
             }
-            Self::Planning(ScoringWorkerError::MismatchedScoringResult) => {
-                "scoring worker stored job/request integrity mismatch; investigate persisted evidence before retrying"
-            }
             Self::Planning(_) => {
                 "scoring worker could not plan a terminal attempt; keep the job leased and retry after a typed engine outcome"
+            }
+            Self::StoredRequestMismatch => {
+                "scoring worker stored job/request integrity mismatch; investigate persisted evidence before retrying"
             }
             Self::Request(_) => {
                 "scoring worker could not reconstruct the persisted scoring request; keep the job leased"
@@ -167,7 +162,7 @@ impl Error for ScoringWorkerCommitError {
         match self {
             Self::Identity(error) | Self::Planning(error) => Some(error),
             Self::Request(error) => Some(error),
-            Self::MissingJob | Self::MissingRequest => None,
+            Self::MissingJob | Self::MissingRequest | Self::StoredRequestMismatch => None,
             Self::Claim(error) | Self::Retry(error) => Some(error),
             Self::Snapshot(error) => Some(error),
             Self::Completion(error) => Some(error),
@@ -324,14 +319,13 @@ fn commit_planned_scoring_worker_attempt(
 /// Returns [`ScoringWorkerCommitError::MissingJob`] when the job row is absent,
 /// [`ScoringWorkerCommitError::MissingRequest`] when the pin is absent,
 /// [`ScoringWorkerCommitError::Request`] when reconstruction fails,
-/// [`ScoringWorkerCommitError::Planning`] when the job names a different
-/// request or the engine/planner cannot produce a typed attempt. A stored
-/// job/request mismatch is classified by
-/// [`ScoringWorkerCommitError::is_stored_request_integrity_failure`] and must be
-/// investigated as integrity evidence rather than retried as an engine outage.
-/// Returns [`ScoringWorkerCommitError::Retry`] when retry evidence cannot persist,
-/// [`ScoringWorkerCommitError::Snapshot`] when the immutable snapshot cannot
-/// persist, or the existing completion/failure error.
+/// [`ScoringWorkerCommitError::StoredRequestMismatch`] when the durable job names
+/// a different request, and [`ScoringWorkerCommitError::Planning`] when the
+/// engine/planner cannot produce a typed attempt. A stored job/request mismatch
+/// must be investigated as integrity evidence rather than retried as an engine
+/// outage. Returns [`ScoringWorkerCommitError::Retry`] when retry evidence cannot
+/// persist, [`ScoringWorkerCommitError::Snapshot`] when the immutable snapshot
+/// cannot persist, or the existing completion/failure error.
 #[allow(clippy::too_many_arguments)]
 pub fn run_scoring_worker_attempt_with_result_snapshot(
     transaction: &mut Transaction<'_>,
@@ -356,9 +350,7 @@ pub fn run_scoring_worker_attempt_with_result_snapshot(
     };
     let stored_request_ref: String = row.get(0);
     if stored_request_ref != scoring_request_ref {
-        return Err(ScoringWorkerCommitError::Planning(
-            ScoringWorkerError::MismatchedScoringResult,
-        ));
+        return Err(ScoringWorkerCommitError::StoredRequestMismatch);
     }
     let request = load_scoring_request(transaction, scoring_request_ref)
         .map_err(ScoringWorkerCommitError::Request)?
