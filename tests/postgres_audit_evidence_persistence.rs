@@ -217,10 +217,9 @@ fn unsupported_isolation_and_corrupt_stored_outcome_fail_closed() {
     transaction.rollback().unwrap();
 
     client
-        .execute(
-            "ALTER TABLE audit_evidence_record DISABLE TRIGGER USER;\
-             ALTER TABLE audit_evidence_record DROP CONSTRAINT audit_evidence_record_outcome_code_check",
-            &[],
+        .batch_execute(
+            "ALTER TABLE audit_evidence_record\
+             DROP CONSTRAINT audit_evidence_outcome_allowed_check;",
         )
         .unwrap();
     client
@@ -241,9 +240,6 @@ fn unsupported_isolation_and_corrupt_stored_outcome_fail_closed() {
                 &1_785_000_000_000_i64,
             ],
         )
-        .unwrap();
-    client
-        .batch_execute("ALTER TABLE audit_evidence_record ENABLE TRIGGER USER")
         .unwrap();
 
     let mut transaction = client.transaction().unwrap();
@@ -266,28 +262,27 @@ fn migration_is_idempotent_and_database_constraints_reject_bad_machine_evidence(
     apply_audit_evidence_migration(&mut client).unwrap();
     apply_audit_evidence_migration(&mut client).unwrap();
 
-    for (column, value) in [
-        ("purpose_code", "HasUppercase"),
-        ("action_code", "has-hyphen"),
-        ("outcome_code", "unknown"),
-        ("evidence_digest", "sha256:deadbeef"),
-    ] {
+    let invalid_rows = [
+        "('audit_event_bad_purpose', 'tenant_research_alpha', 'actor_publisher_alpha', 'HasUppercase', 'publish_instrument_release', 'instrument_release_big_five_ko_v1', 'succeeded', 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 1785000000000)",
+        "('audit_event_bad_action', 'tenant_research_alpha', 'actor_publisher_alpha', 'instrument_publication', 'has-hyphen', 'instrument_release_big_five_ko_v1', 'succeeded', 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 1785000000000)",
+        "('audit_event_bad_outcome', 'tenant_research_alpha', 'actor_publisher_alpha', 'instrument_publication', 'publish_instrument_release', 'instrument_release_big_five_ko_v1', 'unknown', 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 1785000000000)",
+        "('audit_event_bad_digest', 'tenant_research_alpha', 'actor_publisher_alpha', 'instrument_publication', 'publish_instrument_release', 'instrument_release_big_five_ko_v1', 'succeeded', 'sha256:deadbeef', 1785000000000)",
+    ];
+    for row in invalid_rows {
         let statement = format!(
             "INSERT INTO audit_evidence_record (\
                 audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
                 outcome_code, evidence_digest, occurred_at_unix_ms\
-             ) VALUES ('audit_event_constraint_{column}', 'tenant_research_alpha',\
-                       'actor_publisher_alpha', 'instrument_publication',\
-                       'publish_instrument_release', 'instrument_release_big_five_ko_v1',\
-                       'succeeded', '{DIGEST}', 1785000000000)"
+             ) VALUES {row}"
         );
-        client.execute(&statement, &[]).unwrap();
-        let update = format!(
-            "UPDATE audit_evidence_record SET {column} = $1 WHERE audit_event_ref = $2"
-        );
-        let error = client
-            .execute(&update, &[&value, &format!("audit_event_constraint_{column}")])
-            .unwrap_err();
-        assert!(error.to_string().contains("audit evidence is append-only"));
+        assert!(client.execute(&statement, &[]).is_err(), "row must fail closed: {row}");
     }
+
+    assert_eq!(
+        client
+            .query_one("SELECT count(*) FROM audit_evidence_record", &[])
+            .unwrap()
+            .get::<_, i64>(0),
+        0
+    );
 }
