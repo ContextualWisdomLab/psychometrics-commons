@@ -38,7 +38,7 @@ fn guard() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn client() -> Client {
+fn fresh_client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     client
@@ -201,7 +201,7 @@ fn assert_conflict(
 #[test]
 fn every_immutable_header_and_membership_dimension_rejects_rebinding() {
     let _guard = guard();
-    let mut client = client();
+    let mut client = fresh_client();
     let base = base_record();
     assert_eq!(
         persist(&mut client, "tenant_clinic_seoul", &base).unwrap(),
@@ -552,7 +552,7 @@ fn every_immutable_header_and_membership_dimension_rejects_rebinding() {
 #[test]
 fn corrupted_sequence_and_anomaly_evidence_fail_closed_after_restart() {
     let _guard = guard();
-    let mut client = client();
+    let mut client = fresh_client();
     let base = base_record();
     persist(&mut client, "tenant_clinic_seoul", &base).unwrap();
 
@@ -576,7 +576,7 @@ fn corrupted_sequence_and_anomaly_evidence_fail_closed_after_restart() {
     ));
     transaction.rollback().unwrap();
 
-    let mut client = client();
+    let mut client = fresh_client();
     let base = base_record();
     persist(&mut client, "tenant_clinic_seoul", &base).unwrap();
     client
@@ -619,7 +619,7 @@ fn all_public_error_variants_have_stable_messages_and_database_sources() {
     }
 
     let _guard = guard();
-    let mut client = client();
+    let mut client = fresh_client();
     let base = base_record();
     client
         .batch_execute("DROP SCHEMA longitudinal_observation_replay_coverage_test CASCADE")
