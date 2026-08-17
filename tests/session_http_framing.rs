@@ -1,7 +1,8 @@
 //! Public session HTTP must read the declared request body before dispatch.
 
 use psychometrics_commons_runtime::session_http::{
-    accept_one_session_http, bind_session_http, MemorySessionHttpPort, SESSION_COLLECTION_PATH,
+    accept_one_session_http, bind_session_http, handle_session_http_request, MemorySessionHttpPort,
+    SESSION_COLLECTION_PATH,
 };
 use std::io::{Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream};
@@ -93,6 +94,50 @@ fn listener_rejects_invalid_and_oversized_content_length() {
             b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_overflow\r\nContent-Length: 18446744073709551615\r\n\r\n"
         ),
         std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_bad_utf8\r\nX-Bad: \xff\r\n\r\n"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
+fn listener_reloads_a_created_session_over_get() {
+    let mut port = MemorySessionHttpPort::published();
+    let body = format!(
+        "{{\"participant_ref\":\"{PARTICIPANT}\",\"instrument_release_ref\":\"{RELEASE}\",\"locale\":\"ko-KR\"}}"
+    );
+    let created = handle_session_http_request(
+        &format!(
+            "POST {SESSION_COLLECTION_PATH} HTTP/1.1\r\n\
+             Idempotency-Key: {SESSION}\r\n\
+             Content-Length: {}\r\n\
+             \r\n{body}",
+            body.len()
+        ),
+        &mut port,
+        20_000,
+    );
+    assert_eq!(created.status(), 201);
+
+    let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let address = listener.local_addr().unwrap();
+    let reload = format!("GET {SESSION_COLLECTION_PATH}/{SESSION} HTTP/1.1\r\n\r\n");
+    let server = std::thread::spawn(move || {
+        accept_one_session_http(&listener, &mut port, 20_000).unwrap();
+        port
+    });
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream.write_all(reload.as_bytes()).unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
+    let mut reload_response = String::new();
+    stream.read_to_string(&mut reload_response).unwrap();
+    server.join().unwrap();
+    assert!(
+        reload_response.starts_with("HTTP/1.1 200 OK\r\n"),
+        "GET must reload the session created on the same port: {reload_response}"
     );
 }
 

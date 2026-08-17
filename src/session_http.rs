@@ -903,6 +903,86 @@ mod tests {
     }
 
     #[test]
+    fn listener_finishes_when_the_client_closes_before_headers_complete() {
+        use crate::session_http::{accept_one_session_http, MemorySessionHttpPort};
+        use std::io::Write;
+        use std::net::Shutdown;
+
+        let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .write_all(b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_eof")
+                .unwrap();
+            stream.shutdown(Shutdown::Write).unwrap();
+            let mut response = String::new();
+            let _ = std::io::Read::read_to_string(&mut stream, &mut response);
+        });
+        let mut port = MemorySessionHttpPort::published();
+        let _ = accept_one_session_http(&listener, &mut port, 20_000);
+        client.join().unwrap();
+    }
+
+    #[test]
+    fn listener_rejects_invalid_header_utf8_and_reloads_over_get() {
+        use crate::session_http::{
+            accept_one_session_http, handle_session_http_request, MemorySessionHttpPort,
+            SESSION_COLLECTION_PATH,
+        };
+        use std::io::{Read, Write};
+        use std::net::Shutdown;
+
+        let mut port = MemorySessionHttpPort::published();
+        let created = handle_session_http_request(
+            "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_library_get\r\n\r\n{\
+             \"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\
+             \"instrument_release_ref\":\"release_big_five_ko_v1\",\
+             \"locale\":\"ko-KR\"}",
+            &mut port,
+            20_000,
+        );
+        assert_eq!(created.status(), 201);
+
+        let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let invalid = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .write_all(b"POST /v1/sessions HTTP/1.1\r\nX-Bad: \xff\r\n\r\n")
+                .unwrap();
+            stream.shutdown(Shutdown::Write).unwrap();
+            let mut response = String::new();
+            let _ = stream.read_to_string(&mut response);
+        });
+        assert_eq!(
+            accept_one_session_http(&listener, &mut port, 20_000)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        invalid.join().unwrap();
+
+        let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let reload = format!("GET {SESSION_COLLECTION_PATH}/ses_library_get HTTP/1.1\r\n\r\n");
+        let worker = std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream.write_all(reload.as_bytes()).unwrap();
+            stream.shutdown(Shutdown::Write).unwrap();
+            let mut body = String::new();
+            stream.read_to_string(&mut body).unwrap();
+            body
+        });
+        accept_one_session_http(&listener, &mut port, 20_000).unwrap();
+        let response = worker.join().unwrap();
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK\r\n"),
+            "library accept must dispatch GET after a created start: {response}"
+        );
+    }
+
+    #[test]
     fn bind_accepts_one_loopback_create() {
         use crate::session_http::{
             accept_one_session_http, handle_session_http_request, MemorySessionHttpPort,
