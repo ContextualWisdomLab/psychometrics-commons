@@ -108,6 +108,7 @@ src/lib.rs
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
+├── postgres_participant.rs  # PostgreSQL anonymous-first participant base persistence
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/claim/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── reference.rs      # internal opaque-reference normalization
@@ -125,7 +126,8 @@ migrations/
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
 ├── 0011_scoring_request.sql
-└── 0012_integration_consumption.sql
+├── 0012_integration_consumption.sql
+└── 0030_assessment_participant.sql
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal normalized ingestion, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
@@ -133,6 +135,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 ### Active implementation work that is not protected-main truth
 
 **Active PR** #60 exclusive outbox delivery-lease persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Pending outbox rows accept one fenced worker lease, recover expiry from the database clock without transferring the fence, reject a future caller timestamp that would steal a still-live lease, and reject stale or zero-window claims. Live side-effect execution remains outside this slice.
+
+**Active PR** #237 anonymous participant-base persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `assessment_participant` stores only the opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time. Exact replay is idempotent; a conflicting tenant or clock rebind fails closed. Optional Keyverse link history remains a later append-only slice.
 
 ## 5. ADR traceability by concern
 
