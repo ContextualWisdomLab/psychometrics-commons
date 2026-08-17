@@ -375,17 +375,31 @@ fn postgres_sequence(value: usize) -> Result<i64, ResponseEventPersistenceError>
     i64::try_from(value).map_err(|_| ResponseEventPersistenceError::InvalidSequence)
 }
 
+fn next_sequence_from_summary(
+    count: i64,
+    highest: Option<i64>,
+) -> Result<i64, ResponseEventPersistenceError> {
+    match (count, highest) {
+        (0, None) => Ok(1),
+        (count, Some(value)) if count > 0 && value > 0 && count == value => value
+            .checked_add(1)
+            .ok_or(ResponseEventPersistenceError::InvalidSequence),
+        _ => Err(ResponseEventPersistenceError::InvalidSequence),
+    }
+}
+
 fn next_contiguous_sequence(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<i64, ResponseEventPersistenceError> {
-    let highest: Option<i64> = transaction
-        .query_one(
-            "SELECT MAX(server_sequence) FROM response_event WHERE session_ref = $1",
-            &[&session_ref],
-        )?
-        .get(0);
-    Ok(highest.map_or(1, |value| value.saturating_add(1)))
+    let row = transaction.query_one(
+        "SELECT COUNT(*), MAX(server_sequence) \
+         FROM response_event WHERE session_ref = $1",
+        &[&session_ref],
+    )?;
+    let count: i64 = row.get(0);
+    let highest: Option<i64> = row.get(1);
+    next_sequence_from_summary(count, highest)
 }
 
 fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersistenceError> {
@@ -431,10 +445,10 @@ mod reference_guard_tests {
     use super::{
         apply_response_event_migration, classify_existing_event, classify_unique_violation,
         load_response_event_receipts, load_response_ledger, map_rebuild_error,
-        millis_from_duration, next_contiguous_sequence, persist_response_event, postgres_sequence,
-        postgres_timestamptz, query_existing_event_row, require_contiguous_receipt_history,
-        require_read_committed, required_reference, unix_ms_from_system_time,
-        ResponseEventPersistenceError, ResponseEventReceipt,
+        millis_from_duration, next_contiguous_sequence, next_sequence_from_summary,
+        persist_response_event, postgres_sequence, postgres_timestamptz, query_existing_event_row,
+        require_contiguous_receipt_history, require_read_committed, required_reference,
+        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
     use crate::response::WriteError;
@@ -485,6 +499,22 @@ mod reference_guard_tests {
         assert!(matches!(
             millis_from_duration(Duration::from_millis(0)),
             Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+    }
+
+    #[test]
+    fn sequence_summary_requires_an_exact_positive_prefix() {
+        assert_eq!(next_sequence_from_summary(0, None).unwrap(), 1);
+        assert_eq!(next_sequence_from_summary(2, Some(2)).unwrap(), 3);
+        for (count, highest) in [(1, Some(2)), (1, Some(0)), (-1, Some(-1)), (1, None)] {
+            assert!(matches!(
+                next_sequence_from_summary(count, highest),
+                Err(ResponseEventPersistenceError::InvalidSequence)
+            ));
+        }
+        assert!(matches!(
+            next_sequence_from_summary(i64::MAX, Some(i64::MAX)),
+            Err(ResponseEventPersistenceError::InvalidSequence)
         ));
     }
 
