@@ -1,4 +1,4 @@
-//! Real PostgreSQL regression: claim-next resumes a due retry after provider timeout.
+//! Real `PostgreSQL` regression: claim-next resumes a due retry after provider timeout.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
