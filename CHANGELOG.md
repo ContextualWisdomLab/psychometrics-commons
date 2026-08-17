@@ -5,7 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
-- Traceability rebaseline after protected-main item-delivery ledger persistence (#48) and immutable result snapshots (#51). Remaining persist and operator-health HTTP slices stay Active PR, not shipped truth.
+- Traceability rebaseline on exact protected main `aac99d0b`. Item-delivery, result/response snapshots, narrative fallback, dual-proof linking, anonymous credentials, data-rights processing-start, stored result/data-rights authorization, scoring-dispatch persist, outbox delivery leases, and inbox claim-expiry are shipped truth. Remaining persist and operator-health HTTP slices stay Active PR.
 - Scoring-job cancel and lease-expiry fallback classification lock the current row until the caller transaction ends, so concurrent workers cannot rewrite terminal or unleased evidence.
 - PostgreSQL operational-store readiness probe classifies the supported major version and write-readiness, and fails closed when a caller-declared required relation is missing.
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
@@ -60,6 +60,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.
