@@ -135,6 +135,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
 
+**Active PR** #242 append-only purpose-bound audit evidence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Product audit records persist immutable tenant-scoped evidence with fail-closed replay, isolation, reconstruction, and operator-facing error contracts. Dependent public/admin transports remain outside this slice.
+
 ## 5. ADR traceability by concern
 
 | Concern | Governing ADR(s) |
