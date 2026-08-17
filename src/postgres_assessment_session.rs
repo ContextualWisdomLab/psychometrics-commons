@@ -2322,7 +2322,9 @@ mod tests {
 
         client
             .batch_execute(
-                "INSERT INTO assessment_session (\
+                "ALTER TABLE assessment_session \
+                     DROP CONSTRAINT assessment_session_participant_ref_check; \
+                 INSERT INTO assessment_session (\
                      session_ref, participant_ref, instrument_release_ref, \
                      instrument_version_ref, instrument_release_content_digest, \
                      locale, session_state, created_at_unix_ms\
