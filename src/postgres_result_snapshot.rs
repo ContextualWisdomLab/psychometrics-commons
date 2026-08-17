@@ -182,18 +182,7 @@ pub fn load_current_result_snapshot_for_session(
     match classify_current_session_tips(tip_count, session_has_snapshots)? {
         CurrentSessionTipPlan::Absent => Ok(None),
         CurrentSessionTipPlan::LoadUniqueTip => {
-            let snapshot_ref: String = transaction
-                .query_one(
-                    "SELECT result_snapshot_ref \
-                     FROM result_snapshot \
-                     WHERE session_ref = $1 \
-                       AND result_snapshot_ref NOT IN ( \
-                           SELECT supersedes_ref FROM result_snapshot \
-                           WHERE session_ref = $1 AND supersedes_ref IS NOT NULL \
-                       )",
-                    &[&session_ref],
-                )?
-                .get(0);
+            let snapshot_ref = load_unique_session_tip_ref(transaction, session_ref)?;
             load_result_snapshot(transaction, &snapshot_ref)
         }
     }
@@ -524,6 +513,26 @@ fn classify_current_session_tips(
     }
 }
 
+fn load_unique_session_tip_ref(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<String, ResultSnapshotPersistenceError> {
+    let tip_row = match transaction.query_one(
+        "SELECT result_snapshot_ref \
+         FROM result_snapshot \
+         WHERE session_ref = $1 \
+           AND result_snapshot_ref NOT IN ( \
+               SELECT supersedes_ref FROM result_snapshot \
+               WHERE session_ref = $1 AND supersedes_ref IS NOT NULL \
+           )",
+        &[&session_ref],
+    ) {
+        Ok(row) => row,
+        Err(error) => return Err(ResultSnapshotPersistenceError::from(error)),
+    };
+    Ok(tip_row.get(0))
+}
+
 fn require_contiguous_observation_order(
     expected_index: usize,
     stored_order: i32,
@@ -553,10 +562,10 @@ fn require_read_committed(
 mod reference_guard_tests {
     use super::{
         classify_current_session_tips, durable_evidence_error,
-        load_current_result_snapshot_for_session, observation_disposition_name,
-        observation_from_stored, observation_order, postgres_timestamp,
-        require_contiguous_observation_order, required_reference, stored_nonnegative_count,
-        stored_schema_version, stored_timestamp, CurrentSessionTipPlan,
+        load_current_result_snapshot_for_session, load_unique_session_tip_ref,
+        observation_disposition_name, observation_from_stored, observation_order,
+        postgres_timestamp, require_contiguous_observation_order, required_reference,
+        stored_nonnegative_count, stored_schema_version, stored_timestamp, CurrentSessionTipPlan,
         ResultSnapshotPersistenceError,
     };
     use crate::result::ResultSnapshotError;
@@ -768,6 +777,21 @@ mod reference_guard_tests {
         let mut transaction = client.transaction().unwrap();
         assert!(matches!(
             load_current_result_snapshot_for_session(&mut transaction, "session_ipip_ko_quick"),
+            Err(ResultSnapshotPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn unique_session_tip_lookup_maps_missing_relation_to_database_error() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO result_snapshot_unique_tip_missing;")
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            load_unique_session_tip_ref(&mut transaction, "session_ipip_ko_quick"),
             Err(ResultSnapshotPersistenceError::Database(_))
         ));
         transaction.rollback().unwrap();
