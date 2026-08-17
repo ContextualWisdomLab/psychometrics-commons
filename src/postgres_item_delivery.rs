@@ -217,24 +217,12 @@ fn persist_ledger_header(
     session_ref: &str,
 ) -> Result<bool, ItemDeliveryPersistenceError> {
     let allowed_item_version_refs = ledger.allowed_item_version_refs().to_vec();
-    let row = transaction.query_one(
-        "WITH inserted AS (\
-             INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
-             ) VALUES ($1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (session_ref) DO NOTHING \
-             RETURNING tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                       allowed_item_version_refs, TRUE AS inserted\
-         ) \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, inserted \
-         FROM inserted \
-         UNION ALL \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, FALSE AS inserted \
-         FROM item_delivery_ledger WHERE session_ref = $2 \
-         LIMIT 1",
+    let inserted = transaction.execute(
+        "INSERT INTO item_delivery_ledger (\
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
+             allowed_item_version_refs\
+         ) VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (session_ref) DO NOTHING",
         &[
             &tenant_ref,
             &session_ref,
@@ -243,13 +231,22 @@ fn persist_ledger_header(
             &ledger.locale(),
             &allowed_item_version_refs,
         ],
+    )? == 1;
+
+    // Under READ COMMITTED, each SQL statement gets a fresh snapshot. Keep the
+    // conflict insert and replay classification separate so a transaction that
+    // waited for a concurrent winning insert can see that just-committed row.
+    let row = transaction.query_one(
+        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
+                allowed_item_version_refs \
+         FROM item_delivery_ledger WHERE session_ref = $1",
+        &[&session_ref],
     )?;
     let stored_tenant_ref: String = row.get(0);
     let stored_release_ref: String = row.get(1);
     let stored_digest: String = row.get(2);
     let stored_locale: String = row.get(3);
     let stored_allowed: Vec<String> = row.get(4);
-    let inserted: bool = row.get(5);
     if stored_tenant_ref == tenant_ref
         && stored_release_ref == ledger.instrument_release_ref()
         && stored_digest == ledger.release_content_digest()
