@@ -44,18 +44,22 @@ pub fn authorize_result_read(
     )
 }
 
+#[allow(clippy::question_mark)]
 fn authorize_bound_result(
     actor: &AuthorizationContext,
     tenant_ref: &str,
     participant_ref: &str,
     result_ref: &str,
 ) -> Result<(), AuthorizationError> {
-    let resource = ResourceScope::participant_owned(
+    let resource = match ResourceScope::participant_owned(
         ResourceKind::Result,
         tenant_ref,
         participant_ref,
         result_ref,
-    )?;
+    ) {
+        Ok(resource) => resource,
+        Err(error) => return Err(error),
+    };
     authorize(actor, &resource, ProductPermission::ReadOwnResult)
 }
 
