@@ -1,6 +1,6 @@
 //! Durable completion evidence for processed data-rights requests.
 
-use postgres::{Client, IsolationLevel, NoTls};
+use postgres::{error::SqlState, Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::data_rights::{DataRightsRequest, DataRightsRequestKind};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_data_rights::{
@@ -354,6 +354,8 @@ fn completion_classify_select_failure_is_a_database_failure() {
         ))
         .unwrap();
 
+    // The initial UPDATE succeeds, then the trigger redirects search_path so classify_replay's
+    // SELECT of data_rights_request_state is the statement expected to fail.
     let mut transaction = client.transaction().unwrap();
     let error = persist_data_rights_completion(&mut transaction, &request)
         .expect_err("classify-select must return the database error");
@@ -388,6 +390,8 @@ fn completion_update_failure_is_a_database_failure() {
     transaction
         .batch_execute(&format!("SET LOCAL search_path TO {sink}"))
         .unwrap();
+    // The redirected transaction cannot resolve data_rights_request_state, so the completion
+    // UPDATE itself is the statement expected to fail.
     let error = persist_data_rights_completion(&mut transaction, &request)
         .expect_err("completion update must return the database error");
     transaction.rollback().unwrap();
@@ -431,6 +435,8 @@ fn completion_retained_scope_insert_failure_is_a_database_failure() {
         ))
         .unwrap();
 
+    // The UPDATE succeeds and redirects search_path; the subsequent retained-scope INSERT is the
+    // statement expected to fail because its table cannot be resolved in the sink schema.
     let mut transaction = client.transaction().unwrap();
     let error = persist_data_rights_completion(&mut transaction, &request)
         .expect_err("retained-scope insert must return the database error");
@@ -552,6 +558,8 @@ fn completion_retained_scope_classify_select_failure_is_a_database_failure() {
         )
         .unwrap();
 
+    // Replay's no-op UPDATE fires the test trigger and drops the retained-scope table; the later
+    // SELECT of retained scopes in classify_replay is the statement expected to fail.
     let mut transaction = client.transaction().unwrap();
     let error = persist_data_rights_completion(&mut transaction, &request)
         .expect_err("retained-scope classify-select must return the database error");
@@ -572,30 +580,57 @@ fn completion_schema_rejects_invalid_evidence_and_retention_scope() {
         "data_rights_request_completion",
         DataRightsRequestKind::Deletion,
     );
-    assert!(client
+
+    let evidence_error = client
         .execute(
             "UPDATE data_rights_request_state
              SET completion_evidence_ref = '123', completed_at_unix_ms = 10300
              WHERE request_ref = $1",
             &[&request.request_ref()],
         )
-        .is_err());
-    assert!(client
+        .expect_err("numeric-like completion evidence must fail the format CHECK");
+    let evidence_database_error = evidence_error
+        .as_db_error()
+        .expect("completion-evidence rejection should be a PostgreSQL CHECK error");
+    assert_eq!(evidence_database_error.code(), &SqlState::CHECK_VIOLATION);
+    assert_eq!(
+        evidence_database_error.constraint(),
+        Some("data_rights_completion_evidence_ref_format_check")
+    );
+
+    let time_error = client
         .execute(
             "UPDATE data_rights_request_state
              SET completion_evidence_ref = 'completion_alpha', completed_at_unix_ms = 0
              WHERE request_ref = $1",
             &[&request.request_ref()],
         )
-        .is_err());
-    assert!(client
+        .expect_err("non-positive completion time must fail the positive-time CHECK");
+    let time_database_error = time_error
+        .as_db_error()
+        .expect("completion-time rejection should be a PostgreSQL CHECK error");
+    assert_eq!(time_database_error.code(), &SqlState::CHECK_VIOLATION);
+    assert_eq!(
+        time_database_error.constraint(),
+        Some("data_rights_completed_time_positive_check")
+    );
+
+    let retained_error = client
         .execute(
             "INSERT INTO data_rights_retained_scope_evidence
                 (request_ref, tenant_ref, retained_scope_ref)
              VALUES ($1, $2, '123')",
             &[&request.request_ref(), &request.tenant_ref()],
         )
-        .is_err());
+        .expect_err("numeric-like retained scope must fail the format CHECK");
+    let retained_database_error = retained_error
+        .as_db_error()
+        .expect("retained-scope rejection should be a PostgreSQL CHECK error");
+    assert_eq!(retained_database_error.code(), &SqlState::CHECK_VIOLATION);
+    assert_eq!(
+        retained_database_error.constraint(),
+        Some("data_rights_retained_scope_ref_format_check")
+    );
 }
 
 #[test]
