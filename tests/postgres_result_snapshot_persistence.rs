@@ -889,6 +889,8 @@ fn current_session_load_rejects_blank_observation_construct() {
     client
         .batch_execute(
             "ALTER TABLE result_snapshot_observation DISABLE TRIGGER ALL; \
+             ALTER TABLE result_snapshot_observation \
+             DROP CONSTRAINT result_snapshot_observation_construct_ref_format_check; \
              UPDATE result_snapshot_observation \
              SET construct_ref = '' \
              WHERE result_snapshot_ref = 'result_snapshot_disposition'; \
