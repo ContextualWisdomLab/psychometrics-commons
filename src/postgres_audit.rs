@@ -93,7 +93,7 @@ pub fn apply_audit_evidence_migration(
 ///
 /// Exact replay is idempotent. Reusing `audit_event_ref` with a different tenant, actor, purpose,
 /// action, resource, outcome, digest, or event time fails closed rather than rewriting history.
-/// The insert and verification read intentionally use separate commands: under PostgreSQL
+/// The insert and verification read intentionally use separate commands: under `PostgreSQL`
 /// `READ COMMITTED`, `ON CONFLICT DO NOTHING` can observe a concurrent unique-key winner that is
 /// absent from the insert command's snapshot, while the following command receives a fresh
 /// snapshot and can verify that committed winner exactly.
