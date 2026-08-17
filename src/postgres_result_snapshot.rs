@@ -157,14 +157,13 @@ pub fn persist_result_snapshot(
 ///
 /// # Errors
 ///
-/// Returns [`ResultSnapshotPersistenceError`] for unsupported isolation, an
-/// invalid session reference, inconsistent durable evidence, or a database
-/// failure.
+/// Returns [`ResultSnapshotPersistenceError`] for an invalid session reference,
+/// inconsistent durable evidence, or a database failure. Unlike persist, this
+/// read does not require `READ COMMITTED`.
 pub fn load_current_result_snapshot_for_session(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Option<ResultSnapshot>, ResultSnapshotPersistenceError> {
-    require_read_committed(transaction)?;
     let session_ref = required_reference(session_ref)?;
     let counts = match transaction.query_one(
         "SELECT \
@@ -200,14 +199,13 @@ pub fn load_current_result_snapshot_for_session(
 ///
 /// # Errors
 ///
-/// Returns [`ResultSnapshotPersistenceError`] for unsupported isolation, an
-/// invalid snapshot reference, inconsistent durable evidence, or a database
-/// failure.
+/// Returns [`ResultSnapshotPersistenceError`] for an invalid snapshot
+/// reference, inconsistent durable evidence, or a database failure. Unlike
+/// persist, this read does not require `READ COMMITTED`.
 pub fn load_result_snapshot(
     transaction: &mut Transaction<'_>,
     result_snapshot_ref: &str,
 ) -> Result<Option<ResultSnapshot>, ResultSnapshotPersistenceError> {
-    require_read_committed(transaction)?;
     let result_snapshot_ref = required_reference(result_snapshot_ref)?;
     let header = transaction.query_opt(
         "SELECT participant_ref, scoring_result_ref, session_ref, response_snapshot_ref, \

@@ -557,22 +557,37 @@ fn missing_or_empty_result_identity_does_not_invent_a_score() {
 }
 
 #[test]
-fn load_requires_read_committed_isolation() {
+fn load_succeeds_under_stronger_isolation() {
     let _guard = result_snapshot_test_guard();
     let mut client = test_client();
     reset_result_snapshot_tables(&mut client);
     apply_result_snapshot_migration(&mut client).unwrap();
+
+    let snapshot = default_snapshot("result_snapshot_serializable_load");
+    persist_ok(&mut client, &snapshot);
+
+    let mut absent = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(
+        load_result_snapshot(&mut absent, "result_snapshot_absent_rr")
+            .unwrap()
+            .is_none()
+    );
+    absent.commit().unwrap();
 
     let mut transaction = client
         .build_transaction()
         .isolation_level(IsolationLevel::Serializable)
         .start()
         .unwrap();
-    assert!(matches!(
-        load_result_snapshot(&mut transaction, "result_snapshot_serializable_load"),
-        Err(ResultSnapshotPersistenceError::UnsupportedIsolationLevel)
-    ));
-    transaction.rollback().unwrap();
+    let loaded = load_result_snapshot(&mut transaction, "result_snapshot_serializable_load")
+        .unwrap()
+        .expect("stored snapshot must load under SERIALIZABLE");
+    transaction.commit().unwrap();
+    assert_eq!(loaded, snapshot);
 }
 
 #[test]
@@ -822,22 +837,81 @@ fn cyclic_session_supersession_fails_closed_instead_of_looking_absent() {
 }
 
 #[test]
-fn current_session_load_requires_read_committed_isolation() {
+fn current_session_load_succeeds_under_stronger_isolation() {
     let _guard = result_snapshot_test_guard();
     let mut client = test_client();
     reset_result_snapshot_tables(&mut client);
     apply_result_snapshot_migration(&mut client).unwrap();
+
+    let snapshot = snapshot_named(
+        "session_result_serializable",
+        "result_snapshot_session_serializable",
+        ENGINE_DIGEST,
+        Some("norm_version_big_five_ko_v1"),
+        None,
+        vec![ScoreObservation::scored("construct_big_five", 0.25, Some(0.05)).unwrap()],
+    );
+    persist_ok(&mut client, &snapshot);
+
+    let mut absent = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(
+        load_current_result_snapshot_for_session(&mut absent, "session_result_absent_rr")
+            .unwrap()
+            .is_none()
+    );
+    absent.commit().unwrap();
 
     let mut transaction = client
         .build_transaction()
         .isolation_level(IsolationLevel::Serializable)
         .start()
         .unwrap();
+    let loaded =
+        load_current_result_snapshot_for_session(&mut transaction, "session_result_serializable")
+            .unwrap()
+            .expect("unique session tip must load under SERIALIZABLE");
+    transaction.commit().unwrap();
+    assert_eq!(loaded, snapshot);
+
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_serializable_cycle_a",
+            "result_snapshot_serializable_cycle_a",
+            ENGINE_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_serializable_cycle_b"),
+            vec![ScoreObservation::scored("construct_big_five", 0.21, Some(0.05)).unwrap()],
+        ),
+    );
+    persist_ok(
+        &mut client,
+        &snapshot_named(
+            "session_result_serializable_cycle_a",
+            "result_snapshot_serializable_cycle_b",
+            OTHER_DIGEST,
+            Some("norm_version_big_five_ko_v1"),
+            Some("result_snapshot_serializable_cycle_a"),
+            vec![ScoreObservation::scored("construct_big_five", 0.22, Some(0.05)).unwrap()],
+        ),
+    );
+    let mut corrupt = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
     assert!(matches!(
-        load_current_result_snapshot_for_session(&mut transaction, "session_result_serializable"),
-        Err(ResultSnapshotPersistenceError::UnsupportedIsolationLevel)
+        load_current_result_snapshot_for_session(
+            &mut corrupt,
+            "session_result_serializable_cycle_a"
+        ),
+        Err(ResultSnapshotPersistenceError::InconsistentEvidence)
     ));
-    transaction.rollback().unwrap();
+    corrupt.rollback().unwrap();
 }
 
 #[test]
