@@ -109,31 +109,8 @@ pub fn persist_audit_evidence(
     require_read_committed(transaction)?;
     let occurred_at_unix_ms = i64::try_from(evidence.occurred_at_unix_ms())
         .map_err(|_| AuditPersistenceError::TimestampOutOfRange)?;
-    let inserted_rows = transaction.execute(
-        r"INSERT INTO audit_evidence_record (
-              audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
-              outcome_code, evidence_digest, occurred_at_unix_ms
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-          ON CONFLICT (audit_event_ref) DO NOTHING",
-        &[
-            &evidence.audit_event_ref(),
-            &evidence.tenant_ref(),
-            &evidence.actor_ref(),
-            &evidence.purpose_code(),
-            &evidence.action_code(),
-            &evidence.resource_ref(),
-            &evidence.outcome().as_code(),
-            &evidence.evidence_digest(),
-            &occurred_at_unix_ms,
-        ],
-    )?;
-    let row = transaction.query_one(
-        r"SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
-                 evidence_digest, occurred_at_unix_ms
-          FROM audit_evidence_record
-          WHERE audit_event_ref = $1",
-        &[&evidence.audit_event_ref()],
-    )?;
+    let inserted_rows = insert_audit_row(transaction, evidence, occurred_at_unix_ms)?;
+    let row = query_required_audit_row(transaction, evidence.audit_event_ref())?;
 
     let stored_tenant_ref: String = row.get(0);
     let stored_actor_ref: String = row.get(1);
@@ -182,14 +159,7 @@ pub fn load_audit_evidence(
     require_read_committed(transaction)?;
     let tenant_ref = required_reference(tenant_ref)?;
     let audit_event_ref = required_reference(audit_event_ref)?;
-    let row = transaction.query_opt(
-        r"SELECT actor_ref, purpose_code, action_code, resource_ref, outcome_code,
-                  evidence_digest, occurred_at_unix_ms
-           FROM audit_evidence_record
-           WHERE tenant_ref = $1 AND audit_event_ref = $2",
-        &[&tenant_ref, &audit_event_ref],
-    )?;
-    let Some(row) = row else {
+    let Some(row) = query_optional_audit_row(transaction, tenant_ref, audit_event_ref)? else {
         return Ok(None);
     };
 
@@ -220,6 +190,67 @@ pub fn load_audit_evidence(
     .map_err(|_| AuditPersistenceError::CorruptHistory)
 }
 
+fn insert_audit_row(
+    transaction: &mut Transaction<'_>,
+    evidence: &AuditEvidence,
+    occurred_at_unix_ms: i64,
+) -> Result<u64, AuditPersistenceError> {
+    match transaction.execute(
+        r"INSERT INTO audit_evidence_record (
+              audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
+              outcome_code, evidence_digest, occurred_at_unix_ms
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          ON CONFLICT (audit_event_ref) DO NOTHING",
+        &[
+            &evidence.audit_event_ref(),
+            &evidence.tenant_ref(),
+            &evidence.actor_ref(),
+            &evidence.purpose_code(),
+            &evidence.action_code(),
+            &evidence.resource_ref(),
+            &evidence.outcome().as_code(),
+            &evidence.evidence_digest(),
+            &occurred_at_unix_ms,
+        ],
+    ) {
+        Ok(inserted_rows) => Ok(inserted_rows),
+        Err(error) => Err(AuditPersistenceError::from(error)),
+    }
+}
+
+fn query_required_audit_row(
+    transaction: &mut Transaction<'_>,
+    audit_event_ref: &str,
+) -> Result<postgres::Row, AuditPersistenceError> {
+    match transaction.query_one(
+        r"SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+                 evidence_digest, occurred_at_unix_ms
+          FROM audit_evidence_record
+          WHERE audit_event_ref = $1",
+        &[&audit_event_ref],
+    ) {
+        Ok(row) => Ok(row),
+        Err(error) => Err(AuditPersistenceError::from(error)),
+    }
+}
+
+fn query_optional_audit_row(
+    transaction: &mut Transaction<'_>,
+    tenant_ref: &str,
+    audit_event_ref: &str,
+) -> Result<Option<postgres::Row>, AuditPersistenceError> {
+    match transaction.query_opt(
+        r"SELECT actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+                  evidence_digest, occurred_at_unix_ms
+           FROM audit_evidence_record
+           WHERE tenant_ref = $1 AND audit_event_ref = $2",
+        &[&tenant_ref, &audit_event_ref],
+    ) {
+        Ok(row) => Ok(row),
+        Err(error) => Err(AuditPersistenceError::from(error)),
+    }
+}
+
 fn required_reference(reference: &str) -> Result<&str, AuditPersistenceError> {
     match normalized_reference(reference) {
         Some(normalized) if normalized == reference => Ok(reference),
@@ -239,7 +270,28 @@ fn require_read_committed(transaction: &mut Transaction<'_>) -> Result<(), Audit
 
 #[cfg(test)]
 mod tests {
-    use super::{required_reference, AuditPersistenceError};
+    use super::{
+        insert_audit_row, query_optional_audit_row, query_required_audit_row, required_reference,
+        AuditPersistenceError,
+    };
+    use crate::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
+    use postgres::{Client, NoTls};
+
+    fn sample_evidence() -> AuditEvidence {
+        AuditEvidence::new(AuditEvidenceInput {
+            audit_event_ref: "audit_event_query_helper_01",
+            tenant_ref: "tenant_research_alpha",
+            actor_ref: "actor_publisher_alpha",
+            purpose_code: "instrument_publication",
+            action_code: "publish_instrument_release",
+            resource_ref: "instrument_release_big_five_ko_v1",
+            outcome: AuditOutcome::Succeeded,
+            evidence_digest:
+                "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            occurred_at_unix_ms: 1_785_000_000_000,
+        })
+        .unwrap()
+    }
 
     #[test]
     fn caller_aliases_fail_closed_before_database_access() {
@@ -253,5 +305,37 @@ mod tests {
             required_reference("audit_event_alpha").unwrap(),
             "audit_event_alpha"
         );
+    }
+
+    #[test]
+    fn audit_row_helpers_map_missing_relations_to_database_errors() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS audit_query_helper_missing;\
+                 SET search_path TO audit_query_helper_missing;",
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        let evidence = sample_evidence();
+
+        assert!(matches!(
+            insert_audit_row(&mut transaction, &evidence, 1_785_000_000_000),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            query_required_audit_row(&mut transaction, "audit_event_query_helper_01"),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            query_optional_audit_row(
+                &mut transaction,
+                "tenant_research_alpha",
+                "audit_event_query_helper_01"
+            ),
+            Err(AuditPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
     }
 }
