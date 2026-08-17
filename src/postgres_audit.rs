@@ -93,6 +93,10 @@ pub fn apply_audit_evidence_migration(
 ///
 /// Exact replay is idempotent. Reusing `audit_event_ref` with a different tenant, actor, purpose,
 /// action, resource, outcome, digest, or event time fails closed rather than rewriting history.
+/// The insert and verification read intentionally use separate commands: under PostgreSQL
+/// `READ COMMITTED`, `ON CONFLICT DO NOTHING` can observe a concurrent unique-key winner that is
+/// absent from the insert command's snapshot, while the following command receives a fresh
+/// snapshot and can verify that committed winner exactly.
 ///
 /// # Errors
 ///
@@ -105,25 +109,12 @@ pub fn persist_audit_evidence(
     require_read_committed(transaction)?;
     let occurred_at_unix_ms = i64::try_from(evidence.occurred_at_unix_ms())
         .map_err(|_| AuditPersistenceError::TimestampOutOfRange)?;
-    let row = transaction.query_one(
-        r"WITH inserted AS (
-             INSERT INTO audit_evidence_record (
-                 audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
-                 outcome_code, evidence_digest, occurred_at_unix_ms
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-             ON CONFLICT (audit_event_ref) DO NOTHING
-             RETURNING tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
-                       outcome_code, evidence_digest, occurred_at_unix_ms, TRUE AS inserted
-         )
-         SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
-                evidence_digest, occurred_at_unix_ms, inserted
-         FROM inserted
-         UNION ALL
-         SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
-                evidence_digest, occurred_at_unix_ms, FALSE AS inserted
-         FROM audit_evidence_record
-         WHERE audit_event_ref = $1
-         LIMIT 1",
+    let inserted_rows = transaction.execute(
+        r"INSERT INTO audit_evidence_record (
+              audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
+              outcome_code, evidence_digest, occurred_at_unix_ms
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          ON CONFLICT (audit_event_ref) DO NOTHING",
         &[
             &evidence.audit_event_ref(),
             &evidence.tenant_ref(),
@@ -136,6 +127,13 @@ pub fn persist_audit_evidence(
             &occurred_at_unix_ms,
         ],
     )?;
+    let row = transaction.query_one(
+        r"SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+                 evidence_digest, occurred_at_unix_ms
+          FROM audit_evidence_record
+          WHERE audit_event_ref = $1",
+        &[&evidence.audit_event_ref()],
+    )?;
 
     let stored_tenant_ref: String = row.get(0);
     let stored_actor_ref: String = row.get(1);
@@ -145,7 +143,6 @@ pub fn persist_audit_evidence(
     let stored_outcome_code: String = row.get(5);
     let stored_evidence_digest: String = row.get(6);
     let stored_occurred_at_unix_ms: i64 = row.get(7);
-    let inserted: bool = row.get(8);
 
     if stored_tenant_ref == evidence.tenant_ref()
         && stored_actor_ref == evidence.actor_ref()
@@ -156,7 +153,7 @@ pub fn persist_audit_evidence(
         && stored_evidence_digest == evidence.evidence_digest()
         && stored_occurred_at_unix_ms == occurred_at_unix_ms
     {
-        Ok(if inserted {
+        Ok(if inserted_rows == 1 {
             AuditPersistenceDisposition::Inserted
         } else {
             AuditPersistenceDisposition::Duplicate
