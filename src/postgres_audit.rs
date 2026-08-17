@@ -106,7 +106,7 @@ pub fn persist_audit_evidence(
     let occurred_at_unix_ms = i64::try_from(evidence.occurred_at_unix_ms())
         .map_err(|_| AuditPersistenceError::TimestampOutOfRange)?;
     let row = transaction.query_one(
-        r#"WITH inserted AS (
+        r"WITH inserted AS (
              INSERT INTO audit_evidence_record (
                  audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
                  outcome_code, evidence_digest, occurred_at_unix_ms
@@ -123,7 +123,7 @@ pub fn persist_audit_evidence(
                 evidence_digest, occurred_at_unix_ms, FALSE AS inserted
          FROM audit_evidence_record
          WHERE audit_event_ref = $1
-         LIMIT 1"#,
+         LIMIT 1",
         &[
             &evidence.audit_event_ref(),
             &evidence.tenant_ref(),
@@ -186,10 +186,10 @@ pub fn load_audit_evidence(
     let tenant_ref = required_reference(tenant_ref)?;
     let audit_event_ref = required_reference(audit_event_ref)?;
     let row = transaction.query_opt(
-        r#"SELECT actor_ref, purpose_code, action_code, resource_ref, outcome_code,
+        r"SELECT actor_ref, purpose_code, action_code, resource_ref, outcome_code,
                   evidence_digest, occurred_at_unix_ms
            FROM audit_evidence_record
-           WHERE tenant_ref = $1 AND audit_event_ref = $2"#,
+           WHERE tenant_ref = $1 AND audit_event_ref = $2",
         &[&tenant_ref, &audit_event_ref],
     )?;
     let Some(row) = row else {
