@@ -161,7 +161,11 @@ fn reapply_rejects_unicode_aliases_for_retained_scope_evidence() {
         "data_rights_request_retained_scope_ref",
     );
 
-    for invalid_ref in ["U&'\\00A0retention_shadow'", "U&'12\\066B3'", "U&'12\\FF0E3'"] {
+    for invalid_ref in [
+        "U&'\\00A0retention_shadow'",
+        "U&'12\\066B3'",
+        "U&'12\\FF0E3'",
+    ] {
         let statement = format!(
             "INSERT INTO data_rights_retained_scope_evidence
                  (request_ref, tenant_ref, retained_scope_ref)
