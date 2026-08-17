@@ -838,6 +838,122 @@ fn command_persist_rejects_identity_mismatch_and_resulting_state_rebind() {
     transaction.rollback().unwrap();
 }
 
+fn persist_activated_commands(
+    client: &mut Client,
+    session: &AssessmentSession,
+) -> Result<(), AssessmentSessionPersistenceError> {
+    let mut transaction = client.transaction().unwrap();
+    let error = persist_assessment_session_commands(&mut transaction, session).err();
+    transaction.rollback().unwrap();
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+#[test]
+fn command_persist_rejects_each_stored_identity_and_command_field() {
+    let (_database_test_guard, mut client) = test_client();
+    reset_session_table(&mut client);
+    apply_assessment_session_migration(&mut client).unwrap();
+    let created = created_session(
+        "ses_command_fields_alpha",
+        PARTICIPANT_REF,
+        "release_big_five_ko_v1",
+        VALID_DIGEST,
+    );
+    let mut activated = created.clone();
+    activated
+        .apply_command("cmd_activate_fields", 1, SessionCommand::Activate)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_assessment_session(&mut transaction, &created).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    for (column, value) in [
+        ("participant_ref", "ptc_cccccccccccccccccccccccccccccccc"),
+        ("instrument_release_ref", "release_big_five_en_v1"),
+        ("instrument_version_ref", "instrument_version_other"),
+        ("instrument_release_content_digest", OTHER_DIGEST),
+        ("locale", "en-US"),
+    ] {
+        client
+            .execute(
+                &format!("UPDATE assessment_session SET {column} = $2 WHERE session_ref = $1"),
+                &[&"ses_command_fields_alpha", &value],
+            )
+            .unwrap();
+        assert!(
+            matches!(
+                persist_activated_commands(&mut client, &activated),
+                Err(AssessmentSessionPersistenceError::ConflictingReplay)
+            ),
+            "{column} mismatch must fail closed"
+        );
+        client
+            .execute(
+                &format!("UPDATE assessment_session SET {column} = $2 WHERE session_ref = $1"),
+                &[
+                    &"ses_command_fields_alpha",
+                    &match column {
+                        "participant_ref" => PARTICIPANT_REF,
+                        "instrument_release_ref" => "release_big_five_ko_v1",
+                        "instrument_version_ref" => created.instrument_version_ref(),
+                        "instrument_release_content_digest" => VALID_DIGEST,
+                        _ => "ko-KR",
+                    },
+                ],
+            )
+            .unwrap();
+    }
+    client
+        .execute(
+            "UPDATE assessment_session SET created_at_unix_ms = 20001 WHERE session_ref = $1",
+            &[&"ses_command_fields_alpha"],
+        )
+        .unwrap();
+    assert!(matches!(
+        persist_activated_commands(&mut client, &activated),
+        Err(AssessmentSessionPersistenceError::ConflictingReplay)
+    ));
+    client
+        .execute(
+            "UPDATE assessment_session SET created_at_unix_ms = 20000 WHERE session_ref = $1",
+            &[&"ses_command_fields_alpha"],
+        )
+        .unwrap();
+
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_assessment_session_commands(&mut transaction, &activated).unwrap();
+        transaction.commit().unwrap();
+    }
+    for (column, value) in [("command_sequence", "2"), ("command_name", "'pause'")] {
+        client
+            .batch_execute(&format!(
+                "UPDATE assessment_session_command SET {column} = {value} \
+                 WHERE session_ref = 'ses_command_fields_alpha'"
+            ))
+            .unwrap();
+        assert!(
+            matches!(
+                persist_activated_commands(&mut client, &activated),
+                Err(AssessmentSessionPersistenceError::ConflictingReplay)
+            ),
+            "{column} mismatch must fail closed"
+        );
+        client
+            .batch_execute(
+                "UPDATE assessment_session_command \
+                 SET command_sequence = 1, command_name = 'activate', resulting_state = 'active' \
+                 WHERE session_ref = 'ses_command_fields_alpha'",
+            )
+            .unwrap();
+    }
+}
+
 #[test]
 fn load_replays_fail_closed_when_command_or_projection_evidence_is_corrupt() {
     let (_database_test_guard, mut client) = test_client();
