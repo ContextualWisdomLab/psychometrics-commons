@@ -1,6 +1,6 @@
 //! Coverage regression for the `Transaction` instantiation of participant reload.
 //!
-//! `load_anonymous_participant_base` accepts any PostgreSQL client implementation. Integration
+//! `load_anonymous_participant_base` accepts any `PostgreSQL` client implementation. Integration
 //! tests exercise the connection-backed instantiation, while this library test exercises the
 //! transaction-backed instantiation without adding another production adapter or weakening the
 //! exact coverage gate.
