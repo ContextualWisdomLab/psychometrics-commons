@@ -145,7 +145,8 @@ pub fn persist_anonymous_participant_base(
         "SELECT tenant_ref, created_at_unix_ms FROM assessment_participant \
          WHERE participant_ref = $1",
         &[&participant_ref],
-    )? else {
+    )?
+    else {
         return Err(ParticipantBasePersistenceError::CorruptStoredIdentity);
     };
     let stored_tenant_ref: String = row.get(0);
@@ -180,7 +181,8 @@ pub fn load_anonymous_participant_base(
          FROM assessment_participant \
          WHERE participant_ref = $1 AND tenant_ref = $2",
         &[&participant_ref, &tenant_ref],
-    )? else {
+    )?
+    else {
         return Ok(None);
     };
 
@@ -204,11 +206,9 @@ pub fn load_anonymous_participant_base(
     .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)
 }
 
-fn required_exact_reference(
-    reference: &str,
-) -> Result<&str, ParticipantBasePersistenceError> {
-    let normalized = normalized_reference(reference)
-        .ok_or(ParticipantBasePersistenceError::InvalidReference)?;
+fn required_exact_reference(reference: &str) -> Result<&str, ParticipantBasePersistenceError> {
+    let normalized =
+        normalized_reference(reference).ok_or(ParticipantBasePersistenceError::InvalidReference)?;
     if normalized == reference {
         Ok(reference)
     } else {
@@ -224,8 +224,8 @@ fn postgres_timestamp(timestamp: u64) -> Result<i64, ParticipantBasePersistenceE
 }
 
 fn stored_timestamp(timestamp: i64) -> Result<u64, ParticipantBasePersistenceError> {
-    let timestamp =
-        u64::try_from(timestamp).map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
+    let timestamp = u64::try_from(timestamp)
+        .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
     if timestamp == 0 {
         Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
     } else {
@@ -258,7 +258,13 @@ mod tests {
             required_exact_reference("participant_public_demo").unwrap(),
             "participant_public_demo"
         );
-        for reference in ["", " ", " participant_public_demo", "participant_public_demo ", "12"] {
+        for reference in [
+            "",
+            " ",
+            " participant_public_demo",
+            "participant_public_demo ",
+            "12",
+        ] {
             assert!(matches!(
                 required_exact_reference(reference),
                 Err(ParticipantBasePersistenceError::InvalidReference)
@@ -317,5 +323,24 @@ mod tests {
             assert_eq!(error.to_string(), expected);
             assert!(std::error::Error::source(&error).is_none());
         }
+    }
+
+    #[test]
+    fn database_error_wrap_is_instantiated_in_the_library() {
+        let source = postgres::Config::new()
+            .host("/no/such/psychometrics-commons.socket")
+            .port(1)
+            .user("postgres")
+            .dbname("psychometrics_commons_test")
+            .connect_timeout(std::time::Duration::from_millis(50))
+            .connect(postgres::NoTls)
+            .err()
+            .expect("missing local socket must fail closed");
+        let error = ParticipantBasePersistenceError::from(source);
+        assert_eq!(
+            error.to_string(),
+            "PostgreSQL participant base persistence failed"
+        );
+        assert!(std::error::Error::source(&error).is_some());
     }
 }

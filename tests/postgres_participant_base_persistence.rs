@@ -40,12 +40,8 @@ fn reset_participant_base_table(client: &mut Client) {
 }
 
 fn anonymous_participant() -> ParticipantRecord {
-    ParticipantRecord::new_anonymous(
-        "participant_public_demo",
-        "tenant_public_demo",
-        40_000,
-    )
-    .unwrap()
+    ParticipantRecord::new_anonymous("participant_public_demo", "tenant_public_demo", 40_000)
+        .unwrap()
 }
 
 #[test]
@@ -82,7 +78,10 @@ fn anonymous_base_round_trip_is_exact_and_tenant_bound() {
     .expect("stored participant must reload");
     assert_eq!(loaded.participant_ref(), participant.participant_ref());
     assert_eq!(loaded.tenant_ref(), participant.tenant_ref());
-    assert_eq!(loaded.created_at_unix_ms(), participant.created_at_unix_ms());
+    assert_eq!(
+        loaded.created_at_unix_ms(),
+        participant.created_at_unix_ms()
+    );
     assert!(loaded.link_history().is_empty());
     assert!(loaded.link_end_history().is_empty());
 
@@ -184,6 +183,42 @@ fn stronger_isolation_is_rejected_before_insert() {
 }
 
 #[test]
+fn missing_participant_relation_is_a_database_failure() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+
+    let participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    let persist_error = persist_anonymous_participant_base(&mut transaction, &participant)
+        .expect_err("persist must fail closed when the participant relation is missing");
+    transaction.rollback().unwrap();
+    assert!(
+        matches!(
+            persist_error,
+            ParticipantBasePersistenceError::Database(_)
+        ),
+        "missing relation must be a database failure, not a reconstructed identity: {persist_error}"
+    );
+    assert_eq!(
+        persist_error.to_string(),
+        "PostgreSQL participant base persistence failed"
+    );
+    assert!(std::error::Error::source(&persist_error).is_some());
+
+    let load_error = load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .expect_err("load must fail closed when the participant relation is missing");
+    assert!(
+        matches!(load_error, ParticipantBasePersistenceError::Database(_)),
+        "missing relation must be a database failure, not absence: {load_error}"
+    );
+}
+
+#[test]
 fn schema_rejects_blank_numeric_and_nonpositive_identity_evidence() {
     let _guard = participant_base_test_guard();
     let mut client = test_client();
@@ -239,7 +274,10 @@ fn schema_rejects_unicode_reference_forms_rejected_by_the_domain_contract() {
         .query_one("SELECT COUNT(*) FROM assessment_participant", &[])
         .unwrap()
         .get(0);
-    assert_eq!(count, 0, "invalid direct SQL must leave no corrupt identity row");
+    assert_eq!(
+        count, 0,
+        "invalid direct SQL must leave no corrupt identity row"
+    );
     assert!(load_anonymous_participant_base(
         &mut client,
         "participant_public_demo",
