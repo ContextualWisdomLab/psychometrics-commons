@@ -1,4 +1,4 @@
-//! Real PostgreSQL integrity contract for complete longitudinal membership vectors.
+//! Real `PostgreSQL` integrity contract for complete longitudinal membership vectors.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_longitudinal_observation::apply_longitudinal_observation_migration;
