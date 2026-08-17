@@ -39,7 +39,7 @@ class ReleaseLegalReadinessContract(unittest.TestCase):
         self.assertIn("python3 scripts/check_release_legal_readiness.py .", text)
 
     def test_runtime_ci_cannot_skip_changes_to_release_preflight_sources(self) -> None:
-        """Changing the checker or its workflow alone must still trigger the Python contract suite."""
+        """Changing the checker, workflow, or root license evidence must trigger the contract suite."""
         self.assertTrue(RUNTIME_CI.is_file())
         text = RUNTIME_CI.read_text(encoding="utf-8")
         self.assertEqual(
@@ -51,6 +51,16 @@ class ReleaseLegalReadinessContract(unittest.TestCase):
             text.count('      - ".github/workflows/release-legal-readiness.yml"'),
             2,
             "pull-request and protected-main path filters must both include the manual preflight workflow",
+        )
+        self.assertEqual(
+            text.count('      - "LICENSE*"'),
+            2,
+            "pull-request and protected-main path filters must both include root LICENSE evidence",
+        )
+        self.assertEqual(
+            text.count('      - "COPYING*"'),
+            2,
+            "pull-request and protected-main path filters must both include root COPYING evidence",
         )
         self.assertIn("python3 -m unittest discover -s tests -p 'test_*.py' -v", text)
 
