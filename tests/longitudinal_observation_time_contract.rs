@@ -129,9 +129,9 @@ fn same_enrollment_keeps_distinct_source_systems_and_later_pings() {
     ios.source_system_ref = "gyeot_ema_ios";
     ios.time.received_at_unix_ms = RECEIVED_AT_UNIX_MS + 60_000;
     ios.time.ingested_at_unix_ms = INGESTED_AT_UNIX_MS + 60_000;
-    let ios_row = observations
-        .ingest(ios)
-        .expect("the same clinic enrollment can ingest an iOS copy without collapsing source systems");
+    let ios_row = observations.ingest(ios).expect(
+        "the same clinic enrollment can ingest an iOS copy without collapsing source systems",
+    );
     assert_eq!(ios_row.source_system_ref(), "gyeot_ema_ios");
     assert_eq!(ios_row.source_observation_ref(), "gyeot_obs_ios_12ab");
 
