@@ -226,6 +226,43 @@ fn completion_evidence_cannot_exist_before_terminal_state() {
 }
 
 #[test]
+fn terminal_completion_evidence_cannot_be_rewritten() {
+    let mut client = client("data_rights_completion_terminal_immutable");
+    let mut request = persist_processing(
+        &mut client,
+        "data_rights_request_terminal_immutable",
+        DataRightsRequestKind::Deletion,
+    );
+    request
+        .complete("completion_evidence_original", &[], 10_300)
+        .unwrap();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_data_rights_completion(&mut transaction, &request).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let error = client
+        .execute(
+            "UPDATE data_rights_request_state
+             SET completion_evidence_ref = 'completion_evidence_rewritten',
+                 completed_at_unix_ms = 10301,
+                 latest_event_at_unix_ms = 10301
+             WHERE request_ref = $1",
+            &[&request.request_ref()],
+        )
+        .expect_err("terminal completion evidence must be immutable at the database boundary");
+    assert_eq!(
+        error
+            .as_db_error()
+            .expect("terminal completion rewrite should be a PostgreSQL trigger error")
+            .code()
+            .code(),
+        "55000"
+    );
+}
+
+#[test]
 fn retained_scope_evidence_is_immutable_after_completion() {
     let mut client = client("data_rights_completion_retained_scope_immutable");
     let mut request = persist_processing(
