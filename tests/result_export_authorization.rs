@@ -19,6 +19,7 @@ use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::session::SessionState;
+use std::error::Error;
 
 const ENGINE_DIGEST: &str =
     "sha256:4444444444444444444444444444444444444444444444444444444444444444";
@@ -168,4 +169,26 @@ fn participant_record_must_own_the_result_before_export_access() {
             AuthorizationError::OwnerMismatch
         ))
     );
+}
+
+#[test]
+fn export_authorization_errors_keep_safe_operator_text_and_sources() {
+    let authorization = ResultExportAuthorizationError::Authorization(
+        AuthorizationError::CrossTenantDenied,
+    );
+    assert_eq!(
+        authorization.to_string(),
+        "resource tenant does not match the authenticated tenant"
+    );
+    assert_eq!(
+        authorization.source().map(ToString::to_string).as_deref(),
+        Some("resource tenant does not match the authenticated tenant")
+    );
+
+    let binding = ResultExportAuthorizationError::ExportBindingMismatch;
+    assert_eq!(
+        binding.to_string(),
+        "personal result export does not belong to the authorized immutable result"
+    );
+    assert!(binding.source().is_none());
 }
