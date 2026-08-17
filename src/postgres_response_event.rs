@@ -142,8 +142,8 @@ pub fn apply_response_event_migration(
 /// # Errors
 ///
 /// Returns [`ResponseEventPersistenceError`] for an unbound identity,
-/// unsupported isolation, conflicting replay, a sequence conflict, an invalid
-/// sequence or timestamp, or a database failure.
+/// unsupported isolation, conflicting replay, a sequence conflict, a gapped
+/// or out-of-range sequence, an invalid timestamp, or a database failure.
 pub fn persist_response_event(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
@@ -161,6 +161,10 @@ pub fn persist_response_event(
     let received_at = postgres_timestamptz(received_at_unix_ms)?;
     if observed_at_unix_ms > received_at_unix_ms {
         return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
+    let next_sequence = next_contiguous_sequence(transaction, session_ref)?;
+    if server_sequence > next_sequence {
+        return Err(ResponseEventPersistenceError::InvalidSequence);
     }
 
     let inserted = match transaction.execute(
@@ -359,6 +363,19 @@ fn required_reference(reference: &str) -> Result<&str, ResponseEventPersistenceE
 
 fn postgres_sequence(value: usize) -> Result<i64, ResponseEventPersistenceError> {
     i64::try_from(value).map_err(|_| ResponseEventPersistenceError::InvalidSequence)
+}
+
+fn next_contiguous_sequence(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<i64, ResponseEventPersistenceError> {
+    let highest: Option<i64> = transaction
+        .query_one(
+            "SELECT MAX(server_sequence) FROM response_event WHERE session_ref = $1",
+            &[&session_ref],
+        )?
+        .get(0);
+    Ok(highest.map_or(1, |value| value.saturating_add(1)))
 }
 
 fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersistenceError> {

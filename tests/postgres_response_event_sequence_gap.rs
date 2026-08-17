@@ -59,5 +59,6 @@ fn persist_rejects_a_server_sequence_gap_before_commit() {
         persisted_rows, 0,
         "a rejected gap must leave no durable row"
     );
+    assert!(error.to_string().contains("gapped"), "{error}");
     transaction.rollback().unwrap();
 }
