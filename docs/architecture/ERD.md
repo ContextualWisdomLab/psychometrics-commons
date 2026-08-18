@@ -25,6 +25,7 @@ erDiagram
     assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
+    assessment_session ||--o{ assessment_session_command : accepts
     assessment_session ||--o{ item_delivery_event : delivers
     item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
@@ -152,6 +153,14 @@ erDiagram
       string locale
       timestamp created_at
       timestamp latest_event_at
+    }
+
+    assessment_session_command {
+      string session_ref PK, FK
+      string command_ref PK
+      int command_sequence
+      string command_name
+      string resulting_state
     }
 
     item_delivery_event {
@@ -429,6 +438,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
+- Physical `assessment_session` exists only on Active PR #218 (`migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path. Protected main still has the `src/session.rs` aggregate only.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
