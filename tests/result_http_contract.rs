@@ -178,6 +178,23 @@ fn invalid_route_alias_and_unsupported_method_fail_closed() {
 }
 
 #[test]
+fn undefined_query_semantics_fail_closed() {
+    let participant = participant("tenant_alpha", "participant_alpha");
+    let result = result_snapshot("participant_alpha");
+    let actor = actor("tenant_alpha", Some("participant_alpha"));
+
+    let response = handle_result_http_request(
+        "GET /v1/results/result_snapshot_result_http?include=unknown HTTP/1.1\r\n\r\n",
+        &actor,
+        &participant,
+        &result,
+    );
+
+    assert_eq!(response.status(), 400);
+    assert!(!response.body().contains("0.42"));
+}
+
+#[test]
 fn malformed_request_and_wrong_stored_owner_fail_closed() {
     let participant = participant("tenant_alpha", "participant_beta");
     let result = result_snapshot("participant_alpha");
