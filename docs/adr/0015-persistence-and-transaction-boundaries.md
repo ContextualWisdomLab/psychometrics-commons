@@ -61,6 +61,7 @@ Every supported minor version is tested through the same real-database migration
 |---|---|
 | `instrument_publication` | `instrument_definition`, `instrument_version`, `instrument_item`, item/version references |
 | `assessment_session` | `assessment_participant`, `assessment_session` |
+| `measurement_session` | `measurement_session`, `session_membership`, `session_consent_record`, `session_audit_event`, `export_snapshot_pointer` (ADR-0021; no scores) |
 | `response_event` | `response_event`, `response_snapshot`, `response_snapshot_entry` |
 | `scoring_dispatch` | `scoring_job`, scoring attempt/evidence records |
 | `result_snapshot` | `result_snapshot`, narrative/result-access metadata |

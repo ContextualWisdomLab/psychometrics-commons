@@ -36,6 +36,13 @@ This document converts broad quality goals into **stimulus → environment → r
 - **Conflict:** reuse with different evidence fails closed.
 - **Evidence:** concurrency/idempotency tests against real persistence.
 
+### QA-REL-02a — Live measurement-session persist survives process death
+
+- **Stimulus:** a buyer persists a live session with granted service-operation consent, enrolled participants, audit events, and an export-snapshot pointer; the writer process then dies.
+- **Environment:** PostgreSQL 18 operational store with a purpose-bound AES-256-GCM session key; no score kernel in-process.
+- **Response:** a new process reloads byte-for-byte consent, audit, membership, and export-pointer provenance; `service_operation` remains granted so the buyer continues without re-consenting.
+- **Evidence:** `persist_then_process_death_reloads_consent_audit_and_membership` against real PostgreSQL.
+
 ### QA-REL-02 — Completion is crash-safe
 
 - **Stimulus:** process fails immediately before/after session completion transaction/outbox commit.

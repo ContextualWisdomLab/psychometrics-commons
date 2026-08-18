@@ -103,8 +103,10 @@ src/lib.rs
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
+├── measurement_session.rs  # this change: live session membership, consent, audit, and export-pointer provenance
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
+├── postgres_measurement_session.rs  # this change: PostgreSQL persist/reload of live measurement sessions
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
 ├── postgres_health.rs  # PostgreSQL major/write-readiness and relation-integrity probe
@@ -128,16 +130,15 @@ migrations/
 ├── 0005_consent_lifecycle.sql
 ├── 0006_instrument_release.sql
 ├── 0011_scoring_request.sql
-└── 0012_integration_consumption.sql
+├── 0012_integration_consumption.sql
+└── 0020_measurement_session.sql  # this change: live measurement-session persist/reload
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #231 personal result export is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ResultExport::from_snapshot` copies the stored construct scores, standard errors, dispositions, owner `participant_ref`, and version provenance into a JSON document and a human-readable report. Approved limitation text is required so the report cannot imply diagnosis, employment fitness, or a type score. Padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains. The snapshot is not mutated. HTTP `POST /v1/results/{result_ref}/exports` remains Target. Do not fold persistence or public transport into this domain slice.
-
-**Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
+**Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of live measurement sessions is implemented. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main. Do not name closed #159 as the current persist landing.
 
 ## 5. ADR traceability by concern
 
@@ -163,6 +164,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 | Continuous score / narrative separation | ADR-0018 |
 | Scientific publication evidence gate | ADR-0019 |
 | Append-only participant identity-link history | ADR-0020 |
+| Live measurement-session persist/reload | ADR-0021 |
 
 ## 6. Governance and evidence artifact traceability
 

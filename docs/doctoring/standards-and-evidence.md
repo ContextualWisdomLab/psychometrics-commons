@@ -137,6 +137,30 @@ Product consequences:
 - missing sessions return 404 that tells the buyer to POST the same
   Idempotency-Key.
 
+## Session provenance and audit retention
+
+Live measurement-session persist/reload treats membership, consent, audit, and
+the export-snapshot pointer as reconstructable provenance, not as scores.
+W3C PROV-DM supplies the entity/activity/agent vocabulary for that lineage
+(Moreau & Missier, 2013). NIST SP 800-53 Rev. 5 AU-11 requires organizations
+to retain audit records for an organization-defined period to support
+after-the-fact investigation (National Institute of Standards and Technology,
+2020). AICPA Trust Services Criteria use audit logging and confidentiality as
+SOC 2 points of focus; this repository records those criteria as doctoring, not
+as an attestation (American Institute of Certified Public Accountants, 2022).
+
+Product consequences:
+
+- persist stores purpose-bound encrypted consent and audit payloads plus
+  plaintext operational references needed for authorized reload;
+- a writer-process death does not require the buyer to re-consent when reload
+  restores the granted service-operation decision;
+- audit events are append-only and retained with the session until a later
+  data-rights deletion slice executes;
+- export pointers carry a content digest, never a numeric score;
+- authorized work keeps exact participant and consent fields; PII masking is
+  not used as the privacy control.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -177,6 +201,12 @@ PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://w
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
+
+American Institute of Certified Public Accountants. (2022). *2017 Trust Services Criteria for Security, Availability, Processing Integrity, Confidentiality, and Privacy* (with revised points of focus—2022). https://www.aicpa-cima.com/resources/download/2017-trust-services-criteria-with-revised-points-of-focus-2022
+
+Moreau, L., & Missier, P. (Eds.). (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). World Wide Web Consortium. https://www.w3.org/TR/prov-dm/
+
+National Institute of Standards and Technology. (2020). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53, Rev. 5). https://doi.org/10.6028/NIST.SP.800-53r5
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
 

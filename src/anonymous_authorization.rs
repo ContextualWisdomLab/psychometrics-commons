@@ -130,7 +130,9 @@ pub fn authorize_anonymous_session(
 /// The function compares the actor to those supplied records. It does **not** accept a
 /// caller-built [`ResourceScope`]. It does not prove the records were loaded from the product
 /// store; a transport can still construct both aggregates from the proof.
-/// Persist/reload of `assessment_participant` remains Target. For example, a proof for
+/// Persist/reload of live measurement sessions is implemented. Append-only
+/// identity-link history persist remains a later slice. This gate still does not
+/// prove the records were store-loaded. For example, a proof for
 /// `session_alpha` /
 /// `participant_alpha` in `tenant_alpha` is allowed only when the supplied participant is that
 /// same person in that same tenant and the supplied session is `session_alpha` owned by that

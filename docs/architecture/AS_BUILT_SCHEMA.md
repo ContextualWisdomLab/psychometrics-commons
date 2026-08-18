@@ -19,8 +19,18 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | Implemented subset |
 | `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
+| `assessment_participant` | measurement session | This change: persist/reload of live measurement sessions |
+| `measurement_session` | measurement session | This change: persist/reload of live measurement sessions |
+| `session_membership` | measurement session | This change: persist/reload of live measurement sessions |
+| `session_consent_record` | measurement session | This change: encrypted consent records |
+| `session_audit_event` | measurement session | This change: encrypted append-only audit |
+| `export_snapshot_pointer` | measurement session | This change: export artifact pointer, not scores |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
+
+## This-change live measurement-session physical schema
+
+`migrations/0020_measurement_session.sql` and `src/postgres_measurement_session.rs` persist and reload one live measurement session: `assessment_participant`, `measurement_session`, `session_membership`, `session_consent_record`, `session_audit_event`, and `export_snapshot_pointer`. Consent and audit payloads are AES-256-GCM sealed with a purpose-bound key. Exact replay is idempotent. Process death plus reload restores membership, consent, audit, and the export pointer without requiring re-consent. The slice does not persist scores, IRT, linking, or identity-link history. Named tests include `persist_then_process_death_reloads_consent_audit_and_membership`.
 
 ## Active PR assessment-session physical schema
 

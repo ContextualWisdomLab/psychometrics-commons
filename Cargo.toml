@@ -7,7 +7,9 @@ repository = "https://github.com/ContextualWisdomLab/psychometrics-commons"
 publish = false
 
 [dependencies]
+aes-gcm = "=0.10.3"
 postgres = "=0.19.14"
+sha2 = "=0.10.9"
 
 [lib]
 path = "src/lib.rs"

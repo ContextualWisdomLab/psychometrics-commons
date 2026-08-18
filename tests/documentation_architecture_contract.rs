@@ -57,6 +57,7 @@ fn required_architecture_and_governance_viewpoints_exist() {
         "docs/adr/README.md",
         "docs/adr/0000-template.md",
         "docs/adr/0020-append-only-participant-identity-link-history.md",
+        "docs/adr/0021-measurement-session-persist-reload.md",
     ];
 
     for relative_path in required_paths {
@@ -295,6 +296,7 @@ fn required_architecture_decisions_are_indexed() {
         "0018-continuous-scores-and-narrative-separation.md",
         "0019-scientific-publication-evidence-gates.md",
         "0020-append-only-participant-identity-link-history.md",
+        "0021-measurement-session-persist-reload.md",
     ] {
         assert!(index.contains(adr), "ADR index must expose {adr}");
     }
@@ -337,6 +339,7 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn anonymous_command_docs_do_not_claim_store_load() {
     let root = repository_root();
     let authorization = read_required(&root.join("src/anonymous_authorization.rs"));
@@ -428,11 +431,22 @@ fn anonymous_command_docs_do_not_claim_store_load() {
             !document.contains("Active PR #158"),
             "{label} must not name closed restore-reconcile #158 as the current participant persist landing"
         );
-        let persist_status = document.to_ascii_lowercase();
         assert!(
-            persist_status.contains("persist/reload remains target")
-                || persist_status.contains("persist/reload of `assessment_participant` remains target"),
-            "{label} must say assessment_participant persist/reload remains Target on this honesty head"
+            !document.contains("Active PR #159"),
+            "{label} must not name closed #159 as the current persist landing"
+        );
+        let persist_status = document
+            .to_ascii_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            persist_status.contains("persist/reload of live measurement sessions is implemented"),
+            "{label} must say live measurement-session persist/reload is implemented"
+        );
+        assert!(
+            persist_status.contains("identity-link history persist remains a later slice"),
+            "{label} must keep identity-link history persist as a later slice"
         );
     }
 }
