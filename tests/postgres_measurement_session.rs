@@ -263,6 +263,46 @@ fn persist_then_process_death_reloads_consent_audit_and_membership() {
 }
 
 #[test]
+fn persist_then_reload_rejects_consent_nonce_only_rebind() {
+    let _guard = test_guard();
+    let mut writer = test_client();
+    reset_tables(&mut writer);
+    apply_measurement_session_migration(&mut writer).unwrap();
+    let original = live_session();
+    persist(&mut writer, &original).unwrap();
+    drop(writer);
+
+    let mut reader = test_client();
+    let mut transaction = reader.transaction().unwrap();
+    let restored = load_measurement_session(
+        &mut transaction,
+        &actor(),
+        original.session_ref(),
+        &encryption_key(),
+    )
+    .unwrap()
+    .expect("live session must reload after writer death");
+    transaction.commit().unwrap();
+    assert_eq!(restored, original);
+    assert!(
+        restored.service_operation_is_granted("participant_alpha"),
+        "buyer must continue after reload without re-consenting"
+    );
+
+    reader
+        .batch_execute(
+            "UPDATE measurement_session_persist_test.session_consent_record \
+             SET encryption_nonce = '\\x000000000000000000000000'::bytea \
+             WHERE event_ref = 'consent_service';",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist(&mut reader, &restored).unwrap_err(),
+        MeasurementSessionPersistenceError::ConflictingReplay
+    ));
+}
+
+#[test]
 fn exact_replay_is_duplicate_and_rebinding_fails_closed() {
     let _guard = test_guard();
     let mut client = test_client();
