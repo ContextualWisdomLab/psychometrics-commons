@@ -2,7 +2,7 @@
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{
-    ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
+    ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::scoring_engine::{
     execute_scoring_request, ScoringEngine, ScoringEngineExecutionError,
@@ -163,6 +163,30 @@ fn adapter_rejects_any_result_not_bound_to_the_complete_request() {
         );
         assert!(error.source().is_none());
     }
+}
+
+#[test]
+fn unsupported_output_schema_cannot_reach_the_engine_adapter() {
+    let snapshot = completed_snapshot_with_ref(PRIMARY_SNAPSHOT_REF);
+    let error = ScoringRequest::from_snapshot(
+        &snapshot,
+        ScoringRequestInput {
+            scoring_request_ref: "scoring_request_primary",
+            response_snapshot_ref: PRIMARY_SNAPSHOT_REF,
+            assessment_spec_ref: "assessment_spec_big_five",
+            instrument_version_ref: "instrument_version_big_five_en_v1",
+            scoring_version_ref: PRIMARY_SCORING_VERSION,
+            calibration_reference: "calibration_big_five_v1",
+            norm_version_ref: None,
+            requested_output_schema_version: 2,
+        },
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        ScoringContractError::UnsupportedOutputSchemaVersion
+    );
 }
 
 #[test]
