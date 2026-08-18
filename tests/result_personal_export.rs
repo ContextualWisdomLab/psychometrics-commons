@@ -244,6 +244,13 @@ fn personal_export_rejects_blank_identity_locale_time_and_limitations() {
         ResultExport::from_snapshot(&snapshot, input).unwrap_err(),
         ResultExportError::InvalidText
     );
+
+    input = export_input();
+    input.limitations = &[" Do not diagnose from this export. "];
+    assert_eq!(
+        ResultExport::from_snapshot(&snapshot, input).unwrap_err(),
+        ResultExportError::InvalidText
+    );
 }
 
 #[test]

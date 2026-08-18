@@ -72,7 +72,11 @@ impl Display for ResultExportError {
     }
 }
 
-impl Error for ResultExportError {}
+impl Error for ResultExportError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
+}
 
 impl ResultExport {
     /// Copy one immutable snapshot into JSON and a human-readable personal report.
@@ -484,6 +488,10 @@ mod export_guard_tests {
             required_text("\tlimitation"),
             Err(ResultExportError::InvalidText)
         ));
+        assert!(matches!(
+            required_text(" Do not diagnose from this export. "),
+            Err(ResultExportError::InvalidText)
+        ));
         assert_eq!(
             required_text("Continuous scores remain the measurement source of truth.").unwrap(),
             "Continuous scores remain the measurement source of truth."
@@ -504,6 +512,7 @@ mod export_guard_tests {
             ResultExportError::InvalidText,
         ] {
             assert!(!error.to_string().is_empty());
+            assert!(std::error::Error::source(&error).is_none());
         }
     }
 }
