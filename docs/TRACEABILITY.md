@@ -43,7 +43,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; HTTP probes, measured thresholds, and deployment evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; actual English/Korean form content, rights, translation, invariance and serving are Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
-| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/orchestration adapter; observation-time/membership ingest exists only on an Active PR and is not protected-main truth |
+| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/orchestration adapter; `src/longitudinal_observation.rs` records validity, recorded, received, and ingested clocks with explicit membership shares. Enrollment state, PostgreSQL persistence, HTTP, Gyeot collection, and TEPP kernels remain Target |
 | Measurement Workbench | PRD §6 | C4/component view; UML publication-evidence sequence; Measurement Governance | ADR-0001, ADR-0002, ADR-0004, ADR-0019 | Target; fast-mlsirm/Inkspan/RankWeave are External dependencies |
 | Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Architecture established; public transport is Target |
 | Community/Hosted/Enterprise profiles | PRD §7, §13 | TRD deployment sections; Deployment/Operations | ADR-0011, ADR-0017 | Target deployment packaging/evidence |
@@ -93,6 +93,7 @@ Current protected-main Rust module surface on `085ef4b4714796a77fd4645eeb46b028f
 
 ```text
 src/lib.rs
+├── anonymous_authorization.rs  # Active PR #225 supplied-record anonymous session command authorization (not protected-main truth)
 ├── authorization.rs  # fail-closed tenant/task authorization context and gates
 ├── consent.rs        # purpose-specific consent + research contribution lifecycle
 ├── data_rights.rs    # export/deletion lifecycle and retention evidence
@@ -128,15 +129,11 @@ migrations/
 └── 0012_integration_consumption.sql
 ```
 
-Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration. Active PR #232 adds persist-backed session HTTP on the #218 sealed start path (`src/session_http.rs`, `openapi/sessions.yaml`); those files are not protected-main truth.
+Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #232 persist-backed session HTTP on the sealed start path is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` call `start_created_assessment_session_from_stored_release` / `load_assessment_session`. `Idempotency-Key` is the durable session reference. Exact replay after later persist Suspend or Retire returns the original session. A new session after that later persist fails closed. RFC 9457 problem details tell the buyer the next action. Command HTTP, tenant isolation, and leftover #149 / #161 / #219 / #218 / #209 / #205 / #198 remain outside this slice.
-
-**Active PR** #60 exclusive outbox delivery-lease persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Pending outbox rows accept one fenced worker lease, recover expiry from the database clock without transferring the fence, reject a future caller timestamp that would steal a still-live lease, and reject stale or zero-window claims. Live side-effect execution remains outside this slice.
-
-Protected-main `0c695b98f38369db8c80d4f8a54ab1fdb3022716` now includes #228 claim-next scoring-job poll (`claim_next_scoring_job` takes the oldest due queued or retry-scheduled row with `FOR UPDATE SKIP LOCKED`) and #235 longitudinal observation-time ingest. Those slices are no longer Active PR work on this branch. Live `fast-mlsirm` execution, scoring HTTP, a claim-next loop that calls `run_scoring_worker_attempt_with_result_snapshot`, enrollment persistence, Gyeot collection, and TEPP kernels remain later slices.
+**Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
 
 ## 5. ADR traceability by concern
 
