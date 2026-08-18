@@ -650,11 +650,15 @@ fn query_one(
 #[cfg(test)]
 mod tests {
     use super::{
-        insert_then_classify, loaded_unix_ms, required_reference, unix_ms,
+        apply_measurement_session_migration, insert_then_classify, load_measurement_session,
+        loaded_unix_ms, persist_measurement_session, required_reference, unix_ms,
         MeasurementSessionPersistenceError,
     };
-    use crate::authorization::AuthorizationError;
-    use crate::measurement_session::MeasurementSessionError;
+    use crate::authorization::{AuthorizationContext, AuthorizationError, ProductRole};
+    use crate::measurement_session::{
+        MeasurementSession, MeasurementSessionError, MeasurementSessionInput, SessionAuditEvent,
+        SessionEncryptionKey, SessionMembership, MEASUREMENT_SESSION_PERSIST_PURPOSE,
+    };
     use std::error::Error;
 
     #[test]
@@ -688,6 +692,86 @@ mod tests {
         .unwrap_err();
         transaction.rollback().unwrap();
         assert_eq!(persistence_error_name(&error), "database");
+    }
+
+    #[test]
+    fn persist_then_reload_in_the_library_restores_membership_and_audit() {
+        let connection = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+        let mut writer = postgres::Client::connect(&connection, postgres::NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable");
+        writer
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS measurement_session_persist_lib_test;\
+                 SET search_path TO measurement_session_persist_lib_test;\
+                 DROP TABLE IF EXISTS export_snapshot_pointer;\
+                 DROP TABLE IF EXISTS session_audit_event;\
+                 DROP TABLE IF EXISTS session_consent_record;\
+                 DROP TABLE IF EXISTS session_membership;\
+                 DROP TABLE IF EXISTS measurement_session;\
+                 DROP TABLE IF EXISTS assessment_participant;",
+            )
+            .unwrap();
+        apply_measurement_session_migration(&mut writer).unwrap();
+        let original = MeasurementSession::new(MeasurementSessionInput {
+            session_ref: "session_library".to_owned(),
+            tenant_ref: "tenant_alpha".to_owned(),
+            owner_participant_ref: "participant_alpha".to_owned(),
+            created_at_unix_ms: 71,
+            memberships: vec![
+                SessionMembership::new("participant_alpha", "tenant_alpha", 72, 73).unwrap(),
+            ],
+            consent_records: Vec::new(),
+            audit_events: vec![
+                SessionAuditEvent::new(
+                    "audit_zeta",
+                    "actor_alpha",
+                    "session_export",
+                    MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                    "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+                    75,
+                )
+                .unwrap(),
+                SessionAuditEvent::new(
+                    "audit_alpha",
+                    "actor_alpha",
+                    "session_enroll",
+                    MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    74,
+                )
+                .unwrap(),
+            ],
+            export_snapshot_pointer: None,
+        })
+        .unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_alpha",
+            "subject_alpha",
+            Some("participant_alpha"),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let key =
+            SessionEncryptionKey::new(MEASUREMENT_SESSION_PERSIST_PURPOSE, [5_u8; 32]).unwrap();
+        let mut persist_tx = writer.transaction().unwrap();
+        persist_measurement_session(&mut persist_tx, &actor, &original, &key).unwrap();
+        persist_tx.commit().unwrap();
+        drop(writer);
+
+        let mut reader = postgres::Client::connect(&connection, postgres::NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable after writer death");
+        reader
+            .batch_execute("SET search_path TO measurement_session_persist_lib_test;")
+            .unwrap();
+        let mut load_tx = reader.transaction().unwrap();
+        let restored = load_measurement_session(&mut load_tx, &actor, "session_library", &key)
+            .unwrap()
+            .expect("library persist/reload must restore the live session");
+        load_tx.commit().unwrap();
+        assert_eq!(restored, original);
+        assert_eq!(restored.audit_events()[0].event_ref(), "audit_alpha");
+        assert_eq!(restored.audit_events()[1].event_ref(), "audit_zeta");
     }
 
     fn persistence_error_name(error: &MeasurementSessionPersistenceError) -> &'static str {
