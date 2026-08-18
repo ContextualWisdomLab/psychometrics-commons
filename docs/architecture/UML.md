@@ -278,6 +278,8 @@ Export cannot complete with a deletion-retention exception. Exact terminal repla
 
 ## 6. Anonymous assessment happy-path sequence
 
+This sequence is target transport. The as-built command gate compares supplied records and does not perform the load.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -296,6 +298,12 @@ sequenceDiagram
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
 
+    C->>A: activate session
+    A->>DB: load assessment_participant + assessment_session
+    A->>A: authorize anonymous command from supplied records
+    A->>DB: atomically state=Active
+    A-->>C: activation accepted
+
     loop each presented item / response
         A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
         P->>C: answer presented item
@@ -306,6 +314,8 @@ sequenceDiagram
     end
 
     C->>A: complete session
+    A->>DB: load assessment_participant + assessment_session
+    A->>A: authorize anonymous command from supplied records
     A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
