@@ -55,6 +55,24 @@ impl IntegrationPublisher for SuccessfulPublisher {
     }
 }
 
+struct ClassifiedPublisher {
+    outcome: DeliveryOutcome,
+}
+
+impl IntegrationPublisher for ClassifiedPublisher {
+    type Error = PublisherUnavailable;
+
+    fn publish(
+        &self,
+        integration_event: &IntegrationEvent,
+    ) -> Result<IntegrationPublishReceipt, Self::Error> {
+        Ok(IntegrationPublishReceipt::for_event(
+            integration_event,
+            self.outcome,
+        ))
+    }
+}
+
 struct MismatchedPublisher {
     acknowledged_event: IntegrationEvent,
 }
@@ -95,6 +113,25 @@ fn adapter_returns_only_a_receipt_bound_to_the_exact_event() {
     assert_eq!(receipt.tenant_ref(), "tenant_primary");
     assert_eq!(receipt.event_ref(), "event_primary");
     assert_eq!(receipt.outcome(), DeliveryOutcome::Delivered);
+}
+
+#[test]
+fn adapter_preserves_each_publisher_delivery_classification() {
+    let integration_event = event("event_primary", "tenant_primary");
+
+    for outcome in [
+        DeliveryOutcome::Delivered,
+        DeliveryOutcome::RetryableFailure,
+        DeliveryOutcome::PermanentFailure,
+    ] {
+        let receipt = execute_integration_publish(&ClassifiedPublisher { outcome }, &integration_event)
+            .unwrap();
+
+        assert_eq!(receipt.source_ref(), "psychometrics_commons");
+        assert_eq!(receipt.tenant_ref(), "tenant_primary");
+        assert_eq!(receipt.event_ref(), "event_primary");
+        assert_eq!(receipt.outcome(), outcome);
+    }
 }
 
 #[test]
