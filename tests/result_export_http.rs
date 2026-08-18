@@ -115,11 +115,20 @@ fn fixture() -> (AuthorizationContext, ParticipantRecord, ResultSnapshot, Result
     )
 }
 
+fn request(accept: Option<&str>) -> String {
+    let accept = accept
+        .map(|value| format!("Accept: {value}\r\n"))
+        .unwrap_or_default();
+    format!(
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\n{accept}\r\n"
+    )
+}
+
 #[test]
-fn authorized_owner_gets_exact_machine_readable_export() {
+fn authorized_owner_posts_exact_machine_readable_export() {
     let (actor, participant, snapshot, export) = fixture();
     let response = handle_result_export_http_request(
-        "GET /v1/results/result_snapshot_alpha/exports/result_export_alpha HTTP/1.1\r\nAccept: application/json\r\n\r\n",
+        &request(Some("application/json")),
         &actor,
         &participant,
         &snapshot,
@@ -136,7 +145,7 @@ fn authorized_owner_gets_exact_machine_readable_export() {
 fn authorized_owner_can_request_the_human_readable_export() {
     let (actor, participant, snapshot, export) = fixture();
     let response = handle_result_export_http_request(
-        "GET /v1/results/result_snapshot_alpha/exports/result_export_alpha HTTP/1.1\r\nAccept: text/plain\r\n\r\n",
+        &request(Some("text/plain")),
         &actor,
         &participant,
         &snapshot,
@@ -152,7 +161,7 @@ fn authorized_owner_can_request_the_human_readable_export() {
 fn missing_accept_defaults_to_machine_readable_export() {
     let (actor, participant, snapshot, export) = fixture();
     let response = handle_result_export_http_request(
-        "GET /v1/results/result_snapshot_alpha/exports/result_export_alpha HTTP/1.1\r\nHost: example.test\r\n\r\n",
+        &request(None),
         &actor,
         &participant,
         &snapshot,
@@ -170,7 +179,7 @@ fn cross_tenant_denial_precedes_export_binding_details() {
     let wrong_export = personal_export(&other_snapshot, "result_export_beta");
     let actor = actor("tenant_other", "participant_alpha");
     let response = handle_result_export_http_request(
-        "GET /v1/results/result_snapshot_alpha/exports/result_export_alpha HTTP/1.1\r\nAccept: application/json\r\n\r\n",
+        &request(Some("application/json")),
         &actor,
         &participant,
         &snapshot,
@@ -185,40 +194,44 @@ fn cross_tenant_denial_precedes_export_binding_details() {
 }
 
 #[test]
-fn authorized_owner_cannot_rebind_route_to_another_result_or_export() {
+fn authorized_owner_cannot_rebind_result_or_idempotency_identity() {
     let (actor, participant, snapshot, export) = fixture();
-    for request in [
-        "GET /v1/results/result_snapshot_other/exports/result_export_alpha HTTP/1.1\r\n\r\n",
-        "GET /v1/results/result_snapshot_alpha/exports/result_export_other HTTP/1.1\r\n\r\n",
-    ] {
-        let response = handle_result_export_http_request(
-            request,
-            &actor,
-            &participant,
-            &snapshot,
-            &export,
-        );
-        assert_eq!(response.status(), 404);
-        assert!(!response.body().contains("result_snapshot_alpha"));
-        assert!(!response.body().contains("result_export_alpha"));
-    }
+    let wrong_result = handle_result_export_http_request(
+        "POST /v1/results/result_snapshot_other/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\n\r\n",
+        &actor,
+        &participant,
+        &snapshot,
+        &export,
+    );
+    assert_eq!(wrong_result.status(), 404);
+    assert!(!wrong_result.body().contains("result_snapshot_alpha"));
+
+    let wrong_key = handle_result_export_http_request(
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_other\r\n\r\n",
+        &actor,
+        &participant,
+        &snapshot,
+        &export,
+    );
+    assert_eq!(wrong_key.status(), 409);
+    assert!(!wrong_key.body().contains("result_export_alpha"));
 }
 
 #[test]
 fn unsupported_method_and_representation_are_explicit() {
     let (actor, participant, snapshot, export) = fixture();
     let method = handle_result_export_http_request(
-        "POST /v1/results/result_snapshot_alpha/exports/result_export_alpha HTTP/1.1\r\n\r\n",
+        "GET /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\n\r\n",
         &actor,
         &participant,
         &snapshot,
         &export,
     );
     assert_eq!(method.status(), 405);
-    assert_eq!(method.allow(), Some("GET"));
+    assert_eq!(method.allow(), Some("POST"));
 
     let representation = handle_result_export_http_request(
-        "GET /v1/results/result_snapshot_alpha/exports/result_export_alpha HTTP/1.1\r\nAccept: application/xml\r\n\r\n",
+        &request(Some("application/xml")),
         &actor,
         &participant,
         &snapshot,
@@ -229,10 +242,29 @@ fn unsupported_method_and_representation_are_explicit() {
 }
 
 #[test]
+fn idempotency_header_is_required_exact_and_single() {
+    let (actor, participant, snapshot, export) = fixture();
+    for request in [
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\n\r\n",
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: 123\r\n\r\n",
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nIdempotency-Key: result_export_alpha\r\n\r\n",
+    ] {
+        let response = handle_result_export_http_request(
+            request,
+            &actor,
+            &participant,
+            &snapshot,
+            &export,
+        );
+        assert_eq!(response.status(), 400);
+    }
+}
+
+#[test]
 fn malformed_or_unknown_routes_fail_without_echoing_request_identity() {
     let (actor, participant, snapshot, export) = fixture();
     let malformed = handle_result_export_http_request(
-        "GET only-two-parts\r\n\r\n",
+        "POST only-two-parts\r\n\r\n",
         &actor,
         &participant,
         &snapshot,
@@ -241,8 +273,8 @@ fn malformed_or_unknown_routes_fail_without_echoing_request_identity() {
     assert_eq!(malformed.status(), 400);
 
     for request in [
-        "GET /v1/results/123/exports/result_export_alpha HTTP/1.1\r\n\r\n",
-        "GET /v1/unknown/result_snapshot_alpha HTTP/1.1\r\n\r\n",
+        "POST /v1/results/123/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\n\r\n",
+        "POST /v1/unknown/result_snapshot_alpha HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\n\r\n",
     ] {
         let response = handle_result_export_http_request(
             request,
