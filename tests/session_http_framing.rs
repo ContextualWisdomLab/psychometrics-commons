@@ -57,8 +57,11 @@ fn framing_error(request: &[u8]) -> std::io::ErrorKind {
     let payload = request.to_vec();
     let client = std::thread::spawn(move || {
         let mut stream = TcpStream::connect(address).unwrap();
-        stream.write_all(&payload).unwrap();
-        stream.shutdown(Shutdown::Write).unwrap();
+        // The listener may reject and close as soon as the invalid Content-Length is
+        // parsed. A later write or shutdown then races with that close under coverage
+        // instrumentation; the contract under test is the accept-side InvalidData.
+        let _ = stream.write_all(&payload);
+        let _ = stream.shutdown(Shutdown::Write);
         let mut response = String::new();
         let _ = stream.read_to_string(&mut response);
     });
