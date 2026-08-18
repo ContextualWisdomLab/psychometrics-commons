@@ -70,7 +70,7 @@ impl IntegrationPublishReceipt {
 ///
 /// Implementations own only transport execution. Product retry, quarantine,
 /// fencing, and durable delivery-attempt recording remain in the integration and
-/// PostgreSQL adapters.
+/// `PostgreSQL` adapters.
 pub trait IntegrationPublisher {
     /// Typed provider, policy, or transport failure.
     type Error: Error + Send + Sync + 'static;
@@ -124,7 +124,7 @@ where
 ///
 /// This function does not mutate an outbox row, retry a request, or bypass egress
 /// policy. A caller with a durable delivery lease can record the returned outcome
-/// through the existing fenced PostgreSQL delivery-attempt path only after this
+/// through the existing fenced `PostgreSQL` delivery-attempt path only after this
 /// identity check succeeds.
 ///
 /// # Errors
