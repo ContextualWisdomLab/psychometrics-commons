@@ -353,3 +353,120 @@ fn persistence_requires_read_committed_and_live_schema() {
         Err(LongitudinalObservationPersistenceError::Database(_))
     ));
 }
+
+#[test]
+fn persist_fails_closed_when_membership_relation_is_missing() {
+    let _guard = guard();
+    let mut client = client();
+    reset(&mut client);
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+    client
+        .batch_execute("DROP TABLE longitudinal_membership_share CASCADE")
+        .unwrap();
+    let record = observation(
+        "longitudinal_observation_record_missing_membership_relation",
+        "construct_extraversion",
+    );
+    assert!(matches!(
+        persist(&mut client, "tenant_clinic_seoul", &record),
+        Err(LongitudinalObservationPersistenceError::Database(_))
+    ));
+}
+
+#[test]
+fn load_fails_closed_when_observation_or_membership_relations_are_missing() {
+    let _guard = guard();
+    let mut client = client();
+    reset(&mut client);
+    let record = observation(
+        "longitudinal_observation_record_missing_load_relation",
+        "construct_extraversion",
+    );
+    assert!(matches!(
+        load(
+            &mut client,
+            "tenant_clinic_seoul",
+            record.observation_record_ref()
+        ),
+        Err(LongitudinalObservationPersistenceError::Database(_))
+    ));
+
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+    persist(&mut client, "tenant_clinic_seoul", &record).unwrap();
+    client
+        .batch_execute("DROP TABLE longitudinal_membership_share CASCADE")
+        .unwrap();
+    assert!(matches!(
+        load(
+            &mut client,
+            "tenant_clinic_seoul",
+            record.observation_record_ref()
+        ),
+        Err(LongitudinalObservationPersistenceError::Database(_))
+    ));
+}
+
+#[test]
+fn replay_header_select_failure_is_a_database_failure() {
+    let _guard = guard();
+    let mut client = client();
+    reset(&mut client);
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+    let record = observation(
+        "longitudinal_observation_record_hidden_header_select",
+        "construct_extraversion",
+    );
+    persist(&mut client, "tenant_clinic_seoul", &record).unwrap();
+
+    let sink = "longitudinal_observation_header_select_sink";
+    client
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {sink} CASCADE; \
+             CREATE SCHEMA {sink}; \
+             CREATE OR REPLACE FUNCTION longitudinal_observation_redirect_after_insert() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 PERFORM set_config('search_path', '{sink}', false); \
+                 RETURN NULL; \
+             END $$; \
+             CREATE TRIGGER longitudinal_observation_redirect_after_insert \
+             AFTER INSERT ON longitudinal_observation \
+             FOR EACH STATEMENT EXECUTE FUNCTION longitudinal_observation_redirect_after_insert();"
+        ))
+        .unwrap();
+
+    let error = persist(&mut client, "tenant_clinic_seoul", &record)
+        .expect_err("header replay must fail closed when classify-select cannot see stored rows");
+    client
+        .batch_execute(&format!(
+            "DROP TRIGGER IF EXISTS longitudinal_observation_redirect_after_insert \
+             ON longitudinal_observation; \
+             DROP FUNCTION IF EXISTS longitudinal_observation_redirect_after_insert(); \
+             DROP SCHEMA IF EXISTS {sink} CASCADE;"
+        ))
+        .unwrap();
+    assert!(matches!(
+        error,
+        LongitudinalObservationPersistenceError::Database(_)
+    ));
+}
+
+#[test]
+fn replay_membership_select_failure_is_a_database_failure() {
+    let _guard = guard();
+    let mut client = client();
+    reset(&mut client);
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+    let record = observation(
+        "longitudinal_observation_record_hidden_membership_select",
+        "construct_extraversion",
+    );
+    persist(&mut client, "tenant_clinic_seoul", &record).unwrap();
+    client
+        .batch_execute("DROP TABLE longitudinal_membership_share CASCADE")
+        .unwrap();
+    assert!(matches!(
+        persist(&mut client, "tenant_clinic_seoul", &record),
+        Err(LongitudinalObservationPersistenceError::Database(_))
+    ));
+}

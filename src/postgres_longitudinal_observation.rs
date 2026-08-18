@@ -86,7 +86,7 @@ impl From<postgres::Error> for LongitudinalObservationPersistenceError {
 /// Apply the idempotent longitudinal-observation migration.
 ///
 /// The migration uses unqualified database object names. Callers must set the
-/// intended PostgreSQL `search_path` before applying it and use the same schema
+/// intended `PostgreSQL` `search_path` before applying it and use the same schema
 /// context for related persistence queries.
 ///
 /// # Errors
@@ -427,12 +427,16 @@ mod numeric_guard_tests {
             Err(LongitudinalObservationPersistenceError::InvalidNumericRange)
         ));
         assert_eq!(postgres_usize(1).unwrap(), 1);
-        if usize::BITS > 63 {
-            assert!(matches!(
-                postgres_usize(usize::MAX),
-                Err(LongitudinalObservationPersistenceError::InvalidNumericRange)
-            ));
-        }
+        #[cfg(target_pointer_width = "64")]
+        assert!(matches!(
+            postgres_usize(usize::MAX),
+            Err(LongitudinalObservationPersistenceError::InvalidNumericRange)
+        ));
+        #[cfg(not(target_pointer_width = "64"))]
+        assert_eq!(
+            postgres_usize(usize::MAX).unwrap(),
+            i64::try_from(usize::MAX).unwrap()
+        );
         assert_eq!(database_u64(7).unwrap(), 7);
         assert!(matches!(
             database_u64(-1),
