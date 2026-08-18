@@ -71,7 +71,8 @@ impl ResultHttpResponse {
 /// `participant` and `result` must be server-owned records loaded for the
 /// request. The actor never supplies resource ownership. Authorization is
 /// intentionally checked before comparing the route reference with the stored
-/// result identity.
+/// result identity. Query parameters are rejected until the repository defines
+/// their semantics instead of being silently ignored.
 #[must_use]
 pub fn handle_result_http_request(
     request: &str,
@@ -87,8 +88,15 @@ pub fn handle_result_http_request(
             "result read requires an HTTP/1.1 method and target",
         );
     };
-    let path = target.split_once('?').map_or(target, |(path, _)| path);
-    let Some(route_result_ref) = path
+    if target.contains('?') {
+        return ResultHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:unsupported-query",
+            "Unsupported Query",
+            "result reads do not define query parameters; request the exact result resource",
+        );
+    }
+    let Some(route_result_ref) = target
         .strip_prefix(RESULT_READ_PATH_PREFIX)
         .filter(|value| !value.is_empty() && !value.contains('/'))
     else {
