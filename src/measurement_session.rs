@@ -117,7 +117,7 @@ impl SessionEncryptionKey {
         associated_data: &str,
         plaintext: &str,
     ) -> Result<SealedPayload, MeasurementSessionError> {
-        self.seal_bytes(nonce_material, associated_data, plaintext.as_bytes())
+        Ok(self.seal_bytes(nonce_material, associated_data, plaintext.as_bytes()))
     }
 
     /// Seal raw bytes so tests can prove non-UTF-8 plaintext fails closed on open.
@@ -126,17 +126,21 @@ impl SessionEncryptionKey {
         nonce_material: &str,
         associated_data: &str,
         plaintext: &[u8],
-    ) -> Result<SealedPayload, MeasurementSessionError> {
+    ) -> SealedPayload {
         let nonce = nonce_for(nonce_material);
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key_bytes));
-        let ciphertext = map_aead(cipher.encrypt(
-            Nonce::from_slice(&nonce),
-            Payload {
-                msg: plaintext,
-                aad: associated_data.as_bytes(),
-            },
-        ))?;
-        Ok(SealedPayload { nonce, ciphertext })
+        // AES-256-GCM encryption is infallible for a 12-byte nonce; keep the
+        // Result mapper only for authenticated decrypt, which can fail closed.
+        let ciphertext = cipher
+            .encrypt(
+                Nonce::from_slice(&nonce),
+                Payload {
+                    msg: plaintext,
+                    aad: associated_data.as_bytes(),
+                },
+            )
+            .expect("AES-256-GCM encryption does not fail for a 12-byte nonce");
+        SealedPayload { nonce, ciphertext }
     }
 
     /// Open one sealed payload and fail closed on key, nonce, or AAD mismatch.
@@ -1459,6 +1463,31 @@ mod tests {
             authorize_measurement_session(&other_owner, &built).unwrap_err(),
             AuthorizationError::OwnerMismatch
         );
+        assert_eq!(
+            authorize_stored_measurement_session(
+                &actor(),
+                "12",
+                "participant_alpha",
+                "session_alpha"
+            )
+            .unwrap_err(),
+            AuthorizationError::InvalidReference
+        );
+        assert_eq!(
+            authorize_stored_measurement_session(&actor(), "tenant_alpha", " ", "session_alpha")
+                .unwrap_err(),
+            AuthorizationError::InvalidReference
+        );
+        assert_eq!(
+            authorize_stored_measurement_session(
+                &actor(),
+                "tenant_alpha",
+                "participant_alpha",
+                "12"
+            )
+            .unwrap_err(),
+            AuthorizationError::InvalidReference
+        );
         let consent_resource = ResourceScope::participant_owned(
             ResourceKind::ConsentLedger,
             "tenant_alpha",
@@ -1574,9 +1603,7 @@ mod tests {
             .unwrap_err(),
             MeasurementSessionError::InvalidContentDigest
         );
-        let raw = encryption_key
-            .seal_bytes("nonce_raw", "aad_raw", &[0xff, 0xfe])
-            .unwrap();
+        let raw = encryption_key.seal_bytes("nonce_raw", "aad_raw", &[0xff, 0xfe]);
         assert_eq!(
             encryption_key.open(&raw, "aad_raw").unwrap_err(),
             MeasurementSessionError::SealingFailed

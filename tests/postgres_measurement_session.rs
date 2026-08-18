@@ -664,3 +664,318 @@ fn load_maps_a_missing_relation_to_a_database_error() {
         MeasurementSessionPersistenceError::Database(_)
     ));
 }
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn later_missing_export_relation_and_field_rebinding_fail_closed() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    let without_pointer = assemble(MeasurementSessionInput {
+        session_ref: "session_export_drop".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 31,
+        memberships: vec![
+            SessionMembership::new("participant_alpha", "tenant_alpha", 32, 33).unwrap(),
+        ],
+        consent_records: Vec::new(),
+        audit_events: Vec::new(),
+        export_snapshot_pointer: None,
+    });
+    persist(&mut client, &without_pointer).unwrap();
+    client
+        .batch_execute("DROP TABLE measurement_session_persist_test.export_snapshot_pointer;")
+        .unwrap();
+    assert!(matches!(
+        persist(&mut client, &without_pointer).unwrap_err(),
+        MeasurementSessionPersistenceError::Database(_)
+    ));
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    let original = live_session();
+    persist(&mut client, &original).unwrap();
+
+    let created_at_conflict = assemble(MeasurementSessionInput {
+        session_ref: "session_created_member".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 41,
+        memberships: vec![SessionMembership::new(
+            "participant_alpha",
+            "tenant_alpha",
+            1_699_000_000_001,
+            42,
+        )
+        .unwrap()],
+        consent_records: Vec::new(),
+        audit_events: Vec::new(),
+        export_snapshot_pointer: None,
+    });
+    assert!(matches!(
+        persist(&mut client, &created_at_conflict).unwrap_err(),
+        MeasurementSessionPersistenceError::ConflictingReplay
+    ));
+
+    client
+        .execute(
+            "UPDATE measurement_session_persist_test.measurement_session \
+             SET tenant_ref = 'tenant_gamma' WHERE session_ref = $1",
+            &[&original.session_ref()],
+        )
+        .unwrap();
+    assert!(matches!(
+        persist(&mut client, &original).unwrap_err(),
+        MeasurementSessionPersistenceError::ConflictingReplay
+    ));
+    client
+        .execute(
+            "UPDATE measurement_session_persist_test.measurement_session \
+             SET tenant_ref = 'tenant_alpha' WHERE session_ref = $1",
+            &[&original.session_ref()],
+        )
+        .unwrap();
+    client
+        .batch_execute(
+            "UPDATE measurement_session_persist_test.session_consent_record \
+             SET encryption_nonce = '\\x000000000000000000000000'::bytea \
+             WHERE event_ref = 'consent_service';\
+             UPDATE measurement_session_persist_test.session_audit_event \
+             SET encryption_nonce = '\\x000000000000000000000000'::bytea \
+             WHERE event_ref = 'audit_enroll';",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist(&mut client, &original).unwrap_err(),
+        MeasurementSessionPersistenceError::ConflictingReplay
+    ));
+    persist(&mut client, &original).ok();
+
+    let rebound_consent_member = assemble(MeasurementSessionInput {
+        session_ref: "session_alpha".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 1_700_000_000_000,
+        memberships: original.memberships().to_vec(),
+        consent_records: vec![SessionConsentRecord::new(
+            "consent_service",
+            "participant_beta",
+            ConsentPurpose::ServiceOperation,
+            ConsentDecision::Granted,
+            "consent_form_service_v1",
+            None,
+            1_700_000_000_300,
+        )
+        .unwrap()],
+        audit_events: original.audit_events().to_vec(),
+        export_snapshot_pointer: original.export_snapshot_pointer().cloned(),
+    });
+    assert!(matches!(
+        persist(&mut client, &rebound_consent_member).unwrap_err(),
+        MeasurementSessionPersistenceError::ConflictingReplay
+    ));
+
+    let rebound_audit_digest = assemble(MeasurementSessionInput {
+        session_ref: "session_alpha".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 1_700_000_000_000,
+        memberships: original.memberships().to_vec(),
+        consent_records: original.consent_records().to_vec(),
+        audit_events: vec![SessionAuditEvent::new(
+            "audit_enroll",
+            "actor_alpha",
+            "session_enroll",
+            MEASUREMENT_SESSION_PERSIST_PURPOSE,
+            OTHER_DIGEST,
+            1_700_000_000_500,
+        )
+        .unwrap()],
+        export_snapshot_pointer: original.export_snapshot_pointer().cloned(),
+    });
+    assert!(matches!(
+        persist(&mut client, &rebound_audit_digest).unwrap_err(),
+        MeasurementSessionPersistenceError::ConflictingReplay
+    ));
+
+    for pointer in [
+        ExportSnapshotPointer::new("snapshot_beta", "request_alpha", DIGEST, 1_700_000_000_600)
+            .unwrap(),
+        ExportSnapshotPointer::new("snapshot_alpha", "request_beta", DIGEST, 1_700_000_000_600)
+            .unwrap(),
+        ExportSnapshotPointer::new(
+            "snapshot_alpha",
+            "request_alpha",
+            OTHER_DIGEST,
+            1_700_000_000_600,
+        )
+        .unwrap(),
+        ExportSnapshotPointer::new("snapshot_alpha", "request_alpha", DIGEST, 1_700_000_000_601)
+            .unwrap(),
+    ] {
+        let rebound = assemble(MeasurementSessionInput {
+            session_ref: "session_alpha".to_owned(),
+            tenant_ref: "tenant_alpha".to_owned(),
+            owner_participant_ref: "participant_alpha".to_owned(),
+            created_at_unix_ms: 1_700_000_000_000,
+            memberships: original.memberships().to_vec(),
+            consent_records: original.consent_records().to_vec(),
+            audit_events: original.audit_events().to_vec(),
+            export_snapshot_pointer: Some(pointer),
+        });
+        assert!(matches!(
+            persist(&mut client, &rebound).unwrap_err(),
+            MeasurementSessionPersistenceError::ConflictingReplay
+        ));
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn corrupt_stored_evidence_fails_closed_on_reload() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.assessment_participant \
+             DROP CONSTRAINT assessment_participant_created_at_unix_ms_check;\
+             UPDATE measurement_session_persist_test.assessment_participant \
+             SET created_at_unix_ms = 0 WHERE participant_ref = 'participant_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+    client
+        .execute(
+            "UPDATE measurement_session_persist_test.assessment_participant \
+             SET created_at_unix_ms = 1699000000000 WHERE participant_ref = 'participant_alpha'",
+            &[],
+        )
+        .unwrap();
+
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.session_consent_record \
+             DROP CONSTRAINT session_consent_record_encryption_nonce_check;\
+             UPDATE measurement_session_persist_test.session_consent_record \
+             SET encryption_nonce = '\\x00'::bytea WHERE event_ref = 'consent_service';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::Domain(_)
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.session_audit_event \
+             DROP CONSTRAINT session_audit_event_ciphertext_payload_check;\
+             UPDATE measurement_session_persist_test.session_audit_event \
+             SET ciphertext_payload = '\\x00'::bytea WHERE event_ref = 'audit_enroll';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::Domain(_)
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.export_snapshot_pointer \
+             DROP CONSTRAINT export_snapshot_pointer_content_digest_check;\
+             UPDATE measurement_session_persist_test.export_snapshot_pointer \
+             SET content_digest = 'md5:00' WHERE session_ref = 'session_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::Domain(_)
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.measurement_session \
+             DROP CONSTRAINT measurement_session_created_at_unix_ms_check;\
+             UPDATE measurement_session_persist_test.measurement_session \
+             SET created_at_unix_ms = -1 WHERE session_ref = 'session_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+
+    client
+        .batch_execute("DELETE FROM measurement_session_persist_test.session_membership;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE measurement_session_persist_test.measurement_session \
+             SET created_at_unix_ms = 1700000000000 WHERE session_ref = 'session_alpha'",
+            &[],
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::Domain(_)
+    ));
+    transaction.rollback().unwrap();
+}

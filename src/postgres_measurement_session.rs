@@ -12,7 +12,8 @@ use crate::measurement_session::{
     SessionAuditEvent, SessionConsentRecord, SessionEncryptionKey, SessionMembership,
 };
 use crate::reference::normalized_reference;
-use postgres::Transaction;
+use postgres::types::ToSql;
+use postgres::{Row, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -229,7 +230,8 @@ fn persist_participant(
     membership: &SessionMembership,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let created_at = unix_ms(membership.created_at_unix_ms())?;
-    let inserted = transaction.execute(
+    let inserted = execute(
+        transaction,
         "INSERT INTO assessment_participant (\
              participant_ref, tenant_ref, created_at_unix_ms\
          ) VALUES ($1, $2, $3) \
@@ -243,7 +245,8 @@ fn persist_participant(
     if inserted == 1 {
         return Ok(true);
     }
-    let row = transaction.query_one(
+    let row = query_one(
+        transaction,
         "SELECT tenant_ref, created_at_unix_ms \
          FROM assessment_participant WHERE participant_ref = $1",
         &[&membership.participant_ref()],
@@ -262,7 +265,8 @@ fn persist_session_header(
     session: &MeasurementSession,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let created_at = unix_ms(session.created_at_unix_ms())?;
-    let inserted = transaction.execute(
+    let inserted = execute(
+        transaction,
         "INSERT INTO measurement_session (\
              session_ref, tenant_ref, owner_participant_ref, created_at_unix_ms\
          ) VALUES ($1, $2, $3, $4) \
@@ -277,7 +281,8 @@ fn persist_session_header(
     if inserted == 1 {
         return Ok(true);
     }
-    let row = transaction.query_one(
+    let row = query_one(
+        transaction,
         "SELECT tenant_ref, owner_participant_ref, created_at_unix_ms \
          FROM measurement_session WHERE session_ref = $1",
         &[&session.session_ref()],
@@ -301,7 +306,8 @@ fn persist_membership(
     membership: &SessionMembership,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let enrolled_at = unix_ms(membership.enrolled_at_unix_ms())?;
-    let inserted = transaction.execute(
+    let inserted = execute(
+        transaction,
         "INSERT INTO session_membership (\
              session_ref, participant_ref, enrolled_at_unix_ms\
          ) VALUES ($1, $2, $3) \
@@ -311,7 +317,8 @@ fn persist_membership(
     if inserted == 1 {
         return Ok(true);
     }
-    let row = transaction.query_one(
+    let row = query_one(
+        transaction,
         "SELECT enrolled_at_unix_ms FROM session_membership \
          WHERE session_ref = $1 AND participant_ref = $2",
         &[&session_ref, &membership.participant_ref()],
@@ -367,14 +374,15 @@ fn persist_sealed_row(
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let nonce = sealed.nonce().as_slice();
     let ciphertext = sealed.ciphertext();
-    let inserted = transaction.execute(
+    let inserted = execute(
+        transaction,
         insert_sql,
         &[&session_ref, &event_ref, &identity_ref, &nonce, &ciphertext],
     )?;
     if inserted == 1 {
         return Ok(true);
     }
-    let row = transaction.query_one(select_sql, &[&session_ref, &event_ref])?;
+    let row = query_one(transaction, select_sql, &[&session_ref, &event_ref])?;
     let stored_identity: String = row.get(0);
     let stored_nonce: Vec<u8> = row.get(1);
     let stored_ciphertext: Vec<u8> = row.get(2);
@@ -391,12 +399,12 @@ fn persist_export_pointer(
     pointer: Option<&ExportSnapshotPointer>,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let Some(pointer) = pointer else {
-        let count: i64 = transaction
-            .query_one(
-                "SELECT COUNT(*) FROM export_snapshot_pointer WHERE session_ref = $1",
-                &[&session_ref],
-            )?
-            .get(0);
+        let count: i64 = query_one(
+            transaction,
+            "SELECT COUNT(*) FROM export_snapshot_pointer WHERE session_ref = $1",
+            &[&session_ref],
+        )?
+        .get(0);
         return if count == 0 {
             Ok(false)
         } else {
@@ -404,7 +412,8 @@ fn persist_export_pointer(
         };
     };
     let created_at = unix_ms(pointer.created_at_unix_ms())?;
-    let inserted = transaction.execute(
+    let inserted = execute(
+        transaction,
         "INSERT INTO export_snapshot_pointer (\
              session_ref, snapshot_ref, request_ref, content_digest, created_at_unix_ms\
          ) VALUES ($1, $2, $3, $4, $5) \
@@ -420,7 +429,8 @@ fn persist_export_pointer(
     if inserted == 1 {
         return Ok(true);
     }
-    let row = transaction.query_one(
+    let row = query_one(
+        transaction,
         "SELECT snapshot_ref, request_ref, content_digest, created_at_unix_ms \
          FROM export_snapshot_pointer WHERE session_ref = $1",
         &[&session_ref],
@@ -444,7 +454,8 @@ fn load_session_header(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Option<StoredSessionHeader>, MeasurementSessionPersistenceError> {
-    let rows = transaction.query(
+    let rows = query(
+        transaction,
         "SELECT tenant_ref, owner_participant_ref, created_at_unix_ms \
          FROM measurement_session WHERE session_ref = $1",
         &[&session_ref],
@@ -463,7 +474,8 @@ fn load_memberships(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Vec<SessionMembership>, MeasurementSessionPersistenceError> {
-    let rows = transaction.query(
+    let rows = query(
+        transaction,
         "SELECT m.participant_ref, p.tenant_ref, p.created_at_unix_ms, m.enrolled_at_unix_ms \
          FROM session_membership m \
          INNER JOIN assessment_participant p ON p.participant_ref = m.participant_ref \
@@ -488,7 +500,8 @@ fn load_consent_records(
     session_ref: &str,
     encryption_key: &SessionEncryptionKey,
 ) -> Result<Vec<SessionConsentRecord>, MeasurementSessionPersistenceError> {
-    let rows = transaction.query(
+    let rows = query(
+        transaction,
         "SELECT event_ref, participant_ref, encryption_nonce, ciphertext_payload \
          FROM session_consent_record WHERE session_ref = $1 ORDER BY event_ref",
         &[&session_ref],
@@ -516,7 +529,8 @@ fn load_audit_events(
     session_ref: &str,
     encryption_key: &SessionEncryptionKey,
 ) -> Result<Vec<SessionAuditEvent>, MeasurementSessionPersistenceError> {
-    let rows = transaction.query(
+    let rows = query(
+        transaction,
         "SELECT event_ref, actor_ref, occurred_at_unix_ms, encryption_nonce, ciphertext_payload \
          FROM session_audit_event WHERE session_ref = $1 ORDER BY event_ref",
         &[&session_ref],
@@ -545,7 +559,8 @@ fn load_export_pointer(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Option<ExportSnapshotPointer>, MeasurementSessionPersistenceError> {
-    let rows = transaction.query(
+    let rows = query(
+        transaction,
         "SELECT snapshot_ref, request_ref, content_digest, created_at_unix_ms \
          FROM export_snapshot_pointer WHERE session_ref = $1",
         &[&session_ref],
@@ -570,7 +585,8 @@ fn persist_audit_insert(
     let occurred_at = unix_ms(event.occurred_at_unix_ms())?;
     let nonce = sealed.nonce().as_slice();
     let ciphertext = sealed.ciphertext();
-    let inserted = transaction.execute(
+    let inserted = execute(
+        transaction,
         "INSERT INTO session_audit_event (\
              session_ref, event_ref, actor_ref, occurred_at_unix_ms, encryption_nonce, ciphertext_payload\
          ) VALUES ($1, $2, $3, $4, $5, $6) \
@@ -587,7 +603,8 @@ fn persist_audit_insert(
     if inserted == 1 {
         return Ok(true);
     }
-    let row = transaction.query_one(
+    let row = query_one(
+        transaction,
         "SELECT actor_ref, encryption_nonce, ciphertext_payload, occurred_at_unix_ms \
          FROM session_audit_event WHERE session_ref = $1 AND event_ref = $2",
         &[&session_ref, &event.event_ref()],
@@ -622,13 +639,37 @@ fn required_reference(reference: &str) -> Result<&str, MeasurementSessionPersist
 fn require_read_committed(
     transaction: &mut Transaction<'_>,
 ) -> Result<(), MeasurementSessionPersistenceError> {
-    let row = transaction.query_one("SHOW transaction_isolation", &[])?;
+    let row = query_one(transaction, "SHOW transaction_isolation", &[])?;
     let isolation: String = row.get(0);
     if isolation == "read committed" {
         Ok(())
     } else {
         Err(MeasurementSessionPersistenceError::UnsupportedIsolationLevel)
     }
+}
+
+fn execute(
+    transaction: &mut Transaction<'_>,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> Result<u64, MeasurementSessionPersistenceError> {
+    Ok(transaction.execute(sql, params)?)
+}
+
+fn query(
+    transaction: &mut Transaction<'_>,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> Result<Vec<Row>, MeasurementSessionPersistenceError> {
+    Ok(transaction.query(sql, params)?)
+}
+
+fn query_one(
+    transaction: &mut Transaction<'_>,
+    sql: &str,
+    params: &[&(dyn ToSql + Sync)],
+) -> Result<Row, MeasurementSessionPersistenceError> {
+    Ok(transaction.query_one(sql, params)?)
 }
 
 #[cfg(test)]
