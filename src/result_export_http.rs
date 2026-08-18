@@ -2,11 +2,10 @@
 //!
 //! The caller supplies product-owned participant, result, and export records that
 //! were loaded by the hosted runtime. This adapter never trusts tenant, owner, or
-//! result identity from the request body. It authorizes the stored records first,
-//! then binds the opaque route identities to those records before returning either
-//! the exact machine-readable JSON export or the exact human-readable report.
-//! Errors use RFC 9457 problem details and do not echo participant/result/export
-//! references.
+//! result identity from the request body. It authorizes the stored records before
+//! comparing route/idempotency identity to those records, then returns either the
+//! exact machine-readable JSON export or the exact human-readable report. Errors
+//! use RFC 9457 problem details and do not echo participant/result/export references.
 
 use crate::authorization::AuthorizationContext;
 use crate::participant::ParticipantRecord;
@@ -65,9 +64,9 @@ impl ResultExportHttpResponse {
             405,
             "urn:psychometrics-commons:problem:method-not-allowed",
             "Method Not Allowed",
-            "personal result export supports GET only",
+            "personal result export supports POST only",
         );
-        response.allow = Some("GET");
+        response.allow = Some("POST");
         response
     }
 
@@ -99,9 +98,11 @@ impl ResultExportHttpResponse {
 /// Translate one raw HTTP/1.1 request into an authorized personal result export.
 ///
 /// The supplied records must be server-owned stored records, never material
-/// reconstructed from caller-provided tenant or owner values. Authorization is
-/// evaluated before route-to-export binding so an unauthorized caller cannot use
-/// binding errors as an existence oracle.
+/// reconstructed from caller-provided tenant or owner values. The request uses
+/// `POST /v1/results/{result_ref}/exports`; `Idempotency-Key` must be the exact
+/// opaque export identity. Authorization is evaluated before route/export binding
+/// comparisons so an unauthorized caller cannot use those differences as an
+/// existence oracle.
 #[must_use]
 pub fn handle_result_export_http_request(
     request: &str,
@@ -114,20 +115,30 @@ pub fn handle_result_export_http_request(
         return bad_request("result export request must include one HTTP method, target, and version");
     };
 
-    let route = match parse_export_route(target) {
-        RouteParse::Matched {
-            result_snapshot_ref,
-            export_ref,
-        } => (result_snapshot_ref, export_ref),
+    let result_snapshot_ref = match parse_export_route(target) {
+        RouteParse::Matched(result_snapshot_ref) => result_snapshot_ref,
         RouteParse::InvalidReference => {
-            return bad_request("result and export route references must be exact opaque non-numeric values");
+            return bad_request("result route reference must be an exact opaque non-numeric value");
         }
         RouteParse::NotFound => return not_found(),
     };
 
-    if method != "GET" {
+    if method != "POST" {
         return ResultExportHttpResponse::method_not_allowed();
     }
+
+    let idempotency_key = match idempotency_key(request) {
+        Ok(value) => value,
+        Err(IdempotencyError::Missing) => {
+            return bad_request("POST result export requires an opaque Idempotency-Key header");
+        }
+        Err(IdempotencyError::Duplicate) => {
+            return bad_request("send exactly one Idempotency-Key header for result export");
+        }
+        Err(IdempotencyError::Invalid) => {
+            return bad_request("result export Idempotency-Key must be an exact opaque non-numeric value");
+        }
+    };
 
     if authorize_result_export_read(actor, participant, result, export).is_err() {
         return ResultExportHttpResponse::problem(
@@ -138,8 +149,16 @@ pub fn handle_result_export_http_request(
         );
     }
 
-    if route.0 != result.result_snapshot_ref() || route.1 != export.export_ref() {
+    if result_snapshot_ref != result.result_snapshot_ref() {
         return not_found();
+    }
+    if idempotency_key != export.export_ref() {
+        return ResultExportHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:idempotency-conflict",
+            "Idempotency Conflict",
+            "Idempotency-Key is already bound to different personal result-export evidence",
+        );
     }
 
     match accept_representation(request) {
@@ -157,10 +176,7 @@ pub fn handle_result_export_http_request(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RouteParse<'a> {
-    Matched {
-        result_snapshot_ref: &'a str,
-        export_ref: &'a str,
-    },
+    Matched(&'a str),
     InvalidReference,
     NotFound,
 }
@@ -170,23 +186,38 @@ fn parse_export_route(target: &str) -> RouteParse<'_> {
     let Some(rest) = path.strip_prefix("/v1/results/") else {
         return RouteParse::NotFound;
     };
-    let Some((result_snapshot_ref, export_ref)) = rest.split_once("/exports/") else {
+    let Some(result_snapshot_ref) = rest.strip_suffix("/exports") else {
         return RouteParse::NotFound;
     };
-    if result_snapshot_ref.is_empty() || export_ref.is_empty() || export_ref.contains('/') {
+    if result_snapshot_ref.is_empty() || result_snapshot_ref.contains('/') {
         return RouteParse::NotFound;
     }
-    if !exact_opaque_reference(result_snapshot_ref) || !exact_opaque_reference(export_ref) {
+    if !exact_opaque_reference(result_snapshot_ref) {
         return RouteParse::InvalidReference;
     }
-    RouteParse::Matched {
-        result_snapshot_ref,
-        export_ref,
-    }
+    RouteParse::Matched(result_snapshot_ref)
 }
 
 fn exact_opaque_reference(value: &str) -> bool {
     !value.contains('%') && normalized_reference(value) == Some(value)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum IdempotencyError {
+    Missing,
+    Duplicate,
+    Invalid,
+}
+
+fn idempotency_key(request: &str) -> Result<&str, IdempotencyError> {
+    let value = single_header(request, "idempotency-key")
+        .map_err(|_| IdempotencyError::Duplicate)?
+        .ok_or(IdempotencyError::Missing)?;
+    if exact_opaque_reference(value) {
+        Ok(value)
+    } else {
+        Err(IdempotencyError::Invalid)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -202,7 +233,19 @@ enum AcceptError {
 }
 
 fn accept_representation(request: &str) -> Result<Representation, AcceptError> {
-    let mut accept = None;
+    let accept = single_header(request, "accept").map_err(|_| AcceptError::Duplicate)?;
+    match accept {
+        None | Some("*/*") | Some("application/json") => Ok(Representation::Json),
+        Some("text/plain") => Ok(Representation::Text),
+        Some(_) => Err(AcceptError::Unsupported),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DuplicateHeader;
+
+fn single_header<'a>(request: &'a str, requested_name: &str) -> Result<Option<&'a str>, DuplicateHeader> {
+    let mut found = None;
     for line in request.lines().skip(1) {
         if line.is_empty() {
             break;
@@ -210,19 +253,15 @@ fn accept_representation(request: &str) -> Result<Representation, AcceptError> {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
-        if !name.eq_ignore_ascii_case("accept") {
+        if !name.eq_ignore_ascii_case(requested_name) {
             continue;
         }
-        if accept.is_some() {
-            return Err(AcceptError::Duplicate);
+        if found.is_some() {
+            return Err(DuplicateHeader);
         }
-        accept = Some(value.trim());
+        found = Some(value.trim());
     }
-    match accept {
-        None | Some("*/*") | Some("application/json") => Ok(Representation::Json),
-        Some("text/plain") => Ok(Representation::Text),
-        Some(_) => Err(AcceptError::Unsupported),
-    }
+    Ok(found)
 }
 
 fn parse_request_line(request: &str) -> Option<(&str, &str)> {
@@ -275,70 +314,87 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_representation, exact_opaque_reference, json_string, parse_export_route,
-        parse_request_line, AcceptError, Representation, RouteParse,
+        accept_representation, exact_opaque_reference, idempotency_key, json_string,
+        parse_export_route, parse_request_line, single_header, AcceptError, IdempotencyError,
+        Representation, RouteParse,
     };
 
     #[test]
     fn private_http_parsers_cover_fail_closed_edges() {
         assert_eq!(parse_request_line(""), None);
-        assert_eq!(parse_request_line("GET"), None);
-        assert_eq!(parse_request_line("GET /x"), None);
-        assert_eq!(parse_request_line("GET /x HTTP/2"), None);
-        assert_eq!(parse_request_line("GET /x HTTP/1.1 extra"), None);
-        assert_eq!(parse_request_line("GET /x HTTP/1.1"), Some(("GET", "/x")));
+        assert_eq!(parse_request_line("POST"), None);
+        assert_eq!(parse_request_line("POST /x"), None);
+        assert_eq!(parse_request_line("POST /x HTTP/2"), None);
+        assert_eq!(parse_request_line("POST /x HTTP/1.1 extra"), None);
+        assert_eq!(parse_request_line("POST /x HTTP/1.1"), Some(("POST", "/x")));
 
         assert_eq!(parse_export_route("/v1/other"), RouteParse::NotFound);
         assert_eq!(parse_export_route("/v1/results/result_alpha"), RouteParse::NotFound);
-        assert_eq!(parse_export_route("/v1/results//exports/export_alpha"), RouteParse::NotFound);
-        assert_eq!(parse_export_route("/v1/results/result_alpha/exports/"), RouteParse::NotFound);
+        assert_eq!(parse_export_route("/v1/results//exports"), RouteParse::NotFound);
         assert_eq!(
-            parse_export_route("/v1/results/result_alpha/exports/export_alpha/extra"),
+            parse_export_route("/v1/results/result_alpha/extra/exports"),
             RouteParse::NotFound
         );
         assert_eq!(
-            parse_export_route("/v1/results/123/exports/export_alpha"),
+            parse_export_route("/v1/results/123/exports"),
             RouteParse::InvalidReference
         );
         assert_eq!(
-            parse_export_route("/v1/results/result_alpha/exports/export%2Falpha"),
+            parse_export_route("/v1/results/result%2Falpha/exports"),
             RouteParse::InvalidReference
         );
         assert_eq!(
-            parse_export_route("/v1/results/result_alpha/exports/export_alpha?download=1"),
-            RouteParse::Matched {
-                result_snapshot_ref: "result_alpha",
-                export_ref: "export_alpha",
-            }
+            parse_export_route("/v1/results/result_alpha/exports?download=1"),
+            RouteParse::Matched("result_alpha")
         );
         assert!(exact_opaque_reference("result_alpha"));
         assert!(!exact_opaque_reference(" result_alpha"));
 
+        assert_eq!(idempotency_key("POST / HTTP/1.1\r\n\r\n"), Err(IdempotencyError::Missing));
         assert_eq!(
-            accept_representation("GET / HTTP/1.1\r\n\r\n"),
+            idempotency_key("POST / HTTP/1.1\r\nIdempotency-Key: 123\r\n\r\n"),
+            Err(IdempotencyError::Invalid)
+        );
+        assert_eq!(
+            idempotency_key("POST / HTTP/1.1\r\nIdempotency-Key: export_alpha\r\n\r\n"),
+            Ok("export_alpha")
+        );
+        assert_eq!(
+            idempotency_key(
+                "POST / HTTP/1.1\r\nIdempotency-Key: export_alpha\r\nIdempotency-Key: export_alpha\r\n\r\n"
+            ),
+            Err(IdempotencyError::Duplicate)
+        );
+
+        assert_eq!(
+            accept_representation("POST / HTTP/1.1\r\n\r\n"),
             Ok(Representation::Json)
         );
         assert_eq!(
-            accept_representation("GET / HTTP/1.1\r\nAccept: */*\r\n\r\n"),
+            accept_representation("POST / HTTP/1.1\r\nAccept: */*\r\n\r\n"),
             Ok(Representation::Json)
         );
         assert_eq!(
-            accept_representation("GET / HTTP/1.1\r\nACCEPT: application/json\r\n\r\n"),
+            accept_representation("POST / HTTP/1.1\r\nACCEPT: application/json\r\n\r\n"),
             Ok(Representation::Json)
         );
         assert_eq!(
-            accept_representation("GET / HTTP/1.1\r\nAccept: text/plain\r\n\r\n"),
+            accept_representation("POST / HTTP/1.1\r\nAccept: text/plain\r\n\r\n"),
             Ok(Representation::Text)
         );
         assert_eq!(
-            accept_representation("GET / HTTP/1.1\r\nBroken\r\nAccept: application/xml\r\n\r\n"),
+            accept_representation("POST / HTTP/1.1\r\nBroken\r\nAccept: application/xml\r\n\r\n"),
             Err(AcceptError::Unsupported)
         );
         assert_eq!(
             accept_representation(
-                "GET / HTTP/1.1\r\nAccept: application/json\r\nAccept: text/plain\r\n\r\n"
+                "POST / HTTP/1.1\r\nAccept: application/json\r\nAccept: text/plain\r\n\r\n"
             ),
             Err(AcceptError::Duplicate)
+        );
+        assert_eq!(
+            single_header("POST / HTTP/1.1\r\nHost: example.test\r\n\r\n", "accept"),
+            Ok(None)
         );
     }
 
