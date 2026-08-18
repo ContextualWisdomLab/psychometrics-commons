@@ -692,6 +692,8 @@ mod tests {
         .unwrap_err();
         transaction.rollback().unwrap();
         assert_eq!(persistence_error_name(&error), "database");
+        assert!(!error.to_string().is_empty());
+        assert!(error.source().is_some());
     }
 
     #[test]

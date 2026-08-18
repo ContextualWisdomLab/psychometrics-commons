@@ -9,8 +9,8 @@ use psychometrics_commons_runtime::authorization::{
 };
 use psychometrics_commons_runtime::consent::{ConsentDecision, ConsentPurpose};
 use psychometrics_commons_runtime::measurement_session::{
-    ExportSnapshotPointer, MeasurementSession, MeasurementSessionInput, SessionAuditEvent,
-    SessionConsentRecord, SessionEncryptionKey, SessionMembership,
+    ExportSnapshotPointer, MeasurementSession, MeasurementSessionError, MeasurementSessionInput,
+    SessionAuditEvent, SessionConsentRecord, SessionEncryptionKey, SessionMembership,
     MEASUREMENT_SESSION_PERSIST_PURPOSE,
 };
 use psychometrics_commons_runtime::postgres_measurement_session::{
@@ -395,10 +395,25 @@ fn missing_session_and_invalid_reload_references_fail_closed() {
     )
     .unwrap()
     .is_none());
+    let invalid =
+        load_measurement_session(&mut transaction, &actor(), "12", &encryption_key()).unwrap_err();
     assert!(matches!(
-        load_measurement_session(&mut transaction, &actor(), "12", &encryption_key()).unwrap_err(),
+        invalid,
         MeasurementSessionPersistenceError::InvalidReference
     ));
+    assert!(!invalid.to_string().is_empty());
+    assert!(invalid.source().is_none());
+    for error in [
+        MeasurementSessionPersistenceError::InvalidReference,
+        MeasurementSessionPersistenceError::ConflictingReplay,
+        MeasurementSessionPersistenceError::ValueOutOfRange,
+        MeasurementSessionPersistenceError::UnsupportedIsolationLevel,
+        MeasurementSessionPersistenceError::from(AuthorizationError::CrossTenantDenied),
+        MeasurementSessionPersistenceError::from(MeasurementSessionError::SealingFailed),
+    ] {
+        assert!(!error.to_string().is_empty());
+        let _ = error.source();
+    }
     transaction.commit().unwrap();
 }
 
