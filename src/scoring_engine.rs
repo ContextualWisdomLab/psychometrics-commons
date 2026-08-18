@@ -1,10 +1,16 @@
 //! Product-owned adapter boundary for invoking an external scoring engine.
 //!
-//! Psychometrics Commons owns orchestration and provenance validation, not the
-//! psychometric numerical implementation. Implementations of [`ScoringEngine`]
-//! therefore call a versioned `fast-mlsirm`-compatible boundary and return the
-//! already-validated product scoring contract. This module prevents an adapter
-//! from publishing a result for a different immutable scoring request.
+//! **Psychometrics Commons** is the hosted product runtime in this repository.
+//! Here, **orchestration** means deciding when and how an immutable scoring
+//! request is sent to a scorer; **provenance validation** means checking that
+//! the returned result names the exact request and versioned evidence that was
+//! dispatched. A **`fast-mlsirm`-compatible boundary** is a versioned adapter or
+//! service contract whose numerical implementation lives outside this
+//! repository and can consume the product scoring contract. Implementations of
+//! [`ScoringEngine`] cross only that boundary: they invoke the external scorer
+//! and return its already-validated product contract instead of reimplementing
+//! psychometric arithmetic here. This module then prevents an adapter from
+//! publishing a result for a different immutable scoring request.
 
 use crate::scoring::{ScoringRequest, ScoringResult};
 use std::error::Error;
