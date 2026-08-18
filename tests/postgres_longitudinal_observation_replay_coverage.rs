@@ -272,11 +272,7 @@ fn every_membership_dimension_and_source_alias_rejects_rebinding() {
         weight_parts_per_10_000: 10_000,
     }];
     let one_membership_record = ObservationSpec::base(&one_membership).build();
-    assert_conflict(
-        &mut client,
-        "tenant_clinic_seoul",
-        &one_membership_record,
-    );
+    assert_conflict(&mut client, "tenant_clinic_seoul", &one_membership_record);
 
     let context_mismatch_memberships = [
         MembershipShareInput {

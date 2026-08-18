@@ -2,16 +2,31 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_longitudinal_observation::apply_longitudinal_observation_migration;
+use std::sync::{Mutex, MutexGuard};
 
-fn client() -> Client {
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn client(schema_name: &str) -> Client {
+    assert!(
+        schema_name
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character == '_'),
+        "schema names must be two-word snake_case identifiers"
+    );
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     client
-        .batch_execute(
-            "DROP SCHEMA IF EXISTS longitudinal_observation_schema_integrity_test CASCADE; \
-             CREATE SCHEMA longitudinal_observation_schema_integrity_test; \
-             SET search_path TO longitudinal_observation_schema_integrity_test;",
-        )
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema_name} CASCADE; \
+             CREATE SCHEMA {schema_name}; \
+             SET search_path TO {schema_name};"
+        ))
         .unwrap();
     client
 }
@@ -63,7 +78,8 @@ fn assert_check_constraint(error: &postgres::Error, expected_constraint: &str) {
 
 #[test]
 fn observation_header_cannot_commit_without_complete_membership_vector() {
-    let mut client = client();
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_membership_test");
     apply_longitudinal_observation_migration(&mut client).unwrap();
 
     let mut transaction = client.transaction().unwrap();
@@ -106,7 +122,8 @@ fn observation_header_cannot_commit_without_complete_membership_vector() {
 
 #[test]
 fn numeric_like_references_are_rejected_by_the_database_boundary() {
-    let mut client = client();
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_reference_test");
     apply_longitudinal_observation_migration(&mut client).unwrap();
 
     let error = insert_observation(
@@ -122,7 +139,8 @@ fn numeric_like_references_are_rejected_by_the_database_boundary() {
 
 #[test]
 fn anomaly_code_must_match_the_observed_clock_order() {
-    let mut client = client();
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_anomaly_test");
     apply_longitudinal_observation_migration(&mut client).unwrap();
 
     let error = insert_observation(
