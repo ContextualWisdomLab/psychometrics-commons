@@ -7,13 +7,17 @@
 //! framing prevents intermediaries and this server from disagreeing about
 //! where a request ends.
 
+#[expect(
+    dead_code,
+    reason = "the private legacy listener is shadowed while its domain transport implementation is reused"
+)]
 #[path = "session_http.rs"]
 mod implementation;
 
 pub use implementation::{
-    bind_session_http, handle_session_http_request, MemorySessionHttpPort,
-    PostgresSessionHttpPort, SessionHttpPort, SessionHttpResponse, SESSION_COLLECTION_PATH,
-    SESSION_HTTP_IO_TIMEOUT, SESSION_HTTP_MAX_REQUEST_BYTES,
+    bind_session_http, handle_session_http_request, MemorySessionHttpPort, PostgresSessionHttpPort,
+    SessionHttpPort, SessionHttpResponse, SESSION_COLLECTION_PATH, SESSION_HTTP_IO_TIMEOUT,
+    SESSION_HTTP_MAX_REQUEST_BYTES,
 };
 
 use std::io::{self, Read, Write};
@@ -194,7 +198,8 @@ mod tests {
             Some("2")
         );
 
-        let duplicate = "POST /v1/sessions HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}";
+        let duplicate =
+            "POST /v1/sessions HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}";
         assert_eq!(
             single_header_value(duplicate, "content-length")
                 .unwrap_err()
