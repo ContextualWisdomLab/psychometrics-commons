@@ -79,6 +79,10 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
+## Active PR consent/outbox composition
+
+Active PR #142 (`src/postgres_consent_propagation.rs`) adds no new physical objects. It composes the existing `consent_ledger` / `consent_event` slice with `integration_outbox` in one caller-owned `READ COMMITTED` transaction. After the submitted ledger snapshot is persisted, the adapter locks the participant `consent_ledger` row, requires every durable `consent_event` identity to appear in the submitted ledger, and requires a unique durable tail—ordered by `occurred_at_unix_ms`, then `created_at`—to match the outbox `causation_ref` and occurrence time. A grant-only in-memory snapshot therefore cannot enqueue grant propagation after a later stored revocation, and two rows that share occurrence time and `created_at` fail closed instead of using opaque `event_ref` as a correctness key. This slice is **Active PR**, not protected-main truth. Do not merge #70, #112, #120, #123, or #134.
+
 ## Logical-to-physical mapping rule
 
 A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:

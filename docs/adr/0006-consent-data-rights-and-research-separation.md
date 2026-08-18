@@ -64,10 +64,12 @@ Construct-relevant personal data remains available to authorized workflows when 
 4. Public research data contains no Keyverse subject or operational participant reference.
 5. Service denial cannot be based on refusal of optional research contribution.
 6. Data-rights operations are tenant-scoped and identity-verified.
+7. Two durable consent events that share occurrence time and physical insertion time fail closed; opaque event identity is not a correctness tie-breaker.
+8. A later consent-receipt or notice interchange, when added, must map onto ISO/IEC TS 27560:2023 consent-record structure and ISO/IEC 29184:2020 notice/consent presentation. This decision does not emit those receipts yet.
 
 ## Failure behavior
 
-If consent verification is unavailable, optional research processing fails closed while core assessment processing may continue under its valid service basis. An ambiguous withdrawal or identity conflict enters manual adjudication; it is not auto-resolved by email or display name.
+If consent verification is unavailable, optional research processing fails closed while core assessment processing may continue under its valid service basis. An ambiguous withdrawal, identity conflict, or physically tied consent tail enters fail-closed rejection or manual adjudication; it is not auto-resolved by email, display name, or opaque event-reference order.
 
 ## Validation
 
@@ -86,3 +88,15 @@ If consent verification is unavailable, optional research processing fails close
 ## Reversal conditions
 
 Revisit individual retention or withdrawal mechanics when a deployment's law or ethics approval imposes stricter requirements. The separation of service and research purposes remains mandatory.
+
+## References
+
+European Parliament & Council of the European Union. (2016). Regulation (EU) 2016/679 of the European Parliament and of the Council of 27 April 2016 on the protection of natural persons with regard to the processing of personal data and on the free movement of such data (General Data Protection Regulation). *Official Journal of the European Union, L 119*, 1–88. https://eur-lex.europa.eu/eli/reg/2016/679/oj
+
+International Organization for Standardization. (2020). *Information technology — Online privacy notices and consent* (ISO/IEC 29184:2020). https://www.iso.org/standard/70331.html
+
+International Organization for Standardization. (2023). *Privacy technologies — Consent record information structure* (ISO/IEC TS 27560:2023). https://www.iso.org/standard/80392.html
+
+National Institute of Standards and Technology. (2020). *NIST Privacy Framework: A tool for improving privacy through enterprise risk management, version 1.0* (NIST Cybersecurity White Paper). https://doi.org/10.6028/NIST.CSWP.01162020
+
+World Medical Association. (2024). World Medical Association Declaration of Helsinki: Ethical principles for medical research involving human participants. *JAMA, 333*(1), 71–74. https://doi.org/10.1001/jama.2024.21972
