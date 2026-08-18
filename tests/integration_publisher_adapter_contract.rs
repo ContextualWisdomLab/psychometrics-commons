@@ -8,12 +8,12 @@ use psychometrics_commons_runtime::integration_publisher::{
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-fn event(event_ref: &str, tenant_ref: &str) -> IntegrationEvent {
+fn event_with_identity(event_ref: &str, tenant_ref: &str, source_ref: &str) -> IntegrationEvent {
     IntegrationEvent::new(
         event_ref,
         "result.released",
         "v1",
-        "psychometrics_commons",
+        source_ref,
         tenant_ref,
         "result_snapshot_ref",
         1_786_240_000_000,
@@ -22,6 +22,10 @@ fn event(event_ref: &str, tenant_ref: &str) -> IntegrationEvent {
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     )
     .unwrap()
+}
+
+fn event(event_ref: &str, tenant_ref: &str) -> IntegrationEvent {
+    event_with_identity(event_ref, tenant_ref, "psychometrics_commons")
 }
 
 #[derive(Debug)]
@@ -51,7 +55,9 @@ impl IntegrationPublisher for SuccessfulPublisher {
     }
 }
 
-struct MismatchedPublisher;
+struct MismatchedPublisher {
+    acknowledged_event: IntegrationEvent,
+}
 
 impl IntegrationPublisher for MismatchedPublisher {
     type Error = PublisherUnavailable;
@@ -61,7 +67,7 @@ impl IntegrationPublisher for MismatchedPublisher {
         _integration_event: &IntegrationEvent,
     ) -> Result<IntegrationPublishReceipt, Self::Error> {
         Ok(IntegrationPublishReceipt::for_event(
-            &event("event_other", "tenant_other"),
+            &self.acknowledged_event,
             DeliveryOutcome::Delivered,
         ))
     }
@@ -92,19 +98,31 @@ fn adapter_returns_only_a_receipt_bound_to_the_exact_event() {
 }
 
 #[test]
-fn adapter_rejects_a_receipt_for_another_event_identity() {
+fn adapter_rejects_each_independent_outbox_identity_rebinding() {
     let integration_event = event("event_primary", "tenant_primary");
-    let error = execute_integration_publish(&MismatchedPublisher, &integration_event).unwrap_err();
+    let mismatches = [
+        event_with_identity("event_primary", "tenant_primary", "other_source"),
+        event("event_primary", "tenant_other"),
+        event("event_other", "tenant_primary"),
+    ];
 
-    assert!(matches!(
-        error,
-        IntegrationPublisherExecutionError::EventMismatch
-    ));
-    assert_eq!(
-        error.to_string(),
-        "integration publisher receipt does not belong to the dispatched event"
-    );
-    assert!(error.source().is_none());
+    for acknowledged_event in mismatches {
+        let error = execute_integration_publish(
+            &MismatchedPublisher { acknowledged_event },
+            &integration_event,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            IntegrationPublisherExecutionError::EventMismatch
+        ));
+        assert_eq!(
+            error.to_string(),
+            "integration publisher receipt does not belong to the dispatched event"
+        );
+        assert!(error.source().is_none());
+    }
 }
 
 #[test]
