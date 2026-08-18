@@ -161,6 +161,67 @@ fn persist(
 }
 
 #[test]
+fn persist_then_process_death_reloads_two_audit_events_in_canonical_order() {
+    let _guard = test_guard();
+    let mut writer = test_client();
+    reset_tables(&mut writer);
+    apply_measurement_session_migration(&mut writer).unwrap();
+    let original = assemble(MeasurementSessionInput {
+        session_ref: "session_dual_audit".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 61,
+        memberships: vec![
+            SessionMembership::new("participant_alpha", "tenant_alpha", 62, 63).unwrap(),
+        ],
+        consent_records: Vec::new(),
+        audit_events: vec![
+            SessionAuditEvent::new(
+                "audit_zeta",
+                "actor_alpha",
+                "session_export",
+                MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                OTHER_DIGEST,
+                65,
+            )
+            .unwrap(),
+            SessionAuditEvent::new(
+                "audit_alpha",
+                "actor_alpha",
+                "session_enroll",
+                MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                DIGEST,
+                64,
+            )
+            .unwrap(),
+        ],
+        export_snapshot_pointer: None,
+    });
+    persist(&mut writer, &original).unwrap();
+    drop(writer);
+
+    let mut reader = test_client();
+    let mut transaction = reader.transaction().unwrap();
+    let restored = load_measurement_session(
+        &mut transaction,
+        &actor(),
+        "session_dual_audit",
+        &encryption_key(),
+    )
+    .unwrap()
+    .expect("two audit events must reload after process death");
+    transaction.commit().unwrap();
+    assert_eq!(restored, original);
+    assert_eq!(restored.provenance_bytes(), original.provenance_bytes());
+    assert_eq!(
+        restored.audit_events()[0].event_ref(),
+        "audit_alpha",
+        "reload must restore canonical audit order"
+    );
+    assert_eq!(restored.audit_events()[1].event_ref(), "audit_zeta");
+}
+
+#[test]
 fn persist_then_process_death_reloads_consent_audit_and_membership() {
     let _guard = test_guard();
     let mut writer = test_client();
@@ -389,9 +450,23 @@ fn isolation_and_missing_relation_fail_closed() {
     ));
     assert!(!missing.to_string().is_empty());
     assert!(missing.source().is_some());
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    let mut aborted = client.transaction().unwrap();
+    assert!(aborted
+        .batch_execute("SELECT 1 FROM measurement_session_persist_test.relation_does_not_exist")
+        .is_err());
+    assert!(matches!(
+        persist_measurement_session(&mut aborted, &actor(), &original, &encryption_key())
+            .unwrap_err(),
+        MeasurementSessionPersistenceError::Database(_)
+    ));
+    aborted.rollback().unwrap();
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn overflow_timestamp_and_pointer_conflicts_fail_closed() {
     let _guard = test_guard();
     let mut client = test_client();
@@ -411,6 +486,89 @@ fn overflow_timestamp_and_pointer_conflicts_fail_closed() {
     });
     assert!(matches!(
         persist(&mut client, &overflow).unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    let overflow_member_created = assemble(MeasurementSessionInput {
+        session_ref: "session_overflow_member".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 12,
+        memberships: vec![SessionMembership::new(
+            "participant_alpha",
+            "tenant_alpha",
+            u64::MAX,
+            20,
+        )
+        .unwrap()],
+        consent_records: Vec::new(),
+        audit_events: Vec::new(),
+        export_snapshot_pointer: None,
+    });
+    assert!(matches!(
+        persist(&mut client, &overflow_member_created).unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    let overflow_enrolled = assemble(MeasurementSessionInput {
+        session_ref: "session_overflow_enrolled".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 13,
+        memberships: vec![SessionMembership::new(
+            "participant_alpha",
+            "tenant_alpha",
+            10,
+            u64::MAX,
+        )
+        .unwrap()],
+        consent_records: Vec::new(),
+        audit_events: Vec::new(),
+        export_snapshot_pointer: None,
+    });
+    assert!(matches!(
+        persist(&mut client, &overflow_enrolled).unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    let overflow_audit = assemble(MeasurementSessionInput {
+        session_ref: "session_overflow_audit".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 15,
+        memberships: vec![
+            SessionMembership::new("participant_alpha", "tenant_alpha", 10, 17).unwrap(),
+        ],
+        consent_records: Vec::new(),
+        audit_events: vec![SessionAuditEvent::new(
+            "audit_overflow",
+            "actor_alpha",
+            "session_enroll",
+            MEASUREMENT_SESSION_PERSIST_PURPOSE,
+            DIGEST,
+            u64::MAX,
+        )
+        .unwrap()],
+        export_snapshot_pointer: None,
+    });
+    assert!(matches!(
+        persist(&mut client, &overflow_audit).unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    let overflow_export = assemble(MeasurementSessionInput {
+        session_ref: "session_overflow_export".to_owned(),
+        tenant_ref: "tenant_alpha".to_owned(),
+        owner_participant_ref: "participant_alpha".to_owned(),
+        created_at_unix_ms: 18,
+        memberships: vec![
+            SessionMembership::new("participant_alpha", "tenant_alpha", 10, 19).unwrap(),
+        ],
+        consent_records: Vec::new(),
+        audit_events: Vec::new(),
+        export_snapshot_pointer: Some(
+            ExportSnapshotPointer::new("snapshot_alpha", "request_alpha", DIGEST, u64::MAX)
+                .unwrap(),
+        ),
+    });
+    assert!(matches!(
+        persist(&mut client, &overflow_export).unwrap_err(),
         MeasurementSessionPersistenceError::ValueOutOfRange
     ));
 
@@ -737,12 +895,12 @@ fn later_missing_export_relation_and_field_rebinding_fail_closed() {
             &[&original.session_ref()],
         )
         .unwrap();
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &original).unwrap();
     client
         .batch_execute(
-            "UPDATE measurement_session_persist_test.session_consent_record \
-             SET encryption_nonce = '\\x000000000000000000000000'::bytea \
-             WHERE event_ref = 'consent_service';\
-             UPDATE measurement_session_persist_test.session_audit_event \
+            "UPDATE measurement_session_persist_test.session_audit_event \
              SET encryption_nonce = '\\x000000000000000000000000'::bytea \
              WHERE event_ref = 'audit_enroll';",
         )
@@ -845,10 +1003,82 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
 
     client
         .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.session_audit_event \
+             DROP CONSTRAINT session_audit_event_occurred_at_unix_ms_check;\
+             UPDATE measurement_session_persist_test.session_audit_event \
+             SET occurred_at_unix_ms = -1 WHERE event_ref = 'audit_enroll';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.session_audit_event \
+             DROP CONSTRAINT session_audit_event_encryption_nonce_check;\
+             UPDATE measurement_session_persist_test.session_audit_event \
+             SET encryption_nonce = '\\x00'::bytea WHERE event_ref = 'audit_enroll';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::Domain(_)
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
             "ALTER TABLE measurement_session_persist_test.session_membership \
              DROP CONSTRAINT session_membership_enrolled_at_unix_ms_check;\
              UPDATE measurement_session_persist_test.session_membership \
              SET enrolled_at_unix_ms = -1 WHERE participant_ref = 'participant_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.assessment_participant \
+             DROP CONSTRAINT assessment_participant_created_at_unix_ms_check;\
+             UPDATE measurement_session_persist_test.assessment_participant \
+             SET created_at_unix_ms = -1 WHERE participant_ref = 'participant_alpha';",
         )
         .unwrap();
     let mut transaction = client.transaction().unwrap();
@@ -885,6 +1115,30 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
         )
         .unwrap_err(),
         MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.assessment_participant \
+             DROP CONSTRAINT assessment_participant_tenant_ref_check;\
+             UPDATE measurement_session_persist_test.assessment_participant \
+             SET tenant_ref = '12' WHERE participant_ref = 'participant_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::InvalidReference
     ));
     transaction.rollback().unwrap();
 

@@ -353,11 +353,11 @@ impl SessionConsentRecord {
         &self,
         key: &SessionEncryptionKey,
         session_ref: &str,
-    ) -> Result<SealedPayload, MeasurementSessionError> {
-        key.seal(
+    ) -> SealedPayload {
+        key.seal_bytes(
             &format!("{session_ref}\0consent\0{}", self.event_ref),
             &associated_data(session_ref, "consent_record", &self.event_ref),
-            &self.canonical_payload(),
+            self.canonical_payload().as_bytes(),
         )
     }
 
@@ -493,11 +493,11 @@ impl SessionAuditEvent {
         &self,
         key: &SessionEncryptionKey,
         session_ref: &str,
-    ) -> Result<SealedPayload, MeasurementSessionError> {
-        key.seal(
+    ) -> SealedPayload {
+        key.seal_bytes(
             &format!("{session_ref}\0audit\0{}", self.event_ref),
             &associated_data(session_ref, "audit_event", &self.event_ref),
-            &self.canonical_payload(),
+            self.canonical_payload().as_bytes(),
         )
     }
 
@@ -1027,6 +1027,7 @@ mod tests {
     #[allow(clippy::too_many_lines)]
     fn constructors_and_accessors_cover_success_and_failure_paths() {
         let built = session();
+        assert_eq!(key().purpose_ref(), MEASUREMENT_SESSION_PERSIST_PURPOSE);
         assert_eq!(built.session_ref(), "session_alpha");
         assert_eq!(built.tenant_ref(), "tenant_alpha");
         assert_eq!(built.owner_participant_ref(), "participant_alpha");
@@ -1437,9 +1438,8 @@ mod tests {
             SealedPayload::from_stored(sealed.nonce(), sealed.ciphertext().to_vec()).unwrap();
         assert_eq!(encryption_key.open(&restored, "aad").unwrap(), "plaintext");
         let built = session();
-        let consent_sealed = built.consent_records()[0]
-            .sealed_payload(&encryption_key, built.session_ref())
-            .unwrap();
+        let consent_sealed =
+            built.consent_records()[0].sealed_payload(&encryption_key, built.session_ref());
         let opened_consent = SessionConsentRecord::from_sealed(
             "consent_alpha",
             "participant_alpha",
@@ -1449,9 +1449,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opened_consent, built.consent_records()[0]);
-        let audit_sealed = built.audit_events()[0]
-            .sealed_payload(&encryption_key, built.session_ref())
-            .unwrap();
+        let audit_sealed =
+            built.audit_events()[0].sealed_payload(&encryption_key, built.session_ref());
         let opened_audit = SessionAuditEvent::from_sealed(
             "audit_alpha",
             "actor_alpha",
@@ -1685,6 +1684,26 @@ mod tests {
                 &encryption_key,
                 "session_alpha",
                 &bad_decision,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::SealingFailed
+        );
+        let bad_purpose = encryption_key
+            .seal(
+                "session_alpha\0consent\0consent_purpose",
+                &format!(
+                    "{MEASUREMENT_SESSION_PERSIST_PURPOSE}\0session_alpha\0consent_record\0consent_purpose"
+                ),
+                "score_kernel\u{1f}granted\u{1f}consent_form_v1\u{1f}\u{1f}1",
+            )
+            .unwrap();
+        assert_eq!(
+            SessionConsentRecord::from_sealed(
+                "consent_purpose",
+                "participant_alpha",
+                &encryption_key,
+                "session_alpha",
+                &bad_purpose,
             )
             .unwrap_err(),
             MeasurementSessionError::SealingFailed

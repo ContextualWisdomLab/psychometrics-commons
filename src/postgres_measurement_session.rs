@@ -312,7 +312,7 @@ fn persist_consent_record(
     record: &SessionConsentRecord,
     encryption_key: &SessionEncryptionKey,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
-    let sealed = record.sealed_payload(encryption_key, session_ref)?;
+    let sealed = record.sealed_payload(encryption_key, session_ref);
     persist_sealed_row(
         transaction,
         "INSERT INTO session_consent_record (\
@@ -334,7 +334,7 @@ fn persist_audit_event(
     event: &SessionAuditEvent,
     encryption_key: &SessionEncryptionKey,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
-    let sealed = event.sealed_payload(encryption_key, session_ref)?;
+    let sealed = event.sealed_payload(encryption_key, session_ref);
     persist_audit_insert(transaction, session_ref, event, &sealed)
 }
 
