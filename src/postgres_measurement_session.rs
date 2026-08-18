@@ -244,7 +244,7 @@ fn persist_participant(
         "SELECT tenant_ref, created_at_unix_ms \
          FROM assessment_participant WHERE participant_ref = $1",
         &[&membership.participant_ref()],
-        |row| {
+        &|row| {
             let stored_tenant: String = row.get(0);
             let stored_created: i64 = row.get(1);
             stored_tenant == membership.tenant_ref() && stored_created == created_at
@@ -272,7 +272,7 @@ fn persist_session_header(
         "SELECT tenant_ref, owner_participant_ref, created_at_unix_ms \
          FROM measurement_session WHERE session_ref = $1",
         &[&session.session_ref()],
-        |row| {
+        &|row| {
             let stored_tenant: String = row.get(0);
             let stored_owner: String = row.get(1);
             let stored_created: i64 = row.get(2);
@@ -299,7 +299,7 @@ fn persist_membership(
         "SELECT enrolled_at_unix_ms FROM session_membership \
          WHERE session_ref = $1 AND participant_ref = $2",
         &[&session_ref, &membership.participant_ref()],
-        |row| {
+        &|row| {
             let stored_enrolled: i64 = row.get(0);
             stored_enrolled == enrolled_at
         },
@@ -355,7 +355,7 @@ fn persist_sealed_row(
         &[&session_ref, &event_ref, &identity_ref, &nonce, &ciphertext],
         select_sql,
         &[&session_ref, &event_ref],
-        |row| {
+        &|row| {
             let stored_identity: String = row.get(0);
             let stored_nonce: Vec<u8> = row.get(1);
             let stored_ciphertext: Vec<u8> = row.get(2);
@@ -401,7 +401,7 @@ fn persist_export_pointer(
         "SELECT snapshot_ref, request_ref, content_digest, created_at_unix_ms \
          FROM export_snapshot_pointer WHERE session_ref = $1",
         &[&session_ref],
-        |row| {
+        &|row| {
             let stored_snapshot: String = row.get(0);
             let stored_request: String = row.get(1);
             let stored_digest: String = row.get(2);
@@ -566,7 +566,7 @@ fn persist_audit_insert(
         "SELECT actor_ref, encryption_nonce, ciphertext_payload, occurred_at_unix_ms \
          FROM session_audit_event WHERE session_ref = $1 AND event_ref = $2",
         &[&session_ref, &event.event_ref()],
-        |row| {
+        &|row| {
             let stored_actor: String = row.get(0);
             let stored_nonce: Vec<u8> = row.get(1);
             let stored_ciphertext: Vec<u8> = row.get(2);
@@ -609,7 +609,7 @@ fn insert_then_classify(
     insert_params: &[&(dyn ToSql + Sync)],
     select_sql: &str,
     select_params: &[&(dyn ToSql + Sync)],
-    same: impl FnOnce(&Row) -> bool,
+    same: &dyn Fn(&Row) -> bool,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let inserted = execute(transaction, insert_sql, insert_params)?;
     if inserted == 1 {
@@ -683,14 +683,25 @@ mod tests {
             &[&"probe_alpha", &"one"],
             "SELECT value_text FROM classify_probe_missing WHERE probe_ref = $1",
             &[&"probe_alpha"],
-            |_| true,
+            &|_| true,
         )
         .unwrap_err();
         transaction.rollback().unwrap();
-        assert!(matches!(
-            error,
-            MeasurementSessionPersistenceError::Database(_)
-        ));
+        assert_eq!(persistence_error_name(&error), "database");
+    }
+
+    fn persistence_error_name(error: &MeasurementSessionPersistenceError) -> &'static str {
+        match error {
+            MeasurementSessionPersistenceError::InvalidReference => "invalid_reference",
+            MeasurementSessionPersistenceError::ConflictingReplay => "conflicting_replay",
+            MeasurementSessionPersistenceError::ValueOutOfRange => "value_out_of_range",
+            MeasurementSessionPersistenceError::UnsupportedIsolationLevel => {
+                "unsupported_isolation_level"
+            }
+            MeasurementSessionPersistenceError::Unauthorized(_) => "unauthorized",
+            MeasurementSessionPersistenceError::Domain(_) => "domain",
+            MeasurementSessionPersistenceError::Database(_) => "database",
+        }
     }
 
     #[test]
@@ -699,24 +710,24 @@ mod tests {
             required_reference("session_alpha").unwrap(),
             "session_alpha"
         );
-        assert!(matches!(
-            required_reference(" "),
-            Err(MeasurementSessionPersistenceError::InvalidReference)
-        ));
-        assert!(matches!(
-            required_reference("12"),
-            Err(MeasurementSessionPersistenceError::InvalidReference)
-        ));
+        assert_eq!(
+            persistence_error_name(&required_reference(" ").unwrap_err()),
+            "invalid_reference"
+        );
+        assert_eq!(
+            persistence_error_name(&required_reference("12").unwrap_err()),
+            "invalid_reference"
+        );
         assert_eq!(unix_ms(9).unwrap(), 9);
-        assert!(matches!(
-            unix_ms(u64::MAX),
-            Err(MeasurementSessionPersistenceError::ValueOutOfRange)
-        ));
+        assert_eq!(
+            persistence_error_name(&unix_ms(u64::MAX).unwrap_err()),
+            "value_out_of_range"
+        );
         assert_eq!(loaded_unix_ms(9).unwrap(), 9);
-        assert!(matches!(
-            loaded_unix_ms(-1),
-            Err(MeasurementSessionPersistenceError::ValueOutOfRange)
-        ));
+        assert_eq!(
+            persistence_error_name(&loaded_unix_ms(-1).unwrap_err()),
+            "value_out_of_range"
+        );
         let unauthorized =
             MeasurementSessionPersistenceError::from(AuthorizationError::CrossTenantDenied);
         let domain =
@@ -725,22 +736,10 @@ mod tests {
             MeasurementSessionPersistenceError::from(MeasurementSessionError::InvalidReference);
         let timestamp =
             MeasurementSessionPersistenceError::from(MeasurementSessionError::InvalidTimestamp);
-        assert!(matches!(
-            unauthorized,
-            MeasurementSessionPersistenceError::Unauthorized(_)
-        ));
-        assert!(matches!(
-            domain,
-            MeasurementSessionPersistenceError::Domain(_)
-        ));
-        assert!(matches!(
-            invalid,
-            MeasurementSessionPersistenceError::InvalidReference
-        ));
-        assert!(matches!(
-            timestamp,
-            MeasurementSessionPersistenceError::ValueOutOfRange
-        ));
+        assert_eq!(persistence_error_name(&unauthorized), "unauthorized");
+        assert_eq!(persistence_error_name(&domain), "domain");
+        assert_eq!(persistence_error_name(&invalid), "invalid_reference");
+        assert_eq!(persistence_error_name(&timestamp), "value_out_of_range");
         for error in [
             MeasurementSessionPersistenceError::InvalidReference,
             MeasurementSessionPersistenceError::ConflictingReplay,
@@ -750,6 +749,7 @@ mod tests {
             MeasurementSessionPersistenceError::from(MeasurementSessionError::SealingFailed),
         ] {
             assert!(!error.to_string().is_empty());
+            assert!(!persistence_error_name(&error).is_empty());
             let _ = error.source();
         }
         assert!(MeasurementSessionPersistenceError::ConflictingReplay
