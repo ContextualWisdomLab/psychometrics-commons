@@ -8,9 +8,9 @@
 //!
 //! This module intentionally does not generate randomness or hash secrets. Those are transport
 //! and secret-handling responsibilities that require a reviewed cryptographic implementation.
-//! The domain contract instead makes the server-authoritative lifetime, exact binding, digest
-//! identity, and append-only revocation evidence explicit so a later HTTP adapter cannot silently
-//! widen anonymous-session authority.
+//! The domain contract instead makes the server-authoritative lifetime, exact resource binding,
+//! stored proof hash, and append-only revocation evidence explicit so a later HTTP adapter cannot
+//! silently widen anonymous-session authority.
 
 use crate::anonymous_session::AnonymousSessionContext;
 use crate::reference::normalized_reference;
@@ -31,7 +31,7 @@ pub enum AnonymousCredentialError {
     InvalidLifetime,
     /// A revocation replay tried to replace already-recorded immutable revocation evidence.
     ConflictingRevocation,
-    /// The presented digest, binding, or server time did not authorize this credential.
+    /// The presented proof hash, resource references, or server time failed authorization.
     Unauthorized,
 }
 
@@ -64,10 +64,12 @@ impl Error for AnonymousCredentialError {}
 
 /// Immutable anonymous-session authority plus append-only revocation evidence.
 ///
-/// The record stores only a digest of the bearer proof. The raw credential must remain outside
-/// application persistence and routine logs. Authorization succeeds only when the caller presents
-/// the exact canonical digest, exact resource binding, and a server time inside the issuance and
-/// expiry window and before any recorded revocation.
+/// The record stores only a SHA-256 hash of the bearer proof, called the proof digest. The raw
+/// credential must remain outside application persistence and routine logs. The resource binding
+/// is the exact tenant, participant, and assessment-session identity that the proof may authorize.
+/// Authorization succeeds only when the caller presents that exact stored proof hash and resource
+/// binding at a server time inside the issuance and expiry window and before any recorded
+/// revocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnonymousCredential {
     credential_ref: String,
@@ -199,10 +201,11 @@ impl AnonymousCredential {
 
     /// Return whether one already-hashed proof is authorized for the exact resource binding.
     ///
-    /// The presented digest and references must already use their canonical spellings. This
-    /// prevents whitespace-padded aliases from widening resource authority. Digest comparison is
-    /// performed without early exit after canonical validation so comparison work does not reveal
-    /// a matching prefix.
+    /// The presented digest is the SHA-256 hash of the caller's bearer proof. The resource binding
+    /// is the tenant, participant, and session that proof is allowed to access. All four values
+    /// must already use their canonical spelling. This prevents whitespace-padded aliases from
+    /// widening resource authority. Digest comparison is performed without early exit after
+    /// canonical validation so comparison work does not reveal a matching prefix.
     #[must_use]
     pub fn authorizes(
         &self,
@@ -247,15 +250,22 @@ impl AnonymousCredential {
         }
     }
 
-    /// Mint the exact anonymous-session context this credential currently authorizes.
+    /// Create the exact anonymous-session context this credential authorizes now.
     ///
-    /// A transport should call this after hashing the presented bearer proof. The returned context
-    /// names this credential as authorization evidence and expires at the earlier of credential
-    /// expiry or recorded revocation. Raw proof material never enters the context.
+    /// A transport calls this after hashing the caller's bearer proof. The proof digest is that
+    /// SHA-256 hash. The binding is the exact tenant, participant, and assessment session the proof
+    /// may access. When all of those values and the current server time match this credential, the
+    /// method returns an [`AnonymousSessionContext`] naming this server-side credential record as
+    /// its authorization evidence. The context's initial expiry is the earlier of credential
+    /// expiry or any revocation already recorded. Raw proof material never enters the context.
+    ///
+    /// A context is an immutable snapshot. If this credential is revoked later, callers must use
+    /// [`AnonymousCredential::authorizes_session_context_at`] with the current credential record
+    /// before forwarding another protected operation.
     ///
     /// # Errors
     ///
-    /// Returns [`AnonymousCredentialError::Unauthorized`] when the presented digest, tenant,
+    /// Returns [`AnonymousCredentialError::Unauthorized`] when the presented proof hash, tenant,
     /// participant, session, or server time does not currently authorize this credential.
     ///
     /// # Panics
@@ -288,6 +298,30 @@ impl AnonymousCredential {
             self.authority_expires_at_unix_ms(),
         )
         .expect("an authorized credential already carries valid session-context inputs"))
+    }
+
+    /// Return whether this current credential still authorizes an existing session context.
+    ///
+    /// The session context is a snapshot made after an earlier proof check. Its embedded expiry
+    /// cannot change if this credential is revoked later. A server therefore resolves the
+    /// context's `authorization_evidence_ref` to the current credential record and calls this
+    /// method before each protected operation. Authorization succeeds only while the current
+    /// credential itself is valid, the context names this exact credential record, and the
+    /// context still names this credential's tenant, participant, and assessment session.
+    #[must_use]
+    pub fn authorizes_session_context_at(
+        &self,
+        context: &AnonymousSessionContext,
+        now_unix_ms: u64,
+    ) -> bool {
+        self.is_valid_at(now_unix_ms)
+            && self.credential_ref == context.authorization_evidence_ref()
+            && context.is_valid_for_binding_at(
+                &self.tenant_ref,
+                &self.participant_ref,
+                &self.session_ref,
+                now_unix_ms,
+            )
     }
 
     const fn authority_expires_at_unix_ms(&self) -> u64 {
