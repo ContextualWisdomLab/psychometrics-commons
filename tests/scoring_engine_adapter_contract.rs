@@ -242,10 +242,7 @@ fn unsupported_output_schema_cannot_reach_the_engine_adapter() {
     )
     .unwrap_err();
 
-    assert_eq!(
-        error,
-        ScoringContractError::UnsupportedOutputSchemaVersion
-    );
+    assert_eq!(error, ScoringContractError::UnsupportedOutputSchemaVersion);
 }
 
 #[test]
