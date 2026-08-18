@@ -751,7 +751,9 @@ fn later_missing_export_relation_and_field_rebinding_fail_closed() {
         persist(&mut client, &original).unwrap_err(),
         MeasurementSessionPersistenceError::ConflictingReplay
     ));
-    persist(&mut client, &original).ok();
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &original).unwrap();
 
     let rebound_consent_member = assemble(MeasurementSessionInput {
         session_ref: "session_alpha".to_owned(),
@@ -843,6 +845,30 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
 
     client
         .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.session_membership \
+             DROP CONSTRAINT session_membership_enrolled_at_unix_ms_check;\
+             UPDATE measurement_session_persist_test.session_membership \
+             SET enrolled_at_unix_ms = -1 WHERE participant_ref = 'participant_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
             "ALTER TABLE measurement_session_persist_test.assessment_participant \
              DROP CONSTRAINT assessment_participant_created_at_unix_ms_check;\
              UPDATE measurement_session_persist_test.assessment_participant \
@@ -861,14 +887,10 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
         MeasurementSessionPersistenceError::ValueOutOfRange
     ));
     transaction.rollback().unwrap();
-    client
-        .execute(
-            "UPDATE measurement_session_persist_test.assessment_participant \
-             SET created_at_unix_ms = 1699000000000 WHERE participant_ref = 'participant_alpha'",
-            &[],
-        )
-        .unwrap();
 
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
     client
         .batch_execute(
             "ALTER TABLE measurement_session_persist_test.session_consent_record \
@@ -914,6 +936,9 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
     ));
     transaction.rollback().unwrap();
 
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
     client
         .batch_execute(
             "ALTER TABLE measurement_session_persist_test.export_snapshot_pointer \
@@ -935,6 +960,33 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
     ));
     transaction.rollback().unwrap();
 
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE measurement_session_persist_test.export_snapshot_pointer \
+             DROP CONSTRAINT export_snapshot_pointer_created_at_unix_ms_check;\
+             UPDATE measurement_session_persist_test.export_snapshot_pointer \
+             SET created_at_unix_ms = -1 WHERE session_ref = 'session_alpha';",
+        )
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_measurement_session(
+            &mut transaction,
+            &actor(),
+            "session_alpha",
+            &encryption_key(),
+        )
+        .unwrap_err(),
+        MeasurementSessionPersistenceError::ValueOutOfRange
+    ));
+    transaction.rollback().unwrap();
+
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
     client
         .batch_execute(
             "ALTER TABLE measurement_session_persist_test.measurement_session \
@@ -978,4 +1030,72 @@ fn corrupt_stored_evidence_fails_closed_on_reload() {
         MeasurementSessionPersistenceError::Domain(_)
     ));
     transaction.rollback().unwrap();
+}
+
+fn load_after_dropping(table: &str) -> MeasurementSessionPersistenceError {
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(&format!(
+            "DROP TABLE measurement_session_persist_test.{table} CASCADE;"
+        ))
+        .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    let error = load_measurement_session(
+        &mut transaction,
+        &actor(),
+        "session_alpha",
+        &encryption_key(),
+    )
+    .unwrap_err();
+    transaction.rollback().unwrap();
+    error
+}
+
+#[test]
+fn reload_fails_closed_when_a_later_relation_is_dropped() {
+    let _guard = test_guard();
+    for table in [
+        "session_membership",
+        "session_consent_record",
+        "session_audit_event",
+        "export_snapshot_pointer",
+    ] {
+        assert!(
+            matches!(
+                load_after_dropping(table),
+                MeasurementSessionPersistenceError::Database(_)
+            ),
+            "reload after dropping {table} must fail closed"
+        );
+    }
+}
+
+#[test]
+fn exact_replay_fails_closed_when_conflict_select_cannot_read() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_measurement_session_migration(&mut client).unwrap();
+    persist(&mut client, &live_session()).unwrap();
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS measurement_session_select_sink;\
+             CREATE OR REPLACE FUNCTION measurement_session_redirect_search_path() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 PERFORM set_config('search_path', 'measurement_session_select_sink', true); \
+                 RETURN NEW; \
+             END $$; \
+             CREATE TRIGGER assessment_participant_redirect_search_path \
+             BEFORE INSERT ON measurement_session_persist_test.assessment_participant \
+             FOR EACH ROW EXECUTE FUNCTION measurement_session_redirect_search_path();",
+        )
+        .unwrap();
+    assert!(matches!(
+        persist(&mut client, &live_session()).unwrap_err(),
+        MeasurementSessionPersistenceError::Database(_)
+    ));
 }

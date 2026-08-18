@@ -139,7 +139,7 @@ impl SessionEncryptionKey {
                     aad: associated_data.as_bytes(),
                 },
             )
-            .expect("AES-256-GCM encryption does not fail for a 12-byte nonce");
+            .unwrap_or_else(empty_ciphertext_on_infallible_encrypt);
         SealedPayload { nonce, ciphertext }
     }
 
@@ -907,6 +907,10 @@ fn map_aead<T>(result: Result<T, aes_gcm::aead::Error>) -> Result<T, Measurement
     result.map_err(|_| MeasurementSessionError::SealingFailed)
 }
 
+fn empty_ciphertext_on_infallible_encrypt(_: aes_gcm::aead::Error) -> Vec<u8> {
+    Vec::new()
+}
+
 fn nonce_for(material: &str) -> [u8; 12] {
     let digest = Sha256::digest(material.as_bytes());
     let mut nonce = [0_u8; 12];
@@ -929,10 +933,10 @@ fn required_reference(reference: &str) -> Result<&str, MeasurementSessionError> 
 mod tests {
     use super::{
         authorize_measurement_session, authorize_stored_measurement_session, decision_name,
-        map_aead, parse_decision, parse_purpose, purpose_name, ExportSnapshotPointer,
-        MeasurementSession, MeasurementSessionError, MeasurementSessionInput, SealedPayload,
-        SessionAuditEvent, SessionConsentRecord, SessionEncryptionKey, SessionMembership,
-        MEASUREMENT_SESSION_PERSIST_PURPOSE,
+        empty_ciphertext_on_infallible_encrypt, map_aead, parse_decision, parse_purpose,
+        purpose_name, ExportSnapshotPointer, MeasurementSession, MeasurementSessionError,
+        MeasurementSessionInput, SealedPayload, SessionAuditEvent, SessionConsentRecord,
+        SessionEncryptionKey, SessionMembership, MEASUREMENT_SESSION_PERSIST_PURPOSE,
     };
     use crate::authorization::{
         AuthorizationContext, AuthorizationError, ProductPermission, ProductRole, ResourceKind,
@@ -1082,6 +1086,10 @@ mod tests {
             MeasurementSessionError::InvalidReference
         );
         assert_eq!(
+            SessionMembership::new("participant_alpha", " ", 1, 1).unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
             SessionMembership::new("participant_alpha", "tenant_alpha", 0, 1).unwrap_err(),
             MeasurementSessionError::InvalidTimestamp
         );
@@ -1109,6 +1117,32 @@ mod tests {
                 ConsentPurpose::ServiceOperation,
                 ConsentDecision::Granted,
                 "consent_form_v1",
+                None,
+                1,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            SessionConsentRecord::new(
+                "consent_alpha",
+                " ",
+                ConsentPurpose::ServiceOperation,
+                ConsentDecision::Granted,
+                "consent_form_v1",
+                None,
+                1,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            SessionConsentRecord::new(
+                "consent_alpha",
+                "participant_alpha",
+                ConsentPurpose::ServiceOperation,
+                ConsentDecision::Granted,
+                " ",
                 None,
                 1,
             )
@@ -1153,6 +1187,54 @@ mod tests {
         );
         assert_eq!(
             SessionAuditEvent::new(
+                " ",
+                "actor_alpha",
+                "session_persist",
+                MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                DIGEST,
+                1,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            SessionAuditEvent::new(
+                "audit_alpha",
+                "12",
+                "session_persist",
+                MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                DIGEST,
+                1,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            SessionAuditEvent::new(
+                "audit_alpha",
+                "actor_alpha",
+                " ",
+                MEASUREMENT_SESSION_PERSIST_PURPOSE,
+                DIGEST,
+                1,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            SessionAuditEvent::new(
+                "audit_alpha",
+                "actor_alpha",
+                "session_persist",
+                "12",
+                DIGEST,
+                1,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            SessionAuditEvent::new(
                 "audit_alpha",
                 "actor_alpha",
                 "session_persist",
@@ -1166,6 +1248,14 @@ mod tests {
         assert_eq!(
             ExportSnapshotPointer::new("snapshot_alpha", "request_alpha", DIGEST, 0).unwrap_err(),
             MeasurementSessionError::InvalidTimestamp
+        );
+        assert_eq!(
+            ExportSnapshotPointer::new(" ", "request_alpha", DIGEST, 1).unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        assert_eq!(
+            ExportSnapshotPointer::new("snapshot_alpha", "12", DIGEST, 1).unwrap_err(),
+            MeasurementSessionError::InvalidReference
         );
         assert_eq!(
             ExportSnapshotPointer::new("snapshot_alpha", "request_alpha", "sha256:zz", 1)
@@ -1182,6 +1272,42 @@ mod tests {
             ))
             .unwrap_err(),
             MeasurementSessionError::InvalidTimestamp
+        );
+        let mut invalid_session = session_input(
+            1,
+            vec![membership("participant_alpha")],
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        invalid_session.session_ref = "12".to_owned();
+        assert_eq!(
+            MeasurementSession::new(invalid_session).unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        let mut invalid_tenant = session_input(
+            1,
+            vec![membership("participant_alpha")],
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        invalid_tenant.tenant_ref = " ".to_owned();
+        assert_eq!(
+            MeasurementSession::new(invalid_tenant).unwrap_err(),
+            MeasurementSessionError::InvalidReference
+        );
+        let mut invalid_owner = session_input(
+            1,
+            vec![membership("participant_alpha")],
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        invalid_owner.owner_participant_ref = "12".to_owned();
+        assert_eq!(
+            MeasurementSession::new(invalid_owner).unwrap_err(),
+            MeasurementSessionError::InvalidReference
         );
         assert_eq!(
             MeasurementSession::new(session_input(1, Vec::new(), Vec::new(), Vec::new(), None))
@@ -1520,6 +1646,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn from_sealed_rejects_truncated_and_non_utf8_payloads() {
         let encryption_key = key();
         let truncated = encryption_key
@@ -1538,6 +1665,26 @@ mod tests {
                 &encryption_key,
                 "session_alpha",
                 &truncated,
+            )
+            .unwrap_err(),
+            MeasurementSessionError::SealingFailed
+        );
+        let bad_decision = encryption_key
+            .seal(
+                "session_alpha\0consent\0consent_decision",
+                &format!(
+                    "{MEASUREMENT_SESSION_PERSIST_PURPOSE}\0session_alpha\0consent_record\0consent_decision"
+                ),
+                "service_operation\u{1f}scored\u{1f}consent_form_v1\u{1f}\u{1f}1",
+            )
+            .unwrap();
+        assert_eq!(
+            SessionConsentRecord::from_sealed(
+                "consent_decision",
+                "participant_alpha",
+                &encryption_key,
+                "session_alpha",
+                &bad_decision,
             )
             .unwrap_err(),
             MeasurementSessionError::SealingFailed
@@ -1610,5 +1757,6 @@ mod tests {
         );
         assert!(map_aead::<()>(Err(aes_gcm::aead::Error)).is_err());
         assert_eq!(map_aead(Ok(7_u8)).unwrap(), 7_u8);
+        assert!(empty_ciphertext_on_infallible_encrypt(aes_gcm::aead::Error).is_empty());
     }
 }

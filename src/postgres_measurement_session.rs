@@ -230,7 +230,7 @@ fn persist_participant(
     membership: &SessionMembership,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let created_at = unix_ms(membership.created_at_unix_ms())?;
-    let inserted = execute(
+    insert_then_classify(
         transaction,
         "INSERT INTO assessment_participant (\
              participant_ref, tenant_ref, created_at_unix_ms\
@@ -241,23 +241,15 @@ fn persist_participant(
             &membership.tenant_ref(),
             &created_at,
         ],
-    )?;
-    if inserted == 1 {
-        return Ok(true);
-    }
-    let row = query_one(
-        transaction,
         "SELECT tenant_ref, created_at_unix_ms \
          FROM assessment_participant WHERE participant_ref = $1",
         &[&membership.participant_ref()],
-    )?;
-    let stored_tenant: String = row.get(0);
-    let stored_created: i64 = row.get(1);
-    if stored_tenant == membership.tenant_ref() && stored_created == created_at {
-        Ok(false)
-    } else {
-        Err(MeasurementSessionPersistenceError::ConflictingReplay)
-    }
+        |row| {
+            let stored_tenant: String = row.get(0);
+            let stored_created: i64 = row.get(1);
+            stored_tenant == membership.tenant_ref() && stored_created == created_at
+        },
+    )
 }
 
 fn persist_session_header(
@@ -265,7 +257,7 @@ fn persist_session_header(
     session: &MeasurementSession,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let created_at = unix_ms(session.created_at_unix_ms())?;
-    let inserted = execute(
+    insert_then_classify(
         transaction,
         "INSERT INTO measurement_session (\
              session_ref, tenant_ref, owner_participant_ref, created_at_unix_ms\
@@ -277,27 +269,18 @@ fn persist_session_header(
             &session.owner_participant_ref(),
             &created_at,
         ],
-    )?;
-    if inserted == 1 {
-        return Ok(true);
-    }
-    let row = query_one(
-        transaction,
         "SELECT tenant_ref, owner_participant_ref, created_at_unix_ms \
          FROM measurement_session WHERE session_ref = $1",
         &[&session.session_ref()],
-    )?;
-    let stored_tenant: String = row.get(0);
-    let stored_owner: String = row.get(1);
-    let stored_created: i64 = row.get(2);
-    if stored_tenant == session.tenant_ref()
-        && stored_owner == session.owner_participant_ref()
-        && stored_created == created_at
-    {
-        Ok(false)
-    } else {
-        Err(MeasurementSessionPersistenceError::ConflictingReplay)
-    }
+        |row| {
+            let stored_tenant: String = row.get(0);
+            let stored_owner: String = row.get(1);
+            let stored_created: i64 = row.get(2);
+            stored_tenant == session.tenant_ref()
+                && stored_owner == session.owner_participant_ref()
+                && stored_created == created_at
+        },
+    )
 }
 
 fn persist_membership(
@@ -306,29 +289,21 @@ fn persist_membership(
     membership: &SessionMembership,
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let enrolled_at = unix_ms(membership.enrolled_at_unix_ms())?;
-    let inserted = execute(
+    insert_then_classify(
         transaction,
         "INSERT INTO session_membership (\
              session_ref, participant_ref, enrolled_at_unix_ms\
          ) VALUES ($1, $2, $3) \
          ON CONFLICT (session_ref, participant_ref) DO NOTHING",
         &[&session_ref, &membership.participant_ref(), &enrolled_at],
-    )?;
-    if inserted == 1 {
-        return Ok(true);
-    }
-    let row = query_one(
-        transaction,
         "SELECT enrolled_at_unix_ms FROM session_membership \
          WHERE session_ref = $1 AND participant_ref = $2",
         &[&session_ref, &membership.participant_ref()],
-    )?;
-    let stored_enrolled: i64 = row.get(0);
-    if stored_enrolled == enrolled_at {
-        Ok(false)
-    } else {
-        Err(MeasurementSessionPersistenceError::ConflictingReplay)
-    }
+        |row| {
+            let stored_enrolled: i64 = row.get(0);
+            stored_enrolled == enrolled_at
+        },
+    )
 }
 
 fn persist_consent_record(
@@ -374,23 +349,21 @@ fn persist_sealed_row(
 ) -> Result<bool, MeasurementSessionPersistenceError> {
     let nonce = sealed.nonce().as_slice();
     let ciphertext = sealed.ciphertext();
-    let inserted = execute(
+    insert_then_classify(
         transaction,
         insert_sql,
         &[&session_ref, &event_ref, &identity_ref, &nonce, &ciphertext],
-    )?;
-    if inserted == 1 {
-        return Ok(true);
-    }
-    let row = query_one(transaction, select_sql, &[&session_ref, &event_ref])?;
-    let stored_identity: String = row.get(0);
-    let stored_nonce: Vec<u8> = row.get(1);
-    let stored_ciphertext: Vec<u8> = row.get(2);
-    if stored_identity == identity_ref && stored_nonce == nonce && stored_ciphertext == ciphertext {
-        Ok(false)
-    } else {
-        Err(MeasurementSessionPersistenceError::ConflictingReplay)
-    }
+        select_sql,
+        &[&session_ref, &event_ref],
+        |row| {
+            let stored_identity: String = row.get(0);
+            let stored_nonce: Vec<u8> = row.get(1);
+            let stored_ciphertext: Vec<u8> = row.get(2);
+            stored_identity == identity_ref
+                && stored_nonce == nonce
+                && stored_ciphertext == ciphertext
+        },
+    )
 }
 
 fn persist_export_pointer(
@@ -412,7 +385,7 @@ fn persist_export_pointer(
         };
     };
     let created_at = unix_ms(pointer.created_at_unix_ms())?;
-    let inserted = execute(
+    insert_then_classify(
         transaction,
         "INSERT INTO export_snapshot_pointer (\
              session_ref, snapshot_ref, request_ref, content_digest, created_at_unix_ms\
@@ -425,29 +398,20 @@ fn persist_export_pointer(
             &pointer.content_digest(),
             &created_at,
         ],
-    )?;
-    if inserted == 1 {
-        return Ok(true);
-    }
-    let row = query_one(
-        transaction,
         "SELECT snapshot_ref, request_ref, content_digest, created_at_unix_ms \
          FROM export_snapshot_pointer WHERE session_ref = $1",
         &[&session_ref],
-    )?;
-    let stored_snapshot: String = row.get(0);
-    let stored_request: String = row.get(1);
-    let stored_digest: String = row.get(2);
-    let stored_created: i64 = row.get(3);
-    if stored_snapshot == pointer.snapshot_ref()
-        && stored_request == pointer.request_ref()
-        && stored_digest == pointer.content_digest()
-        && stored_created == created_at
-    {
-        Ok(false)
-    } else {
-        Err(MeasurementSessionPersistenceError::ConflictingReplay)
-    }
+        |row| {
+            let stored_snapshot: String = row.get(0);
+            let stored_request: String = row.get(1);
+            let stored_digest: String = row.get(2);
+            let stored_created: i64 = row.get(3);
+            stored_snapshot == pointer.snapshot_ref()
+                && stored_request == pointer.request_ref()
+                && stored_digest == pointer.content_digest()
+                && stored_created == created_at
+        },
+    )
 }
 
 fn load_session_header(
@@ -585,7 +549,7 @@ fn persist_audit_insert(
     let occurred_at = unix_ms(event.occurred_at_unix_ms())?;
     let nonce = sealed.nonce().as_slice();
     let ciphertext = sealed.ciphertext();
-    let inserted = execute(
+    insert_then_classify(
         transaction,
         "INSERT INTO session_audit_event (\
              session_ref, event_ref, actor_ref, occurred_at_unix_ms, encryption_nonce, ciphertext_payload\
@@ -599,29 +563,20 @@ fn persist_audit_insert(
             &nonce,
             &ciphertext,
         ],
-    )?;
-    if inserted == 1 {
-        return Ok(true);
-    }
-    let row = query_one(
-        transaction,
         "SELECT actor_ref, encryption_nonce, ciphertext_payload, occurred_at_unix_ms \
          FROM session_audit_event WHERE session_ref = $1 AND event_ref = $2",
         &[&session_ref, &event.event_ref()],
-    )?;
-    let stored_actor: String = row.get(0);
-    let stored_nonce: Vec<u8> = row.get(1);
-    let stored_ciphertext: Vec<u8> = row.get(2);
-    let stored_occurred: i64 = row.get(3);
-    if stored_actor == event.actor_ref()
-        && stored_nonce == nonce
-        && stored_ciphertext == ciphertext
-        && stored_occurred == occurred_at
-    {
-        Ok(false)
-    } else {
-        Err(MeasurementSessionPersistenceError::ConflictingReplay)
-    }
+        |row| {
+            let stored_actor: String = row.get(0);
+            let stored_nonce: Vec<u8> = row.get(1);
+            let stored_ciphertext: Vec<u8> = row.get(2);
+            let stored_occurred: i64 = row.get(3);
+            stored_actor == event.actor_ref()
+                && stored_nonce == nonce
+                && stored_ciphertext == ciphertext
+                && stored_occurred == occurred_at
+        },
+    )
 }
 
 fn unix_ms(value: u64) -> Result<i64, MeasurementSessionPersistenceError> {
@@ -645,6 +600,26 @@ fn require_read_committed(
         Ok(())
     } else {
         Err(MeasurementSessionPersistenceError::UnsupportedIsolationLevel)
+    }
+}
+
+fn insert_then_classify(
+    transaction: &mut Transaction<'_>,
+    insert_sql: &str,
+    insert_params: &[&(dyn ToSql + Sync)],
+    select_sql: &str,
+    select_params: &[&(dyn ToSql + Sync)],
+    same: impl FnOnce(&Row) -> bool,
+) -> Result<bool, MeasurementSessionPersistenceError> {
+    let inserted = execute(transaction, insert_sql, insert_params)?;
+    if inserted == 1 {
+        return Ok(true);
+    }
+    let row = query_one(transaction, select_sql, select_params)?;
+    if same(&row) {
+        Ok(false)
+    } else {
+        Err(MeasurementSessionPersistenceError::ConflictingReplay)
     }
 }
 
@@ -674,10 +649,49 @@ fn query_one(
 
 #[cfg(test)]
 mod tests {
-    use super::{loaded_unix_ms, required_reference, unix_ms, MeasurementSessionPersistenceError};
+    use super::{
+        insert_then_classify, loaded_unix_ms, required_reference, unix_ms,
+        MeasurementSessionPersistenceError,
+    };
     use crate::authorization::AuthorizationError;
     use crate::measurement_session::MeasurementSessionError;
     use std::error::Error;
+
+    #[test]
+    fn insert_then_classify_maps_a_conflict_select_database_error() {
+        let connection = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+        let mut client = postgres::Client::connect(&connection, postgres::NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS measurement_session_persist_test;\
+                 SET search_path TO measurement_session_persist_test;\
+                 CREATE TABLE IF NOT EXISTS classify_probe (\
+                     probe_ref TEXT PRIMARY KEY,\
+                     value_text TEXT NOT NULL\
+                 );\
+                 TRUNCATE classify_probe;\
+                 INSERT INTO classify_probe (probe_ref, value_text) VALUES ('probe_alpha', 'one');",
+            )
+            .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        let error = insert_then_classify(
+            &mut transaction,
+            "INSERT INTO classify_probe (probe_ref, value_text) VALUES ($1, $2) \
+             ON CONFLICT (probe_ref) DO NOTHING",
+            &[&"probe_alpha", &"one"],
+            "SELECT value_text FROM classify_probe_missing WHERE probe_ref = $1",
+            &[&"probe_alpha"],
+            |_| true,
+        )
+        .unwrap_err();
+        transaction.rollback().unwrap();
+        assert!(matches!(
+            error,
+            MeasurementSessionPersistenceError::Database(_)
+        ));
+    }
 
     #[test]
     fn helpers_and_error_contracts_are_exhaustive() {
