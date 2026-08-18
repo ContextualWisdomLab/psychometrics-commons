@@ -13,8 +13,12 @@ use std::fmt::{Display, Formatter};
 
 const ENGINE_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const PRIMARY_SNAPSHOT_REF: &str = "response_snapshot_scoring_adapter";
+const PRIMARY_SCORING_VERSION: &str = "scoring_version_big_five_v1";
 
-fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnapshot {
+fn completed_snapshot_with_ref(
+    snapshot_ref: &str,
+) -> psychometrics_commons_runtime::response::ResponseSnapshot {
     let mut ledger = ResponseLedger::new("session_scoring_adapter").unwrap();
     ledger
         .record(
@@ -29,25 +33,34 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
         )
         .unwrap();
     ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_scoring_adapter")
+        .freeze_as(SessionState::Completed, snapshot_ref)
         .unwrap()
 }
 
-fn request_with_ref(request_ref: &'static str) -> ScoringRequest {
+fn request_with_identity(
+    request_ref: &str,
+    snapshot_ref: &str,
+    scoring_version_ref: &str,
+) -> ScoringRequest {
+    let snapshot = completed_snapshot_with_ref(snapshot_ref);
     ScoringRequest::from_snapshot(
-        &completed_snapshot(),
+        &snapshot,
         ScoringRequestInput {
             scoring_request_ref: request_ref,
-            response_snapshot_ref: "response_snapshot_scoring_adapter",
+            response_snapshot_ref: snapshot_ref,
             assessment_spec_ref: "assessment_spec_big_five",
             instrument_version_ref: "instrument_version_big_five_en_v1",
-            scoring_version_ref: "scoring_version_big_five_v1",
+            scoring_version_ref,
             calibration_reference: "calibration_big_five_v1",
             norm_version_ref: None,
             requested_output_schema_version: 1,
         },
     )
     .unwrap()
+}
+
+fn request_with_ref(request_ref: &str) -> ScoringRequest {
+    request_with_identity(request_ref, PRIMARY_SNAPSHOT_REF, PRIMARY_SCORING_VERSION)
 }
 
 fn result_for(request: &ScoringRequest, result_ref: &str) -> ScoringResult {
@@ -81,14 +94,15 @@ impl ScoringEngine for SuccessfulEngine {
     }
 }
 
-struct MismatchedEngine;
+struct MismatchedEngine {
+    request: ScoringRequest,
+}
 
 impl ScoringEngine for MismatchedEngine {
     type Error = EngineUnavailable;
 
     fn score(&self, _request: &ScoringRequest) -> Result<ScoringResult, Self::Error> {
-        let other_request = request_with_ref("scoring_request_other");
-        Ok(result_for(&other_request, "scoring_result_other"))
+        Ok(result_for(&self.request, "scoring_result_other"))
     }
 }
 
@@ -108,28 +122,47 @@ fn adapter_returns_only_a_result_bound_to_the_exact_request() {
     let result = execute_scoring_request(&SuccessfulEngine, &request).unwrap();
 
     assert_eq!(result.scoring_request_ref(), "scoring_request_primary");
-    assert_eq!(
-        result.response_snapshot_ref(),
-        "response_snapshot_scoring_adapter"
-    );
+    assert_eq!(result.response_snapshot_ref(), PRIMARY_SNAPSHOT_REF);
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].score(), Some(0.42));
 }
 
 #[test]
-fn adapter_rejects_an_engine_result_bound_to_another_request() {
+fn adapter_rejects_any_result_not_bound_to_the_complete_request() {
     let request = request_with_ref("scoring_request_primary");
-    let error = execute_scoring_request(&MismatchedEngine, &request).unwrap_err();
+    let mismatches = [
+        request_with_ref("scoring_request_other"),
+        request_with_identity(
+            "scoring_request_primary",
+            PRIMARY_SNAPSHOT_REF,
+            "scoring_version_big_five_v2",
+        ),
+        request_with_identity(
+            "scoring_request_primary",
+            "response_snapshot_scoring_adapter_other",
+            PRIMARY_SCORING_VERSION,
+        ),
+    ];
 
-    assert!(matches!(
-        error,
-        ScoringEngineExecutionError::RequestMismatch
-    ));
-    assert_eq!(
-        error.to_string(),
-        "scoring engine result does not belong to the dispatched request"
-    );
-    assert!(error.source().is_none());
+    for mismatched_request in mismatches {
+        let error = execute_scoring_request(
+            &MismatchedEngine {
+                request: mismatched_request,
+            },
+            &request,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ScoringEngineExecutionError::RequestMismatch
+        ));
+        assert_eq!(
+            error.to_string(),
+            "scoring engine result does not belong to the dispatched request"
+        );
+        assert!(error.source().is_none());
+    }
 }
 
 #[test]
