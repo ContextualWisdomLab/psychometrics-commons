@@ -113,6 +113,34 @@ fn listener_rejects_invalid_and_oversized_content_length() {
 }
 
 #[test]
+fn listener_rejects_ambiguous_http_message_framing() {
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_chunked\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_both\r\nTransfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\n{}"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_duplicate\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\n{}x"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_duplicate_same\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
+}
+
+#[test]
 fn listener_reloads_a_created_session_over_get() {
     let mut port = MemorySessionHttpPort::published();
     let body = format!(
