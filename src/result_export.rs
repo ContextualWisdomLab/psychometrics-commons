@@ -458,14 +458,14 @@ mod export_guard_tests {
 
     #[test]
     fn guards_reject_numeric_locale_blank_text_and_name_every_disposition() {
-        assert!(matches!(
+        assert_eq!(
             required_reference("12"),
             Err(ResultExportError::InvalidReference)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             required_reference(" result_export_big_five_ko_v1 "),
             Err(ResultExportError::InvalidReference)
-        ));
+        );
         assert_eq!(
             required_reference("result_export_big_five_ko_v1").unwrap(),
             "result_export_big_five_ko_v1"
@@ -484,14 +484,14 @@ mod export_guard_tests {
         assert!(encoded.is_empty());
         append_json_string_array(&mut encoded, &["consent_service_v1", "consent_research_v1"]);
         assert_eq!(encoded, "\"consent_service_v1\",\"consent_research_v1\"");
-        assert!(matches!(
+        assert_eq!(
             required_text("\tlimitation"),
             Err(ResultExportError::InvalidText)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             required_text(" Do not diagnose from this export. "),
             Err(ResultExportError::InvalidText)
-        ));
+        );
         assert_eq!(
             required_text("Continuous scores remain the measurement source of truth.").unwrap(),
             "Continuous scores remain the measurement source of truth."

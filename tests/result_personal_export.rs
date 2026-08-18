@@ -109,7 +109,10 @@ fn personal_export_repeats_true_big_five_scores_in_json_and_report() {
     let snapshot = published_big_five_snapshot();
     let extraversion_before = snapshot.score_observations()[0].score();
     let export = ResultExport::from_snapshot(&snapshot, export_input()).unwrap();
+    let retained = export.clone();
 
+    assert_eq!(retained, export);
+    assert!(format!("{export:?}").contains("participant_anonymous_ko_001"));
     assert_eq!(export.export_ref(), "result_export_big_five_ko_v1");
     assert_eq!(
         export.result_snapshot_ref(),
@@ -188,6 +191,13 @@ fn personal_export_rejects_blank_identity_locale_time_and_limitations() {
         ResultExport::from_snapshot(&snapshot, input).unwrap_err(),
         ResultExportError::InvalidReference
     );
+
+    input = export_input();
+    input.export_ref = "result_export_\u{0001}_big_five_ko_v1";
+    let control_ref_error = ResultExport::from_snapshot(&snapshot, input).unwrap_err();
+    assert_eq!(control_ref_error, ResultExportError::InvalidReference);
+    assert!(control_ref_error.to_string().contains("opaque non-numeric"));
+    assert!(std::error::Error::source(&control_ref_error).is_none());
 
     input = export_input();
     input.locale = "ko KR";
@@ -296,6 +306,8 @@ fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
                 ObservationDisposition::Failed,
             )
             .unwrap(),
+            ScoreObservation::without_score("construct_openness", ObservationDisposition::Excluded)
+                .unwrap(),
         ],
     )
     .unwrap();
@@ -337,6 +349,10 @@ fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
     assert!(export
         .json_document()
         .contains("\"disposition\":\"failed\""));
+    assert!(export
+        .json_document()
+        .contains("\"disposition\":\"excluded\""));
+    assert!(export.human_readable_report().contains("excluded"));
     assert!(export
         .json_document()
         .contains("Do not treat this as \\\"employment fitness.\\\""));
