@@ -125,6 +125,25 @@ fn adapter_returns_only_a_receipt_bound_to_the_exact_event() {
 }
 
 #[test]
+fn receipt_value_semantics_preserve_exact_identity_and_outcome() {
+    let primary = IntegrationPublishReceipt::for_event(
+        &event(EVENT_PRIMARY, TENANT_PRIMARY),
+        DeliveryOutcome::Delivered,
+    );
+    let cloned = primary.clone();
+    let other = IntegrationPublishReceipt::for_event(
+        &event(EVENT_OTHER, TENANT_PRIMARY),
+        DeliveryOutcome::Delivered,
+    );
+
+    assert_eq!(cloned, primary);
+    assert_ne!(other, primary);
+    let debug = format!("{cloned:?}");
+    assert!(debug.contains(EVENT_PRIMARY));
+    assert!(debug.contains(TENANT_PRIMARY));
+}
+
+#[test]
 fn adapter_preserves_each_publisher_delivery_classification() {
     let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
 
@@ -169,6 +188,7 @@ fn adapter_rejects_each_independent_outbox_identity_rebinding() {
             "integration publisher receipt does not belong to the dispatched event"
         );
         assert!(error.source().is_none());
+        assert!(format!("{error:?}").contains("EventMismatch"));
     }
 }
 
@@ -186,4 +206,5 @@ fn adapter_preserves_publisher_failure_as_the_error_source() {
         error.source().map(ToString::to_string),
         Some("egress transport unavailable".to_owned())
     );
+    assert!(format!("{error:?}").contains("PublisherUnavailable"));
 }
