@@ -18,7 +18,11 @@ fn manifest() -> InstrumentReleaseManifest {
         "instrument_big_five",
         "instrument_version_big_five_ko_v1",
         "construct_big_five",
-        &["item_openness_01", "item_extraversion_01", "item_agreeableness_01"],
+        &[
+            "item_openness_01",
+            "item_extraversion_01",
+            "item_agreeableness_01",
+        ],
         "ko-KR",
         "assessment_spec_big_five_v1",
         "scoring_big_five_v1",
@@ -45,7 +49,10 @@ fn quick_path_preserves_release_identity_and_ordered_subset() {
     .unwrap();
 
     assert_eq!(path.path(), AssessmentPath::Quick);
-    assert_eq!(path.policy_version_ref(), "assessment_path_policy_big_five_v1");
+    assert_eq!(
+        path.policy_version_ref(),
+        "assessment_path_policy_big_five_v1"
+    );
     assert_eq!(path.release_ref(), "release_big_five_ko_v1");
     assert_eq!(
         path.instrument_version_ref(),
@@ -127,7 +134,12 @@ fn path_rejects_empty_duplicate_unknown_or_reordered_items() {
 fn path_policy_reference_must_use_exact_opaque_spelling() {
     let release = manifest();
 
-    for policy_ref in ["", "12345", " assessment_path_policy_big_five_v1 "] {
+    for policy_ref in [
+        "",
+        "12345",
+        " assessment_path_policy_big_five_v1 ",
+        "assessment_path_policy_\u{0001}_big_five_v1",
+    ] {
         let error = AssessmentPathDefinition::new(
             AssessmentPath::Quick,
             policy_ref,

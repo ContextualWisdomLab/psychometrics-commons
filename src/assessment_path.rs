@@ -1,8 +1,9 @@
 //! Versioned Quick and Deep assessment delivery paths.
 //!
-//! An assessment path chooses which release-pinned item versions a participant receives for one
-//! immutable instrument release. This module validates provenance and preserves the release's item
-//! order. It does not establish publication eligibility, choose items psychometrically, calculate
+//! An assessment path chooses which item versions a participant receives from one immutable
+//! instrument release. Each item identity is copied from that release, preserving its origin
+//! (provenance) and relative order. This module does not decide whether the release is eligible for
+//! publication, choose items using measurement-model evidence (psychometric selection), calculate
 //! scores, or replace scientific evidence owned by the release or `fast-mlsirm`.
 
 use crate::instrument::InstrumentReleaseManifest;
@@ -32,7 +33,7 @@ pub enum AssessmentPathError {
     DuplicateItemReference,
     /// The path names an item version that is not part of the immutable release.
     ItemOutsideRelease,
-    /// The path changes the semantically significant item order of the immutable release.
+    /// The path changes the release-defined relative order of its item versions.
     ItemOrderMismatch,
 }
 
@@ -60,10 +61,10 @@ impl Error for AssessmentPathError {}
 
 /// Immutable product evidence for one versioned assessment delivery path.
 ///
-/// The definition copies only identity and ordered item references from the supplied immutable
-/// release. A Quick or Deep label therefore cannot silently rebind to another release version or
+/// The definition copies only identities and ordered item references from the supplied immutable
+/// release. A Quick or Deep label therefore cannot silently point to another release version or
 /// reorder its items. The policy-version reference identifies the versioned product rule that chose
-/// this subset; scientific item-selection and scoring remain outside this module.
+/// this subset; measurement-model item selection and scoring remain outside this module.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssessmentPathDefinition {
     path: AssessmentPath,
@@ -108,10 +109,15 @@ impl AssessmentPathDefinition {
         let mut accepted = Vec::with_capacity(item_version_refs.len());
         let mut previous_position = None;
         for item_ref in item_version_refs {
-            if accepted.iter().any(|accepted_ref| accepted_ref == *item_ref) {
+            if accepted
+                .iter()
+                .any(|accepted_ref| accepted_ref == *item_ref)
+            {
                 return Err(AssessmentPathError::DuplicateItemReference);
             }
-            let Some(position) = release_items.iter().position(|candidate| candidate == *item_ref)
+            let Some(position) = release_items
+                .iter()
+                .position(|candidate| candidate == *item_ref)
             else {
                 return Err(AssessmentPathError::ItemOutsideRelease);
             };
