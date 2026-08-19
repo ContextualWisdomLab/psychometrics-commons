@@ -34,3 +34,16 @@ fn uppercase_runs_cannot_bypass_identity_column_denylist() {
         );
     }
 }
+
+#[test]
+fn unavailable_identity_inventory_error_is_safe_and_actionable() {
+    let message = PublicReleaseLeakageError::IdentityInventoryUnavailable.to_string();
+
+    assert_eq!(
+        message,
+        "supply an authorized restricted-identity inventory before packaging the public release fixture"
+    );
+    assert!(!message.contains("participant_seoul_clinic_one"));
+    assert!(!message.contains("keyverse_subject_seoul_clinic_one"));
+    assert!(!message.contains("linkage_seoul_clinic_one"));
+}
