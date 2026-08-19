@@ -21,6 +21,10 @@ fn uppercase_runs_cannot_bypass_identity_column_denylist() {
         "pseudonymKEYVersion",
         "identitySUBJECTRef",
         "linkedSUBJECTRef",
+        "ASSESSMENTPARTICIPANTREF",
+        "PSEUDONYMKEYVERSION",
+        "IDENTITYSUBJECTREF",
+        "LINKEDSUBJECTREF",
     ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
