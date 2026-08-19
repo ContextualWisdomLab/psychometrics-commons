@@ -1,9 +1,9 @@
 //! Versioned Quick and Deep assessment delivery paths.
 //!
-//! An assessment path chooses which already-published item versions a participant receives for one
+//! An assessment path chooses which release-pinned item versions a participant receives for one
 //! immutable instrument release. This module validates provenance and preserves the release's item
-//! order. It does not choose items psychometrically, calculate scores, or replace evidence owned by
-//! the published release or `fast-mlsirm`.
+//! order. It does not establish publication eligibility, choose items psychometrically, calculate
+//! scores, or replace scientific evidence owned by the release or `fast-mlsirm`.
 
 use crate::instrument::InstrumentReleaseManifest;
 use crate::reference::normalized_reference;
@@ -14,9 +14,9 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AssessmentPath {
-    /// A shorter approved delivery path.
+    /// A shorter versioned delivery path.
     Quick,
-    /// A more comprehensive approved delivery path.
+    /// A more comprehensive versioned delivery path.
     Deep,
 }
 
@@ -62,7 +62,7 @@ impl Error for AssessmentPathError {}
 ///
 /// The definition copies only identity and ordered item references from the supplied immutable
 /// release. A Quick or Deep label therefore cannot silently rebind to another release version or
-/// reorder its items. The policy-version reference identifies the reviewed product rule that chose
+/// reorder its items. The policy-version reference identifies the versioned product rule that chose
 /// this subset; scientific item-selection and scoring remain outside this module.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssessmentPathDefinition {
@@ -79,7 +79,7 @@ impl AssessmentPathDefinition {
     ///
     /// Every path item must already belong to the release and appear in the same relative order as
     /// the release. This boundary does not decide how many items a Quick or Deep path should use;
-    /// that choice must already be represented by a reviewed, versioned policy.
+    /// that choice must already be represented by a versioned product policy.
     ///
     /// # Errors
     ///
@@ -108,10 +108,10 @@ impl AssessmentPathDefinition {
         let mut accepted = Vec::with_capacity(item_version_refs.len());
         let mut previous_position = None;
         for item_ref in item_version_refs {
-            if accepted.iter().any(|accepted_ref| accepted_ref == item_ref) {
+            if accepted.iter().any(|accepted_ref| accepted_ref == *item_ref) {
                 return Err(AssessmentPathError::DuplicateItemReference);
             }
-            let Some(position) = release_items.iter().position(|candidate| candidate == item_ref)
+            let Some(position) = release_items.iter().position(|candidate| candidate == *item_ref)
             else {
                 return Err(AssessmentPathError::ItemOutsideRelease);
             };
@@ -138,7 +138,7 @@ impl AssessmentPathDefinition {
         self.path
     }
 
-    /// Return the reviewed product policy version that selected this path.
+    /// Return the product policy version that selected this path.
     #[must_use]
     pub fn policy_version_ref(&self) -> &str {
         &self.policy_version_ref
