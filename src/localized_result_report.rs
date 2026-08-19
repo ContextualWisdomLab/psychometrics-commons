@@ -1,11 +1,18 @@
 //! Exact-locale participant-facing reports derived from immutable result exports.
 //!
 //! Psychometrics Commons already stores continuous scores and uncertainty in an
-//! immutable result snapshot. This module changes only presentation labels: it
-//! reuses [`crate::result_export::ResultExport`] for validation and score copying,
-//! supports only the explicitly reviewed `ko-KR` and `en-US` locales, and fails
-//! closed for every other locale. It never recomputes a score, uncertainty,
-//! calibration value, norm, DIF result, or scientific gate.
+//! immutable result snapshot. A continuous score is a numeric estimate on a
+//! measurement scale, while uncertainty describes how precise that estimate is.
+//! Calibration links responses to the approved scoring model. A norm is a reviewed
+//! comparison reference. Differential item functioning (DIF) checks whether an item
+//! behaves differently across groups after accounting for the measured construct.
+//! A scientific gate is a required evidence check that must pass before a result may
+//! be published or compared.
+//!
+//! This module changes only presentation labels: it reuses
+//! [`crate::result_export::ResultExport`] for validation and score copying, supports
+//! only the explicitly reviewed `ko-KR` and `en-US` locales, and fails closed for
+//! every other locale. It never recomputes any of those scientific values or gates.
 
 use crate::result::ResultSnapshot;
 use crate::result_export::{ResultExport, ResultExportError, ResultExportInput};
@@ -83,8 +90,8 @@ impl LocalizedResultReport {
         snapshot: &ResultSnapshot,
         input: LocalizedResultReportInput<'_>,
     ) -> Result<Self, LocalizedResultReportError> {
-        let labels = labels_for_locale(input.locale)
-            .ok_or(LocalizedResultReportError::UnsupportedLocale)?;
+        let labels =
+            labels_for_locale(input.locale).ok_or(LocalizedResultReportError::UnsupportedLocale)?;
         let export = ResultExport::from_snapshot(
             snapshot,
             ResultExportInput {
@@ -140,6 +147,13 @@ impl LocalizedResultReport {
 #[derive(Clone, Copy)]
 struct ReportLabels {
     title: &'static str,
+    report_ref: &'static str,
+    result_snapshot_ref: &'static str,
+    participant_ref: &'static str,
+    locale: &'static str,
+    instrument_version_ref: &'static str,
+    scoring_version_ref: &'static str,
+    engine_artifact_digest: &'static str,
     scores: &'static str,
     limitations: &'static str,
     scored: &'static str,
@@ -151,6 +165,13 @@ struct ReportLabels {
 
 const EN_US: ReportLabels = ReportLabels {
     title: "Personal result report",
+    report_ref: "report_ref",
+    result_snapshot_ref: "result_snapshot_ref",
+    participant_ref: "participant_ref",
+    locale: "locale",
+    instrument_version_ref: "instrument_version_ref",
+    scoring_version_ref: "scoring_version_ref",
+    engine_artifact_digest: "engine_artifact_digest",
     scores: "Scores",
     limitations: "Limitations",
     scored: "scored",
@@ -162,6 +183,13 @@ const EN_US: ReportLabels = ReportLabels {
 
 const KO_KR: ReportLabels = ReportLabels {
     title: "개인 결과 보고서",
+    report_ref: "보고서 참조값",
+    result_snapshot_ref: "결과 스냅샷 참조값",
+    participant_ref: "참가자 참조값",
+    locale: "로케일",
+    instrument_version_ref: "검사 버전 참조값",
+    scoring_version_ref: "채점 버전 참조값",
+    engine_artifact_digest: "채점 엔진 산출물 해시",
     scores: "점수",
     limitations: "제한사항",
     scored: "채점됨",
@@ -179,33 +207,36 @@ fn labels_for_locale(locale: &str) -> Option<ReportLabels> {
     }
 }
 
-fn render_report(
-    export: &ResultExport,
-    limitations: &[&str],
-    labels: ReportLabels,
-) -> String {
+fn render_report(export: &ResultExport, limitations: &[&str], labels: ReportLabels) -> String {
     let mut report = String::new();
     report.push_str(labels.title);
     report.push('\n');
-    report.push_str("report_ref: ");
+    report.push_str(labels.report_ref);
+    report.push_str(": ");
     report.push_str(export.export_ref());
     report.push('\n');
-    report.push_str("result_snapshot_ref: ");
+    report.push_str(labels.result_snapshot_ref);
+    report.push_str(": ");
     report.push_str(export.result_snapshot_ref());
     report.push('\n');
-    report.push_str("participant_ref: ");
+    report.push_str(labels.participant_ref);
+    report.push_str(": ");
     report.push_str(export.participant_ref());
     report.push('\n');
-    report.push_str("locale: ");
+    report.push_str(labels.locale);
+    report.push_str(": ");
     report.push_str(export.locale());
     report.push('\n');
-    report.push_str("instrument_version_ref: ");
+    report.push_str(labels.instrument_version_ref);
+    report.push_str(": ");
     report.push_str(export.instrument_version_ref());
     report.push('\n');
-    report.push_str("scoring_version_ref: ");
+    report.push_str(labels.scoring_version_ref);
+    report.push_str(": ");
     report.push_str(export.scoring_version_ref());
     report.push('\n');
-    report.push_str("engine_artifact_digest: ");
+    report.push_str(labels.engine_artifact_digest);
+    report.push_str(": ");
     report.push_str(export.engine_artifact_digest());
     report.push_str("\n\n");
     report.push_str(labels.scores);
