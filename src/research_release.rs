@@ -180,9 +180,10 @@ pub struct PublicReleaseFixtureColumn<'a> {
 
 /// Identities that a public release fixture must not carry.
 ///
-/// Pass the operational, Keyverse, and restricted-linkage values the operator
-/// already holds for the same people. The scan does not mask those values for
-/// authorized research work; it only keeps them out of a public package.
+/// Pass the product-authorized operational, Keyverse, and restricted-linkage values
+/// already held for the people represented by the fixture. At least one effective
+/// nonblank identity must be supplied so an omitted inventory cannot be mistaken for
+/// a clean scan. This boundary never queries another service's application database.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RestrictedReleaseIdentities<'a> {
     /// Operational assessment participant references.
@@ -195,12 +196,14 @@ pub struct RestrictedReleaseIdentities<'a> {
     pub linkage_key_versions: &'a [&'a str],
 }
 
-/// Fail-closed public-release identifier leakage.
+/// Fail-closed public-release identifier leakage or missing scan authority.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PublicReleaseLeakageError {
     /// A published column name is an operational, Keyverse, or linkage field.
     ForbiddenColumn,
+    /// No effective restricted-identity inventory was supplied for the scan.
+    IdentityInventoryUnavailable,
     /// A cell value is an operational participant identifier.
     OperationalParticipant,
     /// A cell value is a Keyverse subject identifier.
@@ -214,6 +217,9 @@ impl Display for PublicReleaseLeakageError {
         formatter.write_str(match self {
             Self::ForbiddenColumn => {
                 "remove operational, Keyverse, or restricted-linkage columns from the public release fixture"
+            }
+            Self::IdentityInventoryUnavailable => {
+                "supply an authorized restricted-identity inventory before packaging the public release fixture"
             }
             Self::OperationalParticipant => {
                 "remove operational participant identifiers from the public release fixture"
@@ -253,11 +259,14 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
 /// fixture. A column named `research_participant_ref` is allowed; columns
 /// named `participant_ref`, `assessment_participant_ref`, `subject_ref`,
 /// `identity_subject_ref`, `linked_subject_ref`, or `pseudonym_key_version`
-/// are not.
+/// are not. The caller must also supply an effective product-authorized identity
+/// inventory; the scanner fails closed rather than treating an omitted inventory as
+/// evidence that the fixture is clean.
 ///
 /// # Errors
 ///
-/// Returns [`PublicReleaseLeakageError`] when a column name or cell value is an
+/// Returns [`PublicReleaseLeakageError`] when a forbidden column is present, the
+/// effective restricted-identity inventory is unavailable, or a cell value is an
 /// operational participant, Keyverse subject, restricted linkage identity, or
 /// linkage-key version.
 pub fn scan_public_release_fixture(
@@ -268,6 +277,13 @@ pub fn scan_public_release_fixture(
         if forbidden_public_release_column(column.column_name) {
             return Err(PublicReleaseLeakageError::ForbiddenColumn);
         }
+    }
+
+    if !has_effective_restricted_identity_inventory(restricted) {
+        return Err(PublicReleaseLeakageError::IdentityInventoryUnavailable);
+    }
+
+    for column in columns {
         for cell in column.cell_values {
             if matches_restricted_identity(cell, restricted.operational_participant_refs) {
                 return Err(PublicReleaseLeakageError::OperationalParticipant);
@@ -283,6 +299,20 @@ pub fn scan_public_release_fixture(
         }
     }
     Ok(())
+}
+
+fn has_effective_restricted_identity_inventory(
+    restricted: RestrictedReleaseIdentities<'_>,
+) -> bool {
+    [
+        restricted.operational_participant_refs,
+        restricted.keyverse_subject_refs,
+        restricted.linkage_refs,
+        restricted.linkage_key_versions,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|identity| !identity.trim().is_empty())
 }
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
