@@ -142,6 +142,36 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
 }
 
 #[test]
+fn localized_report_preserves_auditable_result_provenance() {
+    let snapshot = result_snapshot();
+    let report = LocalizedResultReport::from_snapshot(
+        &snapshot,
+        LocalizedResultReportInput {
+            report_ref: "localized_report_provenance_v1",
+            locale: "ko-KR",
+            rendered_at_unix_ms: 1_700_000_100_004,
+            limitations: &["이 결과는 진단 또는 채용 적격 판정이 아닙니다."],
+        },
+    )
+    .unwrap();
+
+    for expected in [
+        "세션 참조값: session_big_five_locale_v1\n",
+        "응답 스냅샷 참조값: response_snapshot_locale_v1\n",
+        "평가 명세 참조값: assessment_spec_big_five_v1\n",
+        "교정 참조값: calibration_big_five_locale_v1\n",
+        "규준 버전 참조값: 없음\n",
+        "서술 버전 참조값: narrative_version_big_five_v1\n",
+        "출력 스키마 버전: 1\n",
+        "동의 스냅샷 참조값: consent_service_locale_v1\n",
+        "결과 생성 시각(Unix ms): 1700000000000\n",
+        "보고서 생성 시각(Unix ms): 1700000100004\n",
+    ] {
+        assert!(report.text().contains(expected), "missing {expected:?}");
+    }
+}
+
+#[test]
 fn english_report_remains_explicitly_english() {
     let snapshot = result_snapshot();
     let report = LocalizedResultReport::from_snapshot(
