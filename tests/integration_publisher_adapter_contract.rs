@@ -48,75 +48,61 @@ impl Display for PublisherUnavailable {
 
 impl Error for PublisherUnavailable {}
 
-struct SuccessfulPublisher;
+enum PublisherBehavior {
+    Outcome(DeliveryOutcome),
+    Acknowledge(IntegrationEvent),
+    Unavailable,
+}
 
-impl IntegrationPublisher for SuccessfulPublisher {
+struct TestPublisher {
+    behavior: PublisherBehavior,
+}
+
+impl TestPublisher {
+    fn outcome(outcome: DeliveryOutcome) -> Self {
+        Self {
+            behavior: PublisherBehavior::Outcome(outcome),
+        }
+    }
+
+    fn acknowledge(acknowledged_event: IntegrationEvent) -> Self {
+        Self {
+            behavior: PublisherBehavior::Acknowledge(acknowledged_event),
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self {
+            behavior: PublisherBehavior::Unavailable,
+        }
+    }
+}
+
+impl IntegrationPublisher for TestPublisher {
     type Error = PublisherUnavailable;
 
     fn publish(
         &self,
         integration_event: &IntegrationEvent,
     ) -> Result<IntegrationPublishReceipt, Self::Error> {
-        Ok(IntegrationPublishReceipt::for_event(
-            integration_event,
-            DeliveryOutcome::Delivered,
-        ))
-    }
-}
-
-struct ClassifiedPublisher {
-    outcome: DeliveryOutcome,
-}
-
-impl IntegrationPublisher for ClassifiedPublisher {
-    type Error = PublisherUnavailable;
-
-    fn publish(
-        &self,
-        integration_event: &IntegrationEvent,
-    ) -> Result<IntegrationPublishReceipt, Self::Error> {
-        Ok(IntegrationPublishReceipt::for_event(
-            integration_event,
-            self.outcome,
-        ))
-    }
-}
-
-struct MismatchedPublisher {
-    acknowledged_event: IntegrationEvent,
-}
-
-impl IntegrationPublisher for MismatchedPublisher {
-    type Error = PublisherUnavailable;
-
-    fn publish(
-        &self,
-        _integration_event: &IntegrationEvent,
-    ) -> Result<IntegrationPublishReceipt, Self::Error> {
-        Ok(IntegrationPublishReceipt::for_event(
-            &self.acknowledged_event,
-            DeliveryOutcome::Delivered,
-        ))
-    }
-}
-
-struct UnavailablePublisher;
-
-impl IntegrationPublisher for UnavailablePublisher {
-    type Error = PublisherUnavailable;
-
-    fn publish(
-        &self,
-        _integration_event: &IntegrationEvent,
-    ) -> Result<IntegrationPublishReceipt, Self::Error> {
-        Err(PublisherUnavailable)
+        match &self.behavior {
+            PublisherBehavior::Outcome(outcome) => Ok(IntegrationPublishReceipt::for_event(
+                integration_event,
+                *outcome,
+            )),
+            PublisherBehavior::Acknowledge(acknowledged_event) => Ok(
+                IntegrationPublishReceipt::for_event(acknowledged_event, DeliveryOutcome::Delivered),
+            ),
+            PublisherBehavior::Unavailable => Err(PublisherUnavailable),
+        }
     }
 }
 
 #[test]
 fn adapter_returns_only_a_receipt_bound_to_the_exact_event() {
     let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
-    let receipt = execute_integration_publish(&SuccessfulPublisher, &integration_event).unwrap();
+    let publisher = TestPublisher::outcome(DeliveryOutcome::Delivered);
+    let receipt = execute_integration_publish(&publisher, &integration_event).unwrap();
 
     assert_eq!(receipt.source_ref(), SOURCE_PRIMARY);
     assert_eq!(receipt.tenant_ref(), TENANT_PRIMARY);
@@ -152,9 +138,8 @@ fn adapter_preserves_each_publisher_delivery_classification() {
         DeliveryOutcome::RetryableFailure,
         DeliveryOutcome::PermanentFailure,
     ] {
-        let receipt =
-            execute_integration_publish(&ClassifiedPublisher { outcome }, &integration_event)
-                .unwrap();
+        let publisher = TestPublisher::outcome(outcome);
+        let receipt = execute_integration_publish(&publisher, &integration_event).unwrap();
 
         assert_eq!(receipt.source_ref(), SOURCE_PRIMARY);
         assert_eq!(receipt.tenant_ref(), TENANT_PRIMARY);
@@ -173,11 +158,8 @@ fn adapter_rejects_each_independent_outbox_identity_rebinding() {
     ];
 
     for acknowledged_event in mismatches {
-        let error = execute_integration_publish(
-            &MismatchedPublisher { acknowledged_event },
-            &integration_event,
-        )
-        .unwrap_err();
+        let publisher = TestPublisher::acknowledge(acknowledged_event);
+        let error = execute_integration_publish(&publisher, &integration_event).unwrap_err();
 
         assert!(matches!(
             error,
@@ -195,7 +177,8 @@ fn adapter_rejects_each_independent_outbox_identity_rebinding() {
 #[test]
 fn adapter_preserves_publisher_failure_as_the_error_source() {
     let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
-    let error = execute_integration_publish(&UnavailablePublisher, &integration_event).unwrap_err();
+    let publisher = TestPublisher::unavailable();
+    let error = execute_integration_publish(&publisher, &integration_event).unwrap_err();
 
     assert!(matches!(
         error,
