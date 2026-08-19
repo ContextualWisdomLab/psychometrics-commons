@@ -108,6 +108,22 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
     assert_eq!(report.locale(), "ko-KR");
     assert_eq!(report.result_snapshot_ref(), "result_snapshot_locale_v1");
     assert!(report.text().starts_with("개인 결과 보고서\n"));
+    assert!(report.text().contains("보고서 참조값: localized_report_ko_v1\n"));
+    assert!(report
+        .text()
+        .contains("결과 스냅샷 참조값: result_snapshot_locale_v1\n"));
+    assert!(report
+        .text()
+        .contains("참가자 참조값: participant_locale_alpha\n"));
+    assert!(report.text().contains("로케일: ko-KR\n"));
+    assert!(report
+        .text()
+        .contains("검사 버전 참조값: instrument_version_big_five_locale_v1\n"));
+    assert!(report
+        .text()
+        .contains("채점 버전 참조값: scoring_version_big_five_v1\n"));
+    let expected_engine_digest = format!("채점 엔진 산출물 해시: {ENGINE_DIGEST}\n");
+    assert!(report.text().contains(&expected_engine_digest));
     assert!(report.text().contains("\n점수\n"));
     assert!(report.text().contains("\n제한사항\n"));
     assert!(report
@@ -191,6 +207,34 @@ fn invalid_export_input_preserves_underlying_error_source() {
         error,
         LocalizedResultReportError::InvalidExport(_)
     ));
-    assert_eq!(error.to_string(), "localized result report input is invalid");
+    assert_eq!(
+        error.to_string(),
+        "localized result report input is invalid"
+    );
+    assert!(error.source().is_some());
+}
+
+#[test]
+fn zero_render_time_is_reported_as_invalid_export() {
+    let snapshot = result_snapshot();
+    let error = LocalizedResultReport::from_snapshot(
+        &snapshot,
+        LocalizedResultReportInput {
+            report_ref: "localized_report_zero_time_v1",
+            locale: "ko-KR",
+            rendered_at_unix_ms: 0,
+            limitations: &["검토된 제한사항입니다."],
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        LocalizedResultReportError::InvalidExport(_)
+    ));
+    assert_eq!(
+        error.to_string(),
+        "localized result report input is invalid"
+    );
     assert!(error.source().is_some());
 }
