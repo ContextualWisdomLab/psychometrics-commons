@@ -90,9 +90,12 @@ impl IntegrationPublisher for TestPublisher {
                 integration_event,
                 *outcome,
             )),
-            PublisherBehavior::Acknowledge(acknowledged_event) => Ok(
-                IntegrationPublishReceipt::for_event(acknowledged_event, DeliveryOutcome::Delivered),
-            ),
+            PublisherBehavior::Acknowledge(acknowledged_event) => {
+                Ok(IntegrationPublishReceipt::for_event(
+                    acknowledged_event,
+                    DeliveryOutcome::Delivered,
+                ))
+            }
             PublisherBehavior::Unavailable => Err(PublisherUnavailable),
         }
     }
