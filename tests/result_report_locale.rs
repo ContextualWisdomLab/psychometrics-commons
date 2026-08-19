@@ -10,6 +10,7 @@ use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::session::SessionState;
+use std::error::Error;
 
 const ENGINE_DIGEST: &str =
     "sha256:4444444444444444444444444444444444444444444444444444444444444444";
@@ -51,9 +52,20 @@ fn result_snapshot() -> ResultSnapshot {
         ENGINE_DIGEST,
         vec![
             ScoreObservation::scored("construct_extraversion", 0.42, Some(0.18)).unwrap(),
+            ScoreObservation::scored("construct_conscientiousness", 0.67, None).unwrap(),
             ScoreObservation::without_score(
                 "construct_openness",
                 ObservationDisposition::Abstained,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_agreeableness",
+                ObservationDisposition::Failed,
+            )
+            .unwrap(),
+            ScoreObservation::without_score(
+                "construct_neuroticism",
+                ObservationDisposition::Excluded,
             )
             .unwrap(),
         ],
@@ -87,7 +99,12 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
         },
     )
     .unwrap();
+    let retained = report.clone();
 
+    assert_eq!(retained, report);
+    assert!(format!("{report:?}").contains("localized_report_ko_v1"));
+    assert_eq!(report.report_ref(), "localized_report_ko_v1");
+    assert_eq!(report.participant_ref(), "participant_locale_alpha");
     assert_eq!(report.locale(), "ko-KR");
     assert_eq!(report.result_snapshot_ref(), "result_snapshot_locale_v1");
     assert!(report.text().starts_with("개인 결과 보고서\n"));
@@ -96,7 +113,12 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
     assert!(report
         .text()
         .contains("construct_extraversion: 채점됨 0.42 (표준오차 0.18)"));
+    assert!(report
+        .text()
+        .contains("construct_conscientiousness: 채점됨 0.67"));
     assert!(report.text().contains("construct_openness: 보류"));
+    assert!(report.text().contains("construct_agreeableness: 실패"));
+    assert!(report.text().contains("construct_neuroticism: 제외"));
     assert!(report
         .text()
         .contains("이 결과는 진단 또는 채용 적격 판정이 아닙니다."));
@@ -123,7 +145,12 @@ fn english_report_remains_explicitly_english() {
     assert!(report
         .text()
         .contains("construct_extraversion: scored 0.42 (SE 0.18)"));
+    assert!(report
+        .text()
+        .contains("construct_conscientiousness: scored 0.67"));
     assert!(report.text().contains("construct_openness: abstained"));
+    assert!(report.text().contains("construct_agreeableness: failed"));
+    assert!(report.text().contains("construct_neuroticism: excluded"));
 }
 
 #[test]
@@ -141,5 +168,29 @@ fn unsupported_or_noncanonical_locale_fails_closed() {
         )
         .unwrap_err();
         assert_eq!(error, LocalizedResultReportError::UnsupportedLocale);
+        assert!(error.to_string().contains("ko-KR or en-US"));
+        assert!(error.source().is_none());
     }
+}
+
+#[test]
+fn invalid_export_input_preserves_underlying_error_source() {
+    let snapshot = result_snapshot();
+    let error = LocalizedResultReport::from_snapshot(
+        &snapshot,
+        LocalizedResultReportInput {
+            report_ref: " ",
+            locale: "en-US",
+            rendered_at_unix_ms: 1_700_000_100_003,
+            limitations: &["Reviewed limitation."],
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        LocalizedResultReportError::InvalidExport(_)
+    ));
+    assert_eq!(error.to_string(), "localized result report input is invalid");
+    assert!(error.source().is_some());
 }
