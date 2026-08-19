@@ -107,42 +107,55 @@ impl Display for EngineUnavailable {
 
 impl Error for EngineUnavailable {}
 
-struct SuccessfulEngine;
+enum EngineBehavior {
+    Success,
+    ReturnFor(ScoringRequest),
+    Unavailable,
+}
 
-impl ScoringEngine for SuccessfulEngine {
+struct TestEngine {
+    behavior: EngineBehavior,
+}
+
+impl TestEngine {
+    const fn success() -> Self {
+        Self {
+            behavior: EngineBehavior::Success,
+        }
+    }
+
+    fn return_for(request: ScoringRequest) -> Self {
+        Self {
+            behavior: EngineBehavior::ReturnFor(request),
+        }
+    }
+
+    const fn unavailable() -> Self {
+        Self {
+            behavior: EngineBehavior::Unavailable,
+        }
+    }
+}
+
+impl ScoringEngine for TestEngine {
     type Error = EngineUnavailable;
 
     fn score(&self, request: &ScoringRequest) -> Result<ScoringResult, Self::Error> {
-        Ok(result_for(request, "scoring_result_success"))
-    }
-}
-
-struct MismatchedEngine {
-    request: ScoringRequest,
-}
-
-impl ScoringEngine for MismatchedEngine {
-    type Error = EngineUnavailable;
-
-    fn score(&self, _request: &ScoringRequest) -> Result<ScoringResult, Self::Error> {
-        Ok(result_for(&self.request, "scoring_result_other"))
-    }
-}
-
-struct UnavailableEngine;
-
-impl ScoringEngine for UnavailableEngine {
-    type Error = EngineUnavailable;
-
-    fn score(&self, _request: &ScoringRequest) -> Result<ScoringResult, Self::Error> {
-        Err(EngineUnavailable)
+        match &self.behavior {
+            EngineBehavior::Success => Ok(result_for(request, "scoring_result_success")),
+            EngineBehavior::ReturnFor(other_request) => {
+                Ok(result_for(other_request, "scoring_result_other"))
+            }
+            EngineBehavior::Unavailable => Err(EngineUnavailable),
+        }
     }
 }
 
 #[test]
 fn adapter_returns_only_a_result_bound_to_the_exact_request() {
     let request = request_with_ref("scoring_request_primary");
-    let result = execute_scoring_request(&SuccessfulEngine, &request).unwrap();
+    let engine = TestEngine::success();
+    let result = execute_scoring_request(&engine, &request).unwrap();
 
     assert_eq!(result.scoring_request_ref(), "scoring_request_primary");
     assert_eq!(result.response_snapshot_ref(), PRIMARY_SNAPSHOT_REF);
@@ -204,13 +217,8 @@ fn adapter_rejects_any_result_not_bound_to_the_complete_request() {
     ];
 
     for mismatched_request in mismatches {
-        let error = execute_scoring_request(
-            &MismatchedEngine {
-                request: mismatched_request,
-            },
-            &request,
-        )
-        .unwrap_err();
+        let engine = TestEngine::return_for(mismatched_request);
+        let error = execute_scoring_request(&engine, &request).unwrap_err();
 
         assert!(matches!(
             error,
@@ -248,7 +256,8 @@ fn unsupported_output_schema_cannot_reach_the_engine_adapter() {
 #[test]
 fn adapter_preserves_engine_failure_as_the_error_source() {
     let request = request_with_ref("scoring_request_primary");
-    let error = execute_scoring_request(&UnavailableEngine, &request).unwrap_err();
+    let engine = TestEngine::unavailable();
+    let error = execute_scoring_request(&engine, &request).unwrap_err();
 
     assert!(matches!(error, ScoringEngineExecutionError::Engine(_)));
     assert_eq!(error.to_string(), "scoring engine execution failed");
