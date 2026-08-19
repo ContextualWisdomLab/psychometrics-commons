@@ -347,6 +347,8 @@ fn corrupted_sequence_and_anomaly_evidence_fail_closed_after_restart() {
         .batch_execute(
             "ALTER TABLE longitudinal_observation \
              DISABLE TRIGGER longitudinal_observation_immutable_update; \
+             ALTER TABLE longitudinal_observation \
+             DROP CONSTRAINT longitudinal_observation_anomaly_check; \
              UPDATE longitudinal_observation \
              SET clock_anomaly_code = 'recorded_after_received' \
              WHERE observation_record_ref = 'longitudinal_observation_record_coverage'; \
