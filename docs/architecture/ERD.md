@@ -25,6 +25,7 @@ erDiagram
     assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
+    assessment_session ||--o{ assessment_session_command : accepts
     assessment_session ||--o{ item_delivery_event : delivers
     item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
@@ -152,6 +153,14 @@ erDiagram
       string locale
       timestamp created_at
       timestamp latest_event_at
+    }
+
+    assessment_session_command {
+      string session_ref PK, FK
+      string command_ref PK
+      int command_sequence
+      string command_name
+      string resulting_state
     }
 
     item_delivery_event {
@@ -384,6 +393,11 @@ erDiagram
       string payload_digest
       timestamp occurred_at
       timestamp published_at
+      string lease_worker_ref
+      string lease_ref
+      int lease_fencing_token
+      timestamp lease_expires_at
+      int delivery_lease_generation
     }
 
     integration_delivery_attempt {
@@ -424,11 +438,12 @@ The target ERD deliberately includes several logical entities that are not yet p
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
+- Physical `assessment_session` exists only on Active PR #218 (`migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path. Protected main still has the `src/session.rs` aggregate only.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
-- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
+- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains Active PR #52; it is not protected-main truth until integrated. Do not name closed #158, #147, #133, #114, or #124 as the current persist landing.
 - `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
-- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
+- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main. Exclusive outbox delivery-lease columns (`lease_worker_ref`, `lease_ref`, `lease_fencing_token`, `lease_expires_at`, `delivery_lease_generation`) and database-clock expiry recovery exist only on Active PR #60 until merged. `integration_consumption` pending/processing/completed/quarantined persistence is already on protected main.
 
 This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
 

@@ -13,6 +13,7 @@ The product's core scientific governance follows the *Standards for Educational 
 Product consequences:
 
 - an instrument release states intended score interpretations and prohibited/unsupported uses;
+- a personal result export repeats the same continuous scores, standard errors, dispositions, and version provenance as the immutable snapshot, keeps the owner participant reference, and requires approved limitation text so the report cannot imply diagnosis, employment fitness, or a type score;
 - scoring and norms are versioned and reproducible;
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;
@@ -74,27 +75,6 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
-## Research de-identification and public-release leakage
-
-Public research releases must not become joinable to operational assessment
-identity. ISO/IEC 20889:2018, confirmed in 2024, classifies pseudonymization and
-other de-identification techniques so a public fixture can carry a
-program-scoped research identity without carrying the operational participant or
-the restricted linkage key. ISO/IEC 27559:2022 supplies the lifecycle framework
-for identifying and mitigating re-identification risk around that fixture. These
-references constrain public packaging. They do not authorize blanket PII masking
-that would stop authorized research, scoring, or data-rights work.
-
-Product consequences:
-
-- a public-release fixture is scanned for operational, Keyverse, and
-  restricted-linkage column names and cell values before packaging;
-- `research_participant_ref` remains a public research identity and is not
-  treated as an operational `participant_ref`;
-- authorized research keeps the restricted mapping outside the public package;
-- residual re-identification and joinability review remain required after direct
-  identifiers are removed.
-
 ## Temporal and provenance evidence
 
 Longitudinal observations distinguish validity time from source-recorded time,
@@ -113,7 +93,49 @@ Product consequences:
 - clock skew, impossible ordering, and unknown precision are typed validation
   outcomes rather than reasons to rewrite source history;
 - analysis-set digests bind the exact observations and time semantics consumed by
-  temporal, multilevel, cross-classified, or multiple-membership analysis.
+  temporal, multilevel, cross-classified, or multiple-membership analysis;
+- multiple-membership weights stay explicit and complete so a `primary_group`
+  shortcut cannot recreate the atomistic fallacy Robinson (1950) described;
+- within-person change is not inferred from a between-person snapshot
+  (Curran & Bauer, 2011; Hamaker & Wichers, 2017);
+- multiple-membership / multiple-classification structure is retained for TEPP
+  rather than flattened in the product ingest (Browne et al., 2001).
+
+## Operational persistence locking
+
+Scoring-job claim-next uses upstream PostgreSQL 18 row locking so a worker that
+only knows its own identity can take the oldest due job without guessing a
+`scoring_job_ref`. `SELECT ... FOR UPDATE SKIP LOCKED` is the documented lock
+clause that lets concurrent pollers skip a row another transaction already
+locked (PostgreSQL Global Development Group, 2026a). Claim classification
+requires `READ COMMITTED` so a skipped row becomes visible after the owning
+transaction commits (PostgreSQL Global Development Group, 2026b). This is
+orchestration locking only. It does not move psychometric arithmetic into the
+product database.
+
+Product consequences:
+
+- `claim_next_scoring_job` returns the stored request pin and fencing lease, or
+  `None` when no job is due;
+- two concurrent workers cannot both lease the same due row;
+- a retry-scheduled row stays unclaimed until its persisted due time;
+- an empty due set does not invent a score.
+
+## Public HTTP problem details
+
+Implemented public session HTTP uses RFC 9110 status semantics and RFC 9457
+problem details. OpenAPI 3.2.0 is the as-built contract vocabulary for that
+family. Problem details name the next buyer action and must not echo raw
+request bodies, SQL, or provider text.
+
+Product consequences:
+
+- `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` are described by
+  `openapi/sessions.yaml` in the same change that implements them;
+- unpublished or mismatched catalog starts return 409 with publish-or-repair
+  guidance;
+- missing sessions return 404 that tells the buyer to POST the same
+  Idempotency-Key.
 
 ## Evidence maintenance rules
 
@@ -128,13 +150,15 @@ Product consequences:
 
 American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
 
-International Organization for Standardization. (2018). *ISO/IEC 20889:2018 Privacy enhancing data de-identification terminology and classification of techniques* (confirmed 2024). https://www.iso.org/standard/69373.html
+Browne, W. J., Goldstein, H., & Rasbash, J. (2001). Multiple membership multiple classification (MMMC) models. *Statistical Modelling, 1*(2), 103–124. https://doi.org/10.1177/1471082X0100100202
 
-International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+Curran, P. J., & Bauer, D. J. (2011). The disaggregation of within-person and between-person effects in longitudinal models of change. *Annual Review of Psychology, 62*, 583–619. https://doi.org/10.1146/annurev.psych.093008.100356
 
-International Organization for Standardization. (2022a). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
+Hamaker, E. L., & Wichers, M. (2017). No time like the present: Discovering the hidden dynamics in intensive longitudinal data. *Current Directions in Psychological Science, 26*(1), 10–15. https://doi.org/10.1177/0963721416666518
 
-International Organization for Standardization. (2022b). *ISO/IEC 27559:2022 Information security, cybersecurity and privacy protection—Privacy enhancing data de-identification framework*. https://www.iso.org/standard/71677.html
+Robinson, W. S. (1950). Ecological correlations and the behavior of individuals. *American Sociological Review, 15*(3), 351–357. https://doi.org/10.2307/2087176
+
+International Organization for Standardization. (2022). *ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection—Information security management systems—Requirements* (3rd ed.). https://www.iso.org/standard/27001
 
 International Organization for Standardization. (2023a). *ISO/IEC 23894:2023 Information technology—Artificial intelligence—Guidance on risk management*. https://www.iso.org/standard/77304.html
 
@@ -144,8 +168,20 @@ International Organization for Standardization. (2024). *ISO/IEC 27001:2022/Amd 
 
 International Organization for Standardization. (2025). *ISO/IEC 42005:2025 Information technology—Artificial intelligence (AI)—AI system impact assessment*. https://www.iso.org/standard/42005
 
+International Organization for Standardization. (2019). *ISO 8601-1:2019 Date and time—Representations for information interchange—Part 1: Basic rules* (with Amendment 1:2022). https://www.iso.org/standard/70907.html
+
+PostgreSQL Global Development Group. (2026a). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+
+PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP semantics* (RFC 9110). RFC Editor. https://doi.org/10.17487/RFC9110
+
+Nottingham, M., Wilde, E., & Miller, S. (2023). *Problem details for HTTP APIs* (RFC 9457). RFC Editor. https://doi.org/10.17487/RFC9457
+
+OpenAPI Initiative. (2024). *OpenAPI specification v3.2.0*. Linux Foundation. https://spec.openapis.org/oas/v3.2.0.html

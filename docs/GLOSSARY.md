@@ -52,6 +52,10 @@ Use these terms consistently across PRD, TRD, ADRs, APIs, diagrams, code, UI, an
 | **multifactor** | Measurement structure with multiple substantive latent traits. Distinct from multifaceted. |
 | **multifaceted** | Measurement structure accounting for systematic facets such as rater/task/occasion effects. Distinct from multiple substantive traits. |
 | **multiple membership** | Observation/person belongs to multiple relevant higher-level contexts with explicit membership representation rather than one forced primary group. |
+| **validity time** | Interval when the reported state or event was true. A point observation uses the same instant for start and end. Receipt time must not replace it. |
+| **recorded time** | Instant the collection client stored the observation, including offline local storage. |
+| **received time** | Instant Psychometrics Commons first accepted the candidate at its trust boundary. |
+| **ingested time** | Instant Commons durably accepted the normalized observation row. |
 | **within-person change** | Variation over time within the same participant. Must not be conflated with between-person differences. |
 | **AI narrative** | Optional bounded prose rendering from pinned product/scientific evidence. It is not allowed to modify the source scientific result. |
 | **LLM judge** | LLM producing a rating/criterion observation. It is treated as a fallible rater with possible severity/bias/drift, not ground truth by default. |
