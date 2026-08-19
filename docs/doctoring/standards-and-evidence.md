@@ -13,6 +13,7 @@ The product's core scientific governance follows the *Standards for Educational 
 Product consequences:
 
 - an instrument release states intended score interpretations and prohibited/unsupported uses;
+- a personal result export repeats the same continuous scores, standard errors, dispositions, and version provenance as the immutable snapshot, keeps the owner participant reference, and requires approved limitation text so the report cannot imply diagnosis, employment fitness, or a type score;
 - scoring and norms are versioned and reproducible;
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;

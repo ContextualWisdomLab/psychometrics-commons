@@ -42,6 +42,7 @@ pub mod research_release;
 pub mod response;
 pub mod result;
 pub mod result_authorization;
+pub mod result_export;
 pub mod scoring;
 pub mod scoring_job;
 pub mod session;
