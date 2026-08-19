@@ -137,7 +137,6 @@ impl LocalizedResultReport {
     pub fn participant_ref(&self) -> &str {
         &self.participant_ref
     }
-
     /// Return the exact reviewed report locale.
     #[must_use]
     pub fn locale(&self) -> &str {
@@ -263,13 +262,7 @@ fn render_report(
     let mut report = String::new();
     report.push_str(labels.title);
     report.push('\n');
-    append_report_metadata(
-        &mut report,
-        export,
-        snapshot,
-        rendered_at_unix_ms,
-        labels,
-    );
+    append_report_metadata(&mut report, export, snapshot, rendered_at_unix_ms, labels);
     report.push('\n');
     append_score_section(&mut report, export, labels);
     report.push('\n');
