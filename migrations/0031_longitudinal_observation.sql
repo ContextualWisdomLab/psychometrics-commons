@@ -59,7 +59,11 @@ CREATE TABLE IF NOT EXISTS longitudinal_observation (
         AND utc_offset_minutes BETWEEN -720 AND 840
     ),
     CONSTRAINT longitudinal_observation_anomaly_check CHECK (
-        clock_anomaly_code IS NULL OR clock_anomaly_code = 'recorded_after_received'
+        (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
+        OR (
+            clock_anomaly_code = 'recorded_after_received'
+            AND recorded_at_unix_ms > received_at_unix_ms
+        )
     )
 );
 
@@ -100,8 +104,12 @@ ALTER TABLE longitudinal_observation
     DROP CONSTRAINT IF EXISTS longitudinal_observation_anomaly_check;
 ALTER TABLE longitudinal_observation
     ADD CONSTRAINT longitudinal_observation_anomaly_check CHECK (
-        clock_anomaly_code IS NULL OR clock_anomaly_code = 'recorded_after_received'
-    );
+        (clock_anomaly_code IS NULL AND recorded_at_unix_ms <= received_at_unix_ms)
+        OR (
+            clock_anomaly_code = 'recorded_after_received'
+            AND recorded_at_unix_ms > received_at_unix_ms
+        )
+    ) NOT VALID;
 
 ALTER TABLE longitudinal_membership_share
     DROP CONSTRAINT IF EXISTS longitudinal_membership_reference_check;
@@ -111,7 +119,7 @@ ALTER TABLE longitudinal_membership_share
     );
 
 -- Existing rows from a partial pre-merge rollout must already satisfy the clock/code relation.
--- Fail the migration before installing the insert guard if they do not.
+-- Fail the migration with an operator-readable error before validating the strengthened CHECK.
 DO $longitudinal_anomaly_preflight$
 BEGIN
     IF EXISTS (
@@ -132,9 +140,12 @@ BEGIN
 END;
 $longitudinal_anomaly_preflight$;
 
--- Legitimate rows are append-only. Enforce the clock/code relation on INSERT; UPDATE is already
--- prohibited by the immutable-row trigger below. Keeping the consistency guard INSERT-only also
--- lets corruption-recovery tests deliberately disable immutability and prove loaders fail closed.
+ALTER TABLE longitudinal_observation
+    VALIDATE CONSTRAINT longitudinal_observation_anomaly_check;
+
+-- Legitimate rows are append-only. Keep the INSERT guard as a named, early diagnostic in addition
+-- to the CHECK constraint; the CHECK remains authoritative even if immutability is disabled for an
+-- operator repair or integrity exercise.
 CREATE OR REPLACE FUNCTION validate_longitudinal_observation_anomaly_insert()
 RETURNS trigger
 LANGUAGE plpgsql
