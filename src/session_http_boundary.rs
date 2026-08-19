@@ -27,14 +27,15 @@ use std::net::{TcpListener, TcpStream};
 ///
 /// HTTP/1.1 request framing is deliberately narrower than the protocol's full
 /// grammar: this listener accepts no `Transfer-Encoding` and at most one
-/// `Content-Length`. Unsupported or duplicate framing fields fail closed before
-/// application dispatch, so a proxy and the runtime cannot select different
-/// request boundaries.
+/// `Content-Length`. Unsupported, duplicate, or malformed header fields fail
+/// closed before application dispatch, so a proxy and the runtime cannot
+/// select different request boundaries.
 ///
 /// # Errors
 ///
-/// Returns [`io::ErrorKind::InvalidData`] for ambiguous or unsupported message
-/// framing, or the underlying I/O error if accept, read, or write fails.
+/// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, or
+/// unsupported message framing, or the underlying I/O error if accept, read,
+/// or write fails.
 pub fn accept_one_session_http<P: SessionHttpPort>(
     listener: &TcpListener,
     port: &mut P,
@@ -89,7 +90,10 @@ fn single_header_value<'a>(headers: &'a str, name: &str) -> io::Result<Option<&'
             break;
         }
         let Some((header_name, value)) = line.split_once(':') else {
-            continue;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "session HTTP request contains a malformed header field",
+            ));
         };
         if !header_name.eq_ignore_ascii_case(name) {
             continue;
