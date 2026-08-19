@@ -317,7 +317,13 @@ fn has_effective_restricted_identity_inventory(
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
     let normalized = normalize_public_release_column(column_name);
-    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.contains(&normalized.as_str())
+    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.iter().any(|forbidden| {
+        normalized == *forbidden
+            || normalized
+                .bytes()
+                .filter(|byte| *byte != b'_')
+                .eq(forbidden.bytes().filter(|byte| *byte != b'_'))
+    })
 }
 
 /// Fold ASCII case and camelCase/PascalCase acronym boundaries so CSV/JSON export aliases match the denylist.
