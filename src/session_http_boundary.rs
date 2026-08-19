@@ -191,7 +191,7 @@ mod tests {
     };
 
     #[test]
-    fn framing_helpers_fail_closed_on_duplicate_or_unsupported_headers() {
+    fn framing_helpers_fail_closed_on_duplicate_unsupported_or_malformed_headers() {
         let plain = "POST /v1/sessions HTTP/1.1\r\nHost: example.test\r\n\r\n";
         assert_eq!(single_header_value(plain, "content-length").unwrap(), None);
         assert!(reject_transfer_encoding(plain).is_ok());
@@ -206,6 +206,14 @@ mod tests {
             "POST /v1/sessions HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}";
         assert_eq!(
             single_header_value(duplicate, "content-length")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+
+        let malformed = "POST /v1/sessions HTTP/1.1\r\nBroken Header\r\n\r\n";
+        assert_eq!(
+            single_header_value(malformed, "content-length")
                 .unwrap_err()
                 .kind(),
             std::io::ErrorKind::InvalidData
