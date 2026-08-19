@@ -58,7 +58,12 @@ fn result_snapshot(result_ref: &str, participant_ref: &str, suffix: &str) -> Res
         &scoring_result_ref,
         &request,
         ENGINE_DIGEST,
-        vec![ScoreObservation::scored("construct_extraversion", 0.42, Some(0.18)).unwrap()],
+        vec![ScoreObservation::scored(
+            "construct_extraversion",
+            0.42,
+            Some(0.18),
+        )
+        .unwrap()],
     )
     .unwrap();
 
@@ -104,7 +109,12 @@ fn actor(tenant_ref: &str, participant_ref: &str) -> AuthorizationContext {
     .unwrap()
 }
 
-fn fixture() -> (AuthorizationContext, ParticipantRecord, ResultSnapshot, ResultExport) {
+fn fixture() -> (
+    AuthorizationContext,
+    ParticipantRecord,
+    ResultSnapshot,
+    ResultExport,
+) {
     let snapshot = result_snapshot("result_snapshot_alpha", "participant_alpha", "alpha");
     let export = personal_export(&snapshot, "result_export_alpha");
     (
@@ -239,6 +249,19 @@ fn unsupported_method_and_representation_are_explicit() {
     );
     assert_eq!(representation.status(), 406);
     assert_eq!(representation.content_type(), "application/problem+json");
+
+    let duplicate_accept = handle_result_export_http_request(
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nAccept: application/json\r\nAccept: text/plain\r\n\r\n",
+        &actor,
+        &participant,
+        &snapshot,
+        &export,
+    );
+    assert_eq!(duplicate_accept.status(), 400);
+    assert_eq!(
+        duplicate_accept.content_type(),
+        "application/problem+json"
+    );
 }
 
 #[test]
