@@ -20,6 +20,7 @@ pub mod health;
 pub mod instrument;
 pub mod integration;
 pub mod item_delivery;
+pub mod localized_result_report;
 pub mod longitudinal_observation;
 pub mod narrative;
 pub mod participant;
