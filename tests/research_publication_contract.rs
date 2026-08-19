@@ -360,3 +360,74 @@ fn public_release_leakage_errors_tell_the_operator_what_to_remove() {
         assert_eq!(error.to_string(), expected);
     }
 }
+
+#[test]
+fn missing_restricted_identity_inventory_fails_closed_before_public_packaging() {
+    let restricted = RestrictedReleaseIdentities {
+        operational_participant_refs: &[],
+        keyverse_subject_refs: &["  "],
+        linkage_refs: &[],
+        linkage_key_versions: &[""],
+    };
+
+    assert_eq!(
+        scan_public_release_fixture(&public_research_identity_columns(), restricted),
+        Err(PublicReleaseLeakageError::IdentityInventoryUnavailable)
+    );
+}
+
+#[test]
+fn any_effective_restricted_identity_inventory_can_prove_the_scan_was_supplied() {
+    let cases = [
+        RestrictedReleaseIdentities {
+            operational_participant_refs: &["participant_inventory_evidence"],
+            keyverse_subject_refs: &[],
+            linkage_refs: &[],
+            linkage_key_versions: &[],
+        },
+        RestrictedReleaseIdentities {
+            operational_participant_refs: &[],
+            keyverse_subject_refs: &["keyverse_inventory_evidence"],
+            linkage_refs: &[],
+            linkage_key_versions: &[],
+        },
+        RestrictedReleaseIdentities {
+            operational_participant_refs: &[],
+            keyverse_subject_refs: &[],
+            linkage_refs: &["linkage_inventory_evidence"],
+            linkage_key_versions: &[],
+        },
+        RestrictedReleaseIdentities {
+            operational_participant_refs: &[],
+            keyverse_subject_refs: &[],
+            linkage_refs: &[],
+            linkage_key_versions: &["pseudonym_key_inventory_evidence"],
+        },
+    ];
+
+    for restricted in cases {
+        assert_eq!(
+            scan_public_release_fixture(&public_research_identity_columns(), restricted),
+            Ok(())
+        );
+    }
+}
+
+#[test]
+fn forbidden_column_is_reported_even_when_identity_inventory_is_unavailable() {
+    let columns = [PublicReleaseFixtureColumn {
+        column_name: "assessmentParticipantRef",
+        cell_values: &["research_participant_program_alpha_one"],
+    }];
+    let restricted = RestrictedReleaseIdentities {
+        operational_participant_refs: &[],
+        keyverse_subject_refs: &[],
+        linkage_refs: &[],
+        linkage_key_versions: &[],
+    };
+
+    assert_eq!(
+        scan_public_release_fixture(&columns, restricted),
+        Err(PublicReleaseLeakageError::ForbiddenColumn)
+    );
+}
