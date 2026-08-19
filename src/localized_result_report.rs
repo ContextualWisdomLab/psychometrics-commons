@@ -245,10 +245,10 @@ const KO_KR: ReportLabels = ReportLabels {
     standard_error: "표준오차",
 };
 
-fn labels_for_locale(locale: &str) -> Option<ReportLabels> {
+fn labels_for_locale(locale: &str) -> Option<&'static ReportLabels> {
     match locale {
-        "en-US" => Some(EN_US),
-        "ko-KR" => Some(KO_KR),
+        "en-US" => Some(&EN_US),
+        "ko-KR" => Some(&KO_KR),
         _ => None,
     }
 }
@@ -258,98 +258,135 @@ fn render_report(
     snapshot: &ResultSnapshot,
     rendered_at_unix_ms: u64,
     limitations: &[&str],
-    labels: ReportLabels,
+    labels: &ReportLabels,
 ) -> String {
     let mut report = String::new();
     report.push_str(labels.title);
     report.push('\n');
-    append_metadata(&mut report, labels.report_ref, export.export_ref());
-    append_metadata(
+    append_report_metadata(
         &mut report,
+        export,
+        snapshot,
+        rendered_at_unix_ms,
+        labels,
+    );
+    report.push('\n');
+    append_score_section(&mut report, export, labels);
+    report.push('\n');
+    append_limitations_section(&mut report, limitations, labels);
+    report
+}
+
+fn append_report_metadata(
+    report: &mut String,
+    export: &ResultExport,
+    snapshot: &ResultSnapshot,
+    rendered_at_unix_ms: u64,
+    labels: &ReportLabels,
+) {
+    append_identity_metadata(report, export, snapshot, labels);
+    append_scientific_metadata(report, export, snapshot, rendered_at_unix_ms, labels);
+}
+
+fn append_identity_metadata(
+    report: &mut String,
+    export: &ResultExport,
+    snapshot: &ResultSnapshot,
+    labels: &ReportLabels,
+) {
+    append_metadata(report, labels.report_ref, export.export_ref());
+    append_metadata(
+        report,
         labels.result_snapshot_ref,
         export.result_snapshot_ref(),
     );
+    append_metadata(report, labels.participant_ref, export.participant_ref());
+    append_metadata(report, labels.locale, export.locale());
     append_metadata(
-        &mut report,
-        labels.participant_ref,
-        export.participant_ref(),
-    );
-    append_metadata(&mut report, labels.locale, export.locale());
-    append_metadata(
-        &mut report,
+        report,
         labels.scoring_result_ref,
         snapshot.scoring_result_ref(),
     );
-    append_metadata(&mut report, labels.session_ref, snapshot.session_ref());
+    append_metadata(report, labels.session_ref, snapshot.session_ref());
     append_metadata(
-        &mut report,
+        report,
         labels.response_snapshot_ref,
         snapshot.response_snapshot_ref(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.assessment_spec_ref,
         snapshot.assessment_spec_ref(),
     );
+}
+
+fn append_scientific_metadata(
+    report: &mut String,
+    export: &ResultExport,
+    snapshot: &ResultSnapshot,
+    rendered_at_unix_ms: u64,
+    labels: &ReportLabels,
+) {
     append_metadata(
-        &mut report,
+        report,
         labels.instrument_version_ref,
         export.instrument_version_ref(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.scoring_version_ref,
         export.scoring_version_ref(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.calibration_reference,
         snapshot.calibration_reference(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.norm_version_ref,
         snapshot.norm_version_ref().unwrap_or(labels.none),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.narrative_version_ref,
         snapshot.narrative_version_ref(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.requested_output_schema_version,
         &snapshot.requested_output_schema_version().to_string(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.consent_snapshot_refs,
         &snapshot.consent_snapshot_refs().join(", "),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.engine_artifact_digest,
         export.engine_artifact_digest(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.result_created_at_unix_ms,
         &snapshot.created_at_unix_ms().to_string(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.report_rendered_at_unix_ms,
         &rendered_at_unix_ms.to_string(),
     );
     append_metadata(
-        &mut report,
+        report,
         labels.supersedes_ref,
         snapshot.supersedes_ref().unwrap_or(labels.none),
     );
-    report.push('\n');
+}
+
+fn append_score_section(report: &mut String, export: &ResultExport, labels: &ReportLabels) {
     report.push_str(labels.scores);
     report.push('\n');
-
     for observation in export.score_observations() {
         report.push_str("- ");
         report.push_str(observation.construct_ref());
@@ -368,8 +405,9 @@ fn render_report(
         }
         report.push('\n');
     }
+}
 
-    report.push('\n');
+fn append_limitations_section(report: &mut String, limitations: &[&str], labels: &ReportLabels) {
     report.push_str(labels.limitations);
     report.push('\n');
     for limitation in limitations {
@@ -377,7 +415,6 @@ fn render_report(
         report.push_str(limitation);
         report.push('\n');
     }
-    report
 }
 
 fn append_metadata(report: &mut String, label: &str, value: &str) {
@@ -389,7 +426,7 @@ fn append_metadata(report: &mut String, label: &str, value: &str) {
 
 const fn disposition_label(
     disposition: ObservationDisposition,
-    labels: ReportLabels,
+    labels: &ReportLabels,
 ) -> &'static str {
     match disposition {
         ObservationDisposition::Scored => labels.scored,
@@ -411,19 +448,19 @@ mod tests {
         assert!(labels_for_locale("ko").is_none());
         assert!(labels_for_locale("en-us").is_none());
         assert_eq!(
-            disposition_label(ObservationDisposition::Scored, EN_US),
+            disposition_label(ObservationDisposition::Scored, &EN_US),
             "scored"
         );
         assert_eq!(
-            disposition_label(ObservationDisposition::Abstained, KO_KR),
+            disposition_label(ObservationDisposition::Abstained, &KO_KR),
             "보류"
         );
         assert_eq!(
-            disposition_label(ObservationDisposition::Failed, KO_KR),
+            disposition_label(ObservationDisposition::Failed, &KO_KR),
             "실패"
         );
         assert_eq!(
-            disposition_label(ObservationDisposition::Excluded, KO_KR),
+            disposition_label(ObservationDisposition::Excluded, &KO_KR),
             "제외"
         );
     }
