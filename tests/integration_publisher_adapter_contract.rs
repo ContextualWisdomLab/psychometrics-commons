@@ -124,8 +124,9 @@ fn adapter_preserves_each_publisher_delivery_classification() {
         DeliveryOutcome::RetryableFailure,
         DeliveryOutcome::PermanentFailure,
     ] {
-        let receipt = execute_integration_publish(&ClassifiedPublisher { outcome }, &integration_event)
-            .unwrap();
+        let receipt =
+            execute_integration_publish(&ClassifiedPublisher { outcome }, &integration_event)
+                .unwrap();
 
         assert_eq!(receipt.source_ref(), "psychometrics_commons");
         assert_eq!(receipt.tenant_ref(), "tenant_primary");
