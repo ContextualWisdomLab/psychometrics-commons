@@ -78,7 +78,8 @@ impl LocalizedResultReport {
     ///
     /// Numeric scores, standard errors, construct references, participant
     /// identity, and scientific provenance are copied from the existing result
-    /// export. Only report labels and disposition words vary by locale.
+    /// snapshot/export boundary. Only report labels and disposition words vary by
+    /// locale.
     ///
     /// # Errors
     ///
@@ -102,7 +103,13 @@ impl LocalizedResultReport {
             },
         )
         .map_err(LocalizedResultReportError::InvalidExport)?;
-        let text = render_report(&export, input.limitations, labels);
+        let text = render_report(
+            &export,
+            snapshot,
+            input.rendered_at_unix_ms,
+            input.limitations,
+            labels,
+        );
 
         Ok(Self {
             report_ref: export.export_ref().to_owned(),
@@ -151,9 +158,22 @@ struct ReportLabels {
     result_snapshot_ref: &'static str,
     participant_ref: &'static str,
     locale: &'static str,
+    scoring_result_ref: &'static str,
+    session_ref: &'static str,
+    response_snapshot_ref: &'static str,
+    assessment_spec_ref: &'static str,
     instrument_version_ref: &'static str,
     scoring_version_ref: &'static str,
+    calibration_reference: &'static str,
+    norm_version_ref: &'static str,
+    narrative_version_ref: &'static str,
+    requested_output_schema_version: &'static str,
+    consent_snapshot_refs: &'static str,
     engine_artifact_digest: &'static str,
+    result_created_at_unix_ms: &'static str,
+    report_rendered_at_unix_ms: &'static str,
+    supersedes_ref: &'static str,
+    none: &'static str,
     scores: &'static str,
     limitations: &'static str,
     scored: &'static str,
@@ -169,9 +189,22 @@ const EN_US: ReportLabels = ReportLabels {
     result_snapshot_ref: "result_snapshot_ref",
     participant_ref: "participant_ref",
     locale: "locale",
+    scoring_result_ref: "scoring_result_ref",
+    session_ref: "session_ref",
+    response_snapshot_ref: "response_snapshot_ref",
+    assessment_spec_ref: "assessment_spec_ref",
     instrument_version_ref: "instrument_version_ref",
     scoring_version_ref: "scoring_version_ref",
+    calibration_reference: "calibration_reference",
+    norm_version_ref: "norm_version_ref",
+    narrative_version_ref: "narrative_version_ref",
+    requested_output_schema_version: "requested_output_schema_version",
+    consent_snapshot_refs: "consent_snapshot_refs",
     engine_artifact_digest: "engine_artifact_digest",
+    result_created_at_unix_ms: "result_created_at_unix_ms",
+    report_rendered_at_unix_ms: "report_rendered_at_unix_ms",
+    supersedes_ref: "supersedes_ref",
+    none: "none",
     scores: "Scores",
     limitations: "Limitations",
     scored: "scored",
@@ -187,9 +220,22 @@ const KO_KR: ReportLabels = ReportLabels {
     result_snapshot_ref: "결과 스냅샷 참조값",
     participant_ref: "참가자 참조값",
     locale: "로케일",
+    scoring_result_ref: "채점 결과 참조값",
+    session_ref: "세션 참조값",
+    response_snapshot_ref: "응답 스냅샷 참조값",
+    assessment_spec_ref: "평가 명세 참조값",
     instrument_version_ref: "검사 버전 참조값",
     scoring_version_ref: "채점 버전 참조값",
+    calibration_reference: "교정 참조값",
+    norm_version_ref: "규준 버전 참조값",
+    narrative_version_ref: "서술 버전 참조값",
+    requested_output_schema_version: "출력 스키마 버전",
+    consent_snapshot_refs: "동의 스냅샷 참조값",
     engine_artifact_digest: "채점 엔진 산출물 해시",
+    result_created_at_unix_ms: "결과 생성 시각(Unix ms)",
+    report_rendered_at_unix_ms: "보고서 생성 시각(Unix ms)",
+    supersedes_ref: "대체 이전 결과 참조값",
+    none: "없음",
     scores: "점수",
     limitations: "제한사항",
     scored: "채점됨",
@@ -207,38 +253,96 @@ fn labels_for_locale(locale: &str) -> Option<ReportLabels> {
     }
 }
 
-fn render_report(export: &ResultExport, limitations: &[&str], labels: ReportLabels) -> String {
+fn render_report(
+    export: &ResultExport,
+    snapshot: &ResultSnapshot,
+    rendered_at_unix_ms: u64,
+    limitations: &[&str],
+    labels: ReportLabels,
+) -> String {
     let mut report = String::new();
     report.push_str(labels.title);
     report.push('\n');
-    report.push_str(labels.report_ref);
-    report.push_str(": ");
-    report.push_str(export.export_ref());
+    append_metadata(&mut report, labels.report_ref, export.export_ref());
+    append_metadata(
+        &mut report,
+        labels.result_snapshot_ref,
+        export.result_snapshot_ref(),
+    );
+    append_metadata(&mut report, labels.participant_ref, export.participant_ref());
+    append_metadata(&mut report, labels.locale, export.locale());
+    append_metadata(
+        &mut report,
+        labels.scoring_result_ref,
+        snapshot.scoring_result_ref(),
+    );
+    append_metadata(&mut report, labels.session_ref, snapshot.session_ref());
+    append_metadata(
+        &mut report,
+        labels.response_snapshot_ref,
+        snapshot.response_snapshot_ref(),
+    );
+    append_metadata(
+        &mut report,
+        labels.assessment_spec_ref,
+        snapshot.assessment_spec_ref(),
+    );
+    append_metadata(
+        &mut report,
+        labels.instrument_version_ref,
+        export.instrument_version_ref(),
+    );
+    append_metadata(
+        &mut report,
+        labels.scoring_version_ref,
+        export.scoring_version_ref(),
+    );
+    append_metadata(
+        &mut report,
+        labels.calibration_reference,
+        snapshot.calibration_reference(),
+    );
+    append_metadata(
+        &mut report,
+        labels.norm_version_ref,
+        snapshot.norm_version_ref().unwrap_or(labels.none),
+    );
+    append_metadata(
+        &mut report,
+        labels.narrative_version_ref,
+        snapshot.narrative_version_ref(),
+    );
+    append_metadata(
+        &mut report,
+        labels.requested_output_schema_version,
+        &snapshot.requested_output_schema_version().to_string(),
+    );
+    append_metadata(
+        &mut report,
+        labels.consent_snapshot_refs,
+        &snapshot.consent_snapshot_refs().join(", "),
+    );
+    append_metadata(
+        &mut report,
+        labels.engine_artifact_digest,
+        export.engine_artifact_digest(),
+    );
+    append_metadata(
+        &mut report,
+        labels.result_created_at_unix_ms,
+        &snapshot.created_at_unix_ms().to_string(),
+    );
+    append_metadata(
+        &mut report,
+        labels.report_rendered_at_unix_ms,
+        &rendered_at_unix_ms.to_string(),
+    );
+    append_metadata(
+        &mut report,
+        labels.supersedes_ref,
+        snapshot.supersedes_ref().unwrap_or(labels.none),
+    );
     report.push('\n');
-    report.push_str(labels.result_snapshot_ref);
-    report.push_str(": ");
-    report.push_str(export.result_snapshot_ref());
-    report.push('\n');
-    report.push_str(labels.participant_ref);
-    report.push_str(": ");
-    report.push_str(export.participant_ref());
-    report.push('\n');
-    report.push_str(labels.locale);
-    report.push_str(": ");
-    report.push_str(export.locale());
-    report.push('\n');
-    report.push_str(labels.instrument_version_ref);
-    report.push_str(": ");
-    report.push_str(export.instrument_version_ref());
-    report.push('\n');
-    report.push_str(labels.scoring_version_ref);
-    report.push_str(": ");
-    report.push_str(export.scoring_version_ref());
-    report.push('\n');
-    report.push_str(labels.engine_artifact_digest);
-    report.push_str(": ");
-    report.push_str(export.engine_artifact_digest());
-    report.push_str("\n\n");
     report.push_str(labels.scores);
     report.push('\n');
 
@@ -270,6 +374,13 @@ fn render_report(export: &ResultExport, limitations: &[&str], labels: ReportLabe
         report.push('\n');
     }
     report
+}
+
+fn append_metadata(report: &mut String, label: &str, value: &str) {
+    report.push_str(label);
+    report.push_str(": ");
+    report.push_str(value);
+    report.push('\n');
 }
 
 const fn disposition_label(
