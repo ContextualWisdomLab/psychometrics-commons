@@ -50,7 +50,7 @@ impl Error for PublisherUnavailable {}
 
 enum PublisherBehavior {
     Outcome(DeliveryOutcome),
-    Acknowledge(IntegrationEvent),
+    Acknowledge(Box<IntegrationEvent>),
     Unavailable,
 }
 
@@ -67,7 +67,7 @@ impl TestPublisher {
 
     fn acknowledge(acknowledged_event: IntegrationEvent) -> Self {
         Self {
-            behavior: PublisherBehavior::Acknowledge(acknowledged_event),
+            behavior: PublisherBehavior::Acknowledge(Box::new(acknowledged_event)),
         }
     }
 
