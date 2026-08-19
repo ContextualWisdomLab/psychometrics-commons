@@ -103,12 +103,20 @@ fn authorized_owner_reads_the_exact_immutable_score_and_provenance() {
 
     assert_eq!(response.status(), 200);
     assert_eq!(response.content_type(), "application/json");
-    assert!(response.body().contains("\"result_ref\":\"result_snapshot_result_http\""));
-    assert!(response.body().contains("\"participant_ref\":\"participant_alpha\""));
-    assert!(response.body().contains("\"instrument_version_ref\":\"instrument_version_big_five_ko_v1\""));
+    assert!(response
+        .body()
+        .contains("\"result_ref\":\"result_snapshot_result_http\""));
+    assert!(response
+        .body()
+        .contains("\"participant_ref\":\"participant_alpha\""));
+    assert!(response
+        .body()
+        .contains("\"instrument_version_ref\":\"instrument_version_big_five_ko_v1\""));
     assert!(response.body().contains("\"score\":0.42"));
     assert!(response.body().contains("\"standard_error\":0.18"));
-    assert!(response.body().contains("\"disposition\":\"excluded\",\"score\":null,\"standard_error\":null"));
+    assert!(response.body().contains(
+        "\"disposition\":\"excluded\",\"score\":null,\"standard_error\":null"
+    ));
 }
 
 #[test]
@@ -154,6 +162,7 @@ fn invalid_route_alias_and_unsupported_method_fail_closed() {
     let actor = actor("tenant_alpha", Some("participant_alpha"));
 
     for target in [
+        "/v1/results/",
         "/v1/results/12345",
         "/v1/results/%72esult_snapshot_result_http",
         "/v1/results/result_snapshot_result_http/extra",
