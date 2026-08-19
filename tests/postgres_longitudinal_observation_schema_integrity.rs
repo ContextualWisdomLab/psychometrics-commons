@@ -180,6 +180,50 @@ fn embedded_control_characters_are_rejected_by_the_database_boundary() {
 }
 
 #[test]
+fn anomaly_relation_remains_a_check_constraint_when_immutability_is_disabled() {
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_anomaly_update_test");
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+
+    client
+        .batch_execute(
+            "BEGIN; \
+             INSERT INTO longitudinal_observation (\
+                 observation_record_ref, tenant_ref, enrollment_ref, source_system_ref, \
+                 source_observation_ref, construct_ref, measure_ref, validity_start_at_unix_ms, \
+                 validity_end_at_unix_ms, recorded_at_unix_ms, received_at_unix_ms, \
+                 ingested_at_unix_ms, timezone_name, utc_offset_minutes, clock_anomaly_code\
+             ) VALUES (\
+                 'longitudinal_observation_anomaly_update', 'tenant_clinic_seoul', \
+                 'longitudinal_enrollment_anomaly_update', 'gyeot_mobile_collection', \
+                 'gyeot_observation_anomaly_update', 'construct_extraversion', \
+                 'measure_ipip_extraversion_ko_v1', 1776661900000, 1776662200000, \
+                 1776662200000, 1776662260000, 1776662270000, 'Asia/Seoul', 540, NULL\
+             ); \
+             INSERT INTO longitudinal_membership_share (\
+                 observation_record_ref, membership_sequence, membership_context_ref, \
+                 weight_parts_per_10_000\
+             ) VALUES (\
+                 'longitudinal_observation_anomaly_update', 1, 'clinic_ward_seoul_01', 10000\
+             ); \
+             COMMIT; \
+             ALTER TABLE longitudinal_observation \
+             DISABLE TRIGGER longitudinal_observation_immutable_update;",
+        )
+        .unwrap();
+
+    let error = client
+        .execute(
+            "UPDATE longitudinal_observation \
+             SET clock_anomaly_code = 'recorded_after_received' \
+             WHERE observation_record_ref = 'longitudinal_observation_anomaly_update'",
+            &[],
+        )
+        .expect_err("the CHECK constraint must reject a code without a clock inversion");
+    assert_check_constraint(&error, "longitudinal_observation_anomaly_check");
+}
+
+#[test]
 fn anomaly_code_must_match_the_observed_clock_order() {
     let _guard = guard();
     let mut client = client("longitudinal_observation_schema_integrity_anomaly_test");
