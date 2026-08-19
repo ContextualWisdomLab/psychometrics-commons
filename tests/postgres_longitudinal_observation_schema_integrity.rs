@@ -138,6 +138,27 @@ fn numeric_like_references_are_rejected_by_the_database_boundary() {
 }
 
 #[test]
+fn unicode_numeric_separator_aliases_are_rejected_by_the_database_boundary() {
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_unicode_reference_test");
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+
+    for reference in ["1．5", "1，000", "1٫5", "1٬000"] {
+        let is_valid: bool = client
+            .query_one(
+                "SELECT longitudinal_reference_is_valid($1)",
+                &[&reference],
+            )
+            .unwrap()
+            .get(0);
+        assert!(
+            !is_valid,
+            "Unicode numeric separator alias must not be accepted: {reference:?}"
+        );
+    }
+}
+
+#[test]
 fn anomaly_code_must_match_the_observed_clock_order() {
     let _guard = guard();
     let mut client = client("longitudinal_observation_schema_integrity_anomaly_test");
