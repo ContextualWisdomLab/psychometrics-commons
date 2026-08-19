@@ -1,9 +1,9 @@
 -- Durable, immutable normalized longitudinal observation evidence.
 
 -- Keep the database boundary aligned with the shared opaque-reference contract: references must
--- be nonblank, have no outer whitespace, and must not be numeric-like (including signs,
--- decimal/group separators, or exponent notation). The fixed pg_catalog search path prevents
--- caller-controlled schemas from changing function resolution inside this CHECK helper.
+-- be nonblank, have no outer whitespace or control characters, and must not be numeric-like
+-- (including signs, decimal/group separators, or exponent notation). The fixed pg_catalog search
+-- path prevents caller-controlled schemas from changing function resolution inside this CHECK helper.
 CREATE OR REPLACE FUNCTION longitudinal_reference_is_valid(reference_value text)
 RETURNS boolean
 LANGUAGE sql
@@ -16,6 +16,7 @@ AS $longitudinal_reference$
         AND reference_value <> ''
         AND left(reference_value, 1) !~ '[[:space:]]'
         AND right(reference_value, 1) !~ '[[:space:]]'
+        AND reference_value !~ '[[:cntrl:]]'
         AND NOT (
             reference_value ~ '[[:digit:]]'
             AND reference_value ~ '^[[:digit:]+,.eE-٫٬．，]+$'
