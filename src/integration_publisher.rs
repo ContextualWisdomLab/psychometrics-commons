@@ -1,7 +1,14 @@
 //! Product-owned boundary for publishing immutable integration events.
 //!
-//! Psychometrics Commons owns event identity, outbox state, and delivery evidence,
-//! but it does not own external network-egress policy. Implementations of
+//! Psychometrics Commons owns event identity, the durable outbox, and delivery
+//! evidence. Here, an **outbox** is a product-owned persisted queue entry for an
+//! immutable event waiting to be delivered. **Egress** means network traffic leaving
+//! this service through an approved transport and security policy. **Fencing** means
+//! checking the current delivery lease/token so a stale worker cannot record an
+//! outcome. A **durable delivery attempt** is the persisted record of an attempted
+//! delivery and its classification, retained across process restarts.
+//!
+//! This repository does not own external network-egress policy. Implementations of
 //! [`IntegrationPublisher`] may therefore call an approved outbound transport such
 //! as an EgressWeave-compatible adapter without moving delivery authority or a
 //! cross-service database connection into this repository.
@@ -12,9 +19,9 @@ use std::fmt::{Display, Formatter};
 
 /// Immutable acknowledgement returned by an outbound integration publisher.
 ///
-/// The receipt repeats the complete durable outbox identity so the product can
-/// reject an acknowledgement produced for another source, tenant, or event before
-/// recording delivery evidence.
+/// The receipt repeats the complete durable outbox identity (the persisted event
+/// waiting for delivery) so the product can reject an acknowledgement produced for
+/// another source, tenant, or event before recording delivery evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IntegrationPublishReceipt {
     source_ref: String,
@@ -68,9 +75,10 @@ impl IntegrationPublishReceipt {
 
 /// Approved outbound transport boundary for one immutable integration event.
 ///
-/// Implementations own only transport execution. Product retry, quarantine,
-/// fencing, and durable delivery-attempt recording remain in the integration and
-/// `PostgreSQL` adapters.
+/// Implementations own only transport execution. Product retry and quarantine stay
+/// in the integration layer. Fencing (rejecting a stale delivery lease/token) and
+/// durable delivery-attempt recording (persisting the attempt and outcome across
+/// restarts) remain in the integration and `PostgreSQL` adapters.
 pub trait IntegrationPublisher {
     /// Typed provider, policy, or transport failure.
     type Error: Error + Send + Sync + 'static;
@@ -122,10 +130,11 @@ where
 
 /// Publish one immutable event and enforce exact acknowledgement provenance.
 ///
-/// This function does not mutate an outbox row, retry a request, or bypass egress
-/// policy. A caller with a durable delivery lease can record the returned outcome
-/// through the existing fenced `PostgreSQL` delivery-attempt path only after this
-/// identity check succeeds.
+/// This function does not mutate an outbox entry, retry a request, or bypass egress
+/// policy. A caller with a current durable delivery lease can record the returned
+/// outcome through the existing fenced `PostgreSQL` delivery-attempt path only after
+/// this identity check succeeds. In other words, the caller must still prove that it
+/// is the current worker and persist the attempt/outcome using the existing store.
 ///
 /// # Errors
 ///
