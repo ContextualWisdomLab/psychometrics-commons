@@ -18,7 +18,7 @@ AS $longitudinal_reference$
         AND right(reference_value, 1) !~ '[[:space:]]'
         AND NOT (
             reference_value ~ '[[:digit:]]'
-            AND reference_value ~ '^[[:digit:]+,.eE-]+$'
+            AND reference_value ~ '^[[:digit:]+,.eE-٫٬．，]+$'
         );
 $longitudinal_reference$;
 
