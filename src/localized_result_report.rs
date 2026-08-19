@@ -269,7 +269,11 @@ fn render_report(
         labels.result_snapshot_ref,
         export.result_snapshot_ref(),
     );
-    append_metadata(&mut report, labels.participant_ref, export.participant_ref());
+    append_metadata(
+        &mut report,
+        labels.participant_ref,
+        export.participant_ref(),
+    );
     append_metadata(&mut report, labels.locale, export.locale());
     append_metadata(
         &mut report,

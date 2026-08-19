@@ -108,7 +108,9 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
     assert_eq!(report.locale(), "ko-KR");
     assert_eq!(report.result_snapshot_ref(), "result_snapshot_locale_v1");
     assert!(report.text().starts_with("개인 결과 보고서\n"));
-    assert!(report.text().contains("보고서 참조값: localized_report_ko_v1\n"));
+    assert!(report
+        .text()
+        .contains("보고서 참조값: localized_report_ko_v1\n"));
     assert!(report
         .text()
         .contains("결과 스냅샷 참조값: result_snapshot_locale_v1\n"));
