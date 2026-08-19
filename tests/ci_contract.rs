@@ -1,6 +1,8 @@
 //! Integration tests for repository CI evidence semantics.
 
 const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
+const RUST_TOOLCHAIN: &str = include_str!("../rust-toolchain.toml");
+const DEPENDABOT: &str = include_str!("../.github/dependabot.yml");
 
 #[test]
 fn every_checkout_is_bound_to_the_pull_request_head() {
@@ -100,8 +102,20 @@ fn line_coverage_failure_diagnostic_emits_machine_readable_annotations() {
 #[test]
 fn branch_coverage_failure_diagnostic_uses_lcov_branch_records() {
     assert!(CI_WORKFLOW.contains(
-        "cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov"
+        "cargo +nightly-2026-08-18 llvm-cov report --branch --lcov --output-path coverage-branches.lcov"
     ));
     assert!(CI_WORKFLOW.contains("raw_line.startswith(\"BRDA:\")"));
     assert!(CI_WORKFLOW.contains("taken in {\"0\", \"-\"}"));
+}
+
+#[test]
+fn rust_toolchains_are_exact_and_reviewably_updated() {
+    assert!(RUST_TOOLCHAIN.contains("channel = \"1.97.1\""));
+    assert!(!RUST_TOOLCHAIN.contains("channel = \"stable\""));
+
+    assert_eq!(CI_WORKFLOW.matches("nightly-2026-08-18").count(), 5);
+    assert!(!CI_WORKFLOW.contains("nightly-2026-08-01"));
+
+    assert!(DEPENDABOT.contains("package-ecosystem: \"rust-toolchain\""));
+    assert!(DEPENDABOT.contains("interval: \"weekly\""));
 }
