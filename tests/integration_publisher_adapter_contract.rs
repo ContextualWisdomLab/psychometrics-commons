@@ -8,6 +8,15 @@ use psychometrics_commons_runtime::integration_publisher::{
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
+const EVENT_PRIMARY: &str = "evt_3b685ee20bcf448e8acd2b1ce2d5d64e";
+const EVENT_OTHER: &str = "evt_b7bf5b281e534122968e259ddd82a532";
+const TENANT_PRIMARY: &str = "tnt_7e8d22c33d1646448aa0f8acb5ba2c90";
+const TENANT_OTHER: &str = "tnt_4a98421fca8644959240ed2f3301f0f6";
+const SOURCE_PRIMARY: &str = "src_197fdf358dde485e89c627dde386b131";
+const SOURCE_OTHER: &str = "src_945b40e30d264888a97a364fd1c64e17";
+const SUBJECT_REF: &str = "rsrc_2c692aa8dd4f4e10ad4862c8e0e49f87";
+const CORRELATION_REF: &str = "cor_b6617915efaf482383545c94437eed86";
+
 fn event_with_identity(event_ref: &str, tenant_ref: &str, source_ref: &str) -> IntegrationEvent {
     IntegrationEvent::new(
         event_ref,
@@ -15,9 +24,9 @@ fn event_with_identity(event_ref: &str, tenant_ref: &str, source_ref: &str) -> I
         "v1",
         source_ref,
         tenant_ref,
-        "result_snapshot_ref",
+        SUBJECT_REF,
         1_786_240_000_000,
-        "correlation_ref",
+        CORRELATION_REF,
         None,
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     )
@@ -25,7 +34,7 @@ fn event_with_identity(event_ref: &str, tenant_ref: &str, source_ref: &str) -> I
 }
 
 fn event(event_ref: &str, tenant_ref: &str) -> IntegrationEvent {
-    event_with_identity(event_ref, tenant_ref, "psychometrics_commons")
+    event_with_identity(event_ref, tenant_ref, SOURCE_PRIMARY)
 }
 
 #[derive(Debug)]
@@ -106,18 +115,18 @@ impl IntegrationPublisher for UnavailablePublisher {
 
 #[test]
 fn adapter_returns_only_a_receipt_bound_to_the_exact_event() {
-    let integration_event = event("event_primary", "tenant_primary");
+    let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
     let receipt = execute_integration_publish(&SuccessfulPublisher, &integration_event).unwrap();
 
-    assert_eq!(receipt.source_ref(), "psychometrics_commons");
-    assert_eq!(receipt.tenant_ref(), "tenant_primary");
-    assert_eq!(receipt.event_ref(), "event_primary");
+    assert_eq!(receipt.source_ref(), SOURCE_PRIMARY);
+    assert_eq!(receipt.tenant_ref(), TENANT_PRIMARY);
+    assert_eq!(receipt.event_ref(), EVENT_PRIMARY);
     assert_eq!(receipt.outcome(), DeliveryOutcome::Delivered);
 }
 
 #[test]
 fn adapter_preserves_each_publisher_delivery_classification() {
-    let integration_event = event("event_primary", "tenant_primary");
+    let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
 
     for outcome in [
         DeliveryOutcome::Delivered,
@@ -128,20 +137,20 @@ fn adapter_preserves_each_publisher_delivery_classification() {
             execute_integration_publish(&ClassifiedPublisher { outcome }, &integration_event)
                 .unwrap();
 
-        assert_eq!(receipt.source_ref(), "psychometrics_commons");
-        assert_eq!(receipt.tenant_ref(), "tenant_primary");
-        assert_eq!(receipt.event_ref(), "event_primary");
+        assert_eq!(receipt.source_ref(), SOURCE_PRIMARY);
+        assert_eq!(receipt.tenant_ref(), TENANT_PRIMARY);
+        assert_eq!(receipt.event_ref(), EVENT_PRIMARY);
         assert_eq!(receipt.outcome(), outcome);
     }
 }
 
 #[test]
 fn adapter_rejects_each_independent_outbox_identity_rebinding() {
-    let integration_event = event("event_primary", "tenant_primary");
+    let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
     let mismatches = [
-        event_with_identity("event_primary", "tenant_primary", "other_source"),
-        event("event_primary", "tenant_other"),
-        event("event_other", "tenant_primary"),
+        event_with_identity(EVENT_PRIMARY, TENANT_PRIMARY, SOURCE_OTHER),
+        event(EVENT_PRIMARY, TENANT_OTHER),
+        event(EVENT_OTHER, TENANT_PRIMARY),
     ];
 
     for acknowledged_event in mismatches {
@@ -165,7 +174,7 @@ fn adapter_rejects_each_independent_outbox_identity_rebinding() {
 
 #[test]
 fn adapter_preserves_publisher_failure_as_the_error_source() {
-    let integration_event = event("event_primary", "tenant_primary");
+    let integration_event = event(EVENT_PRIMARY, TENANT_PRIMARY);
     let error = execute_integration_publish(&UnavailablePublisher, &integration_event).unwrap_err();
 
     assert!(matches!(
