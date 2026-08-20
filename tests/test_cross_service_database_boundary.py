@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -136,6 +137,15 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         ):
             self.assertTrue(is_deployment_manifest(path), str(path))
         self.assertFalse(is_deployment_manifest(ROOT / "docs" / "example.json"))
+
+    def test_deployment_manifest_scope_is_repository_relative(self) -> None:
+        """Ignore deployment-like checkout ancestors and paths outside the repository."""
+
+        fake_root = Path("/tmp/ops/psychometrics-commons")
+        with patch(f"{__name__}.ROOT", fake_root):
+            self.assertFalse(is_deployment_manifest(fake_root / "docs" / "example.json"))
+            self.assertTrue(is_deployment_manifest(fake_root / "deploy" / "service.yaml"))
+            self.assertFalse(is_deployment_manifest(Path("/tmp/deploy/external.yaml")))
 
     def test_every_dblink_function_family_is_forbidden(self) -> None:
         """Reject representative members of PostgreSQL's remote dblink family."""
