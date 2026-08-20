@@ -233,6 +233,8 @@ pub enum LongitudinalObservationError {
     NonMonotonicIngestion,
     /// The same source observation was replayed with different evidence.
     IdempotencyConflict,
+    /// A distinct source observation tried to reuse an existing Commons record identity.
+    ObservationIdentityConflict,
 }
 
 impl Display for LongitudinalObservationError {
@@ -274,6 +276,9 @@ impl Display for LongitudinalObservationError {
             Self::IdempotencyConflict => {
                 "replay the first accepted observation for this source identity; do not last-write-win a new clock"
             }
+            Self::ObservationIdentityConflict => {
+                "mint a new Commons observation-record identity for a distinct source observation; do not reuse an existing record identity"
+            }
         })
     }
 }
@@ -311,14 +316,17 @@ impl LongitudinalObservationSet {
     ///
     /// Source identity is `(enrollment_ref, source_system_ref, source_observation_ref)`.
     /// An exact retry is a no-op. A retry with different clocks, membership, or
-    /// construct evidence fails closed. Source clocks that arrive after receipt are
-    /// flagged and kept. Platform ingest cannot precede receipt or the previous
-    /// accepted ingest time.
+    /// construct evidence fails closed. A distinct source observation must also
+    /// receive a distinct Commons `observation_record_ref`; a reused record identity
+    /// fails closed instead of aliasing two immutable observations. Source clocks
+    /// that arrive after receipt are flagged and kept. Platform ingest cannot precede
+    /// receipt or the previous accepted ingest time.
     ///
     /// # Errors
     ///
     /// Returns [`LongitudinalObservationError`] when a reference, clock, timezone,
-    /// membership share, platform order, or source-identity replay is invalid.
+    /// membership share, platform order, source-identity replay, or Commons record
+    /// identity reuse is invalid.
     pub fn ingest(
         &mut self,
         input: LongitudinalObservationInput<'_>,
@@ -333,6 +341,13 @@ impl LongitudinalObservationSet {
                 return Ok(existing.clone());
             }
             return Err(LongitudinalObservationError::IdempotencyConflict);
+        }
+        if self
+            .records
+            .iter()
+            .any(|record| record.observation_record_ref == candidate.observation_record_ref)
+        {
+            return Err(LongitudinalObservationError::ObservationIdentityConflict);
         }
         if self
             .records
