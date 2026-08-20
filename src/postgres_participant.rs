@@ -6,10 +6,10 @@
 //! from its own durable evidence before account-scoped authorization. Raw credentials, Keyverse
 //! subjects, assessment responses, and research linkage identifiers never belong in this table.
 //!
-//! Exact replay requires `READ COMMITTED`, the PostgreSQL isolation level where each statement
+//! Exact replay requires `READ COMMITTED`, the `PostgreSQL` isolation level where each statement
 //! sees data committed before that statement begins. `INSERT ... ON CONFLICT DO NOTHING` means a
 //! duplicate participant key does not overwrite the stored row; when another transaction is still
-//! inserting that key, PostgreSQL waits for that writer to finish. The following read then gets a
+//! inserting that key, `PostgreSQL` waits for that writer to finish. The following read then gets a
 //! fresh **command snapshot**—the committed database view used by that statement—and reads the
 //! **replay winner**, the row that actually owns the participant key after the insert race.
 //! [`ParticipantBasePersistenceDisposition::Duplicate`] means that winner has exactly the tenant
