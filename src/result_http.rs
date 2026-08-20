@@ -267,12 +267,23 @@ fn append_escaped(target: &mut String, value: &str) {
         match character {
             '"' => target.push_str("\\\""),
             '\\' => target.push_str("\\\\"),
+            '\u{0008}' => target.push_str("\\b"),
+            '\u{000c}' => target.push_str("\\f"),
             '\n' => target.push_str("\\n"),
             '\r' => target.push_str("\\r"),
             '\t' => target.push_str("\\t"),
+            other if (other as u32) < 0x20 => append_control_escape(target, other),
             other => target.push(other),
         }
     }
+}
+
+fn append_control_escape(target: &mut String, character: char) {
+    const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let code_point = character as usize;
+    target.push_str("\\u00");
+    target.push(HEX_DIGITS[(code_point >> 4) & 0x0f] as char);
+    target.push(HEX_DIGITS[code_point & 0x0f] as char);
 }
 
 const fn disposition_name(disposition: ObservationDisposition) -> &'static str {
