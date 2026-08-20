@@ -74,7 +74,7 @@ fn invalid_consent_insert(client: &mut Client, array_sql: &str) -> postgres::Err
 }
 
 #[test]
-fn schema_rejects_null_numeric_blank_and_duplicate_consent_references() {
+fn schema_rejects_null_numeric_blank_control_and_duplicate_consent_references() {
     let _guard = schema_test_guard();
     let mut client = test_client();
     reset_schema(&mut client);
@@ -84,6 +84,8 @@ fn schema_rejects_null_numeric_blank_and_duplicate_consent_references() {
         "ARRAY[NULL]::TEXT[]",
         "ARRAY['12']",
         "ARRAY[' ']",
+        "ARRAY[E'\\t']",
+        "ARRAY[E'consent_snapshot_service_v1\\n']",
         "ARRAY['consent_snapshot_service_v1', 'consent_snapshot_service_v1']",
     ] {
         let error = invalid_consent_insert(&mut client, invalid_array);
