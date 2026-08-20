@@ -33,7 +33,7 @@ pub struct SessionHttpResponse {
 }
 
 impl SessionHttpResponse {
-    fn from_implementation(response: implementation::SessionHttpResponse) -> Self {
+    fn from_implementation(response: &implementation::SessionHttpResponse) -> Self {
         Self {
             status: response.status(),
             content_type: response.content_type(),
@@ -85,11 +85,8 @@ pub fn handle_session_http_request<P: SessionHttpPort>(
     if has_duplicate_header(request, "idempotency-key") {
         return SessionHttpResponse::duplicate_idempotency_key();
     }
-    SessionHttpResponse::from_implementation(implementation::handle_session_http_request(
-        request,
-        port,
-        created_at_unix_ms,
-    ))
+    let response = implementation::handle_session_http_request(request, port, created_at_unix_ms);
+    SessionHttpResponse::from_implementation(&response)
 }
 
 /// Accept one TCP connection and serve one persist-backed session request.
