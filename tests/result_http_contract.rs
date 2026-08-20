@@ -14,12 +14,24 @@ const ENGINE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
-    result_snapshot_with_norm(participant_ref, Some("norm_big_five_ko_v1"))
+    result_snapshot_with_provenance(
+        participant_ref,
+        Some("norm_big_five_ko_v1"),
+        None,
+    )
 }
 
 fn result_snapshot_with_norm(
     participant_ref: &str,
     norm_version_ref: Option<&str>,
+) -> ResultSnapshot {
+    result_snapshot_with_provenance(participant_ref, norm_version_ref, None)
+}
+
+fn result_snapshot_with_provenance(
+    participant_ref: &str,
+    norm_version_ref: Option<&str>,
+    supersedes_ref: Option<&str>,
 ) -> ResultSnapshot {
     let mut ledger = ResponseLedger::new("session_result_http").unwrap();
     ledger
@@ -75,7 +87,7 @@ fn result_snapshot_with_norm(
             narrative_version_ref: "narrative_version_big_five_v1",
             consent_snapshot_refs: &["service_consent_result_http"],
             created_at_unix_ms: 1_786_240_000_000,
-            supersedes_ref: None,
+            supersedes_ref,
         },
     )
     .unwrap()
@@ -122,6 +134,10 @@ fn authorized_owner_reads_the_exact_immutable_score_and_provenance() {
     assert!(response
         .body()
         .contains("\"norm_version_ref\":\"norm_big_five_ko_v1\""));
+    assert!(response
+        .body()
+        .contains("\"consent_snapshot_refs\":[\"service_consent_result_http\"]"));
+    assert!(response.body().contains("\"supersedes_ref\":null"));
     assert!(response.body().contains("\"score\":0.42"));
     assert!(response.body().contains("\"standard_error\":0.18"));
     assert!(response
@@ -144,6 +160,29 @@ fn authorized_owner_sees_null_when_scoring_used_no_norm_version() {
 
     assert_eq!(response.status(), 200);
     assert!(response.body().contains("\"norm_version_ref\":null"));
+}
+
+#[test]
+fn authorized_owner_reads_supersession_provenance_when_present() {
+    let participant = participant("tenant_alpha", "participant_alpha");
+    let result = result_snapshot_with_provenance(
+        "participant_alpha",
+        Some("norm_big_five_ko_v1"),
+        Some("result_snapshot_result_http_previous"),
+    );
+    let actor = actor("tenant_alpha", Some("participant_alpha"));
+
+    let response = handle_result_http_request(
+        "GET /v1/results/result_snapshot_result_http HTTP/1.1\r\nHost: example.test\r\n\r\n",
+        &actor,
+        &participant,
+        &result,
+    );
+
+    assert_eq!(response.status(), 200);
+    assert!(response.body().contains(
+        "\"supersedes_ref\":\"result_snapshot_result_http_previous\""
+    ));
 }
 
 #[test]
