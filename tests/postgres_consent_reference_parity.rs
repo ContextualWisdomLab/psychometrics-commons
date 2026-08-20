@@ -65,13 +65,21 @@ fn participant_reference_rejects_unicode_numeric_whitespace_and_control_aliases(
     let _guard = guard();
     let mut client = client();
 
-    for invalid_ref in ["½", "²", "Ⅳ", "\u{00a0}participant_alpha", "participant_\u{0001}_alpha"] {
+    for invalid_ref in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}participant_alpha",
+        "participant_\u{0001}_alpha",
+    ] {
         let error = client
             .execute(
                 "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
                 &[&invalid_ref],
             )
-            .expect_err("a direct SQL write must not bypass the Rust participant-reference boundary");
+            .expect_err(
+                "a direct SQL write must not bypass the Rust participant-reference boundary",
+            );
         assert_check(&error, "consent_ledger_participant_ref_format_check");
     }
 }
@@ -119,7 +127,9 @@ fn event_form_and_research_scope_references_share_the_rust_boundary() {
             "research_contribution",
             Some(invalid_ref),
         )
-        .expect_err("research-scope references must use the same opaque-reference boundary as Rust");
+        .expect_err(
+            "research-scope references must use the same opaque-reference boundary as Rust",
+        );
         assert_check(&error, "consent_event_research_scope_format_check");
     }
 }
