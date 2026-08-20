@@ -112,6 +112,8 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
     """Keep read-only bounded-context dependencies out of this product database."""
 
     def test_runtime_scan_accepts_only_expected_text_artifacts(self) -> None:
+        """Exclude binary-looking source fixtures before strict UTF-8 decoding."""
+
         self.assertTrue(is_runtime_text_file(ROOT / "src" / "lib.rs"))
         self.assertTrue(
             is_runtime_text_file(ROOT / ".github" / "workflows" / "ci.yml")
@@ -120,6 +122,8 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         self.assertFalse(is_runtime_text_file(ROOT / "migrations" / "fixture.bin"))
 
     def test_deployment_manifest_shapes_are_runtime_inputs(self) -> None:
+        """Treat common deploy-time manifests as architecture-enforcement inputs."""
+
         for path in (
             ROOT / "Dockerfile",
             ROOT / "Dockerfile.production",
@@ -134,6 +138,8 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         self.assertFalse(is_deployment_manifest(ROOT / "docs" / "example.json"))
 
     def test_every_dblink_function_family_is_forbidden(self) -> None:
+        """Reject representative members of PostgreSQL's remote dblink family."""
+
         for sql in (
             "SELECT dblink('dbname=other', 'SELECT 1')",
             "SELECT dblink_exec('remote', 'DELETE FROM sample')",
@@ -144,6 +150,8 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
             self.assertIsNotNone(FORBIDDEN_CROSS_DATABASE_SQL.search(sql), sql)
 
     def test_external_context_database_credentials_are_not_runtime_inputs(self) -> None:
+        """Reject dedicated database URLs or DSNs for read-only sibling contexts."""
+
         violations: list[str] = []
         for path in runtime_files():
             text = read_text(path)
@@ -159,6 +167,8 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         )
 
     def test_cross_database_sql_primitives_are_not_shipped(self) -> None:
+        """Reject PostgreSQL primitives that would bypass service-owned contracts."""
+
         violations: list[str] = []
         for path in runtime_files():
             match = FORBIDDEN_CROSS_DATABASE_SQL.search(read_text(path))
