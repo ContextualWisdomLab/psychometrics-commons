@@ -989,10 +989,15 @@ mod tests {
         };
         let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let addr = listener.local_addr().unwrap();
-        let request = "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_loopback\r\n\r\n{\"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}";
+        let body = "{\"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}";
+        let request = format!(
+            "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_loopback\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let client_request = request.clone();
         let worker = std::thread::spawn(move || {
             let mut stream = TcpStream::connect(addr).unwrap();
-            stream.write_all(request.as_bytes()).unwrap();
+            stream.write_all(client_request.as_bytes()).unwrap();
             let mut body = String::new();
             std::io::Read::read_to_string(&mut stream, &mut body).unwrap();
             body
@@ -1001,7 +1006,7 @@ mod tests {
         accept_one_session_http(&listener, &mut port, 20_000).unwrap();
         let response = worker.join().unwrap();
         assert!(response.contains("201"));
-        let replay = handle_session_http_request(request, &mut port, 20_000);
+        let replay = handle_session_http_request(&request, &mut port, 20_000);
         assert_eq!(replay.status(), 200);
     }
 
