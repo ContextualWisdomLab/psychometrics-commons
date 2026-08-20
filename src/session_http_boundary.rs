@@ -69,6 +69,7 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
             continue;
         };
         let body_start = header_offset + 4;
+        reject_non_crlf_header_lines(&buffer[..body_start])?;
         let headers = std::str::from_utf8(&buffer[..body_start])
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         reject_transfer_encoding(headers)?;
@@ -84,6 +85,23 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
     }
     String::from_utf8(buffer[..filled].to_vec())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn reject_non_crlf_header_lines(header_bytes: &[u8]) -> io::Result<()> {
+    let mut index = 0;
+    while index < header_bytes.len() {
+        match header_bytes[index] {
+            b'\r' => {
+                if header_bytes.get(index + 1) != Some(&b'\n') {
+                    return Err(malformed_header_field_error());
+                }
+                index += 2;
+            }
+            b'\n' => return Err(malformed_header_field_error()),
+            _ => index += 1,
+        }
+    }
+    Ok(())
 }
 
 fn single_header_value<'a>(headers: &'a str, name: &str) -> io::Result<Option<&'a str>> {
@@ -207,7 +225,8 @@ const fn reason_phrase(status: u16) -> &'static str {
 mod tests {
     use super::{
         declared_request_end, reject_full_request_buffer, reject_invalid_header_name,
-        reject_oversized_request, reject_transfer_encoding, single_header_value,
+        reject_non_crlf_header_lines, reject_oversized_request, reject_transfer_encoding,
+        single_header_value,
     };
 
     #[test]
@@ -242,6 +261,23 @@ mod tests {
         let transfer = "POST /v1/sessions HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert_eq!(
             reject_transfer_encoding(transfer).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn header_lines_require_crlf_delimiters() {
+        assert!(reject_non_crlf_header_lines(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n").is_ok());
+        assert_eq!(
+            reject_non_crlf_header_lines(b"GET / HTTP/1.1\nHost: example.test\r\n\r\n")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            reject_non_crlf_header_lines(b"GET / HTTP/1.1\rHost: example.test\r\n\r\n")
+                .unwrap_err()
+                .kind(),
             std::io::ErrorKind::InvalidData
         );
     }
