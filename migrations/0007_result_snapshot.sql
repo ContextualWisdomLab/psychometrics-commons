@@ -13,6 +13,7 @@ AS $result_snapshot_consent_refs$
             WHERE reference_text IS NULL
                 OR reference_text <> btrim(reference_text)
                 OR reference_text = ''
+                OR reference_text ~ '[[:cntrl:]]'
                 OR (
                     reference_text ~ '[[:digit:]]'
                     AND reference_text ~ '^[[:digit:]+,.eE-]+$'
