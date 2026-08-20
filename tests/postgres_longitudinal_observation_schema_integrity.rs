@@ -121,6 +121,28 @@ fn observation_header_cannot_commit_without_complete_membership_vector() {
 }
 
 #[test]
+fn digit_bearing_opaque_references_remain_valid_at_the_database_boundary() {
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_opaque_reference_test");
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+
+    for reference in [
+        "longitudinal_observation_record_001",
+        "gyeot_observation_20260818_001",
+        "clinic_ward_seoul_01",
+    ] {
+        let is_valid: bool = client
+            .query_one("SELECT longitudinal_reference_is_valid($1)", &[&reference])
+            .unwrap()
+            .get(0);
+        assert!(
+            is_valid,
+            "opaque references containing digits must not be misclassified as numeric-like: {reference:?}"
+        );
+    }
+}
+
+#[test]
 fn numeric_like_references_are_rejected_by_the_database_boundary() {
     let _guard = guard();
     let mut client = client("longitudinal_observation_schema_integrity_reference_test");
@@ -145,10 +167,7 @@ fn unicode_numeric_separator_aliases_are_rejected_by_the_database_boundary() {
 
     for reference in ["1．5", "1，000", "1٫5", "1٬000"] {
         let is_valid: bool = client
-            .query_one(
-                "SELECT longitudinal_reference_is_valid($1)",
-                &[&reference],
-            )
+            .query_one("SELECT longitudinal_reference_is_valid($1)", &[&reference])
             .unwrap()
             .get(0);
         assert!(
@@ -166,10 +185,7 @@ fn embedded_control_characters_are_rejected_by_the_database_boundary() {
 
     for reference in ["tenant_\u{0001}_clinic", "tenant_\u{001f}_clinic"] {
         let is_valid: bool = client
-            .query_one(
-                "SELECT longitudinal_reference_is_valid($1)",
-                &[&reference],
-            )
+            .query_one("SELECT longitudinal_reference_is_valid($1)", &[&reference])
             .unwrap()
             .get(0);
         assert!(
