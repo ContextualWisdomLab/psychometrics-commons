@@ -198,6 +198,15 @@ fn result_body(result: &ResultSnapshot) -> String {
         "calibration_reference",
         result.calibration_reference(),
     );
+    json.push_str(",\"norm_version_ref\":");
+    match result.norm_version_ref() {
+        Some(norm_version_ref) => {
+            json.push('"');
+            append_escaped(&mut json, norm_version_ref);
+            json.push('"');
+        }
+        None => json.push_str("null"),
+    }
     json.push(',');
     append_json_string(
         &mut json,
