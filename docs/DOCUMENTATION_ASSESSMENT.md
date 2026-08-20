@@ -1,8 +1,8 @@
 # Documentation Completeness Assessment
 
 - Status: Architecture baseline assessment
-- Date: 2026-08-20
-- Evaluated protected-main baseline: `5544149ca5dc55d2bfc3402cc59c03c44830de5f`
+- Date: 2026-08-21
+- Evaluated protected-main baseline: `503a4e640eeba0f5e126fa4c4078d8d21aebb93b`
 - Scope: product, architecture, psychometric, longitudinal, research, AI, privacy, integration, quality, risk, compliance-readiness, operations, and durable product decisions established throughout the Psychometrics Commons design discussion
 
 ## Executive assessment
@@ -29,7 +29,7 @@ This reconciliation closes those architecture-definition gaps without promoting 
 | Research governance | **Sufficient as design baseline** | Purpose-specific contribution, pseudonymization/linkage boundary, privacy/scientific review and immutable release semantics are present. End-to-end release evidence remains Target. |
 | Product experience | **Sufficient as design baseline** | Quick/Deep/Reflect/Longitudinal, continuous-score interpretation, narrative UX, research opt-in, accessibility/i18n and Workbench surfaces are described. |
 | Quality / risk / compliance readiness | **Sufficient as assurance baseline** | Evidence scenarios and risk state are explicit; readiness is not certification. |
-| Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `5544149…`, reconciles merged result/session/anonymous-authorization slices, and isolates still-open PRs from shipped truth. Must be updated after every material merge. |
+| Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `503a4e…`, reconciles merged result/session/anonymous-authorization slices, and isolates still-open PRs from shipped truth. Must be updated after every material merge. |
 | Roadmap / agent guidance / changelog | **Sufficient for continued delivery** | Must remain code-current; documentation completion is not a terminal condition for the execution loop. |
 | Machine-readable OpenAPI / AsyncAPI | **Not yet applicable as as-built evidence** | Add and validate with the first implemented HTTP/event transport. Do not publish aspirational operations as deployed. |
 | Physical schema / as-built topology | **Partial / implementation-gated** | Logical ERD is authoritative target semantics. Actual migrations/topology/rollback/restore evidence must be compared to it as those artifacts land. |
@@ -62,7 +62,7 @@ Enterprise issue prioritization/causal expected-intervention-value logic is not 
 
 ## Protected-main implementation reconciliation
 
-At exact protected-main `5544149ca5dc55d2bfc3402cc59c03c44830de5f` the domain surface includes, among other existing modules:
+At exact protected-main `503a4e640eeba0f5e126fa4c4078d8d21aebb93b` the domain surface includes, among other existing modules:
 
 - `src/item_delivery.rs` — sequence-aware item delivery evidence;
 - `src/participant.rs` — stable participant identity and first optional Keyverse link primitive;
