@@ -237,7 +237,7 @@ fn handle_record(
             "item delivery record requires delivery_ref, item_version_ref, and presentation_context_ref strings",
         );
     };
-    if record.delivery_ref != idempotency_key {
+    if record.delivery != idempotency_key {
         return ItemDeliveryHttpResponse::problem(
             400,
             "urn:psychometrics-commons:problem:idempotency-mismatch",
@@ -250,10 +250,10 @@ fn handle_record(
     };
     let previous_len = session.ledger.len();
     let request = ItemDeliveryRequest {
-        delivery_ref: &record.delivery_ref,
-        item_version_ref: &record.item_version_ref,
-        presentation_context_ref: &record.presentation_context_ref,
-        selection_evidence_ref: record.selection_evidence_ref.as_deref(),
+        delivery_ref: &record.delivery,
+        item_version_ref: &record.item_version,
+        presentation_context_ref: &record.presentation_context,
+        selection_evidence_ref: record.selection_evidence.as_deref(),
     };
     match session.ledger.deliver(session.state, request) {
         Ok(event) => {
@@ -320,10 +320,10 @@ fn delivery_problem(error: ItemDeliveryError) -> ItemDeliveryHttpResponse {
 }
 
 struct DeliveryRecordBody {
-    delivery_ref: String,
-    item_version_ref: String,
-    presentation_context_ref: String,
-    selection_evidence_ref: Option<String>,
+    delivery: String,
+    item_version: String,
+    presentation_context: String,
+    selection_evidence: Option<String>,
 }
 
 fn parse_record_body(body: &str) -> Option<DeliveryRecordBody> {
@@ -336,10 +336,10 @@ fn parse_record_body(body: &str) -> Option<DeliveryRecordBody> {
         return None;
     }
     Some(DeliveryRecordBody {
-        delivery_ref: fields.get("delivery_ref")?.clone(),
-        item_version_ref: fields.get("item_version_ref")?.clone(),
-        presentation_context_ref: fields.get("presentation_context_ref")?.clone(),
-        selection_evidence_ref,
+        delivery: fields.get("delivery_ref")?.clone(),
+        item_version: fields.get("item_version_ref")?.clone(),
+        presentation_context: fields.get("presentation_context_ref")?.clone(),
+        selection_evidence: selection_evidence_ref,
     })
 }
 
