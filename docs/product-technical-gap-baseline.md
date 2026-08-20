@@ -114,7 +114,7 @@ Snapshot source: GitHub REST `GET /repos/ContextualWisdomLab/psychometrics-commo
 | [259](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/259) | feat(result): render exact Korean and English personal reports | `automation/result-report-locale-20260819` | `44884af` | Ready | 2026-08-20 |
 | [261](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/261) | feat(assessment): bind Quick and Deep paths to immutable releases | `feat/assessment-path-contract-20260820` | `e472cd9` | Ready | 2026-08-20 |
 | [262](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/262) | fix(longitudinal): reject reused Commons observation identities | `fix/longitudinal-record-identity-20260820` | `d759ece` | Ready | 2026-08-20 |
-| [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | docs: establish current product technical gap baseline | `feat/product-technical-gap-baseline-20260820` | `ed4f4c7` | Ready | 2026-08-20 |
+| [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | docs: establish current product technical gap baseline | `feat/product-technical-gap-baseline-20260820` | `d47d699` | Ready | 2026-08-20 |
 
 ## Current issue inventory
 
