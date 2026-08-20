@@ -40,6 +40,45 @@ fn uppercase_runs_cannot_bypass_identity_column_denylist() {
 }
 
 #[test]
+fn prefixed_etl_aliases_cannot_hide_restricted_identity_columns() {
+    for column_name in [
+        "export_assessment_participant_ref",
+        "sourcePseudonymKeyVersion",
+        "stagingIDENTITYSUBJECTREF",
+        "warehouseLinkedSubjectRef",
+        "etlSubjectRef",
+        "customerParticipantRef",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not hide a restricted identity field behind an ETL prefix"
+        );
+    }
+}
+
+#[test]
+fn prefixed_research_participant_namespace_remains_public() {
+    for column_name in ["public_research_participant_ref", "exportResearchParticipantRef"] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Ok(()),
+            "{column_name} must remain in the explicit public research identity namespace"
+        );
+    }
+}
+
+#[test]
 fn unavailable_identity_inventory_error_is_safe_and_actionable() {
     let message = PublicReleaseLeakageError::IdentityInventoryUnavailable.to_string();
 
