@@ -329,16 +329,15 @@ fn has_effective_restricted_identity_inventory(
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
     let normalized = normalize_public_release_column(column_name);
-    if normalized == "research_participant_ref"
-        || normalized.ends_with("_research_participant_ref")
+    if normalized == "research_participant_ref" || normalized.ends_with("_research_participant_ref")
     {
         return false;
     }
 
     let compact = compact_public_release_column(&normalized);
-    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.iter().any(|forbidden| {
-        compact.ends_with(&compact_public_release_column(forbidden))
-    })
+    FORBIDDEN_PUBLIC_RELEASE_COLUMNS
+        .iter()
+        .any(|forbidden| compact.ends_with(&compact_public_release_column(forbidden)))
 }
 
 fn compact_public_release_column(column_name: &str) -> String {

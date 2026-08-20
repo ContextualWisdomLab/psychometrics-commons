@@ -86,7 +86,10 @@ fn separator_aliases_cannot_hide_restricted_identity_columns() {
 
 #[test]
 fn prefixed_research_participant_namespace_remains_public() {
-    for column_name in ["public_research_participant_ref", "exportResearchParticipantRef"] {
+    for column_name in [
+        "public_research_participant_ref",
+        "exportResearchParticipantRef",
+    ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
             cell_values: &["research_participant_program_alpha_one"],
