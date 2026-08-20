@@ -112,10 +112,7 @@ fn migration_reapplication_repairs_a_weaker_event_reference_check() {
         .unwrap();
     insert_outbox(&mut client, "½").expect("the weakened historical check demonstrates the gap");
     client
-        .execute(
-            "DELETE FROM integration_outbox WHERE event_ref = '½'",
-            &[],
-        )
+        .execute("DELETE FROM integration_outbox WHERE event_ref = '½'", &[])
         .unwrap();
 
     apply_integration_migration(&mut client).unwrap();
