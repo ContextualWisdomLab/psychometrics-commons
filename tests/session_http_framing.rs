@@ -154,6 +154,12 @@ fn listener_rejects_ambiguous_http_message_framing() {
         ),
         std::io::ErrorKind::InvalidData
     );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_duplicate_a\r\nIdempotency-Key: ses_duplicate_b\r\n\r\n"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
 }
 
 #[test]
