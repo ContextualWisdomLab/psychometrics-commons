@@ -13,7 +13,7 @@ use psychometrics_commons_runtime::postgres_item_delivery::{
     ItemDeliveryPersistenceDisposition,
 };
 use psychometrics_commons_runtime::session::SessionState;
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
@@ -21,6 +21,13 @@ const SCHEMA: &str = "item_delivery_concurrent_replay_test";
 const TENANT_REF: &str = "tenant_item_delivery_concurrent";
 const DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn test_guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn connection_url() -> String {
     std::env::var("TEST_DATABASE_URL")
@@ -90,7 +97,7 @@ fn delivered_ledger(session_ref: &str) -> ItemDeliveryLedger {
 }
 
 fn wait_until_blocked(control: &mut Client, backend_pid: i32) {
-    for _ in 0..200 {
+    for _ in 0..500 {
         let blocked: bool = control
             .query_one(
                 "SELECT cardinality(pg_blocking_pids($1)) > 0",
@@ -108,6 +115,7 @@ fn wait_until_blocked(control: &mut Client, backend_pid: i32) {
 
 #[test]
 fn concurrent_header_exact_replay_is_duplicate_not_database_failure() {
+    let _guard = test_guard();
     let connection = connection_url();
     let mut control = reset_schema(&connection);
     let session_ref = "session_item_delivery_concurrent_header";
@@ -167,6 +175,7 @@ fn concurrent_header_exact_replay_is_duplicate_not_database_failure() {
 
 #[test]
 fn concurrent_event_exact_replay_is_duplicate_not_database_failure() {
+    let _guard = test_guard();
     let connection = connection_url();
     let mut control = reset_schema(&connection);
     let session_ref = "session_item_delivery_concurrent_event";
