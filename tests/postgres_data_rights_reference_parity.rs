@@ -10,8 +10,7 @@ use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migra
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 use std::sync::{Mutex, MutexGuard};
 
-const DIGEST: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn guard() -> MutexGuard<'static, ()> {
@@ -101,7 +100,14 @@ fn seed_request_and_outbox(client: &mut Client, suffix: &str) -> (String, String
 fn request_and_verification_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "12345",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let error = insert_request(
@@ -167,13 +173,33 @@ fn request_and_verification_references_reject_rust_invalid_aliases() {
         .expect_err("verification evidence must match the Rust opaque-reference boundary");
         assert_check(&error, "data_rights_verification_evidence_format_check");
     }
+
+    assert_eq!(
+        insert_request(
+            &mut client,
+            "request_item_2",
+            "tenant_alpha 2",
+            "participant_3.1",
+            "scope-v1",
+            Some("verification 2"),
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[test]
 fn propagation_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "12345",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let (request_ref, tenant_ref, event_ref) =
@@ -257,7 +283,8 @@ fn migration_reapplication_revalidates_existing_request_rows() {
     )
     .expect("the deliberately weakened historical constraint should admit the regression row");
 
-    let error = apply_data_rights_migration(&mut client)
-        .expect_err("migration reapplication must revalidate existing rows under the Rust predicate");
+    let error = apply_data_rights_migration(&mut client).expect_err(
+        "migration reapplication must revalidate existing rows under the Rust predicate",
+    );
     assert_check(&error, "data_rights_request_ref_format_check");
 }
