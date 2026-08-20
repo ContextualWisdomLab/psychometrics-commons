@@ -294,3 +294,23 @@ fn require_read_committed(
         Err(DataRightsPersistenceError::UnsupportedIsolationLevel)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::retained_scope_sequences_match;
+
+    #[test]
+    fn retained_scope_replay_is_independent_of_database_collation_order() {
+        let stored_database_order = vec!["retention_a".to_owned(), "retention_Z".to_owned()];
+        let expected_rust_order = ["retention_Z", "retention_a"];
+
+        assert!(retained_scope_sequences_match(
+            stored_database_order,
+            &expected_rust_order
+        ));
+        assert!(!retained_scope_sequences_match(
+            vec!["retention_a".to_owned(), "retention_other".to_owned()],
+            &expected_rust_order
+        ));
+    }
+}
