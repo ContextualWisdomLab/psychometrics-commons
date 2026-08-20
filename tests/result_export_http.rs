@@ -58,12 +58,7 @@ fn result_snapshot(result_ref: &str, participant_ref: &str, suffix: &str) -> Res
         &scoring_result_ref,
         &request,
         ENGINE_DIGEST,
-        vec![ScoreObservation::scored(
-            "construct_extraversion",
-            0.42,
-            Some(0.18),
-        )
-        .unwrap()],
+        vec![ScoreObservation::scored("construct_extraversion", 0.42, Some(0.18)).unwrap()],
     )
     .unwrap();
 
@@ -170,13 +165,8 @@ fn authorized_owner_can_request_the_human_readable_export() {
 #[test]
 fn missing_accept_defaults_to_machine_readable_export() {
     let (actor, participant, snapshot, export) = fixture();
-    let response = handle_result_export_http_request(
-        &request(None),
-        &actor,
-        &participant,
-        &snapshot,
-        &export,
-    );
+    let response =
+        handle_result_export_http_request(&request(None), &actor, &participant, &snapshot, &export);
 
     assert_eq!(response.status(), 200);
     assert_eq!(response.content_type(), "application/json");
@@ -258,10 +248,7 @@ fn unsupported_method_and_representation_are_explicit() {
         &export,
     );
     assert_eq!(duplicate_accept.status(), 400);
-    assert_eq!(
-        duplicate_accept.content_type(),
-        "application/problem+json"
-    );
+    assert_eq!(duplicate_accept.content_type(), "application/problem+json");
 }
 
 #[test]

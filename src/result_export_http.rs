@@ -112,7 +112,9 @@ pub fn handle_result_export_http_request(
     export: &ResultExport,
 ) -> ResultExportHttpResponse {
     let Some((method, target)) = parse_request_line(request) else {
-        return bad_request("result export request must include one HTTP method, target, and version");
+        return bad_request(
+            "result export request must include one HTTP method, target, and version",
+        );
     };
 
     let result_snapshot_ref = match parse_export_route(target) {
@@ -136,7 +138,9 @@ pub fn handle_result_export_http_request(
             return bad_request("send exactly one Idempotency-Key header for result export");
         }
         Err(IdempotencyError::Invalid) => {
-            return bad_request("result export Idempotency-Key must be an exact opaque non-numeric value");
+            return bad_request(
+                "result export Idempotency-Key must be an exact opaque non-numeric value",
+            );
         }
     };
 
@@ -164,7 +168,9 @@ pub fn handle_result_export_http_request(
     match accept_representation(request) {
         Ok(Representation::Json) => ResultExportHttpResponse::json(export.json_document()),
         Ok(Representation::Text) => ResultExportHttpResponse::text(export.human_readable_report()),
-        Err(AcceptError::Duplicate) => bad_request("send at most one Accept header for result export"),
+        Err(AcceptError::Duplicate) => {
+            bad_request("send at most one Accept header for result export")
+        }
         Err(AcceptError::Unsupported) => ResultExportHttpResponse::problem(
             406,
             "urn:psychometrics-commons:problem:not-acceptable",
@@ -235,7 +241,7 @@ enum AcceptError {
 fn accept_representation(request: &str) -> Result<Representation, AcceptError> {
     let accept = single_header(request, "accept").map_err(|_| AcceptError::Duplicate)?;
     match accept {
-        None | Some("*/*") | Some("application/json") => Ok(Representation::Json),
+        None | Some("*/*" | "application/json") => Ok(Representation::Json),
         Some("text/plain") => Ok(Representation::Text),
         Some(_) => Err(AcceptError::Unsupported),
     }
@@ -244,7 +250,10 @@ fn accept_representation(request: &str) -> Result<Representation, AcceptError> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct DuplicateHeader;
 
-fn single_header<'a>(request: &'a str, requested_name: &str) -> Result<Option<&'a str>, DuplicateHeader> {
+fn single_header<'a>(
+    request: &'a str,
+    requested_name: &str,
+) -> Result<Option<&'a str>, DuplicateHeader> {
     let mut found = None;
     for line in request.lines().skip(1) {
         if line.is_empty() {
@@ -329,8 +338,14 @@ mod tests {
         assert_eq!(parse_request_line("POST /x HTTP/1.1"), Some(("POST", "/x")));
 
         assert_eq!(parse_export_route("/v1/other"), RouteParse::NotFound);
-        assert_eq!(parse_export_route("/v1/results/result_alpha"), RouteParse::NotFound);
-        assert_eq!(parse_export_route("/v1/results//exports"), RouteParse::NotFound);
+        assert_eq!(
+            parse_export_route("/v1/results/result_alpha"),
+            RouteParse::NotFound
+        );
+        assert_eq!(
+            parse_export_route("/v1/results//exports"),
+            RouteParse::NotFound
+        );
         assert_eq!(
             parse_export_route("/v1/results/result_alpha/extra/exports"),
             RouteParse::NotFound
@@ -350,7 +365,10 @@ mod tests {
         assert!(exact_opaque_reference("result_alpha"));
         assert!(!exact_opaque_reference(" result_alpha"));
 
-        assert_eq!(idempotency_key("POST / HTTP/1.1\r\n\r\n"), Err(IdempotencyError::Missing));
+        assert_eq!(
+            idempotency_key("POST / HTTP/1.1\r\n\r\n"),
+            Err(IdempotencyError::Missing)
+        );
         assert_eq!(
             idempotency_key("POST / HTTP/1.1\r\nIdempotency-Key: 123\r\n\r\n"),
             Err(IdempotencyError::Invalid)
@@ -400,6 +418,9 @@ mod tests {
 
     #[test]
     fn problem_json_escapes_reviewed_strings() {
-        assert_eq!(json_string("a\"b\\c\nd\re\tf"), "\"a\\\"b\\\\c\\nd\\re\\tf\"");
+        assert_eq!(
+            json_string("a\"b\\c\nd\re\tf"),
+            "\"a\\\"b\\\\c\\nd\\re\\tf\""
+        );
     }
 }
