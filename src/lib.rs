@@ -8,6 +8,7 @@
 //! contracts rather than reimplemented here.
 
 pub mod account_link;
+pub mod anonymous_authorization;
 pub mod anonymous_credential;
 pub mod anonymous_session;
 pub mod authorization;
@@ -18,10 +19,12 @@ pub mod deterministic_narrative;
 pub mod health;
 pub mod instrument;
 pub mod integration;
+pub mod integration_publisher;
 pub mod item_delivery;
 pub mod longitudinal_observation;
 pub mod narrative;
 pub mod participant;
+pub mod postgres_assessment_session;
 pub mod postgres_consent;
 pub mod postgres_data_rights;
 pub mod postgres_data_rights_processing;
@@ -42,6 +45,8 @@ pub mod research_release;
 pub mod response;
 pub mod result;
 pub mod result_authorization;
+pub mod result_export;
 pub mod scoring;
 pub mod scoring_job;
 pub mod session;
+pub mod session_http;

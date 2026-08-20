@@ -1,49 +1,54 @@
 # As-Built PostgreSQL Schema Map
 
 - Status: Normative evidence map
-- Date: 2026-08-17
-- Protected-main baseline: `0c695b98f38369db8c80d4f8a54ab1fdb3022716`
+- Date: 2026-08-20
+- Protected-main baseline: `5544149ca5dc55d2bfc3402cc59c03c44830de5f`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
 ## Protected-main physical schema
 
-Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery/consumption, scoring-job/request state, instrument publication, consent, data rights, item delivery, immutable response snapshots, and immutable result snapshots. Each listed subset has checked-in migration/adaptor evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
+Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, and instrument releases. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
-| `integration_outbox` | integration | Implemented subset, including the exclusive delivery-lease extension on protected main |
+| `integration_outbox` | integration | Implemented subset; exclusive delivery-lease extension is **Active PR** #60 |
 | `integration_delivery_attempt` | integration | Implemented subset |
 | `integration_inbox` | integration | Implemented subset |
-| `integration_consumption` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
+| `integration_consumption` | integration | Implemented subset |
+| `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
-Other protected-main migrations and their owning adapters remain authoritative even when this compact table does not enumerate every relation. The checked-in migration inventory on the named baseline includes `0001`, `0002`, `0003`, `0004`, `0005`, `0006`, `0007`, `0010`, `0011`, `0012`, `0013`, `0015`, `0018`, and `0019`; this map must not describe an already-merged migration as Active PR work.
+## Active PR assessment-session physical schema
 
-## Active PR participant-base physical schema
+PR #218 (`migrations/0014_assessment_session.sql`, `migrations/0016_assessment_session_command.sql`, and `src/postgres_assessment_session.rs`) persist and load one assessment-session identity bound to a published locale-specific release, plus append-only command history. New sessions start only through `created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`. Durable start locks `instrument_release` with `SELECT … FOR UPDATE` so a stale in-memory Published object cannot insert after persist Suspend or Retire. First insert through `persist_assessment_session` takes the same lock, so a reconstituted Created aggregate cannot insert after that later persist. When that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate so a concurrent retry after the first insert commits cannot turn a later Suspend or Retire into a false unpublished failure. Exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, current state, and creation time. Exact replay is idempotent. Rebinding any stored field or command evidence, or persisting a shorter command history than already stored, fails closed so a stale Activate-only worker cannot rewind Pause/Resume. Command persist locks the `assessment_session` header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load restores created identity without asking whether the release still accepts new sessions, then replays commands so Activate/Pause/Resume survive restart. Isolation is the global opaque `session_ref` primary key; this slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. Persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` (`src/session_http.rs`, `openapi/sessions.yaml`) sit on this start path. Command HTTP remains outside this slice. #205 is the unlocked-peek first-insert-seal predecessor; #209 is the weaker NotFound-allows-insert competitor; #198 is the exact start-replay predecessor; #180 is the stored-publication lock predecessor; #188 is the in-memory replay predecessor that still lacks the store lock; #153 is the in-memory-start predecessor; #164 is the unlocked stored-load predecessor; #146 is the header-lock predecessor; #129 is the sequential stale-prefix predecessor; #125 is the command-history predecessor that still rewinds on a stale shorter persist; #109 is the persist-and-load predecessor.
 
-PR #250 (`automation/participant-base-reconcile-20260818`) adds `migrations/0030_assessment_participant.sql` and `src/postgres_participant.rs` for the stable anonymous-first participant base record. This slice is **Active PR**, not protected-main truth. It stores only the opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time; optional Keyverse link history remains a separate append-only identity-link concern.
+## Active PR outbox delivery-lease physical schema
 
-The adapter requires `READ COMMITTED`, waits for a concurrent uncommitted unique-key winner, then classifies exact replay separately from conflicting tenant/time rebinding. Reload uses only the exact participant-and-tenant pair. The physical table rejects the same numeric-like public identities as Rust `char::is_numeric` and blocks mutation paths that would silently rewrite or erase stable participant evidence. Real PostgreSQL persistence, recovery, numeric-parity, and concurrency tests exercise those contracts. This slice does **not** claim participant HTTP transport, account-link history persistence, or Keyverse federation.
+PR #60 (`feat/outbox-delivery-lease-20260814`) extends the protected-main `integration_outbox` relation through `migrations/0013_outbox_delivery_lease.sql` and `src/postgres_integration.rs`. The extension is **Active PR**, not protected-main truth.
 
-## Protected-main outbox delivery-lease physical schema
-
-`migrations/0013_outbox_delivery_lease.sql` and the corresponding `src/postgres_integration.rs` lease paths are present on the named protected-main baseline. Historical PR #60 is closed and is not current Active PR evidence; the implementation reached protected main through later integrated history.
-
-The protected-main lease slice adds:
+The active slice adds:
 
 - nullable `lease_worker_ref` and `lease_ref` opaque ownership references;
 - nullable positive `lease_fencing_token` and `lease_expires_at_unix_ms` values that are either all present or all absent for the current lease;
 - `delivery_lease_generation BIGINT NOT NULL DEFAULT 0 CHECK (delivery_lease_generation >= 0)` as the persisted monotonic generation;
-- an integrity rule requiring any live lease fencing token to equal the current persisted generation;
+- `integration_outbox_fencing_generation_check`, requiring any live `lease_fencing_token` to equal the current persisted generation;
 - exclusive pending-row claims, explicit expired-lease recovery, and fenced attempt recording that clears the current lease after an accepted attempt;
-- database-clock authority for lease-expiry classification and recovery, while caller-supplied attempt timestamps remain immutable delivery-attempt evidence;
+- database-clock authority for both worker-side lease-expiry classification and exclusive-lease recovery, while caller-supplied attempt timestamps remain immutable delivery-attempt evidence and a future caller observation cannot steal a still-live lease;
 - fail-closed stale fencing before replay classification whenever a current lease exists, while exact replay after a completed attempt has cleared its lease remains idempotent.
 
-These semantics are **Implemented subset** truth on the named protected-main baseline. They do not by themselves prove live downstream side-effect execution, deployment SLOs, or GA recovery evidence.
+Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_delivery_lease.rs`, `tests/postgres_outbox_delivery_lease_fencing_integrity.rs`, `tests/postgres_outbox_delivery_lease_authority.rs`, `tests/postgres_outbox_delivery_lease_concurrency.rs`, `tests/postgres_outbox_delivery_lease_coverage_edges.rs`, and `tests/postgres_outbox_delivery_lease_migration_isolation.rs`. These tests cover exclusive claim/recovery, monotonic fencing, invalid physical state rejection, database-authoritative expiry, rejection of a future caller timestamp against a still-live lease, stale-fence replay precedence, blocking-proven concurrent claims, schema isolation, and persistence failure paths. The slice must remain **Active PR** until the exact reviewed/check-clean head is merged and protected main is refetched.
+
+## Active PR participant-base physical schema
+
+PR #250 (`migrations/0030_assessment_participant.sql`, `src/postgres_participant.rs`) adds a durable anonymous-first participant base record. This slice is **Active PR**, not protected-main truth. It stores only opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time; optional Keyverse link history remains a separate append-only identity-link concern.
+
+The adapter requires `READ COMMITTED`, waits for a concurrent uncommitted unique-key winner, then classifies exact replay separately from conflicting tenant/time rebinding. Reload uses the exact participant-and-tenant pair and never returns raw identity-provider subject data. The physical table rejects the same numeric-like public identities as Rust `char::is_numeric` and blocks update, delete, and truncate paths that would silently rewrite or erase stable participant evidence.
+
+Real PostgreSQL persistence, recovery, numeric-parity, and concurrency tests exercise these contracts. This slice does **not** claim participant HTTP transport, account-link history persistence, or Keyverse federation. It must remain **Active PR** until the exact reviewed/check-clean head is integrated and the protected-main baseline is refetched.
 
 ## Protected-main inbox-consumption physical schema
 
@@ -65,7 +70,7 @@ Migration reapplication does not trust relation existence or constraint names al
 
 Protected-main PostgreSQL tests cover exact replay/conflicting replay, enqueue and claim isolation contracts, fail-closed invalid evidence, per-test-suite schema isolation, concurrent claim fencing, exact-shape migration reapplication, incompatible-schema rejection, same-name constraint-definition weakening, unexpected CHECK/UNIQUE/FOREIGN KEY/EXCLUDE/NOT NULL constraint rejection, database lifecycle-shape constraints, database error propagation, and stable non-sensitive error/source contracts.
 
-This protected-main subset does **not** by itself claim live fast-mlsirm execution or deployed profile recovery evidence. Those capabilities require their own integrated protected-main evidence before they can be promoted here.
+This protected-main subset does **not** by itself claim durable retry scheduling/reclaim, completion, permanent failure/quarantine transitions, expired-lease recovery, crash/restart recovery, result persistence, or live fast-mlsirm execution. Those capabilities require their own integrated protected-main evidence before they can be promoted here.
 
 ## Protected-main instrument-release physical schema
 
@@ -80,7 +85,7 @@ The protected-main slice persists:
 - reachable publication-state advance without rewriting immutable manifest columns;
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
-The slice does **not** by itself claim complete publication-event history transport, a deployed administration API, or real instrument rights/scientific evidence. Those remain separately evidence-gated.
+The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
 ## Logical-to-physical mapping rule
 
