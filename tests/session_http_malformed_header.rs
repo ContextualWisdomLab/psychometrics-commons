@@ -59,3 +59,17 @@ fn listener_rejects_obsolete_folded_framing_headers() {
         );
     }
 }
+
+#[test]
+fn listener_rejects_mixed_or_bare_header_line_endings() {
+    for request in [
+        b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_bad_lf\nContent-Length: 2\r\n\r\n{}".as_slice(),
+        b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_bad_cr\rContent-Length: 2\r\n\r\n{}".as_slice(),
+        b"POST /v1/sessions HTTP/1.1\nIdempotency-Key: ses_bad_request_line\r\nContent-Length: 2\r\n\r\n{}".as_slice(),
+    ] {
+        assert_eq!(
+            rejected_request_kind(request),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+}
