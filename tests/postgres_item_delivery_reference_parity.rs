@@ -212,7 +212,7 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let session_ref = format!("session_item_{index}");
-        insert_ledger(
+        let error = insert_ledger(
             &mut client,
             "tenant_alpha",
             &session_ref,
@@ -220,6 +220,31 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
             &[invalid_ref],
         )
         .expect_err("invalid item identity must already fail in allowed-item evidence");
+        assert_check(&error, "item_delivery_ledger_allowed_items_format_check");
+    }
+
+    for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
+        let session_ref = format!("session_event_item_{index}");
+        let allowed_item_ref = format!("item_event_allowed_{index}");
+        insert_ledger(
+            &mut client,
+            "tenant_alpha",
+            &session_ref,
+            &format!("release_event_item_{index}"),
+            &[allowed_item_ref.as_str()],
+        )
+        .unwrap();
+        let error = insert_event(
+            &mut client,
+            "tenant_alpha",
+            &session_ref,
+            &format!("delivery_event_item_{index}"),
+            invalid_ref,
+            &format!("presentation_event_item_{index}"),
+            None,
+        )
+        .expect_err("event item references must match the Rust opaque-reference boundary");
+        assert_check(&error, "item_delivery_event_item_ref_format_check");
     }
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
