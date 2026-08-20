@@ -71,9 +71,14 @@ def is_runtime_text_file(path: Path) -> bool:
 
 
 def is_deployment_manifest(path: Path) -> bool:
-    """Return whether a path shape can configure a deployed runtime."""
+    """Return whether a repository-relative path can configure a deployed runtime."""
 
-    name = path.name.lower()
+    try:
+        repository_path = path.relative_to(ROOT)
+    except ValueError:
+        return False
+
+    name = repository_path.name.lower()
     if name == "dockerfile" or name.startswith("dockerfile."):
         return True
     if name in {"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}:
@@ -81,8 +86,11 @@ def is_deployment_manifest(path: Path) -> bool:
     if name == ".env" or name.startswith(".env."):
         return True
     return (
-        any(part.lower() in DEPLOYMENT_DIRECTORY_NAMES for part in path.parts)
-        and path.suffix.lower() in DEPLOYMENT_TEXT_SUFFIXES
+        any(
+            part.lower() in DEPLOYMENT_DIRECTORY_NAMES
+            for part in repository_path.parts
+        )
+        and repository_path.suffix.lower() in DEPLOYMENT_TEXT_SUFFIXES
     )
 
 
