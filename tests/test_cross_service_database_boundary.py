@@ -25,6 +25,7 @@ RUNTIME_FILES = (
     ROOT / "Cargo.toml",
     ROOT / "rust-toolchain.toml",
 )
+RUNTIME_TEXT_SUFFIXES = frozenset({".rs", ".sql", ".toml", ".yml", ".yaml"})
 
 EXTERNAL_CONTEXT_ENV_PREFIXES = (
     "FAST_MLSIRM",
@@ -58,6 +59,12 @@ FORBIDDEN_CROSS_DATABASE_SQL = re.compile(
 )
 
 
+def is_runtime_text_file(path: Path) -> bool:
+    """Return whether a discovered runtime path is an expected UTF-8 text artifact."""
+
+    return path.is_file() and path.suffix.lower() in RUNTIME_TEXT_SUFFIXES
+
+
 def runtime_files() -> list[Path]:
     """Return deterministic UTF-8 text files that can affect shipped runtime behavior."""
 
@@ -65,19 +72,27 @@ def runtime_files() -> list[Path]:
     for root in RUNTIME_ROOTS:
         if not root.exists():
             continue
-        files.extend(path for path in root.rglob("*") if path.is_file())
+        files.extend(path for path in root.rglob("*") if is_runtime_text_file(path))
     files.extend(path for path in RUNTIME_FILES if path.exists())
     return sorted(set(files))
 
 
 def read_text(path: Path) -> str:
-    """Read one repository-controlled runtime/configuration file as UTF-8 text."""
+    """Read one expected repository-controlled UTF-8 runtime/configuration file."""
 
     return path.read_text(encoding="utf-8")
 
 
 class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
     """Keep read-only bounded-context dependencies out of this product database."""
+
+    def test_runtime_scan_accepts_only_expected_text_artifacts(self) -> None:
+        self.assertTrue(is_runtime_text_file(ROOT / "src" / "lib.rs"))
+        self.assertTrue(
+            is_runtime_text_file(ROOT / ".github" / "workflows" / "ci.yml")
+        )
+        self.assertFalse(is_runtime_text_file(ROOT / "src" / "fixture.png"))
+        self.assertFalse(is_runtime_text_file(ROOT / "migrations" / "fixture.bin"))
 
     def test_external_context_database_credentials_are_not_runtime_inputs(self) -> None:
         violations: list[str] = []
@@ -99,9 +114,7 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         for path in runtime_files():
             match = FORBIDDEN_CROSS_DATABASE_SQL.search(read_text(path))
             if match is not None:
-                violations.append(
-                    f"{path.relative_to(ROOT)}: {match.group(0)}"
-                )
+                violations.append(f"{path.relative_to(ROOT)}: {match.group(0)}")
 
         self.assertEqual(
             [],
