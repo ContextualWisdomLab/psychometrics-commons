@@ -110,12 +110,30 @@ fn branch_coverage_failure_diagnostic_uses_lcov_branch_records() {
 
 #[test]
 fn rust_toolchains_are_exact_and_reviewably_updated() {
+    const STABLE_QUALITY_INSTALL: &str =
+        "rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt";
+    const STABLE_COVERAGE_INSTALL: &str =
+        "rustup toolchain install 1.97.1 --profile minimal --component llvm-tools-preview";
+    const NIGHTLY_COVERAGE_INSTALL: &str =
+        "rustup toolchain install nightly-2026-08-18 --profile minimal --component llvm-tools-preview";
+    const NIGHTLY_LLVM_COV_INSTALL: &str =
+        "cargo +nightly-2026-08-18 install cargo-llvm-cov --locked --version \"$CARGO_LLVM_COV_VERSION\"";
+    const NIGHTLY_LLVM_COV_VERSION: &str =
+        "cargo +nightly-2026-08-18 llvm-cov --version | grep -F \"$CARGO_LLVM_COV_VERSION\"";
+    const NIGHTLY_BRANCH_JSON: &str =
+        "cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json";
+
     assert!(RUST_TOOLCHAIN.contains("channel = \"1.97.1\""));
     assert!(!RUST_TOOLCHAIN.contains("channel = \"stable\""));
-
-    assert_eq!(CI_WORKFLOW.matches("nightly-2026-08-18").count(), 5);
+    assert!(CI_WORKFLOW.contains(STABLE_QUALITY_INSTALL));
+    assert!(CI_WORKFLOW.contains(STABLE_COVERAGE_INSTALL));
+    assert!(CI_WORKFLOW.contains(NIGHTLY_COVERAGE_INSTALL));
+    assert!(CI_WORKFLOW.contains(NIGHTLY_LLVM_COV_INSTALL));
+    assert!(CI_WORKFLOW.contains(NIGHTLY_LLVM_COV_VERSION));
+    assert!(CI_WORKFLOW.contains(NIGHTLY_BRANCH_JSON));
     assert!(!CI_WORKFLOW.contains("nightly-2026-08-01"));
 
     assert!(DEPENDABOT.contains("package-ecosystem: \"rust-toolchain\""));
+    assert!(DEPENDABOT.contains("directory: \"/\""));
     assert!(DEPENDABOT.contains("interval: \"weekly\""));
 }
