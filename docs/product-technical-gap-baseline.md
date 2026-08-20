@@ -104,17 +104,22 @@ Snapshot source: GitHub REST `GET /repos/ContextualWisdomLab/psychometrics-commo
 | [248](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/248) | feat(longitudinal): persist immutable observation evidence | `feat/longitudinal-observation-persistence-20260818` | `377777e` | Ready | 2026-08-20 |
 | [249](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/249) | feat(result): authorize personal export delivery | `automation/result-export-authorization-20260818` | `98af6ef` | Ready | 2026-08-20 |
 | [250](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/250) | feat(participant): reconcile anonymous base persistence | `automation/participant-base-reconcile-20260818` | `79a8ab2` | Ready | 2026-08-20 |
-| [251](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/251) | feat(scoring): enforce request-bound engine adapter results | `feat/scoring-engine-adapter-20260818` | `1298ffd` | Ready | 2026-08-20 |
+| [251](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/251) | feat(scoring): enforce request-bound engine adapter results | `feat/scoring-engine-adapter-20260818` | `470f5a6` | Ready | 2026-08-20 |
 | [253](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/253) | feat(anonymous): reconcile credential-bound session authority | `fix/reconcile-anonymous-session-context-20260818` | `45a1921` | Ready | 2026-08-20 |
-| [254](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/254) | fix(api): reject ambiguous HTTP request framing | `fix/session-http-framing-20260818` | `8ab49c7` | Ready | 2026-08-20 |
+| [254](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/254) | fix(api): reject ambiguous HTTP request framing | `fix/session-http-framing-20260818` | `4fa541d` | Ready | 2026-08-20 |
 | [255](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/255) | feat: persist and reload live measurement sessions | `cursor/measurement-session-persist-reload-6a63` | `c61bd99` | Ready | 2026-08-20 |
 | [256](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/256) | feat(api): expose authorized personal result exports | `automation/result-export-http-20260818` | `26884f2` | Ready | 2026-08-20 |
 | [257](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/257) | feat(api): expose authorized immutable result reads | `feat/result-read-http-20260818` | `4849d48` | Ready | 2026-08-20 |
 | [258](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/258) | ci(rust): refresh nightly coverage and track stable compiler | `agent/rust-toolchain-refresh-2026-08-19` | `2f1c404` | Ready | 2026-08-20 |
-| [259](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/259) | feat(result): render exact Korean and English personal reports | `automation/result-report-locale-20260819` | `bfbf5f9` | Ready | 2026-08-20 |
-| [261](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/261) | feat(assessment): bind Quick and Deep paths to immutable releases | `feat/assessment-path-contract-20260820` | `e472cd9` | Ready | 2026-08-20 |
-| [262](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/262) | fix(longitudinal): reject reused Commons observation identities | `fix/longitudinal-record-identity-20260820` | `64d88c7` | Ready | 2026-08-20 |
-| [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | docs: establish current product technical gap baseline | `feat/product-technical-gap-baseline-20260820` | `e3932b0` | Ready | 2026-08-20 |
+| [259](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/259) | feat(result): render exact Korean and English personal reports | `automation/result-report-locale-20260819` | `e08dde2` | Ready | 2026-08-20 |
+| [261](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/261) | feat(assessment): bind Quick and Deep paths to immutable releases | `feat/assessment-path-contract-20260820` | `441fac2` | Ready | 2026-08-20 |
+| [262](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/262) | fix(longitudinal): reject reused Commons observation identities | `fix/longitudinal-record-identity-20260820` | `31df209` | Ready | 2026-08-20 |
+| [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | docs: establish current product technical gap baseline | `feat/product-technical-gap-baseline-20260820` | `817ec3e` | Ready | 2026-08-20 |
+| [264](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/264) | feat(integration): bind verified publish receipts to fenced persistence | `agent/verified-publisher-handoff-20260820` | `ad485cc` | Ready | 2026-08-20 |
+| [265](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/265) | fix(research): reject prefixed identity-column aliases | `agent/research-prefixed-identity-alias-20260820` | `36b7a28` | Ready | 2026-08-20 |
+| [266](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/266) | test(db): enforce descriptive migration table names | `agent/migration-table-naming-contract-20260820` | `ab43dbe` | Ready | 2026-08-20 |
+| [267](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/267) | fix(research): fail closed on structured public-fixture cells | `agent/research-structured-cell-fail-closed-20260820` | `4d85db9` | Ready | 2026-08-20 |
+| [268](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/268) | fix(research): reject separator-based identity aliases | `agent/research-separator-alias-20260820` | `f64f5df` | Ready | 2026-08-20 |
 
 ## Current issue inventory
 
