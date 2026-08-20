@@ -52,7 +52,12 @@ fn insert_entry(
         "INSERT INTO response_snapshot_entry (\
              snapshot_ref, snapshot_sequence, event_ref, item_version_ref, payload_digest\
          ) VALUES ($1,1,$2,$3,$4)",
-        &[&snapshot_ref, &event_ref, &item_version_ref, &payload_digest],
+        &[
+            &snapshot_ref,
+            &event_ref,
+            &item_version_ref,
+            &payload_digest,
+        ],
     )
 }
 
@@ -94,10 +99,7 @@ fn canonical_lowercase_sha256_digest_remains_persistable() {
     let _guard = guard();
     let mut client = client();
 
-    assert_eq!(
-        insert_entry(&mut client, "valid", VALID_DIGEST).unwrap(),
-        1
-    );
+    assert_eq!(insert_entry(&mut client, "valid", VALID_DIGEST).unwrap(), 1);
 }
 
 #[test]
@@ -108,7 +110,7 @@ fn migration_reapplication_replaces_the_weaker_not_blank_digest_constraint() {
     client
         .batch_execute(
             "ALTER TABLE response_snapshot_entry \
-                 DROP CONSTRAINT response_snapshot_entry_payload_digest_not_blank_check; \
+                 DROP CONSTRAINT response_snapshot_entry_payload_digest_format_check; \
              ALTER TABLE response_snapshot_entry \
                  ADD CONSTRAINT response_snapshot_entry_payload_digest_not_blank_check CHECK (\
                      payload_digest = btrim(payload_digest) AND payload_digest <> ''\

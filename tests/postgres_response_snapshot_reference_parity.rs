@@ -71,7 +71,13 @@ fn insert_entry(
 fn snapshot_and_session_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let error = insert_header(
@@ -98,7 +104,13 @@ fn snapshot_and_session_references_reject_rust_invalid_aliases() {
 fn entry_event_and_item_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let snapshot_ref = format!("response_snapshot_event_ref_{index}");
