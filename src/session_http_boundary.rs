@@ -1,12 +1,13 @@
 //! Hardened public HTTP/1.1 request-boundary checks for assessment sessions.
 //!
 //! `session_http.rs` contains the session transport behavior. This module keeps
-//! the same public API while validating request framing: the rules that decide
-//! where one HTTP request ends. It accepts exactly one optional `Content-Length`
-//! header and no `Transfer-Encoding`. Invalid or ambiguous requests are rejected
-//! before application code runs (a fail-closed policy). That prevents proxies,
-//! gateways, and other HTTP intermediaries from choosing a different request
-//! boundary than this server.
+//! the same public API while validating request framing, meaning the rules that
+//! decide where one HTTP request ends. It accepts exactly one optional
+//! `Content-Length` header and no `Transfer-Encoding`. Invalid or ambiguous
+//! requests are rejected before application code runs; this fail-closed policy
+//! means the server stops safely instead of guessing. That prevents proxies,
+//! gateways, and other intermediaries (servers between the client and this
+//! service) from choosing a different request boundary than this server.
 
 #[path = "session_http.rs"]
 mod implementation;
