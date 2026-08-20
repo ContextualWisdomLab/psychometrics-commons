@@ -97,6 +97,13 @@ fn structured_cells_must_be_flattened_before_identity_scanning() {
             "structured fixture cells must fail closed instead of bypassing exact identity matching"
         );
     }
+
+    let message = PublicReleaseLeakageError::StructuredValueUnsupported.to_string();
+    assert_eq!(
+        message,
+        "flatten or independently scan structured public-release values before packaging the fixture"
+    );
+    assert!(!message.contains("participant_seoul_clinic_one"));
 }
 
 #[test]
