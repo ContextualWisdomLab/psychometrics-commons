@@ -1,4 +1,4 @@
-"""Contract tests for descriptive PostgreSQL table names in owned migrations."""
+"""Contracts for descriptive, collision-resistant PostgreSQL migration names."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ CREATE_TABLE_PATTERN = re.compile(
 DESCRIPTIVE_SNAKE_CASE_PATTERN = re.compile(
     r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$"
 )
+MIGRATION_FILENAME_PATTERN = re.compile(
+    r"^(?P<number>[0-9]{4})_(?P<slug>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\.sql$"
+)
 
 
 def created_table_names(sql: str) -> list[str]:
@@ -34,7 +37,7 @@ def is_descriptive_snake_case_table_name(table_name: str) -> bool:
 
 
 class MigrationTableNamingContractTests(unittest.TestCase):
-    """Keep product-owned PostgreSQL tables descriptive and machine-reviewable."""
+    """Keep product-owned PostgreSQL migration identity machine-reviewable."""
 
     def test_parser_covers_plain_if_not_exists_and_schema_qualified_tables(self) -> None:
         sql = """
@@ -55,6 +58,42 @@ class MigrationTableNamingContractTests(unittest.TestCase):
         for valid_name in ["assessment_session", "scoring_job_attempt", "result_snapshot_v2"]:
             with self.subTest(valid_name=valid_name):
                 self.assertTrue(is_descriptive_snake_case_table_name(valid_name))
+
+    def test_migration_filenames_keep_unique_four_digit_descriptive_identity(self) -> None:
+        migration_paths = sorted(MIGRATIONS_DIR.glob("*.sql"))
+        self.assertTrue(migration_paths, "migration naming gate found no SQL migrations")
+
+        seen_numbers: dict[str, Path] = {}
+        invalid_filenames: list[str] = []
+        duplicate_numbers: list[str] = []
+
+        for migration_path in migration_paths:
+            match = MIGRATION_FILENAME_PATTERN.fullmatch(migration_path.name)
+            if match is None:
+                invalid_filenames.append(migration_path.name)
+                continue
+
+            migration_number = match.group("number")
+            previous = seen_numbers.get(migration_number)
+            if previous is not None:
+                duplicate_numbers.append(
+                    f"{migration_number}:{previous.name},{migration_path.name}"
+                )
+            else:
+                seen_numbers[migration_number] = migration_path
+
+        self.assertEqual(
+            invalid_filenames,
+            [],
+            "migration files must use NNNN_<two-or-more-word-snake-case>.sql; "
+            f"invalid={invalid_filenames}",
+        )
+        self.assertEqual(
+            duplicate_numbers,
+            [],
+            "migration sequence identities must be unique; "
+            f"duplicates={duplicate_numbers}",
+        )
 
     def test_every_owned_migration_table_uses_descriptive_snake_case(self) -> None:
         observed: list[tuple[Path, str]] = []
