@@ -65,4 +65,14 @@ fn distinct_source_observations_cannot_reuse_one_commons_record_identity() {
         .to_string()
         .contains("observation-record identity"));
     assert_eq!(observations.len(), 1);
+
+    let replay = observations
+        .ingest(observation(
+            "observation_record_shared_identity",
+            "gyeot_obs_first",
+            1_776_336_120_000,
+            1_776_336_180_000,
+        ))
+        .expect("the rejected collision must not replace the accepted record");
+    assert_eq!(replay.source_observation_ref(), "gyeot_obs_first");
 }
