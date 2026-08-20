@@ -8,10 +8,6 @@
 //! gateways, and other HTTP intermediaries from choosing a different request
 //! boundary than this server.
 
-#[expect(
-    dead_code,
-    reason = "the private legacy listener is shadowed while its domain transport implementation is reused"
-)]
 #[path = "session_http.rs"]
 mod implementation;
 
@@ -275,7 +271,7 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        declared_request_end, normalize_read_error, reject_full_request_buffer,
+        declared_request_end, normalize_read_error, reason_phrase, reject_full_request_buffer,
         reject_invalid_header_name, reject_non_crlf_header_lines, reject_oversized_request,
         reject_transfer_encoding, remaining_request_timeout, single_header_value,
     };
@@ -316,6 +312,18 @@ mod tests {
             reject_transfer_encoding(transfer).unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
+    }
+
+    #[test]
+    fn response_reason_phrases_cover_public_and_fallback_statuses() {
+        assert_eq!(reason_phrase(200), "OK");
+        assert_eq!(reason_phrase(201), "Created");
+        assert_eq!(reason_phrase(400), "Bad Request");
+        assert_eq!(reason_phrase(404), "Not Found");
+        assert_eq!(reason_phrase(405), "Method Not Allowed");
+        assert_eq!(reason_phrase(409), "Conflict");
+        assert_eq!(reason_phrase(500), "Internal Server Error");
+        assert_eq!(reason_phrase(418), "Error");
     }
 
     #[test]
