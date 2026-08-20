@@ -265,11 +265,12 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
 /// fixture. A column named `research_participant_ref` is allowed, including a clear
 /// export or staging prefix ending in that exact research namespace. Restricted
 /// identity names remain forbidden even when an ETL, export, source, or warehouse
-/// prefix is added before them. The caller must also supply an effective
-/// product-authorized identity inventory; the scanner fails closed rather than
-/// treating an omitted inventory as evidence that the fixture is clean. Object or
-/// array cell values are not parsed here: callers must flatten them or prove a
-/// separate structured-value privacy scan before packaging.
+/// prefix is added before them or punctuation/whitespace replaces underscores. The
+/// caller must also supply an effective product-authorized identity inventory; the
+/// scanner fails closed rather than treating an omitted inventory as evidence that
+/// the fixture is clean. Object or array cell values are not parsed here: callers
+/// must flatten them or prove a separate structured-value privacy scan before
+/// packaging.
 ///
 /// # Errors
 ///
@@ -343,7 +344,7 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
 fn compact_public_release_column(column_name: &str) -> String {
     column_name
         .chars()
-        .filter(|character| *character != '_')
+        .filter(|character| character.is_alphanumeric())
         .collect()
 }
 
