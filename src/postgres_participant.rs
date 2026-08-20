@@ -6,12 +6,16 @@
 //! from its own durable evidence before account-scoped authorization. Raw credentials, Keyverse
 //! subjects, assessment responses, and research linkage identifiers never belong in this table.
 //!
-//! Exact replay requires `READ COMMITTED`. `INSERT ... ON CONFLICT DO NOTHING` waits for a
-//! concurrent uncommitted winner of the same `participant_ref`. After that winner commits, the
-//! next statement receives a fresh command snapshot and rereads the stored tenant and creation
-//! time. An exact match is [`ParticipantBasePersistenceDisposition::Duplicate`]. A different
-//! tenant or creation time is [`ParticipantBasePersistenceError::ConflictingReplay`]. A conflict
-//! without a recoverable winner is [`ParticipantBasePersistenceError::CorruptStoredIdentity`].
+//! Exact replay requires `READ COMMITTED`, the PostgreSQL isolation level where each statement
+//! sees data committed before that statement begins. `INSERT ... ON CONFLICT DO NOTHING` means a
+//! duplicate participant key does not overwrite the stored row; when another transaction is still
+//! inserting that key, PostgreSQL waits for that writer to finish. The following read then gets a
+//! fresh **command snapshot**—the committed database view used by that statement—and reads the
+//! **replay winner**, the row that actually owns the participant key after the insert race.
+//! [`ParticipantBasePersistenceDisposition::Duplicate`] means that winner has exactly the tenant
+//! and creation time the caller is retrying. [`ParticipantBasePersistenceError::ConflictingReplay`]
+//! means the winner is valid but carries different identity evidence. Missing or malformed winner
+//! evidence is [`ParticipantBasePersistenceError::CorruptStoredIdentity`].
 
 use crate::participant::ParticipantRecord;
 use crate::reference::normalized_reference;
@@ -270,13 +274,16 @@ fn classify_conflict_winner(
     created_at_unix_ms: i64,
 ) -> Result<ParticipantBasePersistenceDisposition, ParticipantBasePersistenceError> {
     match existing {
-        Some((stored_tenant_ref, stored_created_at_unix_ms))
-            if stored_tenant_ref == tenant_ref
-                && stored_created_at_unix_ms == created_at_unix_ms =>
-        {
-            Ok(ParticipantBasePersistenceDisposition::Duplicate)
+        Some((stored_tenant_ref, stored_created_at_unix_ms)) => {
+            required_exact_reference(stored_tenant_ref)
+                .map_err(|_| ParticipantBasePersistenceError::CorruptStoredIdentity)?;
+            stored_timestamp(stored_created_at_unix_ms)?;
+            if stored_tenant_ref == tenant_ref && stored_created_at_unix_ms == created_at_unix_ms {
+                Ok(ParticipantBasePersistenceDisposition::Duplicate)
+            } else {
+                Err(ParticipantBasePersistenceError::ConflictingReplay)
+            }
         }
-        Some(_) => Err(ParticipantBasePersistenceError::ConflictingReplay),
         None => Err(ParticipantBasePersistenceError::CorruptStoredIdentity),
     }
 }
@@ -445,6 +452,12 @@ mod tests {
             ),
             Err(ParticipantBasePersistenceError::ConflictingReplay)
         ));
+        for corrupt_winner in [Some((" ", 40_000)), Some(("tenant_public_demo", 0))] {
+            assert!(matches!(
+                classify_conflict_winner(corrupt_winner, "tenant_public_demo", 40_000),
+                Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
+            ));
+        }
         assert!(matches!(
             classify_conflict_winner(None, "tenant_public_demo", 40_000),
             Err(ParticipantBasePersistenceError::CorruptStoredIdentity)
