@@ -366,6 +366,106 @@ fn response_event_http_contract_is_mapped() {
     );
 }
 
+fn anonymous_command_docs_do_not_claim_store_load() {
+    let root = repository_root();
+    let authorization = read_required(&root.join("src/anonymous_authorization.rs"));
+    let security = read_required(&root.join("docs/architecture/SECURITY_AND_DATA.md"));
+    let changelog = read_required(&root.join("CHANGELOG.md"));
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+    let adr =
+        read_required(&root.join("docs/adr/0003-keyverse-identity-and-anonymous-participation.md"));
+    let erd = read_required(&root.join("docs/architecture/ERD.md"));
+    let command_tests =
+        read_required(&root.join("tests/anonymous_session_command_authorization.rs"));
+    let uml = read_required(&root.join("docs/architecture/UML.md"));
+
+    assert!(
+        !authorization.contains("have been loaded from the product store"),
+        "apply_anonymous_session_command rustdoc must not claim the caller already loaded records"
+    );
+    assert!(
+        !authorization.contains("ParticipantRecord`] loaded from the product store"),
+        "authorize_anonymous_session_command rustdoc must not label the participant argument as store-loaded"
+    );
+    assert!(
+        authorization.contains("does not prove the records were loaded"),
+        "command authorization rustdoc must say the gate does not prove store load"
+    );
+    assert!(
+        !security.contains("supplied after a store load"),
+        "SECURITY_AND_DATA must not claim the command gate observed a store load"
+    );
+    assert!(
+        security.contains("does not prove those records were store-loaded"),
+        "SECURITY_AND_DATA must say the command gate does not prove store load"
+    );
+    assert!(
+        uml.contains(
+            "as-built command gate compares supplied records and does not perform the load"
+        ),
+        "UML happy-path must distinguish target store load from the as-built command gate"
+    );
+    assert!(
+        !uml.contains("authorize anonymous command from loaded records"),
+        "UML command step must not say the gate authorized from loaded records"
+    );
+    assert!(
+        uml.contains("authorize anonymous command from supplied records"),
+        "UML command step must say the gate compares supplied records"
+    );
+    assert!(
+        !authorization.contains("already loaded a participant"),
+        "command authorization rustdoc must not assume the caller already loaded records"
+    );
+    assert!(
+        !command_tests.contains("must load the participant"),
+        "command tests must not say a transport must load records the gate does not prove"
+    );
+    assert!(
+        !command_tests.contains("_loaded_"),
+        "command tests must name supplied records, not loaded records"
+    );
+
+    for (label, document) in [
+        ("CHANGELOG.md", changelog.as_str()),
+        ("docs/TRACEABILITY.md", traceability.as_str()),
+        (
+            "docs/adr/0003-keyverse-identity-and-anonymous-participation.md",
+            adr.as_str(),
+        ),
+        ("docs/architecture/ERD.md", erd.as_str()),
+        ("docs/architecture/SECURITY_AND_DATA.md", security.as_str()),
+        (
+            "tests/anonymous_session_command_authorization.rs",
+            command_tests.as_str(),
+        ),
+        ("src/anonymous_authorization.rs", authorization.as_str()),
+    ] {
+        assert!(
+            !document.contains("remains Active PR #114"),
+            "{label} must not name superseded #114 as the current participant persist landing"
+        );
+        assert!(
+            !document.contains("remains Active PR #133"),
+            "{label} must not name superseded #133 as the current participant persist landing"
+        );
+        assert!(
+            !document.contains("remains Active PR #147"),
+            "{label} must not name superseded #147 as the current participant persist landing"
+        );
+        assert!(
+            !document.contains("Active PR #158"),
+            "{label} must not name closed restore-reconcile #158 as the current participant persist landing"
+        );
+        let persist_status = document.to_ascii_lowercase();
+        assert!(
+            persist_status.contains("persist/reload remains target")
+                || persist_status.contains("persist/reload of `assessment_participant` remains target"),
+            "{label} must say assessment_participant persist/reload remains Target on this honesty head"
+        );
+    }
+}
+
 #[test]
 fn uml_covers_identity_longitudinal_and_workbench_behavior() {
     let uml = read_required(&repository_root().join("docs/architecture/UML.md"));

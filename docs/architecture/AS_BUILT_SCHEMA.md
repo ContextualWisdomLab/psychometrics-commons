@@ -2,7 +2,7 @@
 
 - Status: Normative evidence map
 - Date: 2026-08-14
-- Protected-main baseline: `4b828134f4d597ca1add3d6dbf02bebd72bfb0b2`
+- Protected-main baseline: `cc5850a0d1eacbbf16d03075534fce460a8286e6`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
@@ -12,18 +12,39 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
-| `integration_outbox` | integration | Implemented subset |
+| `integration_outbox` | integration | Implemented subset; exclusive delivery-lease extension is **Active PR** #60 |
 | `integration_delivery_attempt` | integration | Implemented subset |
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
-| `integration_consumption` | integration | **Active PR** #58 (not protected-main truth) |
+| `integration_consumption` | integration | Implemented subset |
+| `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
-## Active PR inbox-consumption physical schema
+## Active PR assessment-session physical schema
 
-PR #58 (`feat/inbox-consumption-persistence-20260814`) `migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` adapter persist one consumption work item for an existing `integration_inbox` receipt. The slice is **Active PR**, not protected-main truth. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence.
+PR #218 (`migrations/0014_assessment_session.sql`, `migrations/0016_assessment_session_command.sql`, and `src/postgres_assessment_session.rs`) persist and load one assessment-session identity bound to a published locale-specific release, plus append-only command history. New sessions start only through `created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`. Durable start locks `instrument_release` with `SELECT … FOR UPDATE` so a stale in-memory Published object cannot insert after persist Suspend or Retire. First insert through `persist_assessment_session` takes the same lock, so a reconstituted Created aggregate cannot insert after that later persist. When that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate so a concurrent retry after the first insert commits cannot turn a later Suspend or Retire into a false unpublished failure. Exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, current state, and creation time. Exact replay is idempotent. Rebinding any stored field or command evidence, or persisting a shorter command history than already stored, fails closed so a stale Activate-only worker cannot rewind Pause/Resume. Command persist locks the `assessment_session` header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load restores created identity without asking whether the release still accepts new sessions, then replays commands so Activate/Pause/Resume survive restart. Isolation is the global opaque `session_ref` primary key; this slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. Persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` (`src/session_http.rs`, `openapi/sessions.yaml`) sit on this start path. Command HTTP remains outside this slice. #205 is the unlocked-peek first-insert-seal predecessor; #209 is the weaker NotFound-allows-insert competitor; #198 is the exact start-replay predecessor; #180 is the stored-publication lock predecessor; #188 is the in-memory replay predecessor that still lacks the store lock; #153 is the in-memory-start predecessor; #164 is the unlocked stored-load predecessor; #146 is the header-lock predecessor; #129 is the sequential stale-prefix predecessor; #125 is the command-history predecessor that still rewinds on a stale shorter persist; #109 is the persist-and-load predecessor.
+
+## Active PR outbox delivery-lease physical schema
+
+PR #60 (`feat/outbox-delivery-lease-20260814`) extends the protected-main `integration_outbox` relation through `migrations/0013_outbox_delivery_lease.sql` and `src/postgres_integration.rs`. The extension is **Active PR**, not protected-main truth.
+
+The active slice adds:
+
+- nullable `lease_worker_ref` and `lease_ref` opaque ownership references;
+- nullable positive `lease_fencing_token` and `lease_expires_at_unix_ms` values that are either all present or all absent for the current lease;
+- `delivery_lease_generation BIGINT NOT NULL DEFAULT 0 CHECK (delivery_lease_generation >= 0)` as the persisted monotonic generation;
+- `integration_outbox_fencing_generation_check`, requiring any live `lease_fencing_token` to equal the current persisted generation;
+- exclusive pending-row claims, explicit expired-lease recovery, and fenced attempt recording that clears the current lease after an accepted attempt;
+- database-clock authority for both worker-side lease-expiry classification and exclusive-lease recovery, while caller-supplied attempt timestamps remain immutable delivery-attempt evidence and a future caller observation cannot steal a still-live lease;
+- fail-closed stale fencing before replay classification whenever a current lease exists, while exact replay after a completed attempt has cleared its lease remains idempotent.
+
+Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_delivery_lease.rs`, `tests/postgres_outbox_delivery_lease_fencing_integrity.rs`, `tests/postgres_outbox_delivery_lease_authority.rs`, `tests/postgres_outbox_delivery_lease_concurrency.rs`, `tests/postgres_outbox_delivery_lease_coverage_edges.rs`, and `tests/postgres_outbox_delivery_lease_migration_isolation.rs`. These tests cover exclusive claim/recovery, monotonic fencing, invalid physical state rejection, database-authoritative expiry, rejection of a future caller timestamp against a still-live lease, stale-fence replay precedence, blocking-proven concurrent claims, schema isolation, and persistence failure paths. The slice must remain **Active PR** until the exact reviewed/check-clean head is merged and protected main is refetched.
+
+## Protected-main inbox-consumption physical schema
+
+`migrations/0012_integration_consumption.sql` and `src/postgres_inbox_consumption.rs` persist one consumption work item for an existing `integration_inbox` receipt. This is an **Implemented subset** on protected main after #58. It stores pending/processing/completed/quarantined evidence, a monotonically increasing fencing token, a time-bounded processing claim, a durable `side_effect_ref`, and optional completion or quarantine evidence. Receipt-only inbox rows remain uncompleted. A processing claim cannot be stolen by another worker. Expire-and-reclaim returns an expired claim to pending without transferring the crashed worker's fence. Subsequent claim-deadline columns from later inbox-expiry slices remain documented with those slices.
 
 ## Protected-main scoring-job physical schema
 
