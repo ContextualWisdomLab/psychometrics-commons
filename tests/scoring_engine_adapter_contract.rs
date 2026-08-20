@@ -233,6 +233,37 @@ fn adapter_rejects_any_result_not_bound_to_the_complete_request() {
 }
 
 #[test]
+fn adapter_rejects_rebinding_between_two_pinned_norm_versions() {
+    let request = request_with_provenance(
+        "scoring_request_normed",
+        PRIMARY_SNAPSHOT_REF,
+        PRIMARY_ASSESSMENT_SPEC_REF,
+        PRIMARY_INSTRUMENT_VERSION_REF,
+        PRIMARY_SCORING_VERSION,
+        PRIMARY_CALIBRATION_REFERENCE,
+        Some("norm_version_big_five_v1"),
+    );
+    let mismatched_request = request_with_provenance(
+        "scoring_request_normed",
+        PRIMARY_SNAPSHOT_REF,
+        PRIMARY_ASSESSMENT_SPEC_REF,
+        PRIMARY_INSTRUMENT_VERSION_REF,
+        PRIMARY_SCORING_VERSION,
+        PRIMARY_CALIBRATION_REFERENCE,
+        Some("norm_version_big_five_v2"),
+    );
+
+    let engine = TestEngine::return_for(mismatched_request);
+    let error = execute_scoring_request(&engine, &request).unwrap_err();
+
+    assert!(matches!(
+        error,
+        ScoringEngineExecutionError::RequestMismatch
+    ));
+    assert!(error.source().is_none());
+}
+
+#[test]
 fn unsupported_output_schema_cannot_reach_the_engine_adapter() {
     let snapshot = completed_snapshot_with_ref(PRIMARY_SNAPSHOT_REF);
     let error = ScoringRequest::from_snapshot(
