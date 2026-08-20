@@ -39,22 +39,45 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
     assert_eq!(database_error.constraint(), Some(constraint));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug)]
+struct SnapshotRefs {
+    result: String,
+    participant: String,
+    scoring_result: String,
+    session: String,
+    response: String,
+    assessment: String,
+    instrument: String,
+    scoring: String,
+    calibration: String,
+    norm: Option<String>,
+    narrative: String,
+    supersedes: Option<String>,
+}
+
+impl SnapshotRefs {
+    fn valid(suffix: &str) -> Self {
+        Self {
+            result: format!("result_snapshot_{suffix}"),
+            participant: format!("participant_{suffix}"),
+            scoring_result: format!("scoring_result_{suffix}"),
+            session: format!("session_{suffix}"),
+            response: format!("response_snapshot_{suffix}"),
+            assessment: format!("assessment_spec_{suffix}"),
+            instrument: format!("instrument_version_{suffix}"),
+            scoring: format!("scoring_version_{suffix}"),
+            calibration: format!("calibration_reference_{suffix}"),
+            norm: Some(format!("norm_version_{suffix}")),
+            narrative: format!("narrative_version_{suffix}"),
+            supersedes: None,
+        }
+    }
+}
+
 fn insert_snapshot(
     client: &mut Client,
-    result_ref: &str,
-    participant_ref: &str,
-    scoring_result_ref: &str,
-    session_ref: &str,
-    response_ref: &str,
-    assessment_ref: &str,
-    instrument_ref: &str,
-    scoring_ref: &str,
-    calibration_ref: &str,
-    norm_ref: Option<&str>,
-    narrative_ref: &str,
-    consent_refs: Vec<&str>,
-    supersedes_ref: Option<&str>,
+    refs: &SnapshotRefs,
+    consent_refs: &[&str],
 ) -> Result<u64, postgres::Error> {
     client.execute(
         "INSERT INTO result_snapshot (\
@@ -65,38 +88,22 @@ fn insert_snapshot(
              engine_artifact_digest, created_at_unix_ms, supersedes_ref\
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11,$12,$13,70000,$14)",
         &[
-            &result_ref,
-            &participant_ref,
-            &scoring_result_ref,
-            &session_ref,
-            &response_ref,
-            &assessment_ref,
-            &instrument_ref,
-            &scoring_ref,
-            &calibration_ref,
-            &norm_ref,
-            &narrative_ref,
+            &refs.result,
+            &refs.participant,
+            &refs.scoring_result,
+            &refs.session,
+            &refs.response,
+            &refs.assessment,
+            &refs.instrument,
+            &refs.scoring,
+            &refs.calibration,
+            &refs.norm.as_deref(),
+            &refs.narrative,
             &consent_refs,
             &DIGEST,
-            &supersedes_ref,
+            &refs.supersedes.as_deref(),
         ],
     )
-}
-
-fn valid_values(suffix: &str) -> [String; 11] {
-    [
-        format!("result_snapshot_{suffix}"),
-        format!("participant_{suffix}"),
-        format!("scoring_result_{suffix}"),
-        format!("session_{suffix}"),
-        format!("response_snapshot_{suffix}"),
-        format!("assessment_spec_{suffix}"),
-        format!("instrument_version_{suffix}"),
-        format!("scoring_version_{suffix}"),
-        format!("calibration_reference_{suffix}"),
-        format!("norm_version_{suffix}"),
-        format!("narrative_version_{suffix}"),
-    ]
 }
 
 #[derive(Clone, Copy)]
@@ -115,46 +122,33 @@ enum SnapshotField {
     Supersedes,
 }
 
+fn invalid_case(field: SnapshotField, invalid_ref: &str, suffix: &str) -> SnapshotRefs {
+    let mut refs = SnapshotRefs::valid(suffix);
+    match field {
+        SnapshotField::Result => refs.result = invalid_ref.to_owned(),
+        SnapshotField::Participant => refs.participant = invalid_ref.to_owned(),
+        SnapshotField::ScoringResult => refs.scoring_result = invalid_ref.to_owned(),
+        SnapshotField::Session => refs.session = invalid_ref.to_owned(),
+        SnapshotField::Response => refs.response = invalid_ref.to_owned(),
+        SnapshotField::Assessment => refs.assessment = invalid_ref.to_owned(),
+        SnapshotField::Instrument => refs.instrument = invalid_ref.to_owned(),
+        SnapshotField::Scoring => refs.scoring = invalid_ref.to_owned(),
+        SnapshotField::Calibration => refs.calibration = invalid_ref.to_owned(),
+        SnapshotField::Norm => refs.norm = Some(invalid_ref.to_owned()),
+        SnapshotField::Narrative => refs.narrative = invalid_ref.to_owned(),
+        SnapshotField::Supersedes => refs.supersedes = Some(invalid_ref.to_owned()),
+    }
+    refs
+}
+
 fn assert_field_rejects(client: &mut Client, field: SnapshotField, constraint: &str) {
     for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"]
         .into_iter()
         .enumerate()
     {
-        let mut values = valid_values(&format!("{}_{index}", field as u8));
-        let mut norm = Some(values[9].as_str());
-        let mut supersedes = None;
-        match field {
-            SnapshotField::Result => values[0] = invalid_ref.to_owned(),
-            SnapshotField::Participant => values[1] = invalid_ref.to_owned(),
-            SnapshotField::ScoringResult => values[2] = invalid_ref.to_owned(),
-            SnapshotField::Session => values[3] = invalid_ref.to_owned(),
-            SnapshotField::Response => values[4] = invalid_ref.to_owned(),
-            SnapshotField::Assessment => values[5] = invalid_ref.to_owned(),
-            SnapshotField::Instrument => values[6] = invalid_ref.to_owned(),
-            SnapshotField::Scoring => values[7] = invalid_ref.to_owned(),
-            SnapshotField::Calibration => values[8] = invalid_ref.to_owned(),
-            SnapshotField::Norm => norm = Some(invalid_ref),
-            SnapshotField::Narrative => values[10] = invalid_ref.to_owned(),
-            SnapshotField::Supersedes => supersedes = Some(invalid_ref),
-        }
-
-        let error = insert_snapshot(
-            client,
-            &values[0],
-            &values[1],
-            &values[2],
-            &values[3],
-            &values[4],
-            &values[5],
-            &values[6],
-            &values[7],
-            &values[8],
-            norm,
-            &values[10],
-            vec!["consent_snapshot_service"],
-            supersedes,
-        )
-        .expect_err("every durable result reference must match the Rust boundary");
+        let refs = invalid_case(field, invalid_ref, &format!("{}_{index}", field as u8));
+        let error = insert_snapshot(client, &refs, &["consent_snapshot_service"])
+            .expect_err("every durable result reference must match the Rust boundary");
         assert_check(&error, constraint);
     }
 }
@@ -204,61 +198,25 @@ fn every_snapshot_reference_column_rejects_rust_invalid_aliases() {
 fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
     let _guard = guard();
     let mut client = client();
+    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
 
-    for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"]
-        .into_iter()
-        .enumerate()
-    {
-        let values = valid_values(&format!("consent_{index}"));
-        let error = insert_snapshot(
-            &mut client,
-            &values[0],
-            &values[1],
-            &values[2],
-            &values[3],
-            &values[4],
-            &values[5],
-            &values[6],
-            &values[7],
-            &values[8],
-            Some(&values[9]),
-            &values[10],
-            vec![invalid_ref],
-            None,
-        )
-        .expect_err("consent snapshot arrays must reject the same Rust-invalid aliases");
+    for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
+        let refs = SnapshotRefs::valid(&format!("consent_{index}"));
+        let error = insert_snapshot(&mut client, &refs, &[invalid_ref])
+            .expect_err("consent snapshot arrays must reject the same Rust-invalid aliases");
         assert_check(&error, "result_snapshot_consent_refs_integrity_check");
     }
 
-    for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"]
-        .into_iter()
-        .enumerate()
-    {
-        let values = valid_values(&format!("construct_{index}"));
-        insert_snapshot(
-            &mut client,
-            &values[0],
-            &values[1],
-            &values[2],
-            &values[3],
-            &values[4],
-            &values[5],
-            &values[6],
-            &values[7],
-            &values[8],
-            Some(&values[9]),
-            &values[10],
-            vec!["consent_snapshot_service"],
-            None,
-        )
-        .unwrap();
+    for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
+        let refs = SnapshotRefs::valid(&format!("construct_{index}"));
+        insert_snapshot(&mut client, &refs, &["consent_snapshot_service"]).unwrap();
         let error = client
             .execute(
                 "INSERT INTO result_snapshot_observation (\
                      result_snapshot_ref, observation_order, construct_ref, observation_disposition, \
                      score, standard_error\
                  ) VALUES ($1,0,$2,'scored',0.5,0.1)",
-                &[&values[0], &invalid_ref],
+                &[&refs.result, &invalid_ref],
             )
             .expect_err("construct references must match the Rust opaque-reference boundary");
         assert_check(&error, "result_snapshot_observation_construct_ref_format_check");
@@ -278,24 +236,10 @@ fn migration_reapplication_revalidates_existing_result_rows() {
              );",
         )
         .unwrap();
-    let values = valid_values("upgrade_guard");
-    insert_snapshot(
-        &mut client,
-        "½",
-        &values[1],
-        &values[2],
-        &values[3],
-        &values[4],
-        &values[5],
-        &values[6],
-        &values[7],
-        &values[8],
-        Some(&values[9]),
-        &values[10],
-        vec!["consent_snapshot_service"],
-        None,
-    )
-    .expect("the deliberately weakened historical CHECK should admit the regression row");
+    let mut refs = SnapshotRefs::valid("upgrade_guard");
+    refs.result = "½".to_owned();
+    insert_snapshot(&mut client, &refs, &["consent_snapshot_service"])
+        .expect("the deliberately weakened historical CHECK should admit the regression row");
 
     let error = apply_result_snapshot_migration(&mut client)
         .expect_err("migration reapplication must reject historical Rust-invalid result identity");
