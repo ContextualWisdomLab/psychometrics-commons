@@ -178,6 +178,26 @@ fn unicode_numeric_separator_aliases_are_rejected_by_the_database_boundary() {
 }
 
 #[test]
+fn unicode_numeric_categories_match_the_rust_reference_boundary() {
+    let _guard = guard();
+    let mut client = client("longitudinal_observation_schema_integrity_numeric_category_test");
+    apply_longitudinal_observation_migration(&mut client).unwrap();
+
+    // Rust char::is_numeric covers Unicode decimal digits, letter numbers, and other numbers.
+    // PostgreSQL's POSIX [[:digit:]] class alone does not prove that same boundary.
+    for reference in ["½", "²", "Ⅳ", "+Ⅳ", "½e²"] {
+        let is_valid: bool = client
+            .query_one("SELECT longitudinal_reference_is_valid($1)", &[&reference])
+            .unwrap()
+            .get(0);
+        assert!(
+            !is_valid,
+            "Unicode numeric reference accepted by PostgreSQL but rejected by Rust: {reference:?}"
+        );
+    }
+}
+
+#[test]
 fn embedded_control_characters_are_rejected_by_the_database_boundary() {
     let _guard = guard();
     let mut client = client("longitudinal_observation_schema_integrity_control_reference_test");
