@@ -20,6 +20,7 @@ pub mod deterministic_narrative;
 pub mod health;
 pub mod instrument;
 pub mod integration;
+pub mod integration_publisher;
 pub mod item_delivery;
 pub mod longitudinal_observation;
 pub mod narrative;
