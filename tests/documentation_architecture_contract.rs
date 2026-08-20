@@ -366,6 +366,7 @@ fn response_event_http_contract_is_mapped() {
     );
 }
 
+#[test]
 fn anonymous_command_docs_do_not_claim_store_load() {
     let root = repository_root();
     let authorization = read_required(&root.join("src/anonymous_authorization.rs"));
