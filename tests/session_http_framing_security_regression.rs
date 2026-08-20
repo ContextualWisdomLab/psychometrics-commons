@@ -55,6 +55,37 @@ fn listener_rejects_bytes_beyond_one_framed_request() {
 }
 
 #[test]
+fn listener_rejects_peer_close_before_declared_body_is_complete() {
+    let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let address = listener.local_addr().unwrap();
+    let body = b"{\"participant_ref\":\"ptc_short_body\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}";
+    let request = format!(
+        "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_short_body\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body.len() + 1,
+        std::str::from_utf8(body).unwrap()
+    );
+    let client = std::thread::spawn(move || {
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        stream.shutdown(Shutdown::Write).unwrap();
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        response
+    });
+
+    let mut port = MemorySessionHttpPort::published();
+    let error = accept_one_session_http(&listener, &mut port, 20_000).unwrap_err();
+    let response = client.join().unwrap();
+
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    assert!(response.is_empty());
+    assert!(
+        port.last_start_locale.is_none(),
+        "an incomplete HTTP frame must not reach session creation"
+    );
+}
+
+#[test]
 fn listener_enforces_one_deadline_across_slow_fragmented_reads() {
     let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let address = listener.local_addr().unwrap();
