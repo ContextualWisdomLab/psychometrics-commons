@@ -52,9 +52,8 @@ CREATE TABLE IF NOT EXISTS response_snapshot_entry (
             )
         ),
     payload_digest TEXT CONSTRAINT response_snapshot_entry_payload_digest_not_null NOT NULL
-        CONSTRAINT response_snapshot_entry_payload_digest_not_blank_check CHECK (
-            payload_digest = btrim(payload_digest)
-            AND payload_digest <> ''
+        CONSTRAINT response_snapshot_entry_payload_digest_format_check CHECK (
+            payload_digest ~ '^sha256:[0-9a-f]{64}$'
         ),
     created_at TIMESTAMPTZ CONSTRAINT response_snapshot_entry_created_at_not_null NOT NULL
         DEFAULT clock_timestamp(),
@@ -63,3 +62,14 @@ CREATE TABLE IF NOT EXISTS response_snapshot_entry (
         REFERENCES response_snapshot (snapshot_ref),
     CONSTRAINT response_snapshot_entry_event_unique UNIQUE (snapshot_ref, event_ref)
 );
+
+-- CREATE TABLE IF NOT EXISTS does not replace historical CHECK definitions. Reapply the owned
+-- digest constraint so an upgraded schema cannot retain the old nonblank-only payload identity.
+ALTER TABLE response_snapshot_entry
+    DROP CONSTRAINT IF EXISTS response_snapshot_entry_payload_digest_not_blank_check;
+ALTER TABLE response_snapshot_entry
+    DROP CONSTRAINT IF EXISTS response_snapshot_entry_payload_digest_format_check;
+ALTER TABLE response_snapshot_entry
+    ADD CONSTRAINT response_snapshot_entry_payload_digest_format_check CHECK (
+        payload_digest ~ '^sha256:[0-9a-f]{64}$'
+    );
