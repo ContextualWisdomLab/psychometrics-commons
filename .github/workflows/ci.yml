@@ -223,13 +223,13 @@ jobs:
           printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned nightly with LLVM tools
-        run: rustup toolchain install nightly-2026-08-01 --profile minimal --component llvm-tools-preview
+        run: rustup toolchain install nightly-2026-08-18 --profile minimal --component llvm-tools-preview
       - name: Install pinned cargo-llvm-cov
-        run: cargo +nightly-2026-08-01 install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
+        run: cargo +nightly-2026-08-18 install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
       - name: Verify cargo-llvm-cov version
-        run: cargo +nightly-2026-08-01 llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
+        run: cargo +nightly-2026-08-18 llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
       - name: Generate branch coverage
-        run: cargo +nightly-2026-08-01 llvm-cov --branch --json --summary-only --output-path coverage-branches.json
+        run: cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json
       - name: Enforce complete branch coverage
         run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
       - name: Diagnose missing branch coverage
@@ -252,7 +252,7 @@ jobs:
                       f"{file_entry.get('filename')}"
                   )
           PY
-          cargo +nightly-2026-08-01 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
+          cargo +nightly-2026-08-18 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
           python3 - <<'PY'
           from pathlib import Path
 
