@@ -17,7 +17,9 @@ paths:
       description: >
         Send participant_ref, instrument_release_ref, and locale. Reuse the
         same opaque Idempotency-Key to resume the same session after restart
-        or after the catalog is later suspended or retired.
+        or after the catalog is later suspended or retired. Exactly one
+        Idempotency-Key field is accepted; repeated fields fail closed with
+        a 400 problem response before session lookup or mutation.
       parameters:
         - name: Idempotency-Key
           in: header
