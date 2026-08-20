@@ -1,0 +1,149 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public session-start API
+  version: 0.1.0
+  description: >
+    As-built public create and reload of one created assessment session.
+    POST /v1/sessions starts from the stored published instrument release
+    locked in the same transaction. Idempotency-Key is the durable session
+    reference. Exact replay after later persist Suspend or Retire returns
+    the original session. A new session after that later persist fails
+    closed.
+paths:
+  /v1/sessions:
+    post:
+      operationId: startAssessmentSession
+      summary: Start one created session from a stored published release
+      description: >
+        Send participant_ref, instrument_release_ref, and locale. Reuse the
+        same opaque Idempotency-Key to resume the same session after restart
+        or after the catalog is later suspended or retired.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque session reference used for exact start replay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionCreate"
+      responses:
+        "200":
+          description: Exact idempotent replay of an already stored start.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedSession"
+        "201":
+          description: Newly persisted created session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+  /v1/sessions/{session_ref}:
+    get:
+      operationId: loadAssessmentSession
+      summary: Reload one stored session after restart
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque assessment-session reference from Idempotency-Key.
+      responses:
+        "200":
+          description: Stored created session identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedSession"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "500":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    SessionCreate:
+      type: object
+      additionalProperties: false
+      required:
+        - participant_ref
+        - instrument_release_ref
+        - locale
+      properties:
+        participant_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        locale:
+          type: string
+    CreatedSession:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - participant_ref
+        - instrument_release_ref
+        - instrument_version_ref
+        - instrument_release_content_digest
+        - locale
+        - state
+        - created_at_unix_ms
+      properties:
+        session_ref:
+          type: string
+        participant_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        instrument_version_ref:
+          type: string
+        instrument_release_content_digest:
+          type: string
+        locale:
+          type: string
+        state:
+          type: string
+        created_at_unix_ms:
+          type: integer
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem details with the next buyer action.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
