@@ -112,6 +112,9 @@ fn authorized_owner_reads_the_exact_immutable_score_and_provenance() {
     assert!(response
         .body()
         .contains("\"instrument_version_ref\":\"instrument_version_big_five_ko_v1\""));
+    assert!(response
+        .body()
+        .contains("\"norm_version_ref\":\"norm_big_five_ko_v1\""));
     assert!(response.body().contains("\"score\":0.42"));
     assert!(response.body().contains("\"standard_error\":0.18"));
     assert!(response
