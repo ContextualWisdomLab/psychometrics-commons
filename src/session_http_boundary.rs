@@ -410,6 +410,13 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
+        let parse_overflow = format!("{}0", usize::MAX);
+        assert_eq!(
+            declared_request_end(32, &parse_overflow)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
         assert!(reject_full_request_buffer(100, 8_192).is_ok());
         assert_eq!(
             reject_full_request_buffer(8_192, 8_192).unwrap_err().kind(),
