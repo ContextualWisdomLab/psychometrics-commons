@@ -1,13 +1,15 @@
 //! Hardened public HTTP/1.1 request-boundary checks for assessment sessions.
 //!
 //! `session_http.rs` contains the session transport behavior. This module keeps
-//! the same public API while validating request framing and request identity:
-//! the rules that decide where one HTTP request ends and which idempotency key
-//! names one session create. It accepts exactly one optional `Content-Length`,
-//! no `Transfer-Encoding`, and at most one `Idempotency-Key` field. Invalid or
-//! ambiguous requests are rejected before application code runs (a fail-closed
-//! policy). That prevents proxies, gateways, and other HTTP intermediaries from
-//! choosing a different request boundary or replay identity than this server.
+//! the same public API while validating request framing, meaning the rules that
+//! decide where one HTTP request ends, and request identity, meaning which
+//! idempotency key names one session create. It accepts exactly one optional
+//! `Content-Length` header, no `Transfer-Encoding`, and at most one
+//! `Idempotency-Key` field. Invalid or ambiguous requests are rejected before
+//! application code runs; this fail-closed policy means the server stops safely
+//! instead of guessing. That prevents proxies, gateways, and other
+//! intermediaries (servers between the client and this service) from choosing a
+//! different request boundary or replay identity than this server.
 
 #[path = "session_http.rs"]
 mod implementation;
@@ -127,7 +129,7 @@ fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<St
             .read(&mut buffer[filled..])
             .map_err(normalize_read_error)?;
         if read == 0 {
-            break;
+            return Err(incomplete_request_body_error());
         }
         filled += read;
         let Some(header_offset) = buffer[..filled]
@@ -184,6 +186,13 @@ fn request_deadline_error() -> io::Error {
     io::Error::new(
         io::ErrorKind::TimedOut,
         "session HTTP request exceeded the overall read deadline",
+    )
+}
+
+fn incomplete_request_body_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session HTTP request ended before a complete frame was received",
     )
 }
 
@@ -530,6 +539,13 @@ mod tests {
         );
         assert_eq!(
             declared_request_end(32, "18446744073709551616")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        let parse_overflow = format!("{}0", usize::MAX);
+        assert_eq!(
+            declared_request_end(32, &parse_overflow)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::InvalidData
