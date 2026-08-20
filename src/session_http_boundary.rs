@@ -1,11 +1,12 @@
-//! Hardened public HTTP/1.1 framing boundary for assessment sessions.
+//! Hardened public HTTP/1.1 request-boundary checks for assessment sessions.
 //!
-//! The domain transport implementation remains in `session_http.rs`; this
-//! facade keeps its public API while making message framing a fail-closed
-//! boundary. The listener supports exactly one optional `Content-Length`
-//! header and no `Transfer-Encoding`. Rejecting unsupported or ambiguous
-//! framing prevents intermediaries and this server from disagreeing about
-//! where a request ends.
+//! `session_http.rs` contains the session transport behavior. This module keeps
+//! the same public API while validating request framing: the rules that decide
+//! where one HTTP request ends. It accepts exactly one optional `Content-Length`
+//! header and no `Transfer-Encoding`. Invalid or ambiguous requests are rejected
+//! before application code runs (a fail-closed policy). That prevents proxies,
+//! gateways, and other HTTP intermediaries from choosing a different request
+//! boundary than this server.
 
 #[expect(
     dead_code,
@@ -22,42 +23,47 @@ pub use implementation::{
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::time::{Duration, Instant};
 
 const HTTP_FIELD_NAME_BYTES: &[u8] =
     b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
 
-/// Accept one TCP connection and serve a single persist-backed session request.
+/// Accept one TCP connection and serve one persist-backed session request.
 ///
-/// HTTP/1.1 request framing is deliberately narrower than the protocol's full
-/// grammar: this listener accepts no `Transfer-Encoding` and at most one
-/// `Content-Length`. Unsupported, duplicate, or malformed header fields fail
-/// closed before application dispatch, so a proxy and the runtime cannot
-/// select different request boundaries.
+/// Request framing means deciding exactly which bytes belong to this request.
+/// This deliberately small HTTP/1.1 listener accepts no `Transfer-Encoding`
+/// and at most one `Content-Length`. Malformed or ambiguous headers are rejected
+/// before session handling begins. The connection also has one overall read
+/// deadline, so sending tiny fragments cannot keep a worker occupied forever.
 ///
 /// # Errors
 ///
-/// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, or
-/// unsupported message framing, or the underlying I/O error if accept, read,
-/// or write fails.
+/// Returns [`io::ErrorKind::InvalidData`] when request boundaries or headers are
+/// malformed or ambiguous, [`io::ErrorKind::TimedOut`] when the overall request
+/// deadline expires, or the underlying I/O error when accept, read, or write
+/// fails.
 pub fn accept_one_session_http<P: SessionHttpPort>(
     listener: &TcpListener,
     port: &mut P,
     created_at_unix_ms: u64,
 ) -> io::Result<()> {
     let (mut stream, _) = listener.accept()?;
-    stream.set_read_timeout(Some(SESSION_HTTP_IO_TIMEOUT))?;
+    let deadline = Instant::now() + SESSION_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(SESSION_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream)?;
+    let request = read_http_request(&mut stream, deadline)?;
     let response = handle_session_http_request(&request, port, created_at_unix_ms);
     write_http_response(&mut stream, &response)
 }
 
-fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
+fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<String> {
     let mut buffer = vec![0_u8; SESSION_HTTP_MAX_REQUEST_BYTES];
     let mut filled = 0;
     loop {
         reject_full_request_buffer(filled, buffer.len())?;
-        let read = stream.read(&mut buffer[filled..])?;
+        stream.set_read_timeout(Some(remaining_request_timeout(deadline)?))?;
+        let read = stream
+            .read(&mut buffer[filled..])
+            .map_err(normalize_read_error)?;
         if read == 0 {
             break;
         }
@@ -73,18 +79,56 @@ fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
         let headers = std::str::from_utf8(&buffer[..body_start])
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         reject_transfer_encoding(headers)?;
-        if let Some(value) = single_header_value(headers, "content-length")? {
-            let expected = declared_request_end(body_start, value)?;
-            reject_oversized_request(expected, buffer.len())?;
-            if filled < expected {
-                continue;
-            }
-            filled = expected;
+        let expected = match single_header_value(headers, "content-length")? {
+            Some(value) => declared_request_end(body_start, value)?,
+            None => body_start,
+        };
+        reject_oversized_request(expected, buffer.len())?;
+        if filled < expected {
+            continue;
         }
+        if filled > expected {
+            return Err(trailing_request_bytes_error());
+        }
+        filled = expected;
         break;
     }
     String::from_utf8(buffer[..filled].to_vec())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn remaining_request_timeout(deadline: Instant) -> io::Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err(request_deadline_error())
+    } else {
+        Ok(remaining)
+    }
+}
+
+fn normalize_read_error(error: io::Error) -> io::Error {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ) {
+        request_deadline_error()
+    } else {
+        error
+    }
+}
+
+fn request_deadline_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "session HTTP request exceeded the overall read deadline",
+    )
+}
+
+fn trailing_request_bytes_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session HTTP request contains bytes beyond one framed request",
+    )
 }
 
 fn reject_non_crlf_header_lines(header_bytes: &[u8]) -> io::Result<()> {
@@ -123,7 +167,7 @@ fn single_header_value<'a>(headers: &'a str, name: &str) -> io::Result<Option<&'
                 "session HTTP request contains duplicate framing headers",
             ));
         }
-        found = Some(value.trim());
+        found = Some(value.trim_matches(&[' ', '\t'][..]));
     }
     Ok(found)
 }
@@ -180,13 +224,20 @@ fn reject_oversized_request(expected: usize, capacity: usize) -> io::Result<()> 
     }
 }
 
+fn invalid_content_length_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "invalid session HTTP Content-Length",
+    )
+}
+
 fn declared_request_end(body_start: usize, content_length: &str) -> io::Result<usize> {
-    let content_length = content_length.parse::<usize>().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid session HTTP Content-Length",
-        )
-    })?;
+    if content_length.is_empty() || !content_length.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid_content_length_error());
+    }
+    let content_length = content_length
+        .parse::<usize>()
+        .map_err(|_| invalid_content_length_error())?;
     body_start.checked_add(content_length).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -224,10 +275,12 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        declared_request_end, reject_full_request_buffer, reject_invalid_header_name,
-        reject_non_crlf_header_lines, reject_oversized_request, reject_transfer_encoding,
-        single_header_value,
+        declared_request_end, normalize_read_error, reject_full_request_buffer,
+        reject_invalid_header_name, reject_non_crlf_header_lines, reject_oversized_request,
+        reject_transfer_encoding, remaining_request_timeout, single_header_value,
     };
+    use std::io;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn framing_helpers_fail_closed_on_duplicate_unsupported_or_malformed_headers() {
@@ -235,7 +288,7 @@ mod tests {
         assert_eq!(single_header_value(plain, "content-length").unwrap(), None);
         assert!(reject_transfer_encoding(plain).is_ok());
 
-        let one = "POST /v1/sessions HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}";
+        let one = "POST /v1/sessions HTTP/1.1\r\nContent-Length: \t2 \t\r\n\r\n{}";
         assert_eq!(
             single_header_value(one, "content-length").unwrap(),
             Some("2")
@@ -247,7 +300,7 @@ mod tests {
             single_header_value(duplicate, "content-length")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
 
         let malformed = "POST /v1/sessions HTTP/1.1\r\nBroken Header\r\n\r\n";
@@ -255,30 +308,54 @@ mod tests {
             single_header_value(malformed, "content-length")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
 
         let transfer = "POST /v1/sessions HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert_eq!(
             reject_transfer_encoding(transfer).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn request_deadline_helpers_cover_expiry_and_socket_timeout_kinds() {
+        assert!(remaining_request_timeout(Instant::now() + Duration::from_secs(1)).is_ok());
+        assert_eq!(
+            remaining_request_timeout(Instant::now()).unwrap_err().kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            normalize_read_error(io::Error::new(io::ErrorKind::TimedOut, "timeout")).kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            normalize_read_error(io::Error::new(io::ErrorKind::WouldBlock, "would block")).kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            normalize_read_error(io::Error::new(io::ErrorKind::ConnectionReset, "reset")).kind(),
+            io::ErrorKind::ConnectionReset
         );
     }
 
     #[test]
     fn header_lines_require_crlf_delimiters() {
-        assert!(reject_non_crlf_header_lines(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n").is_ok());
+        assert!(
+            reject_non_crlf_header_lines(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n")
+                .is_ok()
+        );
         assert_eq!(
             reject_non_crlf_header_lines(b"GET / HTTP/1.1\nHost: example.test\r\n\r\n")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
         assert_eq!(
             reject_non_crlf_header_lines(b"GET / HTTP/1.1\rHost: example.test\r\n\r\n")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
     }
 
@@ -287,19 +364,19 @@ mod tests {
         assert!(reject_invalid_header_name("Content-Length").is_ok());
         assert_eq!(
             reject_invalid_header_name("").unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
         assert_eq!(
             reject_invalid_header_name("Content-Length ")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
         assert_eq!(
             reject_invalid_header_name("Content@Length")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
     }
 
@@ -307,24 +384,32 @@ mod tests {
     fn framing_size_helpers_cover_valid_invalid_and_overflow_paths() {
         assert_eq!(declared_request_end(32, "8").unwrap(), 40);
         assert_eq!(
+            declared_request_end(32, "").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
             declared_request_end(32, "no").unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            declared_request_end(32, "+8").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
         );
         assert_eq!(
             declared_request_end(32, "18446744073709551615")
                 .unwrap_err()
                 .kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
         assert!(reject_full_request_buffer(100, 8_192).is_ok());
         assert_eq!(
             reject_full_request_buffer(8_192, 8_192).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
         assert!(reject_oversized_request(100, 8_192).is_ok());
         assert_eq!(
             reject_oversized_request(20_000, 8_192).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
+            io::ErrorKind::InvalidData
         );
     }
 }
