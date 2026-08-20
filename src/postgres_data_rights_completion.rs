@@ -257,23 +257,25 @@ fn classify_replay(
         .query(
             "SELECT retained_scope_ref
              FROM data_rights_retained_scope_evidence
-             WHERE request_ref = $1 AND tenant_ref = $2
-             ORDER BY retained_scope_ref",
+             WHERE request_ref = $1 AND tenant_ref = $2",
             &[&request.request_ref(), &request.tenant_ref()],
         )?
         .into_iter()
         .map(|row| row.get::<_, String>(0))
         .collect::<Vec<_>>();
-    let expected_retained = evidence
-        .retained_scopes
-        .iter()
-        .map(|reference| (*reference).to_owned())
-        .collect::<Vec<_>>();
-    if stored_retained != expected_retained {
+    if !retained_scope_sequences_match(stored_retained, &evidence.retained_scopes) {
         return Err(DataRightsPersistenceError::ConflictingReplay);
     }
 
     Ok(DataRightsCompletionDisposition::Duplicate)
+}
+
+fn retained_scope_sequences_match(mut stored: Vec<String>, expected: &[&str]) -> bool {
+    stored.sort();
+    stored
+        .iter()
+        .map(String::as_str)
+        .eq(expected.iter().copied())
 }
 
 fn request_kind_name(kind: DataRightsRequestKind) -> &'static str {
