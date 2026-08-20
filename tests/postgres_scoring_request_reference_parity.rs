@@ -38,6 +38,7 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
     assert_eq!(database_error.constraint(), Some(constraint));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn insert_request(
     client: &mut Client,
     scoring_request_ref: &str,
@@ -85,7 +86,13 @@ fn assert_field_rejects_rust_invalid_aliases(
     field: ReferenceField,
     constraint: &str,
 ) {
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let suffix = format!("{}_{}", field as u8, index);
@@ -99,13 +106,15 @@ fn assert_field_rejects_rust_invalid_aliases(
         let norm_version_ref = format!("norm_version_{suffix}");
 
         match field {
-            ReferenceField::Request => request_ref = invalid_ref.to_owned(),
-            ReferenceField::Session => session_ref = invalid_ref.to_owned(),
-            ReferenceField::Snapshot => snapshot_ref = invalid_ref.to_owned(),
-            ReferenceField::AssessmentSpec => assessment_spec_ref = invalid_ref.to_owned(),
-            ReferenceField::InstrumentVersion => instrument_version_ref = invalid_ref.to_owned(),
-            ReferenceField::ScoringVersion => scoring_version_ref = invalid_ref.to_owned(),
-            ReferenceField::Calibration => calibration_reference = invalid_ref.to_owned(),
+            ReferenceField::Request => invalid_ref.clone_into(&mut request_ref),
+            ReferenceField::Session => invalid_ref.clone_into(&mut session_ref),
+            ReferenceField::Snapshot => invalid_ref.clone_into(&mut snapshot_ref),
+            ReferenceField::AssessmentSpec => invalid_ref.clone_into(&mut assessment_spec_ref),
+            ReferenceField::InstrumentVersion => {
+                invalid_ref.clone_into(&mut instrument_version_ref);
+            }
+            ReferenceField::ScoringVersion => invalid_ref.clone_into(&mut scoring_version_ref),
+            ReferenceField::Calibration => invalid_ref.clone_into(&mut calibration_reference),
             ReferenceField::NormVersion => {}
         }
         let norm_version = if field == ReferenceField::NormVersion {
@@ -208,8 +217,5 @@ fn migration_reapplication_replaces_a_weakened_reference_constraint() {
         None,
     )
     .expect_err("migration reapplication must repair a weaker same-named reference constraint");
-    assert_check(
-        &error,
-        "scoring_request_scoring_request_ref_format_check",
-    );
+    assert_check(&error, "scoring_request_scoring_request_ref_format_check");
 }
