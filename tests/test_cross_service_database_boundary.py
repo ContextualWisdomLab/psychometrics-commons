@@ -94,6 +94,30 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         self.assertFalse(is_runtime_text_file(ROOT / "src" / "fixture.png"))
         self.assertFalse(is_runtime_text_file(ROOT / "migrations" / "fixture.bin"))
 
+    def test_deployment_manifest_shapes_are_runtime_inputs(self) -> None:
+        for path in (
+            ROOT / "Dockerfile",
+            ROOT / "Dockerfile.production",
+            ROOT / "compose.yaml",
+            ROOT / "docker-compose.yml",
+            ROOT / "deploy" / "service.yaml",
+            ROOT / "infra" / "runtime.json",
+            ROOT / "k8s" / "values.toml",
+            ROOT / ".env.production",
+        ):
+            self.assertTrue(is_deployment_manifest(path), str(path))
+        self.assertFalse(is_deployment_manifest(ROOT / "docs" / "example.json"))
+
+    def test_every_dblink_function_family_is_forbidden(self) -> None:
+        for sql in (
+            "SELECT dblink('dbname=other', 'SELECT 1')",
+            "SELECT dblink_exec('remote', 'DELETE FROM sample')",
+            "SELECT dblink_connect_u('remote', 'dbname=other')",
+            "SELECT dblink_send_query('remote', 'SELECT 1')",
+            "SELECT dblink_build_sql_insert('sample', ARRAY[1], 1, ARRAY['1'], ARRAY['2'])",
+        ):
+            self.assertIsNotNone(FORBIDDEN_CROSS_DATABASE_SQL.search(sql), sql)
+
     def test_external_context_database_credentials_are_not_runtime_inputs(self) -> None:
         violations: list[str] = []
         for path in runtime_files():
