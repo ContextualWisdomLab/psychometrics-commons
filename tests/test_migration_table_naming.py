@@ -39,16 +39,28 @@ def is_descriptive_snake_case_table_name(table_name: str) -> bool:
 class MigrationTableNamingContractTests(unittest.TestCase):
     """Keep product-owned PostgreSQL migration identity machine-reviewable."""
 
-    def test_parser_covers_plain_if_not_exists_schema_and_unlogged_tables(self) -> None:
+    def test_parser_covers_postgresql_table_creation_forms(self) -> None:
         sql = """
         CREATE TABLE assessment_session (session_ref text);
         CREATE TABLE IF NOT EXISTS public.scoring_job_attempt (attempt_ref text);
         CREATE UNLOGGED TABLE durable_import_buffer (row_ref text);
+        CREATE GLOBAL TEMPORARY TABLE migration_review_cache (row_ref text);
+        CREATE TABLE typed_result_snapshot OF result_record;
+        CREATE TABLE monthly_result_partition PARTITION OF result_archive DEFAULT;
+        CREATE UNLOGGED TABLE report_extract AS SELECT 1 AS value;
         """
 
         self.assertEqual(
             created_table_names(sql),
-            ["assessment_session", "scoring_job_attempt", "durable_import_buffer"],
+            [
+                "assessment_session",
+                "scoring_job_attempt",
+                "durable_import_buffer",
+                "migration_review_cache",
+                "typed_result_snapshot",
+                "monthly_result_partition",
+                "report_extract",
+            ],
         )
 
     def test_name_contract_rejects_single_word_mixed_case_and_quoted_aliases(self) -> None:
