@@ -151,9 +151,56 @@ fn get_returns_server_ordered_deliveries_so_the_client_can_resume() {
     assert!(loaded.body().contains("\"sequence\":2"));
     assert!(loaded.body().contains("\"item_version_001\""));
     assert!(loaded.body().contains("\"item_version_002\""));
+    assert!(loaded
+        .body()
+        .contains(&format!("\"release_content_digest\":\"{RELEASE_DIGEST}\"")));
+    assert!(loaded.body().contains("\"session_state\":\"active\""));
+    assert!(loaded
+        .body()
+        .contains("\"allowed_item_version_refs\":[\"item_version_001\",\"item_version_002\"]"));
     let first_pos = loaded.body().find("item_version_001").unwrap();
     let second_pos = loaded.body().find("item_version_002").unwrap();
     assert!(first_pos < second_pos);
+}
+
+#[test]
+fn ambiguous_or_wrong_headers_fail_closed_before_recording() {
+    let body = valid_body();
+    let mut padded = active_runtime();
+    let padded_request = format!(
+        "POST {} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key:  {DELIVERY_REF} \r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        collection_path(SESSION_REF),
+        body.len()
+    );
+    assert_eq!(
+        handle_item_delivery_http_request(&padded_request, &mut padded).status(),
+        400
+    );
+    assert_eq!(padded.event_count(SESSION_REF), 0);
+
+    let mut duplicate = active_runtime();
+    let duplicate_request = format!(
+        "POST {} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        collection_path(SESSION_REF),
+        body.len()
+    );
+    assert_eq!(
+        handle_item_delivery_http_request(&duplicate_request, &mut duplicate).status(),
+        400
+    );
+    assert_eq!(duplicate.event_count(SESSION_REF), 0);
+
+    let mut wrong_media_type = active_runtime();
+    let wrong_media_type_request = format!(
+        "POST {} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{body}",
+        collection_path(SESSION_REF),
+        body.len()
+    );
+    let response =
+        handle_item_delivery_http_request(&wrong_media_type_request, &mut wrong_media_type);
+    assert_eq!(response.status(), 415);
+    assert_eq!(response.content_type(), "application/problem+json");
+    assert_eq!(wrong_media_type.event_count(SESSION_REF), 0);
 }
 
 #[test]

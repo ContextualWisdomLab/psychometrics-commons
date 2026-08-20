@@ -52,6 +52,21 @@ fn exchange(addr: SocketAddr, request: &str) -> String {
     body
 }
 
+fn exchange_in_chunks(addr: SocketAddr, headers: &str, body: &str) -> String {
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream.write_all(headers.as_bytes()).unwrap();
+    stream.flush().unwrap();
+    thread::sleep(Duration::from_millis(20));
+    stream.write_all(body.as_bytes()).unwrap();
+    stream.shutdown(std::net::Shutdown::Write).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
 #[test]
 fn bound_listener_records_and_reloads_item_delivery_over_tcp() {
     let listener =
@@ -71,12 +86,13 @@ fn bound_listener_records_and_reloads_item_delivery_over_tcp() {
     let body = format!(
         "{{\"delivery_ref\":\"{DELIVERY_REF}\",\"item_version_ref\":\"item_version_001\",\"presentation_context_ref\":\"presentation_web_self_report_v1\"}}"
     );
-    let created = exchange(
+    let created = exchange_in_chunks(
         addr,
         &format!(
-            "POST /v1/sessions/{SESSION_REF}{ITEM_DELIVERY_COLLECTION_SUFFIX} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /v1/sessions/{SESSION_REF}{ITEM_DELIVERY_COLLECTION_SUFFIX} HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {DELIVERY_REF}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
             body.len()
         ),
+        &body,
     );
     assert!(created.starts_with("HTTP/1.1 201 Created\r\n"));
     assert!(created.contains("Content-Type: application/json\r\n"));

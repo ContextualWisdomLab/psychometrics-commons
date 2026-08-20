@@ -14,8 +14,9 @@ paths:
       summary: Record one item delivery
       description: >
         Records that one item version from the session's bound published release
-        was shown. The server assigns a monotonic sequence. Exact Idempotency-Key
-        replay that matches delivery_ref returns the original event.
+        was shown. The server assigns a monotonic sequence. An exact, unpadded,
+        non-duplicate Idempotency-Key replay that matches delivery_ref returns
+        the original event; the request must use application/json.
       parameters:
         - name: session_ref
           in: path
@@ -56,12 +57,17 @@ paths:
           $ref: "#/components/responses/Problem"
         "409":
           $ref: "#/components/responses/Problem"
+        "415":
+          $ref: "#/components/responses/Problem"
     get:
       operationId: listItemDeliveries
       summary: Reload delivered items for one session
       description: >
         Returns the in-process server-ordered item-delivery ledger so a client
-        can resume the same Active session.
+        can resume the same session. The response includes the bound release
+        digest, lifecycle state, and exact allowed item-version set. This
+        in-process route has no tenant authentication or capability-URL
+        authority; hosted authorization remains a separate family.
       parameters:
         - name: session_ref
           in: path
@@ -133,15 +139,26 @@ components:
       required:
         - session_ref
         - instrument_release_ref
+        - release_content_digest
         - locale
+        - session_state
+        - allowed_item_version_refs
         - events
       properties:
         session_ref:
           type: string
         instrument_release_ref:
           type: string
+        release_content_digest:
+          type: string
         locale:
           type: string
+        session_state:
+          type: string
+        allowed_item_version_refs:
+          type: array
+          items:
+            type: string
         events:
           type: array
           items:

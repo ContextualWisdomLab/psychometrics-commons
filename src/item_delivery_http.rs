@@ -211,8 +211,8 @@ fn handle_record(
     session_ref: &str,
     runtime: &mut ItemDeliveryHttpRuntime,
 ) -> ItemDeliveryHttpResponse {
-    let Some(idempotency_key) =
-        header_value(request, "idempotency-key").and_then(valid_idempotency_key)
+    let Some(idempotency_key) = header_value_raw(request, "idempotency-key")
+        .and_then(|value| valid_idempotency_key(value.strip_prefix(' ').unwrap_or(value)))
     else {
         return ItemDeliveryHttpResponse::problem(
             400,
@@ -221,6 +221,14 @@ fn handle_record(
             "POST /v1/sessions/{session_ref}/item-deliveries requires an opaque Idempotency-Key header",
         );
     };
+    if header_value(request, "content-type") != Some("application/json") {
+        return ItemDeliveryHttpResponse::problem(
+            415,
+            "urn:psychometrics-commons:problem:unsupported-media-type",
+            "Unsupported Media Type",
+            "POST /v1/sessions/{session_ref}/item-deliveries requires Content-Type: application/json",
+        );
+    }
     let Some(body) = request_body(request) else {
         return ItemDeliveryHttpResponse::problem(
             400,
@@ -270,7 +278,9 @@ fn handle_record(
 
 fn handle_list(session_ref: &str, runtime: &ItemDeliveryHttpRuntime) -> ItemDeliveryHttpResponse {
     match runtime.sessions.get(session_ref) {
-        Some(session) => ItemDeliveryHttpResponse::json(200, ledger_body(&session.ledger)),
+        Some(session) => {
+            ItemDeliveryHttpResponse::json(200, ledger_body(&session.ledger, session.state))
+        }
         None => session_not_found(),
     }
 }
@@ -411,7 +421,7 @@ fn event_body(
     )
 }
 
-fn ledger_body(ledger: &ItemDeliveryLedger) -> String {
+fn ledger_body(ledger: &ItemDeliveryLedger, state: SessionState) -> String {
     let mut events = String::from("[");
     for (index, event) in ledger.events().iter().enumerate() {
         if index > 0 {
@@ -420,38 +430,67 @@ fn ledger_body(ledger: &ItemDeliveryLedger) -> String {
         events.push_str(&event_body(ledger, event));
     }
     events.push(']');
+    let mut allowed_item_version_refs = String::from("[");
+    for (index, item_version_ref) in ledger.allowed_item_version_refs().iter().enumerate() {
+        if index > 0 {
+            allowed_item_version_refs.push(',');
+        }
+        allowed_item_version_refs.push_str(&json_string(item_version_ref));
+    }
+    allowed_item_version_refs.push(']');
     format!(
-        "{{\"session_ref\":{},\"instrument_release_ref\":{},\"locale\":{},\"events\":{events}}}",
+        "{{\"session_ref\":{},\"instrument_release_ref\":{},\"release_content_digest\":{},\"locale\":{},\"session_state\":{},\"allowed_item_version_refs\":{allowed_item_version_refs},\"events\":{events}}}",
         json_string(ledger.session_ref()),
         json_string(ledger.instrument_release_ref()),
-        json_string(ledger.locale())
+        json_string(ledger.release_content_digest()),
+        json_string(ledger.locale()),
+        json_string(session_state_name(state))
     )
 }
 
-fn valid_idempotency_key(value: &str) -> Option<&str> {
-    let normalized = value.trim();
-    if normalized.is_empty() || normalized.chars().any(char::is_whitespace) {
-        return None;
-    }
-    let numeric_like = normalized.chars().any(char::is_numeric)
-        && normalized
-            .chars()
-            .all(|character| character.is_numeric() || matches!(character, '+' | '-' | '.' | ','));
-    if numeric_like {
-        None
-    } else {
-        Some(normalized)
+fn session_state_name(state: SessionState) -> &'static str {
+    match state {
+        SessionState::Created => "created",
+        SessionState::Active => "active",
+        SessionState::Paused => "paused",
+        SessionState::Completed => "completed",
+        SessionState::Scoring => "scoring",
+        SessionState::Scored => "scored",
+        SessionState::Released => "released",
+        SessionState::Expired => "expired",
+        SessionState::Cancelled => "cancelled",
+        SessionState::Invalidated => "invalidated",
     }
 }
 
+fn valid_idempotency_key(value: &str) -> Option<&str> {
+    if value.trim() != value || value.chars().any(char::is_whitespace) {
+        return None;
+    }
+    normalized_reference(value)
+}
+
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
-    request.lines().skip(1).find_map(|line| {
+    header_value_raw(request, name).map(str::trim)
+}
+
+fn header_value_raw<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+    let mut found = None;
+    for line in request.split("\r\n").skip(1) {
         if line.is_empty() {
-            return None;
+            break;
         }
-        let (header_name, value) = line.split_once(':')?;
-        (header_name.eq_ignore_ascii_case(name)).then(|| value.trim())
-    })
+        let Some((header_name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if header_name.eq_ignore_ascii_case(name) {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(value);
+        }
+    }
+    found
 }
 
 fn request_body(request: &str) -> Option<&str> {
@@ -468,54 +507,58 @@ fn request_body(request: &str) -> Option<&str> {
 fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
     let mut buffer = Vec::new();
     let mut chunk = [0_u8; 512];
+    let mut expected_len = None;
     loop {
+        if buffer.len() >= ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES {
+            return Ok(String::new());
+        }
         let read_result = stream.read(&mut chunk);
-        match apply_request_read(&mut buffer, &chunk, read_result)? {
-            RequestReadProgress::Continue => {}
-            RequestReadProgress::Complete => break,
+        match read_result {
+            Ok(0) => break,
+            Ok(read) => {
+                buffer.extend_from_slice(&chunk[..read]);
+                if buffer.len() > ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES {
+                    return Ok(String::new());
+                }
+                if expected_len.is_none() {
+                    let Some(header_offset) =
+                        buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                    else {
+                        continue;
+                    };
+                    let body_start = header_offset + 4;
+                    let headers = String::from_utf8_lossy(&buffer[..body_start]);
+                    expected_len = Some(
+                        header_value(&headers, "content-length")
+                            .and_then(|value| value.parse::<usize>().ok())
+                            .and_then(|length| body_start.checked_add(length))
+                            .unwrap_or(body_start),
+                    );
+                }
+                if let Some(expected) = expected_len {
+                    if buffer.len() == expected {
+                        break;
+                    }
+                    if buffer.len() > expected {
+                        return Ok(String::new());
+                    }
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error),
         }
     }
-    if buffer.len() > ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES
-        || !buffer.windows(4).any(|window| window == b"\r\n\r\n")
-    {
+    if expected_len.is_none() || expected_len != Some(buffer.len()) {
         return Ok(String::new());
     }
     Ok(String::from_utf8_lossy(&buffer).into_owned())
-}
-
-#[derive(Debug)]
-enum RequestReadProgress {
-    Continue,
-    Complete,
-}
-
-fn apply_request_read(
-    buffer: &mut Vec<u8>,
-    chunk: &[u8],
-    read_result: io::Result<usize>,
-) -> io::Result<RequestReadProgress> {
-    match read_result {
-        Ok(0) => Ok(RequestReadProgress::Complete),
-        Ok(read) => {
-            buffer.extend_from_slice(&chunk[..read]);
-            if buffer.windows(4).any(|window| window == b"\r\n\r\n")
-                || buffer.len() > ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES
-            {
-                Ok(RequestReadProgress::Complete)
-            } else {
-                Ok(RequestReadProgress::Continue)
-            }
-        }
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-            ) =>
-        {
-            Ok(RequestReadProgress::Complete)
-        }
-        Err(error) => Err(error),
-    }
 }
 
 fn write_http_response(
@@ -547,6 +590,7 @@ const fn reason_phrase(status: u16) -> &'static str {
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        415 => "Unsupported Media Type",
         500 => "Internal Server Error",
         _ => "Error",
     }
@@ -590,15 +634,13 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_request_read, collection_session_ref, handle_item_delivery_http_request, json_string,
-        parse_json_string, parse_record_body, parse_string_object, reason_phrase,
-        valid_idempotency_key, ItemDeliveryHttpRuntime, RequestReadProgress,
-        ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES,
+        collection_session_ref, handle_item_delivery_http_request, json_string, parse_json_string,
+        parse_record_body, parse_string_object, reason_phrase, valid_idempotency_key,
+        ItemDeliveryHttpRuntime,
     };
     use crate::instrument::InstrumentReleaseManifest;
     use crate::item_delivery::ItemDeliveryLedger;
     use crate::session::SessionState;
-    use std::io::{self, ErrorKind};
 
     const RELEASE_DIGEST: &str =
         "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -632,7 +674,7 @@ mod tests {
 
     fn post(body: &str, key: &str) -> String {
         format!(
-            "POST /v1/sessions/{SESSION_REF}/item-deliveries HTTP/1.1\r\nIdempotency-Key: {key}\r\nContent-Length: {}\r\n\r\n{body}",
+            "POST /v1/sessions/{SESSION_REF}/item-deliveries HTTP/1.1\r\nIdempotency-Key: {key}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         )
     }
@@ -667,43 +709,6 @@ mod tests {
             collection_session_ref("/v1/sessions/ses_x/item-deliveries"),
             Some("ses_x")
         );
-    }
-
-    #[test]
-    fn request_read_progress_and_transport_failures_are_classified() {
-        let mut buffer = Vec::new();
-        assert!(matches!(
-            apply_request_read(&mut buffer, b"", Ok(0)).unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(&mut Vec::new(), b"GET", Ok(3)).unwrap(),
-            RequestReadProgress::Continue
-        ));
-        let mut oversized = vec![b'x'; ITEM_DELIVERY_HTTP_MAX_REQUEST_BYTES];
-        assert!(matches!(
-            apply_request_read(&mut oversized, b"y", Ok(1)).unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::TimedOut, "timeout"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::WouldBlock, "block"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
     }
 
     #[test]
@@ -753,7 +758,7 @@ mod tests {
         );
         assert_eq!(
             handle_item_delivery_http_request(
-                "POST /v1/sessions/ses_unit_item_delivery/item-deliveries HTTP/1.1\r\nIdempotency-Key: dlv_ok\r\nContent-Length: 8\r\n\r\nshort",
+                "POST /v1/sessions/ses_unit_item_delivery/item-deliveries HTTP/1.1\r\nIdempotency-Key: dlv_ok\r\nContent-Type: application/json\r\nContent-Length: 8\r\n\r\nshort",
                 &mut runtime
             )
             .status(),
