@@ -8,8 +8,7 @@ use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 use std::sync::{Mutex, MutexGuard};
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn guard() -> MutexGuard<'static, ()> {
@@ -45,14 +44,20 @@ fn insert_ledger(
     tenant_ref: &str,
     session_ref: &str,
     release_ref: &str,
-    allowed_items: Vec<&str>,
+    allowed_items: &[&str],
 ) -> Result<u64, postgres::Error> {
     client.execute(
         "INSERT INTO item_delivery_ledger (\
              tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
              allowed_item_version_refs\
          ) VALUES ($1,$2,$3,$4,'en-US',$5)",
-        &[&tenant_ref, &session_ref, &release_ref, &DIGEST, &allowed_items],
+        &[
+            &tenant_ref,
+            &session_ref,
+            &release_ref,
+            &DIGEST,
+            &allowed_items,
+        ],
     )
 }
 
@@ -85,7 +90,14 @@ fn insert_event(
 fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "12345",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let error = insert_ledger(
@@ -93,7 +105,7 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
             invalid_ref,
             &format!("session_tenant_{index}"),
             &format!("release_tenant_{index}"),
-            vec!["item_alpha"],
+            &["item_alpha"],
         )
         .expect_err("tenant references must match the Rust opaque-reference boundary");
         assert_check(&error, "item_delivery_ledger_tenant_ref_format_check");
@@ -105,7 +117,7 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             invalid_ref,
             &format!("release_session_{index}"),
-            vec!["item_alpha"],
+            &["item_alpha"],
         )
         .expect_err("session references must match the Rust opaque-reference boundary");
         assert_check(&error, "item_delivery_ledger_session_ref_format_check");
@@ -117,7 +129,7 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             &format!("session_release_{index}"),
             invalid_ref,
-            vec!["item_alpha"],
+            &["item_alpha"],
         )
         .expect_err("release references must match the Rust opaque-reference boundary");
         assert_check(&error, "item_delivery_ledger_release_ref_format_check");
@@ -129,18 +141,50 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             &format!("session_array_{index}"),
             &format!("release_array_{index}"),
-            vec!["item_alpha", invalid_ref],
+            &["item_alpha", invalid_ref],
         )
         .expect_err("allowed-item arrays must enforce every Rust reference predicate");
         assert_check(&error, "item_delivery_ledger_allowed_items_format_check");
     }
+
+    for (index, allowed_items) in [
+        vec!["item_2", "opaque_alpha 2"],
+        vec!["release_3.1", "v1-2"],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        insert_ledger(
+            &mut client,
+            "tenant_mixed",
+            &format!("session_mixed_{index}"),
+            &format!("release_mixed_{index}"),
+            &allowed_items,
+        )
+        .expect("mixed references must remain valid opaque identifiers");
+    }
+
+    let null_array: bool = client
+        .query_one(
+            "SELECT item_delivery_reference_array_is_valid(NULL::text[])",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(!null_array, "a NULL reference array must fail closed");
 }
 
 #[test]
 fn delivery_event_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let session_ref = format!("session_delivery_{index}");
@@ -150,7 +194,7 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             &session_ref,
             &format!("release_delivery_{index}"),
-            vec![item_ref.as_str()],
+            &[item_ref.as_str()],
         )
         .unwrap();
         let error = insert_event(
@@ -173,7 +217,7 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             &session_ref,
             &format!("release_item_{index}"),
-            vec![invalid_ref],
+            &[invalid_ref],
         )
         .expect_err("invalid item identity must already fail in allowed-item evidence");
     }
@@ -186,7 +230,7 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             &session_ref,
             &format!("release_presentation_{index}"),
-            vec![item_ref.as_str()],
+            &[item_ref.as_str()],
         )
         .unwrap();
         let error = insert_event(
@@ -210,7 +254,7 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
             "tenant_alpha",
             &session_ref,
             &format!("release_selection_{index}"),
-            vec![item_ref.as_str()],
+            &[item_ref.as_str()],
         )
         .unwrap();
         let error = insert_event(
@@ -245,11 +289,12 @@ fn migration_reapplication_revalidates_existing_rows_under_the_rust_predicate() 
         "½",
         "session_upgrade_guard",
         "release_upgrade_guard",
-        vec!["item_upgrade_guard"],
+        &["item_upgrade_guard"],
     )
     .expect("the deliberately weakened historical predicate should admit the regression row");
 
-    let error = apply_item_delivery_migration(&mut client)
-        .expect_err("migration reapplication must revalidate pre-existing rows under the new predicate");
+    let error = apply_item_delivery_migration(&mut client).expect_err(
+        "migration reapplication must revalidate pre-existing rows under the new predicate",
+    );
     assert_check(&error, "item_delivery_ledger_tenant_ref_format_check");
 }

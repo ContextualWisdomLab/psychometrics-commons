@@ -4,8 +4,7 @@ use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 use std::sync::{Mutex, MutexGuard};
 
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn guard() -> MutexGuard<'static, ()> {
@@ -61,9 +60,15 @@ fn event_tenant_and_item_columns_apply_the_same_rust_reference_boundary() {
     let _guard = guard();
     let mut client = client();
 
-    for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"]
-        .into_iter()
-        .enumerate()
+    for (index, invalid_ref) in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let session_ref = seed_ledger(&mut client, &format!("tenant_{index}"));
         let error = client
@@ -84,9 +89,15 @@ fn event_tenant_and_item_columns_apply_the_same_rust_reference_boundary() {
         assert_check(&error, "item_delivery_event_tenant_ref_format_check");
     }
 
-    for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"]
-        .into_iter()
-        .enumerate()
+    for (index, invalid_ref) in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let session_ref = seed_ledger(&mut client, &format!("item_{index}"));
         let error = client
