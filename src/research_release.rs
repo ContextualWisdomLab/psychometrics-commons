@@ -169,7 +169,8 @@ impl ApprovedResearchRelease {
 ///
 /// A buyer packaging a public release passes the column name the fixture would
 /// publish and the cell values in that column. Research identities are allowed.
-/// Operational, Keyverse, and restricted-linkage names are not.
+/// Operational, Keyverse, and restricted-linkage names are not. Structured values
+/// must be flattened or independently scanned before this boundary accepts them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PublicReleaseFixtureColumn<'a> {
     /// Published column name.
@@ -204,6 +205,8 @@ pub enum PublicReleaseLeakageError {
     ForbiddenColumn,
     /// No effective restricted-identity inventory was supplied for the scan.
     IdentityInventoryUnavailable,
+    /// A cell contains structured data this flat scanner cannot inspect safely.
+    StructuredValueUnsupported,
     /// A cell value is an operational participant identifier.
     OperationalParticipant,
     /// A cell value is a Keyverse subject identifier.
@@ -220,6 +223,9 @@ impl Display for PublicReleaseLeakageError {
             }
             Self::IdentityInventoryUnavailable => {
                 "supply an authorized restricted-identity inventory before packaging the public release fixture"
+            }
+            Self::StructuredValueUnsupported => {
+                "flatten or independently scan structured public-release values before packaging the fixture"
             }
             Self::OperationalParticipant => {
                 "remove operational participant identifiers from the public release fixture"
@@ -261,14 +267,16 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
 /// identity names remain forbidden even when an ETL, export, source, or warehouse
 /// prefix is added before them. The caller must also supply an effective
 /// product-authorized identity inventory; the scanner fails closed rather than
-/// treating an omitted inventory as evidence that the fixture is clean.
+/// treating an omitted inventory as evidence that the fixture is clean. Object or
+/// array cell values are not parsed here: callers must flatten them or prove a
+/// separate structured-value privacy scan before packaging.
 ///
 /// # Errors
 ///
 /// Returns [`PublicReleaseLeakageError`] when a forbidden column is present, the
-/// effective restricted-identity inventory is unavailable, or a cell value is an
-/// operational participant, Keyverse subject, restricted linkage identity, or
-/// linkage-key version.
+/// effective restricted-identity inventory is unavailable, a structured cell cannot
+/// be inspected safely, or a cell value is an operational participant, Keyverse
+/// subject, restricted linkage identity, or linkage-key version.
 pub fn scan_public_release_fixture(
     columns: &[PublicReleaseFixtureColumn<'_>],
     restricted: RestrictedReleaseIdentities<'_>,
@@ -285,6 +293,9 @@ pub fn scan_public_release_fixture(
 
     for column in columns {
         for cell in column.cell_values {
+            if structured_public_release_cell(cell) {
+                return Err(PublicReleaseLeakageError::StructuredValueUnsupported);
+            }
             if matches_restricted_identity(cell, restricted.operational_participant_refs) {
                 return Err(PublicReleaseLeakageError::OperationalParticipant);
             }
@@ -361,6 +372,11 @@ fn normalize_public_release_column(column_name: &str) -> String {
         previous = Some(current);
     }
     normalized
+}
+
+fn structured_public_release_cell(cell: &str) -> bool {
+    let cell = cell.trim_start();
+    cell.starts_with('{') || cell.starts_with('[')
 }
 
 fn matches_restricted_identity(cell: &str, restricted_identities: &[&str]) -> bool {
