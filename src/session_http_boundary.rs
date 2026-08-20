@@ -322,7 +322,9 @@ mod tests {
     fn request_deadline_helpers_cover_expiry_and_socket_timeout_kinds() {
         assert!(remaining_request_timeout(Instant::now() + Duration::from_secs(1)).is_ok());
         assert_eq!(
-            remaining_request_timeout(Instant::now()).unwrap_err().kind(),
+            remaining_request_timeout(Instant::now())
+                .unwrap_err()
+                .kind(),
             io::ErrorKind::TimedOut
         );
         assert_eq!(
@@ -342,8 +344,7 @@ mod tests {
     #[test]
     fn header_lines_require_crlf_delimiters() {
         assert!(
-            reject_non_crlf_header_lines(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n")
-                .is_ok()
+            reject_non_crlf_header_lines(b"GET / HTTP/1.1\r\nHost: example.test\r\n\r\n").is_ok()
         );
         assert_eq!(
             reject_non_crlf_header_lines(b"GET / HTTP/1.1\nHost: example.test\r\n\r\n")
