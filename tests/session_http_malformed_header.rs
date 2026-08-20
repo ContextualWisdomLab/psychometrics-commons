@@ -16,7 +16,9 @@ fn rejected_request_kind(request: &[u8]) -> std::io::ErrorKind {
 
     let mut stream = TcpStream::connect(address).unwrap();
     stream.write_all(request).unwrap();
-    stream.shutdown(Shutdown::Write).unwrap();
+    // Malformed framing is rejected by closing the peer promptly, so a client
+    // half-close can legitimately lose the race with that server-side close.
+    stream.shutdown(Shutdown::Write).ok();
     let mut response = String::new();
     let _ = stream.read_to_string(&mut response);
 
