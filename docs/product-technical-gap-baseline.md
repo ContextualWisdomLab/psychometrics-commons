@@ -128,7 +128,7 @@ After fetching `origin`, protected `main` is `503a4e640eeba0f5e126fa4c4078d8d21a
 | PR | Current head | Base / dependency | Last observed gate evidence |
 |---:|---|---|---|
 | [220](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/220) | `2c45d9df65654c6eab1d9c55c77b5553e8c1dd22` | `main` | Checks queued except an existing Dependabot success; review/merge gate remains open |
-| [254](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/254) | `a8f756a6748b0d5db833cc23e1b8419f407eb33f` | `main` | Exact-head local Rust/PostgreSQL tests, clippy, and doc passed; GitHub checks queued |
+| [254](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/254) | `d2aa585efcfb41a710eeb6ac887828222aabe703` | `main` | Current head verified: 16 checks queued/running, 0 terminal failures; review records still require re-evaluation |
 | [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | active documentation PR; exact head is the current PR ref | `main` | This documentation refresh is an active PR change, not protected-main evidence |
 | [269](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/269) | `754ad0c215039eb44865781d24fe92330fc7d6b1` | stacked on session-framing work | Exact-head local coverage/clippy/doc evidence passed; stacked base remains a merge dependency |
 | [272](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/272) | `f48deeabfe881468ba0614e2b1558a7879d8ae79` | `main` | 16 checks queued/running, 0 terminal failures, 0 independent approvals at last REST observation |
