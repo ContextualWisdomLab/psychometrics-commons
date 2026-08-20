@@ -57,10 +57,8 @@ fn insert_with_reference(
 ) -> Result<u64, postgres::Error> {
     let job_ref = format!("scoring_job_reference_parity_{suffix}");
     let request_ref = format!("scoring_request_reference_parity_{suffix}");
-    let failure_ref = format!("scoring_failure_reference_parity_{suffix}");
     let worker_ref = format!("scoring_worker_reference_parity_{suffix}");
     let lease_ref = format!("scoring_lease_reference_parity_{suffix}");
-    let result_ref = format!("scoring_result_reference_parity_{suffix}");
 
     match field {
         ReferenceField::Job => client.execute(
@@ -94,10 +92,6 @@ fn insert_with_reference(
             &[&job_ref, &request_ref, &reference],
         ),
     }
-    .map(|rows| {
-        let _ = (failure_ref, result_ref);
-        rows
-    })
 }
 
 #[test]
