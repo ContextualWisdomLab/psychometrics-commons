@@ -14,6 +14,13 @@ const ENGINE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
+    result_snapshot_with_norm(participant_ref, Some("norm_big_five_ko_v1"))
+}
+
+fn result_snapshot_with_norm(
+    participant_ref: &str,
+    norm_version_ref: Option<&str>,
+) -> ResultSnapshot {
     let mut ledger = ResponseLedger::new("session_result_http").unwrap();
     ledger
         .record(
@@ -39,7 +46,7 @@ fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
             instrument_version_ref: "instrument_version_big_five_ko_v1",
             scoring_version_ref: "scoring_version_big_five_v1",
             calibration_reference: "calibration_big_five_v1",
-            norm_version_ref: Some("norm_big_five_ko_v1"),
+            norm_version_ref,
             requested_output_schema_version: 1,
         },
     )
@@ -120,6 +127,23 @@ fn authorized_owner_reads_the_exact_immutable_score_and_provenance() {
     assert!(response
         .body()
         .contains("\"disposition\":\"excluded\",\"score\":null,\"standard_error\":null"));
+}
+
+#[test]
+fn authorized_owner_sees_null_when_scoring_used_no_norm_version() {
+    let participant = participant("tenant_alpha", "participant_alpha");
+    let result = result_snapshot_with_norm("participant_alpha", None);
+    let actor = actor("tenant_alpha", Some("participant_alpha"));
+
+    let response = handle_result_http_request(
+        "GET /v1/results/result_snapshot_result_http HTTP/1.1\r\nHost: example.test\r\n\r\n",
+        &actor,
+        &participant,
+        &result,
+    );
+
+    assert_eq!(response.status(), 200);
+    assert!(response.body().contains("\"norm_version_ref\":null"));
 }
 
 #[test]
