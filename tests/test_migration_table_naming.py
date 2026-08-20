@@ -10,7 +10,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = REPOSITORY_ROOT / "migrations"
 CREATE_TABLE_PATTERN = re.compile(
-    r"^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"^\s*CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
     r"(?P<qualified_name>(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)"
     r"(?:\.(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)\s*\(",
     re.IGNORECASE | re.MULTILINE,
