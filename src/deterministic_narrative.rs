@@ -91,7 +91,7 @@ pub struct RenderedNarrative {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum NarrativeFallbackError {
-    /// An opaque product reference was blank or numeric-like.
+    /// An opaque product reference was blank, numeric-like, or not already in canonical spelling.
     InvalidReference,
     /// Participant-facing approved text was blank or noncanonical.
     InvalidText,
