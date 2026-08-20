@@ -19,8 +19,8 @@ reviewable pull requests rather than silently changing CI behavior.
 
 ## References
 
-GitHub. (2026). *Dependabot supports updates for Rust toolchains*. GitHub
-Changelog. https://github.blog/changelog/
+GitHub. (2025, August 19). *Dependabot now supports Rust toolchain updates*.
+GitHub Changelog. https://github.blog/changelog/2025-08-19-dependabot-now-supports-rust-toolchain-updates/
 
 Rust Project Developers. (2026, July 16). *Announcing Rust 1.97.1*. Rust Blog.
 https://blog.rust-lang.org/2026/07/16/Rust-1.97.1/
