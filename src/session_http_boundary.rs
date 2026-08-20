@@ -61,7 +61,10 @@ fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<St
             .read(&mut buffer[filled..])
             .map_err(normalize_read_error)?;
         if read == 0 {
-            break;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "session HTTP request ended before a complete frame was received",
+            ));
         }
         filled += read;
         let Some(header_offset) = buffer[..filled]
