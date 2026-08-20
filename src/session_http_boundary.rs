@@ -361,7 +361,7 @@ mod tests {
         declared_request_end, has_duplicate_header, normalize_read_error, reason_phrase,
         reject_full_request_buffer, reject_invalid_header_name, reject_non_crlf_header_lines,
         reject_oversized_request, reject_transfer_encoding, remaining_request_timeout,
-        single_header_value,
+        single_header_value, write_http_response, SessionHttpResponse,
     };
     use std::io;
     use std::time::{Duration, Instant};
@@ -429,6 +429,19 @@ mod tests {
         assert_eq!(reason_phrase(409), "Conflict");
         assert_eq!(reason_phrase(500), "Internal Server Error");
         assert_eq!(reason_phrase(418), "Error");
+    }
+
+    #[test]
+    fn response_writer_emits_reason_phrase_and_body_length_for_problem_response() {
+        let response = SessionHttpResponse::duplicate_idempotency_key();
+        let mut wire = Vec::new();
+
+        write_http_response(&mut wire, &response).unwrap();
+
+        let wire = String::from_utf8(wire).unwrap();
+        assert!(wire.starts_with("HTTP/1.1 400 Bad Request\r\n"));
+        assert!(wire.contains(&format!("Content-Length: {}\r\n", response.body().len())));
+        assert!(wire.ends_with(response.body()));
     }
 
     #[test]
