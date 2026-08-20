@@ -63,10 +63,7 @@ fn invalid_consent_insert(client: &mut Client, array_sql: &str) -> postgres::Err
         .execute(
             &format!(
                 "INSERT INTO result_snapshot ({SNAPSHOT_COLUMNS}) VALUES ({})",
-                VALID_SNAPSHOT_VALUES.replace(
-                    "ARRAY['consent_snapshot_service_v1']",
-                    array_sql,
-                )
+                VALID_SNAPSHOT_VALUES.replace("ARRAY['consent_snapshot_service_v1']", array_sql,)
             ),
             &[],
         )

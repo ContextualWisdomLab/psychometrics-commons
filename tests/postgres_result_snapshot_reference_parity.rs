@@ -7,8 +7,7 @@ use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
 use std::sync::{Mutex, MutexGuard};
 
-const DIGEST: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn guard() -> MutexGuard<'static, ()> {
@@ -125,26 +124,32 @@ enum SnapshotField {
 fn invalid_case(field: SnapshotField, invalid_ref: &str, suffix: &str) -> SnapshotRefs {
     let mut refs = SnapshotRefs::valid(suffix);
     match field {
-        SnapshotField::Result => refs.result = invalid_ref.to_owned(),
-        SnapshotField::Participant => refs.participant = invalid_ref.to_owned(),
-        SnapshotField::ScoringResult => refs.scoring_result = invalid_ref.to_owned(),
-        SnapshotField::Session => refs.session = invalid_ref.to_owned(),
-        SnapshotField::Response => refs.response = invalid_ref.to_owned(),
-        SnapshotField::Assessment => refs.assessment = invalid_ref.to_owned(),
-        SnapshotField::Instrument => refs.instrument = invalid_ref.to_owned(),
-        SnapshotField::Scoring => refs.scoring = invalid_ref.to_owned(),
-        SnapshotField::Calibration => refs.calibration = invalid_ref.to_owned(),
+        SnapshotField::Result => invalid_ref.clone_into(&mut refs.result),
+        SnapshotField::Participant => invalid_ref.clone_into(&mut refs.participant),
+        SnapshotField::ScoringResult => invalid_ref.clone_into(&mut refs.scoring_result),
+        SnapshotField::Session => invalid_ref.clone_into(&mut refs.session),
+        SnapshotField::Response => invalid_ref.clone_into(&mut refs.response),
+        SnapshotField::Assessment => invalid_ref.clone_into(&mut refs.assessment),
+        SnapshotField::Instrument => invalid_ref.clone_into(&mut refs.instrument),
+        SnapshotField::Scoring => invalid_ref.clone_into(&mut refs.scoring),
+        SnapshotField::Calibration => invalid_ref.clone_into(&mut refs.calibration),
         SnapshotField::Norm => refs.norm = Some(invalid_ref.to_owned()),
-        SnapshotField::Narrative => refs.narrative = invalid_ref.to_owned(),
+        SnapshotField::Narrative => invalid_ref.clone_into(&mut refs.narrative),
         SnapshotField::Supersedes => refs.supersedes = Some(invalid_ref.to_owned()),
     }
     refs
 }
 
 fn assert_field_rejects(client: &mut Client, field: SnapshotField, constraint: &str) {
-    for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"]
-        .into_iter()
-        .enumerate()
+    for (index, invalid_ref) in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ]
+    .into_iter()
+    .enumerate()
     {
         let refs = invalid_case(field, invalid_ref, &format!("{}_{index}", field as u8));
         let error = insert_snapshot(client, &refs, &["consent_snapshot_service"])
@@ -168,14 +173,26 @@ fn every_snapshot_reference_column_rejects_rust_invalid_aliases() {
             SnapshotField::ScoringResult,
             "result_snapshot_scoring_result_ref_format_check",
         ),
-        (SnapshotField::Session, "result_snapshot_session_ref_format_check"),
-        (SnapshotField::Response, "result_snapshot_response_ref_format_check"),
-        (SnapshotField::Assessment, "result_snapshot_spec_ref_format_check"),
+        (
+            SnapshotField::Session,
+            "result_snapshot_session_ref_format_check",
+        ),
+        (
+            SnapshotField::Response,
+            "result_snapshot_response_ref_format_check",
+        ),
+        (
+            SnapshotField::Assessment,
+            "result_snapshot_spec_ref_format_check",
+        ),
         (
             SnapshotField::Instrument,
             "result_snapshot_instrument_ref_format_check",
         ),
-        (SnapshotField::Scoring, "result_snapshot_scoring_ref_format_check"),
+        (
+            SnapshotField::Scoring,
+            "result_snapshot_scoring_ref_format_check",
+        ),
         (
             SnapshotField::Calibration,
             "result_snapshot_calibration_ref_format_check",
@@ -198,7 +215,13 @@ fn every_snapshot_reference_column_rejects_rust_invalid_aliases() {
 fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
     let _guard = guard();
     let mut client = client();
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let refs = SnapshotRefs::valid(&format!("consent_{index}"));
@@ -219,7 +242,10 @@ fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
                 &[&refs.result, &invalid_ref],
             )
             .expect_err("construct references must match the Rust opaque-reference boundary");
-        assert_check(&error, "result_snapshot_observation_construct_ref_format_check");
+        assert_check(
+            &error,
+            "result_snapshot_observation_construct_ref_format_check",
+        );
     }
 }
 
