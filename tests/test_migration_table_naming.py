@@ -10,9 +10,11 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = REPOSITORY_ROOT / "migrations"
 CREATE_TABLE_PATTERN = re.compile(
-    r"^\s*CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
+    r"^\s*CREATE\s+"
+    r"(?:(?:(?:GLOBAL|LOCAL)\s+)?(?:TEMPORARY|TEMP)|UNLOGGED)\s+)?"
+    r"TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
     r"(?P<qualified_name>(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)"
-    r"(?:\.(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)\s*\(",
+    r"(?:\.(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)",
     re.IGNORECASE | re.MULTILINE,
 )
 DESCRIPTIVE_SNAKE_CASE_PATTERN = re.compile(
@@ -24,7 +26,7 @@ MIGRATION_FILENAME_PATTERN = re.compile(
 
 
 def created_table_names(sql: str) -> list[str]:
-    """Return table identifiers declared by CREATE TABLE statements."""
+    """Return table names from PostgreSQL CREATE TABLE variants used in migrations."""
     return [
         match.group("qualified_name").rsplit(".", maxsplit=1)[-1]
         for match in CREATE_TABLE_PATTERN.finditer(sql)
