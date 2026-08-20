@@ -132,4 +132,21 @@ fn aggregate_applies_session_commands_and_preserves_release_provenance() {
     assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
     assert_eq!(session.instrument_release_content_digest(), RELEASE_DIGEST);
     assert_eq!(session.locale(), "ko-KR");
+
+    let commands = session.accepted_commands();
+    assert_eq!(commands.len(), 2);
+    assert_eq!(
+        commands[0].command_ref(),
+        "cmd_7e39ee81534f40288d3154b149936170"
+    );
+    assert_eq!(commands[0].sequence(), 1);
+    assert_eq!(commands[0].command(), SessionCommand::Activate);
+    assert_eq!(commands[0].resulting_state(), SessionState::Active);
+    assert_eq!(
+        commands[1].command_ref(),
+        "cmd_d0b706bf38f44112b5151ccac9da77f1"
+    );
+    assert_eq!(commands[1].sequence(), 2);
+    assert_eq!(commands[1].command(), SessionCommand::Pause);
+    assert_eq!(commands[1].resulting_state(), SessionState::Paused);
 }

@@ -14,6 +14,10 @@ Psychometrics Commons owns product APIs, instrument publication, participant/ses
 
 It does **not** duplicate psychometric numerical kernels, identity credentials, temporal model kernels, public research catalog internals, or generic LLM orchestration. `g7` is an optional replaceable reference client rather than a platform dependency.
 
+## Personal result export
+
+Active PR #231 — not protected-main truth until an unchanged reviewed/check-clean head is integrated. After a result snapshot exists, call `ResultExport::from_snapshot` with an opaque `export_ref`, the exact BCP 47 report locale, and approved limitation text. Copy the returned JSON or human-readable report to the participant. Confirm Extraversion (or another scored construct) and its standard error match the snapshot before handing the file over. If export fails, repair the identity, locale, timestamp, or limitation text before offering a download. Do not invent a type score, do not mask the owner `participant_ref`, and do not treat this domain copy as the HTTP `POST /v1/results/{result_ref}/exports` transport.
+
 ## Documentation
 
 ### Product, technical, and governance baseline

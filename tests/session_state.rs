@@ -167,3 +167,21 @@ fn lifecycle_wire_names_are_stable_and_exhaustive() {
         assert_eq!(command.as_str(), expected);
     }
 }
+
+#[test]
+fn persist_names_round_trip_and_reject_unknown_vocabulary() {
+    for state in STATES {
+        assert_eq!(
+            SessionState::from_persist_name(state.persist_name()),
+            Some(state)
+        );
+    }
+    for command in COMMANDS {
+        assert_eq!(
+            SessionCommand::from_persist_name(command.persist_name()),
+            Some(command)
+        );
+    }
+    assert_eq!(SessionState::from_persist_name("unknown_state"), None);
+    assert_eq!(SessionCommand::from_persist_name("unknown_command"), None);
+}

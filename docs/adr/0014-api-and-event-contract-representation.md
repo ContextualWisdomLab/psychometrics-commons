@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet implemented on protected main; current Rust domain contracts are transport-neutral. **Active PR** `openapi/session-commands.yaml` describes one in-process command operation and is not protected-main truth
+- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet protected-main truth; current Rust domain contracts are transport-neutral. Active PR #232 contains persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`), and Active PR #204 contains in-process session commands (`POST /v1/sessions/{session_ref}/commands`, `openapi/session-commands.yaml`); both require unchanged reviewed/check-clean heads before integration.
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 

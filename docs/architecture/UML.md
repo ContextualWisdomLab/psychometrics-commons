@@ -280,6 +280,8 @@ Export cannot complete with a deletion-retention exception. Exact terminal repla
 
 ## 6. Anonymous assessment happy-path sequence
 
+This sequence is target transport. The as-built command gate compares supplied records and does not perform the load.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -293,9 +295,16 @@ sequenceDiagram
 
     P->>C: choose published instrument + locale
     C->>A: POST session (idempotency key)
-    A->>DB: persist anonymous participant/session
+    A->>DB: start created session from currently published release
+    Note over A,DB: start calls AssessmentSession::new; load is not authorization
     DB-->>A: session_ref + pinned instrument version
     A-->>C: session resource + item-delivery contract
+
+    C->>A: activate session
+    A->>DB: load assessment_participant + assessment_session
+    A->>A: authorize anonymous command from supplied records
+    A->>DB: atomically state=Active
+    A-->>C: activation accepted
 
     loop each presented item / response
         A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
@@ -307,10 +316,13 @@ sequenceDiagram
     end
 
     C->>A: complete session
+    A->>DB: load assessment_participant + assessment_session
+    A->>A: authorize anonymous command from supplied records
     A->>DB: atomically state=Completed + freeze ResponseSnapshot + outbox scoring request
     A-->>C: completion accepted / scoring pending
 
     W->>DB: claim scoring work
+    Note over W,DB: Protected-main claim_next_scoring_job takes the oldest due queued or retry-scheduled row with FOR UPDATE SKIP LOCKED
     W->>F: version-pinned ScoringRequest
     F-->>W: scored/abstained/failed/excluded + provenance
     W->>DB: persist immutable scoring-result evidence
@@ -501,6 +513,7 @@ For effects fully owned by the same PostgreSQL transaction, the domain side effe
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
 - Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
 - `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land.
+- Session start from a stored published release plus persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` exists on Active PR #232; command HTTP remains target.
 
 ## 14. Reference
 
