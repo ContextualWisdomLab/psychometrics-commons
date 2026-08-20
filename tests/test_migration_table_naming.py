@@ -11,7 +11,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = REPOSITORY_ROOT / "migrations"
 CREATE_TABLE_PATTERN = re.compile(
     r"^\s*CREATE\s+"
-    r"(?:(?:(?:GLOBAL|LOCAL)\s+)?(?:TEMPORARY|TEMP)|UNLOGGED)\s+)?"
+    r"(?:(?:(?:GLOBAL|LOCAL)\s+)?(?:TEMPORARY|TEMP)\s+|UNLOGGED\s+)?"
     r"TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?"
     r"(?P<qualified_name>(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*)"
     r"(?:\.(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)",
