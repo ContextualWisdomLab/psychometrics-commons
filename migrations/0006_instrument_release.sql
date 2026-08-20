@@ -49,9 +49,9 @@ AS $instrument_release_reference$
     FROM reference_classification;
 $instrument_release_reference$;
 
--- Array-valued provenance is subject to the same canonical-reference boundary and exact
--- uniqueness rule as InstrumentReleaseManifest. Bind the current schema explicitly because
--- the helper itself runs with a hardened search_path.
+-- Array-valued provenance owns canonical element validation and exact uniqueness. Cardinality is
+-- deliberately left to the pre-existing *_not_empty_check constraints so each invariant has one
+-- diagnostic owner and corruption tests can disable the complete relevant boundary explicitly.
 DO $instrument_release_array_function$
 DECLARE
     migration_schema TEXT := current_schema();
@@ -67,11 +67,10 @@ PARALLEL SAFE
 SET search_path = pg_catalog, %1$I
 AS $instrument_release_reference_array$
     SELECT
-        cardinality(reference_values) > 0
-        AND COUNT(*) = COUNT(DISTINCT reference_value)
+        COUNT(*) = COUNT(DISTINCT reference_value)
         AND COALESCE(
             bool_and(instrument_release_reference_is_valid(reference_value)),
-            FALSE
+            TRUE
         )
     FROM unnest(reference_values) AS release_reference(reference_value);
 $instrument_release_reference_array$;
