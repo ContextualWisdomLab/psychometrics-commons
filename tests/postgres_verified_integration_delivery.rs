@@ -1,4 +1,4 @@
-//! PostgreSQL contract for the verified publisher-to-fenced-persistence handoff.
+//! `PostgreSQL` contract for the verified publisher-to-fenced-persistence handoff.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent, OutboxState};
@@ -128,8 +128,7 @@ fn verified_handoff_records_only_its_own_fenced_outbox_identity() {
         PersistenceDisposition::Inserted
     );
 
-    let primary_identity =
-        OutboxPersistenceIdentity::new(SOURCE, TENANT, primary.event_ref());
+    let primary_identity = OutboxPersistenceIdentity::new(SOURCE, TENANT, primary.event_ref());
     let lease = {
         let mut transaction = client.transaction().unwrap();
         let lease = claim_outbox_delivery(
