@@ -127,7 +127,7 @@ After fetching `origin`, protected `main` is `503a4e640eeba0f5e126fa4c4078d8d21a
 
 | PR | Current head | Base / dependency | Last observed gate evidence |
 |---:|---|---|---|
-| [220](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/220) | `2c45d9df65654c6eab1d9c55c77b5553e8c1dd22` | `main` | Checks queued except an existing Dependabot success; review/merge gate remains open |
+| [220](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/220) | `2c45d9df65654c6eab1d9c55c77b5553e8c1dd22` | `main` | Current head verified: 2 checks queued/running, 0 terminal failures, 0 independent approvals; mergeable=true/blocked |
 | [254](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/254) | `d2aa585efcfb41a710eeb6ac887828222aabe703` | `main` | Current head verified: 16 checks queued/running, 0 terminal failures; review records still require re-evaluation |
 | [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | active documentation PR; exact head is the current PR ref | `main` | This documentation refresh is an active PR change, not protected-main evidence |
 | [269](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/269) | `e03a82972c75e15c263263ecbf9ae1be721829a3` | stacked on session-framing `d2aa585e` | Current head verified: 15 checks queued/running, 0 terminal failures, 0 independent approvals; mergeable=true/blocked |
