@@ -1,8 +1,8 @@
 # Product and Technical Gap Baseline
 
 - Status: current delivery snapshot, not a release or certification claim
-- Snapshot date: 2026-08-20 (Asia/Seoul)
-- Evaluated protected-main head: `5544149c` (`feat(integration): enforce event-bound publisher acknowledgements (#252)`)
+- Snapshot date: 2026-08-21 (Asia/Seoul)
+- Evaluated protected-main head: `503a4e640eeba0f5e126fa4c4078d8d21aebb93b` (`ci(rust): refresh nightly coverage and track stable compiler (#258)`)
 - Repository: `ContextualWisdomLab/psychometrics-commons`
 - Scope: buyer-visible product journey, product/runtime implementation, architecture evidence, open PRs/issues, and next executable loop
 
@@ -51,9 +51,9 @@ The evaluated head contains a Rust product-runtime library with PostgreSQL adapt
 | P2 | **Database scale and naming proof.** Existing migrations use descriptive multi-word table names, but there is no single automated proof for all object names, 3NF/cardinality reconciliation, or hot-partition behavior. | Current migration inventory is observable; ERD is logical and several future aggregates have no physical migration. | Add a bounded migration/schema contract check when the next physical slice lands; document partition keys only where measured workload requires them. | Clean/upgrade migration tests, ERD reconciliation, naming check, tenant uniqueness checks, and measured contention/partition evidence. |
 | P2 | **Design-system and buyer onboarding evidence.** No Figma/Storybook artifacts exist in this backend-focused repository, so visual consistency and onboarding are not reviewable. | No frontend or Storybook files were observed in the protected-main tree. | Use a separate reference-client/design-system boundary when the first client slice is authorized; record the real Figma File ID in its ADR. | Storybook inventory, design-token tests, keyboard/interaction/i18n checks, and a published usable client; do not fabricate a Figma ID. |
 
-## Current open PR inventory
+## Historical open PR inventory (2026-08-20)
 
-Snapshot source: GitHub REST `GET /repos/ContextualWisdomLab/psychometrics-commons/pulls?state=open` after fetching remotes on 2026-08-20. These are all open PRs observed at snapshot time; every one still requires exact-head review/check verification before merge. `Ready` means GitHub did not mark it Draft, not that it is merge-ready.
+Snapshot source: GitHub REST `GET /repos/ContextualWisdomLab/psychometrics-commons/pulls?state=open` after fetching remotes on 2026-08-20. This table is retained as historical evidence; it is not the current PR inventory. `Ready` means GitHub did not mark it Draft, not that it is merge-ready.
 
 | PR | Title | Head branch | Head | Draft state | Updated |
 |---:|---|---|---|---|---|
@@ -121,6 +121,25 @@ Snapshot source: GitHub REST `GET /repos/ContextualWisdomLab/psychometrics-commo
 | [267](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/267) | fix(research): fail closed on structured public-fixture cells | `agent/research-structured-cell-fail-closed-20260820` | `4d85db9` | Ready | 2026-08-20 |
 | [268](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/268) | fix(research): reject separator-based identity aliases | `agent/research-separator-alias-20260820` | `f64f5df` | Ready | 2026-08-20 |
 
+## Current PR and gate refresh (2026-08-21)
+
+After fetching `origin`, protected `main` is `503a4e640eeba0f5e126fa4c4078d8d21aebb93b`; merged PR #258 is included in that head. GitHub currently reports 64 open PRs. The following buyer-impact and gate-critical PRs are the current exact-head subset; queued checks, review requirements, and concurrent branch movement remain authoritative on GitHub.
+
+| PR | Current head | Base reported by GitHub | Checks | Review state |
+|---:|---|---|---|---|
+| [220](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/220) | `222e2f1dfea5b6136a89a4d77d117335b714fd46` | `5544149c` | 24 success, 9 skipped | `REVIEW_REQUIRED` |
+| [250](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/250) | `c0d4c42e723db464ddd3c83271947cf1ce4c2691` | `5544149c` | 22 success, 1 pending, 9 skipped | no decision |
+| [254](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/254) | `d0b3e81adefe68ff80213e46f16007b743baaaf8` | `5544149c` | 16 pending, 7 skipped | `CHANGES_REQUESTED` |
+| [262](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/262) | `8cd3ae286cfae4c3db33e3d7c553e5858037b93f` | `503a4e64` | 1 success, 16 pending, 7 skipped | `REVIEW_REQUIRED` |
+| [263](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/263) | `7bb5a48e2772ef776c0ea7d97a8d9657418ee764` | `5544149c` | 20 success, 2 pending, 9 skipped | no decision |
+| [264](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/264) | `ad485cc1dbd25e4056da1ac381c4741f1793c896` | `5544149c` | 24 success, 9 skipped | `REVIEW_REQUIRED` |
+| [266](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/266) | `22d714afb8b1552cb8b30d3e4288422b223959b2` | `5544149c` | 24 success, 9 skipped | `REVIEW_REQUIRED` |
+| [271](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/271) | `43704acfe51f09360828a1191653b73f2478402a` | `503a4e64` | 1 success, 16 pending, 7 skipped | `REVIEW_REQUIRED` |
+| [272](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/272) | `5cacc7fd99f3db41b2fa3d7fa7cfab7307c7d90e` | `5544149c` | 16 pending, 7 skipped | `REVIEW_REQUIRED` |
+| [273](https://github.com/ContextualWisdomLab/psychometrics-commons/pull/273) | `ad6730fb54661358f1bc2c6dfe1f8596f75202de` | `5544149c` | 16 pending, 7 skipped | `REVIEW_REQUIRED` |
+
+These exact-head rows are a bounded operational view, not merge evidence. A PR is mergeable only after the current head, current base, required workflows, two independent approvals, last-push approval, thread resolution, and security/provenance gates are all verified together.
+
 ## Current issue inventory
 
 The only open repository issue observed in this snapshot is [#260](https://github.com/ContextualWisdomLab/psychometrics-commons/issues/260), **Fail closed when public-release identity inventory is unavailable**. It depends on #220. Its required distinction is:
@@ -129,7 +148,7 @@ The only open repository issue observed in this snapshot is [#260](https://githu
 - `forbidden identity` when a supplied authoritative inventory matches a fixture cell;
 - allowed `research_participant_ref` public namespace when no restricted identity is matched.
 
-The implementation must consume an authorized product-owned inventory input, never another service database, and must not echo raw identifiers. #220 is green on its observed checks but still open with `REVIEW_REQUIRED`; neither it nor #260 is protected-main truth.
+The implementation must consume an authorized product-owned inventory input, never another service database, and must not echo raw identifiers. #220 is currently `222e2f1dfea5b6136a89a4d77d117335b714fd46` with its visible checks green but `REVIEW_REQUIRED`; neither it nor #260 is protected-main truth.
 
 ## Architecture and research basis
 
