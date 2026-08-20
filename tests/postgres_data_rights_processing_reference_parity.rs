@@ -114,10 +114,7 @@ fn migration_reapplication_repairs_all_owned_processing_constraints() {
             &[],
         )
         .expect_err("repaired operation constraint must reject Rust-invalid references");
-    assert_check(
-        &reference_error,
-        "data_rights_operation_ref_format_check",
-    );
+    assert_check(&reference_error, "data_rights_operation_ref_format_check");
 
     insert_request(&mut client, "data_rights_request_repaired_time");
     let time_error = client
@@ -171,7 +168,7 @@ fn migration_upgrade_fails_closed_on_historical_invalid_operation_identity() {
     let error = apply_data_rights_processing_migration(&mut client)
         .expect_err("upgrade must fail closed while an invalid historical identity remains");
     assert_eq!(
-        error.as_db_error().map(|database_error| database_error.code()),
+        error.as_db_error().map(postgres::error::DbError::code),
         Some(&SqlState::CHECK_VIOLATION)
     );
 }
