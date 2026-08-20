@@ -166,6 +166,7 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
     assert!(!null_array, "a NULL reference array must fail closed");
 }
 
+#[allow(clippy::too_many_lines)]
 #[test]
 fn delivery_event_references_reject_rust_invalid_aliases() {
     let _guard = guard();

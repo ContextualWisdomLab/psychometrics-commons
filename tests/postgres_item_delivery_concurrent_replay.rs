@@ -1,6 +1,6 @@
-//! Real PostgreSQL regressions for exact item-delivery replay under concurrent commits.
+//! Real `PostgreSQL` regressions for exact item-delivery replay under concurrent commits.
 //!
-//! PostgreSQL Read Committed gives each command a fresh snapshot, while `INSERT ... ON CONFLICT
+//! `PostgreSQL` Read Committed gives each command a fresh snapshot, while `INSERT ... ON CONFLICT
 //! DO NOTHING` can observe a unique conflict whose row is not visible to that same command's
 //! snapshot. Exact replay must therefore retry the read in a later command instead of turning a
 //! concurrent duplicate into an opaque database failure.
@@ -9,8 +9,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{ItemDeliveryLedger, ItemDeliveryRequest};
 use psychometrics_commons_runtime::postgres_item_delivery::{
-    apply_item_delivery_migration, persist_item_delivery_ledger,
-    ItemDeliveryPersistenceDisposition,
+    apply_item_delivery_migration, persist_item_delivery_ledger, ItemDeliveryPersistenceDisposition,
 };
 use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{mpsc, Mutex, MutexGuard};
@@ -19,8 +18,7 @@ use std::time::Duration;
 
 const SCHEMA: &str = "item_delivery_concurrent_replay_test";
 const TENANT_REF: &str = "tenant_item_delivery_concurrent";
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn test_guard() -> MutexGuard<'static, ()> {
