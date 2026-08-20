@@ -1,4 +1,4 @@
-//! PostgreSQL scoring-job references must match the Rust opaque-reference boundary.
+//! `PostgreSQL` scoring-job references must match the Rust opaque-reference boundary.
 //!
 //! The Rust product boundary trims Unicode outer whitespace and rejects embedded controls plus
 //! numeric-like spellings under `char::is_numeric`. Direct SQL and trusted migration upgrades must
@@ -223,7 +223,7 @@ fn upgrade_fails_closed_when_historical_rows_violate_the_stronger_boundary() {
     let error = apply_scoring_job_migration(&mut client)
         .expect_err("migration must fail closed while historical invalid identity remains");
     assert_eq!(
-        error.as_db_error().map(|database_error| database_error.code()),
+        error.as_db_error().map(postgres::error::DbError::code),
         Some(&SqlState::CHECK_VIOLATION)
     );
 }
