@@ -1,4 +1,4 @@
-//! PostgreSQL instrument-release identity must match the Rust immutable-manifest boundary.
+//! `PostgreSQL` instrument-release identity must match the Rust immutable-manifest boundary.
 //!
 //! The Rust domain trims Unicode outer whitespace and rejects embedded controls plus
 //! numeric-like opaque identifiers under `char::is_numeric`. Instrument item and consent
@@ -106,7 +106,13 @@ fn assert_scalar_field_rejects_rust_invalid_aliases(
     field: ReferenceField,
     constraint: &str,
 ) {
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let suffix = format!("{}_{}", field as u8, index);
@@ -125,17 +131,19 @@ fn assert_scalar_field_rejects_rust_invalid_aliases(
         let mut limitations_ref = format!("limitations_{suffix}");
 
         match field {
-            ReferenceField::Release => release_ref = invalid_ref.to_owned(),
-            ReferenceField::Instrument => instrument_ref = invalid_ref.to_owned(),
-            ReferenceField::InstrumentVersion => instrument_version_ref = invalid_ref.to_owned(),
-            ReferenceField::Construct => construct_ref = invalid_ref.to_owned(),
-            ReferenceField::AssessmentSpec => assessment_spec_ref = invalid_ref.to_owned(),
-            ReferenceField::ScoringVersion => scoring_version_ref = invalid_ref.to_owned(),
-            ReferenceField::Calibration => calibration_reference = invalid_ref.to_owned(),
+            ReferenceField::Release => invalid_ref.clone_into(&mut release_ref),
+            ReferenceField::Instrument => invalid_ref.clone_into(&mut instrument_ref),
+            ReferenceField::InstrumentVersion => {
+                invalid_ref.clone_into(&mut instrument_version_ref);
+            }
+            ReferenceField::Construct => invalid_ref.clone_into(&mut construct_ref),
+            ReferenceField::AssessmentSpec => invalid_ref.clone_into(&mut assessment_spec_ref),
+            ReferenceField::ScoringVersion => invalid_ref.clone_into(&mut scoring_version_ref),
+            ReferenceField::Calibration => invalid_ref.clone_into(&mut calibration_reference),
             ReferenceField::NormVersion => {}
-            ReferenceField::NarrativeVersion => narrative_version_ref = invalid_ref.to_owned(),
-            ReferenceField::IntendedUse => intended_use_ref = invalid_ref.to_owned(),
-            ReferenceField::Limitations => limitations_ref = invalid_ref.to_owned(),
+            ReferenceField::NarrativeVersion => invalid_ref.clone_into(&mut narrative_version_ref),
+            ReferenceField::IntendedUse => invalid_ref.clone_into(&mut intended_use_ref),
+            ReferenceField::Limitations => invalid_ref.clone_into(&mut limitations_ref),
         }
         let norm_ref = if field == ReferenceField::NormVersion {
             Some(invalid_ref)
@@ -247,7 +255,13 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         assert_check(&error, "instrument_release_item_refs_format_check");
     }
 
-    for invalid_ref in ["½", "²", "Ⅳ", "\u{00a0}consent_alpha", "consent_\u{0001}_alpha"] {
+    for invalid_ref in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}consent_alpha",
+        "consent_\u{0001}_alpha",
+    ] {
         let item_refs = vec!["item_version_alpha".to_owned()];
         let consent_refs = vec![invalid_ref.to_owned()];
         let error = insert_release(
@@ -270,7 +284,10 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         assert_check(&error, "instrument_release_consent_refs_format_check");
     }
 
-    let duplicate_items = vec!["item_version_alpha".to_owned(), "item_version_alpha".to_owned()];
+    let duplicate_items = vec![
+        "item_version_alpha".to_owned(),
+        "item_version_alpha".to_owned(),
+    ];
     let consent_refs = vec!["consent_service_v1".to_owned()];
     let error = insert_release(
         &mut client,
@@ -292,7 +309,10 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
     assert_check(&error, "instrument_release_item_refs_format_check");
 
     let item_refs = vec!["item_version_alpha".to_owned()];
-    let duplicate_consents = vec!["consent_service_v1".to_owned(), "consent_service_v1".to_owned()];
+    let duplicate_consents = vec![
+        "consent_service_v1".to_owned(),
+        "consent_service_v1".to_owned(),
+    ];
     let error = insert_release(
         &mut client,
         "release_duplicate_consents",
