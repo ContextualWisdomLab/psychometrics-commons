@@ -61,9 +61,7 @@ fn distinct_source_observations_cannot_reuse_one_commons_record_identity() {
         conflict,
         LongitudinalObservationError::ObservationIdentityConflict
     );
-    assert!(conflict
-        .to_string()
-        .contains("observation-record identity"));
+    assert!(conflict.to_string().contains("observation-record identity"));
     assert_eq!(observations.len(), 1);
 
     let replay = observations
