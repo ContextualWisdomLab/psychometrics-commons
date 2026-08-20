@@ -1254,6 +1254,18 @@ mod tests {
             ),
             std::io::ErrorKind::InvalidData
         );
+        assert_eq!(
+            framing_kind(
+                b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_badlen\r\nContent-Length: no\r\n\r\n{}"
+            ),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            framing_kind(
+                b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_bad_body\r\nContent-Length: 2\r\n\r\n\xff\xfe"
+            ),
+            std::io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
