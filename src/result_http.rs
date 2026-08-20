@@ -324,6 +324,10 @@ mod tests {
             "\"quote\\\" slash\\\\ newline\\n return\\r tab\\t\""
         );
         assert_eq!(json_string("plain"), "\"plain\"");
+        assert_eq!(
+            json_string("backspace\u{0008} form-feed\u{000c} nul\u{0000}"),
+            "\"backspace\\b form-feed\\f nul\\u0000\""
+        );
     }
 
     #[test]
