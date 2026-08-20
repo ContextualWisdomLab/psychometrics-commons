@@ -61,10 +61,7 @@ fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<St
             .read(&mut buffer[filled..])
             .map_err(normalize_read_error)?;
         if read == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "session HTTP request ended before a complete frame was received",
-            ));
+            return Err(incomplete_request_body_error());
         }
         filled += read;
         let Some(header_offset) = buffer[..filled]
@@ -120,6 +117,13 @@ fn request_deadline_error() -> io::Error {
     io::Error::new(
         io::ErrorKind::TimedOut,
         "session HTTP request exceeded the overall read deadline",
+    )
+}
+
+fn incomplete_request_body_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session HTTP request ended before a complete frame was received",
     )
 }
 
