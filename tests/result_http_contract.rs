@@ -14,11 +14,7 @@ const ENGINE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
-    result_snapshot_with_provenance(
-        participant_ref,
-        Some("norm_big_five_ko_v1"),
-        None,
-    )
+    result_snapshot_with_provenance(participant_ref, Some("norm_big_five_ko_v1"), None)
 }
 
 fn result_snapshot_with_norm(
@@ -180,9 +176,9 @@ fn authorized_owner_reads_supersession_provenance_when_present() {
     );
 
     assert_eq!(response.status(), 200);
-    assert!(response.body().contains(
-        "\"supersedes_ref\":\"result_snapshot_result_http_previous\""
-    ));
+    assert!(response
+        .body()
+        .contains("\"supersedes_ref\":\"result_snapshot_result_http_previous\""));
 }
 
 #[test]

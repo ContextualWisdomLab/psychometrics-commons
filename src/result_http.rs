@@ -213,6 +213,16 @@ fn result_body(result: &ResultSnapshot) -> String {
         "narrative_version_ref",
         result.narrative_version_ref(),
     );
+    json.push_str(",\"consent_snapshot_refs\":[");
+    for (index, consent_snapshot_ref) in result.consent_snapshot_refs().iter().enumerate() {
+        if index > 0 {
+            json.push(',');
+        }
+        json.push('"');
+        append_escaped(&mut json, consent_snapshot_ref);
+        json.push('"');
+    }
+    json.push(']');
     json.push(',');
     append_json_string(
         &mut json,
@@ -223,6 +233,15 @@ fn result_body(result: &ResultSnapshot) -> String {
     json.push_str(&result.requested_output_schema_version().to_string());
     json.push_str(",\"created_at_unix_ms\":");
     json.push_str(&result.created_at_unix_ms().to_string());
+    json.push_str(",\"supersedes_ref\":");
+    match result.supersedes_ref() {
+        Some(supersedes_ref) => {
+            json.push('"');
+            append_escaped(&mut json, supersedes_ref);
+            json.push('"');
+        }
+        None => json.push_str("null"),
+    }
     json.push_str(",\"score_observations\":[");
     for (index, observation) in result.score_observations().iter().enumerate() {
         if index > 0 {
