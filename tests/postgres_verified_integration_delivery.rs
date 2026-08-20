@@ -17,10 +17,16 @@ use std::fmt::{Display, Formatter};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5652_4644_484E_4446;
-const SOURCE: &str = "src_verified_handoff";
-const TENANT: &str = "tnt_verified_handoff";
-const SUBJECT: &str = "rsrc_verified_handoff";
-const CORRELATION: &str = "cor_verified_handoff";
+const EVENT_PRIMARY: &str = "evt_20e50796bff84ce99f92d6d6fb741ca0";
+const EVENT_OTHER: &str = "evt_a7b5539bc8b141b7a93e4d67cf20aa32";
+const SOURCE: &str = "src_79a6ad0f1fbe4aa4a7e7f3cbd68bd129";
+const TENANT: &str = "tnt_1af14653bef743b9a2dbab2df45bedca";
+const SUBJECT: &str = "rsrc_75e7d35de54c420681c09ac899a96431";
+const CORRELATION: &str = "cor_30d5474bfbd94baab8ad0df6d5649a58";
+const WORKER: &str = "wrk_0d05c221742c4c1c98ca17dba02156be";
+const LEASE: &str = "lse_62ef295ceded4d09b45f59bde457da9d";
+const ATTEMPT_PRIMARY: &str = "atm_960c0721f29e4f64a9bce69a782e18bb";
+const ATTEMPT_OTHER: &str = "atm_efb99d301d3d4fe0a7a503920ea1d84d";
 
 fn schema_name() -> String {
     format!("verified_handoff_{}", std::process::id())
@@ -110,8 +116,8 @@ impl IntegrationPublisher for DeliveredPublisher {
 fn verified_handoff_records_only_its_own_fenced_outbox_identity() {
     let mut client = ready_client();
     let now = now_unix_ms();
-    let primary = event("evt_verified_handoff_primary", now - 1_000);
-    let other = event("evt_verified_handoff_other", now - 900);
+    let primary = event(EVENT_PRIMARY, now - 1_000);
+    let other = event(EVENT_OTHER, now - 900);
 
     assert_eq!(
         enqueue_outbox_event(&mut client, &primary, 3).unwrap(),
@@ -129,8 +135,8 @@ fn verified_handoff_records_only_its_own_fenced_outbox_identity() {
         let lease = claim_outbox_delivery(
             &mut transaction,
             primary_identity,
-            "worker_verified_handoff",
-            "lease_verified_handoff",
+            WORKER,
+            LEASE,
             now,
             now + 60_000,
         )
@@ -146,7 +152,7 @@ fn verified_handoff_records_only_its_own_fenced_outbox_identity() {
         let persistence = record_verified_leased_delivery_attempt(
             &mut transaction,
             &verified_primary,
-            "attempt_verified_handoff",
+            ATTEMPT_PRIMARY,
             now + 1,
             None,
             lease.fencing_token(),
@@ -174,7 +180,7 @@ fn verified_handoff_records_only_its_own_fenced_outbox_identity() {
     let error = record_verified_leased_delivery_attempt(
         &mut transaction,
         &verified_other,
-        "attempt_wrong_fence_target",
+        ATTEMPT_OTHER,
         now + 2,
         None,
         lease.fencing_token(),

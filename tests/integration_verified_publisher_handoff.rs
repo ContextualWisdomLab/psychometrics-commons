@@ -8,12 +8,12 @@ use psychometrics_commons_runtime::integration_publisher::{
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-const EVENT_PRIMARY: &str = "evt_verified_delivery_primary";
-const EVENT_OTHER: &str = "evt_verified_delivery_other";
-const TENANT: &str = "tnt_verified_delivery";
-const SOURCE: &str = "src_verified_delivery";
-const SUBJECT: &str = "rsrc_verified_delivery";
-const CORRELATION: &str = "cor_verified_delivery";
+const EVENT_PRIMARY: &str = "evt_08c2c1a3f02d4d8eb7e3b4d23be7c0a1";
+const EVENT_OTHER: &str = "evt_65d8c037a1014aa2bb90f2ce3b71a44e";
+const TENANT: &str = "tnt_8f4cd56b90944c10986828715646bca9";
+const SOURCE: &str = "src_ae7101265f7647abb8f77b4e28be33a0";
+const SUBJECT: &str = "rsrc_834c2d734fb14e349f71cefb21ad68d9";
+const CORRELATION: &str = "cor_e92a62357e9b4b67b9f4f8017f00fcec";
 
 fn event(event_ref: &str) -> IntegrationEvent {
     IntegrationEvent::new(
