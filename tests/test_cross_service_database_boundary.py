@@ -26,6 +26,10 @@ RUNTIME_FILES = (
     ROOT / "rust-toolchain.toml",
 )
 RUNTIME_TEXT_SUFFIXES = frozenset({".rs", ".sql", ".toml", ".yml", ".yaml"})
+DEPLOYMENT_DIRECTORY_NAMES = frozenset(
+    {"deploy", "deployment", "deployments", "infra", "ops", "k8s", "helm"}
+)
+DEPLOYMENT_TEXT_SUFFIXES = frozenset({".json", ".toml", ".yml", ".yaml"})
 
 EXTERNAL_CONTEXT_ENV_PREFIXES = (
     "FAST_MLSIRM",
@@ -54,7 +58,7 @@ FORBIDDEN_EXTERNAL_DATABASE_TOKENS = tuple(
 # These PostgreSQL facilities create direct cross-database/server coupling and are
 # incompatible with the API/event/artifact-only dependency direction in ADR-0015.
 FORBIDDEN_CROSS_DATABASE_SQL = re.compile(
-    r"\b(?:postgres_fdw|dblink(?:_connect)?|CREATE\s+SERVER|IMPORT\s+FOREIGN\s+SCHEMA)\b",
+    r"\b(?:postgres_fdw|dblink(?:_[a-z0-9_]+)?|CREATE\s+SERVER|IMPORT\s+FOREIGN\s+SCHEMA)\b",
     re.IGNORECASE,
 )
 
@@ -63,6 +67,22 @@ def is_runtime_text_file(path: Path) -> bool:
     """Return whether a discovered runtime path is an expected UTF-8 text artifact."""
 
     return path.is_file() and path.suffix.lower() in RUNTIME_TEXT_SUFFIXES
+
+
+def is_deployment_manifest(path: Path) -> bool:
+    """Return whether a path shape can configure a deployed runtime."""
+
+    name = path.name.lower()
+    if name == "dockerfile" or name.startswith("dockerfile."):
+        return True
+    if name in {"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}:
+        return True
+    if name == ".env" or name.startswith(".env."):
+        return True
+    return (
+        any(part.lower() in DEPLOYMENT_DIRECTORY_NAMES for part in path.parts)
+        and path.suffix.lower() in DEPLOYMENT_TEXT_SUFFIXES
+    )
 
 
 def runtime_files() -> list[Path]:
@@ -74,6 +94,11 @@ def runtime_files() -> list[Path]:
             continue
         files.extend(path for path in root.rglob("*") if is_runtime_text_file(path))
     files.extend(path for path in RUNTIME_FILES if path.exists())
+    files.extend(
+        path
+        for path in ROOT.rglob("*")
+        if path.is_file() and is_deployment_manifest(path)
+    )
     return sorted(set(files))
 
 
