@@ -316,10 +316,10 @@ impl LongitudinalObservationSet {
     ///
     /// Source identity is `(enrollment_ref, source_system_ref, source_observation_ref)`.
     /// An exact retry is a no-op. A retry with different clocks, membership, or
-    /// construct evidence fails closed. A distinct source observation must also
-    /// receive a distinct Commons `observation_record_ref`; a reused record identity
-    /// fails closed instead of aliasing two immutable observations. Source clocks
-    /// that arrive after receipt are flagged and kept. Platform ingest cannot precede
+    /// construct evidence returns an error. Each distinct source observation must use
+    /// a distinct Commons `observation_record_ref`. If a record identity is reused,
+    /// `ingest` returns an error and does not add a second record. Source clocks that
+    /// arrive after receipt are flagged and kept. Platform ingest cannot precede
     /// receipt or the previous accepted ingest time.
     ///
     /// # Errors
