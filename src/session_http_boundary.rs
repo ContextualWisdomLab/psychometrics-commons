@@ -23,6 +23,9 @@ pub use implementation::{
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 
+const HTTP_FIELD_NAME_BYTES: &[u8] =
+    b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
+
 /// Accept one TCP connection and serve a single persist-backed session request.
 ///
 /// HTTP/1.1 request framing is deliberately narrower than the protocol's full
@@ -90,11 +93,9 @@ fn single_header_value<'a>(headers: &'a str, name: &str) -> io::Result<Option<&'
             break;
         }
         let Some((header_name, value)) = line.split_once(':') else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "session HTTP request contains a malformed header field",
-            ));
+            return Err(malformed_header_field_error());
         };
+        reject_invalid_header_name(header_name)?;
         if !header_name.eq_ignore_ascii_case(name) {
             continue;
         }
@@ -107,6 +108,25 @@ fn single_header_value<'a>(headers: &'a str, name: &str) -> io::Result<Option<&'
         found = Some(value.trim());
     }
     Ok(found)
+}
+
+fn reject_invalid_header_name(header_name: &str) -> io::Result<()> {
+    if header_name.is_empty()
+        || !header_name
+            .bytes()
+            .all(|byte| HTTP_FIELD_NAME_BYTES.contains(&byte))
+    {
+        Err(malformed_header_field_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn malformed_header_field_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session HTTP request contains a malformed header field",
+    )
 }
 
 fn reject_transfer_encoding(headers: &str) -> io::Result<()> {
@@ -186,8 +206,8 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        declared_request_end, reject_full_request_buffer, reject_oversized_request,
-        reject_transfer_encoding, single_header_value,
+        declared_request_end, reject_full_request_buffer, reject_invalid_header_name,
+        reject_oversized_request, reject_transfer_encoding, single_header_value,
     };
 
     #[test]
@@ -222,6 +242,27 @@ mod tests {
         let transfer = "POST /v1/sessions HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert_eq!(
             reject_transfer_encoding(transfer).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn header_names_require_exact_http_token_grammar() {
+        assert!(reject_invalid_header_name("Content-Length").is_ok());
+        assert_eq!(
+            reject_invalid_header_name("").unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            reject_invalid_header_name("Content-Length ")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            reject_invalid_header_name("Content@Length")
+                .unwrap_err()
+                .kind(),
             std::io::ErrorKind::InvalidData
         );
     }
