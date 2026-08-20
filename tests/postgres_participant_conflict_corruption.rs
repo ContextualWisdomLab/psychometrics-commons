@@ -33,10 +33,9 @@ fn corrupt_conflict_winner_is_reported_as_corrupt_stored_identity() {
         )
         .unwrap();
 
-    for (stored_tenant_ref, stored_created_at_unix_ms) in [
-        (" ", 40_000_i64),
-        ("tenant_conflict_corruption", 0_i64),
-    ] {
+    for (stored_tenant_ref, stored_created_at_unix_ms) in
+        [(" ", 40_000_i64), ("tenant_conflict_corruption", 0_i64)]
+    {
         client
             .execute(
                 "INSERT INTO assessment_participant \
@@ -50,8 +49,9 @@ fn corrupt_conflict_winner_is_reported_as_corrupt_stored_identity() {
             .unwrap();
 
         let mut transaction = client.transaction().unwrap();
-        let error = persist_anonymous_participant_base(&mut transaction, &participant)
-            .expect_err("corrupt stored winner evidence must fail closed before replay classification");
+        let error = persist_anonymous_participant_base(&mut transaction, &participant).expect_err(
+            "corrupt stored winner evidence must fail closed before replay classification",
+        );
         assert!(matches!(
             error,
             ParticipantBasePersistenceError::CorruptStoredIdentity
