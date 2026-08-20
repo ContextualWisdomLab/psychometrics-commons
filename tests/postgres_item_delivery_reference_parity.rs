@@ -147,22 +147,14 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
         assert_check(&error, "item_delivery_ledger_allowed_items_format_check");
     }
 
-    for (index, allowed_items) in [
-        vec!["item_2", "opaque_alpha 2"],
-        vec!["release_3.1", "v1-2"],
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        insert_ledger(
-            &mut client,
-            "tenant_mixed",
-            &format!("session_mixed_{index}"),
-            &format!("release_mixed_{index}"),
-            &allowed_items,
-        )
-        .expect("mixed references must remain valid opaque identifiers");
-    }
+    insert_ledger(
+        &mut client,
+        "tenant_2",
+        "opaque session 2",
+        "release_3.1",
+        &["item_2", "opaque_alpha 2", "v1-2"],
+    )
+    .expect("mixed scalar and array references must remain valid opaque identifiers");
 
     let null_array: bool = client
         .query_one(
