@@ -161,6 +161,9 @@ fn reapply_rejects_unicode_aliases_for_completion_evidence() {
         "U&'\\00A0completion_evidence_alpha'",
         "U&'12\\066B3'",
         "U&'12\\FF0E3'",
+        "U&'\\00BD'",
+        "U&'\\00B2'",
+        "U&'\\2163'",
     ] {
         let statement = format!(
             "UPDATE data_rights_request_state
@@ -201,6 +204,9 @@ fn reapply_rejects_unicode_aliases_for_retained_scope_evidence() {
         "U&'\\00A0retention_shadow'",
         "U&'12\\066B3'",
         "U&'12\\FF0E3'",
+        "U&'\\00BD'",
+        "U&'\\00B2'",
+        "U&'\\2163'",
     ] {
         let statement = format!(
             "INSERT INTO data_rights_retained_scope_evidence
