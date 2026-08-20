@@ -1,3 +1,29 @@
+CREATE OR REPLACE FUNCTION result_snapshot_consent_refs_are_valid(reference_array TEXT[])
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+STRICT
+PARALLEL SAFE
+SET search_path = pg_catalog
+AS $result_snapshot_consent_refs$
+    SELECT
+        NOT EXISTS (
+            SELECT 1
+            FROM unnest(reference_array) AS consent_reference(reference_text)
+            WHERE reference_text IS NULL
+                OR reference_text <> btrim(reference_text)
+                OR reference_text = ''
+                OR (
+                    reference_text ~ '[[:digit:]]'
+                    AND reference_text ~ '^[[:digit:]+,.eE-]+$'
+                )
+        )
+        AND cardinality(reference_array) = (
+            SELECT count(DISTINCT reference_text)
+            FROM unnest(reference_array) AS consent_reference(reference_text)
+        );
+$result_snapshot_consent_refs$;
+
 CREATE TABLE IF NOT EXISTS result_snapshot (
     result_snapshot_ref TEXT CONSTRAINT result_snapshot_ref_not_null NOT NULL
         CONSTRAINT result_snapshot_ref_format_check CHECK (
@@ -108,6 +134,9 @@ CREATE TABLE IF NOT EXISTS result_snapshot (
     consent_snapshot_refs TEXT[] CONSTRAINT result_snapshot_consent_refs_not_null NOT NULL
         CONSTRAINT result_snapshot_consent_refs_not_empty_check CHECK (
             cardinality(consent_snapshot_refs) > 0
+        )
+        CONSTRAINT result_snapshot_consent_refs_integrity_check CHECK (
+            result_snapshot_consent_refs_are_valid(consent_snapshot_refs)
         ),
     engine_artifact_digest TEXT CONSTRAINT result_snapshot_engine_digest_not_null NOT NULL
         CONSTRAINT result_snapshot_engine_digest_format_check CHECK (
@@ -194,6 +223,12 @@ CREATE TABLE IF NOT EXISTS result_snapshot_observation (
 -- Reapplying this migration must also strengthen a schema created by an earlier
 -- revision of this not-yet-released migration. PostgreSQL's CREATE TABLE IF NOT
 -- EXISTS does not reconcile changed CHECK definitions on an existing table.
+ALTER TABLE result_snapshot
+    DROP CONSTRAINT IF EXISTS result_snapshot_consent_refs_integrity_check;
+ALTER TABLE result_snapshot
+    ADD CONSTRAINT result_snapshot_consent_refs_integrity_check CHECK (
+        result_snapshot_consent_refs_are_valid(consent_snapshot_refs)
+    );
 ALTER TABLE result_snapshot
     DROP CONSTRAINT IF EXISTS result_snapshot_engine_digest_format_check;
 ALTER TABLE result_snapshot
