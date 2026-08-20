@@ -4,11 +4,11 @@
 - Date: 2026-08-14
 - Protected-main baseline: `cc5850a0d1eacbbf16d03075534fce460a8286e6`
 
-This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
+This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline. Later protected-main deltas are named with their exact protected SHA rather than silently rewriting the historical baseline.
 
 ## Protected-main physical schema
 
-Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, and instrument releases. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
+Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, and instrument releases on the historical baseline, with later protected-main deltas explicitly identified below. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before its named protected-main evidence point. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
@@ -18,9 +18,17 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | Implemented subset |
-| `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
+| `assessment_session` | session | **Active PR** #218 (not protected-main truth on the historical baseline) |
+| `item_delivery_ledger` | item delivery | **Implemented on current protected main `503a4e640eeba0f5e126fa4c4078d8d21aebb93b` (post-baseline)** through `migrations/0004_item_delivery_evidence.sql` and `src/postgres_item_delivery.rs`; Active PR #276 hardens reference validation/reapplication only |
+| `item_delivery_event` | item delivery | **Implemented on current protected main `503a4e640eeba0f5e126fa4c4078d8d21aebb93b` (post-baseline)** through `migrations/0004_item_delivery_evidence.sql` and `src/postgres_item_delivery.rs`; Active PR #276 hardens reference validation/reapplication only |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
+
+## Current protected-main item-delivery physical schema delta
+
+Protected `main` at `503a4e640eeba0f5e126fa4c4078d8d21aebb93b` contains `migrations/0004_item_delivery_evidence.sql` and `src/postgres_item_delivery.rs`, which persist tenant/session-bound `item_delivery_ledger` evidence and immutable `item_delivery_event` rows. The physical slice is governed by ADR-0005 for session/item-delivery lifecycle semantics, ADR-0010 for immutable/versioned provenance, and ADR-0015 for PostgreSQL ownership and transaction boundaries.
+
+That protected-main evidence means item-delivery persistence is no longer a Target even though public/API delivery orchestration remains incomplete. Active PR #276 does **not** create a new logical entity, ownership boundary, public operation, scoring authority, confidential-response store, or cross-service dependency. It narrows the existing database acceptance grammar to the Rust opaque-reference boundary and forces migration reapplication to revalidate dependent CHECK constraints. Therefore `ERD.md`, API/event contracts, scoring governance, and bounded-context ownership do not gain a new implementation claim from #276; `TRACEABILITY.md` and this physical maturity map are the artifacts whose stale persistence status changes in this workstream.
 
 ## Active PR assessment-session physical schema
 
@@ -81,7 +89,7 @@ The slice does **not** persist publication-event history, bound scientific evide
 
 ## Logical-to-physical mapping rule
 
-A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:
+A logical entity is classified as physical only when all of the following exist on the named protected-main baseline or on a later exact protected-main delta explicitly named in this document:
 
 1. a checked-in migration or equivalent durable schema definition;
 2. an owning adapter/repository contract;
@@ -93,4 +101,4 @@ A table may combine multiple logical value objects or lifecycle fields, but phys
 
 ## Reconciliation obligations
 
-When a physical migration merges, the same workstream must reconcile this map, `ERD.md`, `TRACEABILITY.md`, ADR-0015, migration/rollback guidance, and any UML sequence whose transactional semantics changed. Only protected-main evidence on the named baseline changes an item from **Active PR** to **Implemented**; an active PR statement never changes shipped maturity by itself.
+When a physical migration merges, the same workstream must reconcile this map, `ERD.md`, `TRACEABILITY.md`, ADR-0015, migration/rollback guidance, and any UML sequence whose transactional semantics changed. Only protected-main evidence on the named baseline or an explicitly named later protected-main delta changes an item from **Active PR** or **Target** to **Implemented**; an active PR statement never changes shipped maturity by itself.
