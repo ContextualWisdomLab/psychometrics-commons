@@ -272,4 +272,24 @@ fn migration_reapplication_revalidates_existing_result_rows() {
     let error = apply_result_snapshot_migration(&mut client)
         .expect_err("migration reapplication must reject historical Rust-invalid result identity");
     assert_check(&error, "result_snapshot_ref_format_check");
+
+    let constraint = client
+        .query_one(
+            "SELECT pg_get_constraintdef(oid), convalidated \
+             FROM pg_constraint \
+             WHERE conrelid = 'result_snapshot'::regclass \
+               AND conname = 'result_snapshot_ref_format_check'",
+            &[],
+        )
+        .expect("failed migration reapplication must preserve the preexisting CHECK constraint");
+    let definition: String = constraint.get(0);
+    let validated: bool = constraint.get(1);
+    assert!(
+        definition.contains("btrim(result_snapshot_ref)"),
+        "failed reapplication must roll back DROP/ADD and preserve the previous CHECK definition"
+    );
+    assert!(
+        validated,
+        "failed reapplication must leave the previous CHECK constraint validated"
+    );
 }
