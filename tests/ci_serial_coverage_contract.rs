@@ -1,21 +1,26 @@
-//! Regression contract for the serialized coverage runner.
+//! Regression contract for capacity-aware coverage scheduling.
 //!
-//! The combined runner must preserve independent branch-coverage evidence even
-//! when the line-coverage gate has already failed. It must also keep generation
-//! failures visible as operator diagnostics instead of silently skipping the
-//! corresponding gate. This keeps the two-runner allocation remedy from hiding
-//! a second coverage defect in the same run.
+//! Runtime CI must reduce peak hosted-runner pressure without renaming the two
+//! long-lived coverage check identities. Branch coverage therefore waits for
+//! the line-coverage job, but still runs after a line-coverage failure unless
+//! the workflow was cancelled. Generation failures remain explicit operator
+//! diagnostics rather than silently skipped evidence.
 
 const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
 
 #[test]
-fn branch_coverage_still_runs_after_line_coverage_failure() {
+fn coverage_jobs_preserve_their_check_identities() {
+    assert!(CI_WORKFLOW.contains("\n  line-coverage:\n    name: Production line coverage\n"));
+    assert!(CI_WORKFLOW.contains("\n  branch-coverage:\n    name: Production branch coverage\n"));
+    assert!(!CI_WORKFLOW.contains("name: Production line and branch coverage"));
+}
+
+#[test]
+fn branch_coverage_is_serialized_without_becoming_fail_open() {
     assert!(CI_WORKFLOW.contains(
-        "- name: Generate branch coverage\n        id: branch_coverage_generation\n        if: ${{ !cancelled() }}"
+        "\n  branch-coverage:\n    name: Production branch coverage\n    needs: line-coverage\n    if: ${{ !cancelled() }}\n"
     ));
-    assert!(CI_WORKFLOW.contains(
-        "- name: Enforce complete branch coverage\n        id: branch_coverage_gate\n        if: ${{ !cancelled() && steps.branch_coverage_generation.outcome == 'success' }}"
-    ));
+    assert_eq!(CI_WORKFLOW.matches("runs-on: ubuntu-latest").count(), 3);
 }
 
 #[test]
@@ -33,6 +38,9 @@ fn line_generation_failure_has_operator_diagnostics() {
 
 #[test]
 fn branch_generation_failure_has_operator_diagnostics() {
+    assert!(CI_WORKFLOW.contains(
+        "- name: Generate branch coverage\n        id: branch_coverage_generation"
+    ));
     assert!(CI_WORKFLOW.contains(
         "- name: Diagnose branch coverage generation failure\n        if: ${{ !cancelled() && steps.branch_coverage_generation.outcome == 'failure' }}"
     ));
