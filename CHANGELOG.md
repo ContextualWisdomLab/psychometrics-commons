@@ -69,7 +69,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
-- **Active PR #288 only:** Runtime CI line and branch coverage now share one hosted PostgreSQL runner while retaining both exact coverage gates, exact-head checkout, immutable service-image, ephemeral-credential, and scoped-diagnostic evidence. This is not protected-main or release evidence until the PR's current head passes the required workflows and independent review.
+- **Active PR #288 only:** Runtime CI preserves the long-lived `Production line coverage` and `Production branch coverage` check identities while serializing branch coverage behind line coverage. At most rust-quality plus one coverage job request hosted runners concurrently; a failed line job still hands off to branch coverage unless the workflow is cancelled. Exact-head checkout, immutable service images, ephemeral credentials, exact 100% gates, and scoped generation/gate diagnostics remain intact. This is not protected-main or release evidence until the PR's unchanged current head passes the required workflows and independent review.
 - Stale shorter assessment-session command history now fails closed instead of rewinding the current-state projection, so a later Pause/Resume still reloads after a rejected Activate-only persist.
 - Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
