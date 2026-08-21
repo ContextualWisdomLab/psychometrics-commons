@@ -197,9 +197,12 @@ jobs:
           PY
           cargo llvm-cov report --text --show-missing-lines --show-instantiations
       - name: Generate branch coverage
+        id: branch_coverage_generation
+        if: ${{ !cancelled() }}
         run: cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json
       - name: Enforce complete branch coverage
         id: branch_coverage_gate
+        if: ${{ !cancelled() && steps.branch_coverage_generation.outcome == 'success' }}
         run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
       - name: Diagnose missing branch coverage
         if: failure() && steps.branch_coverage_gate.outcome == 'failure'
