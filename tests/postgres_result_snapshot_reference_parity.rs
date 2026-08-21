@@ -1,7 +1,9 @@
 //! Immutable result persistence must match the Rust opaque-reference boundary.
 //!
 //! Result provenance is acquisition-critical evidence: direct SQL and migration upgrades must not
-//! retain identifiers the Rust domain would reject or normalize differently.
+//! retain identifiers the Rust domain would reject or normalize differently. Domain constructors
+//! may accept edge whitespace only by normalizing it away before persistence; stored identity is
+//! always canonical and direct SQL aliases fail closed.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
@@ -146,7 +148,9 @@ fn assert_field_rejects(client: &mut Client, field: SnapshotField, constraint: &
         "½",
         "²",
         "Ⅳ",
+        " opaque_alpha ",
         "\u{00a0}opaque_alpha",
+        "\u{2003}opaque_alpha\u{2003}",
         "opaque_\u{0001}_alpha",
     ]
     .into_iter()
@@ -154,7 +158,7 @@ fn assert_field_rejects(client: &mut Client, field: SnapshotField, constraint: &
     {
         let refs = invalid_case(field, invalid_ref, &format!("{}_{index}", field as u8));
         let error = insert_snapshot(client, &refs, &["consent_snapshot_service"])
-            .expect_err("every durable result reference must match the Rust boundary");
+            .expect_err("every durable result reference must be canonical at the storage boundary");
         assert_check(&error, constraint);
     }
 }
@@ -221,14 +225,16 @@ fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
         "½",
         "²",
         "Ⅳ",
+        " opaque_alpha ",
         "\u{00a0}opaque_alpha",
+        "\u{2003}opaque_alpha\u{2003}",
         "opaque_\u{0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let refs = SnapshotRefs::valid(&format!("consent_{index}"));
         let error = insert_snapshot(&mut client, &refs, &[invalid_ref])
-            .expect_err("consent snapshot arrays must reject the same Rust-invalid aliases");
+            .expect_err("consent snapshot arrays must reject noncanonical durable aliases");
         assert_check(&error, "result_snapshot_consent_refs_integrity_check");
     }
 
@@ -243,7 +249,7 @@ fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
                  ) VALUES ($1,0,$2,'scored',0.5,0.1)",
                 &[&refs.result, &invalid_ref],
             )
-            .expect_err("construct references must match the Rust opaque-reference boundary");
+            .expect_err("construct references must match the canonical storage boundary");
         assert_check(
             &error,
             "result_snapshot_observation_construct_ref_format_check",
