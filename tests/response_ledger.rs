@@ -335,4 +335,8 @@ fn write_errors_have_stable_human_readable_context() {
         WriteError::SnapshotRequiresCompleted(SessionState::Active).to_string(),
         "response snapshot requires Completed session state, found Active"
     );
+    assert_eq!(
+        WriteError::InvalidSequence.to_string(),
+        "persisted response events must use contiguous positive server sequences"
+    );
 }
