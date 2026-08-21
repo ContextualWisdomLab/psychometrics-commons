@@ -47,13 +47,31 @@ EXTERNAL_CONTEXT_ENV_PREFIXES = (
     "CLEARFOLIO",
 )
 
-# A dedicated database URL/DSN for another bounded context is a high-signal sign
-# that this service has crossed an ownership boundary. Product-owned generic
+# Dedicated database connection material for another bounded context is a high-signal
+# sign that this service has crossed an ownership boundary. Product-owned generic
 # TEST_DATABASE_URL remains intentionally allowed.
+EXTERNAL_DATABASE_TOKEN_SUFFIXES = (
+    "DATABASE_URL",
+    "DB_URL",
+    "DATABASE_DSN",
+    "DB_DSN",
+    "DATABASE_HOST",
+    "DB_HOST",
+    "DATABASE_PORT",
+    "DB_PORT",
+    "DATABASE_USER",
+    "DB_USER",
+    "DATABASE_USERNAME",
+    "DB_USERNAME",
+    "DATABASE_PASSWORD",
+    "DB_PASSWORD",
+    "DATABASE_NAME",
+    "DB_NAME",
+)
 FORBIDDEN_EXTERNAL_DATABASE_TOKENS = tuple(
     f"{prefix}_{suffix}"
     for prefix in EXTERNAL_CONTEXT_ENV_PREFIXES
-    for suffix in ("DATABASE_URL", "DB_URL", "DATABASE_DSN", "DB_DSN")
+    for suffix in EXTERNAL_DATABASE_TOKEN_SUFFIXES
 )
 
 # These PostgreSQL facilities create direct cross-database/server coupling and are
@@ -172,8 +190,26 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
         ):
             self.assertIsNotNone(FORBIDDEN_CROSS_DATABASE_SQL.search(sql), sql)
 
+    def test_sibling_database_connection_parts_are_forbidden(self) -> None:
+        """Cover split host, port, identity, secret, and database-name configuration."""
+
+        for token in (
+            "KEYVERSE_DB_HOST",
+            "TEPP_DATABASE_PORT",
+            "GYEOT_DB_USER",
+            "FAST_MLSIRM_DATABASE_USERNAME",
+            "INKSPAN_DB_PASSWORD",
+            "RANKWEAVE_DATABASE_NAME",
+            "CLEARFOLIO_DATABASE_URL",
+            "LIFEOS_DB_DSN",
+        ):
+            self.assertIn(token, FORBIDDEN_EXTERNAL_DATABASE_TOKENS)
+
+        self.assertNotIn("TEST_DATABASE_URL", FORBIDDEN_EXTERNAL_DATABASE_TOKENS)
+        self.assertNotIn("KEYVERSE_API_URL", FORBIDDEN_EXTERNAL_DATABASE_TOKENS)
+
     def test_external_context_database_credentials_are_not_runtime_inputs(self) -> None:
-        """Reject dedicated database URLs or DSNs for read-only sibling contexts."""
+        """Reject dedicated database connection material for read-only sibling contexts."""
 
         violations: list[str] = []
         for path in runtime_files():
