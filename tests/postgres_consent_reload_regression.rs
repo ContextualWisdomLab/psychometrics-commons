@@ -127,6 +127,46 @@ fn missing_and_empty_ledgers_do_not_invent_consent() {
 }
 
 #[test]
+fn one_persist_call_with_multiple_events_reloads_exactly() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    let mut ledger = ConsentLedger::new("participant_consent_reload_batch").unwrap();
+    ledger
+        .record(research_event(
+            "consent_event_batch_grant",
+            ConsentDecision::Granted,
+            30_000,
+        ))
+        .unwrap();
+    ledger
+        .record(research_event(
+            "consent_event_batch_revoke",
+            ConsentDecision::Revoked,
+            30_000,
+        ))
+        .unwrap();
+
+    persist(&mut client, &ledger);
+
+    client
+        .execute(
+            "UPDATE consent_event \
+             SET created_at = TIMESTAMPTZ '2026-08-21 00:00:00+00' \
+             WHERE participant_ref = $1",
+            &[&"participant_consent_reload_batch"],
+        )
+        .unwrap();
+
+    let loaded = load(&mut client, "participant_consent_reload_batch")
+        .expect("a single multi-event persist must remain restart-reconstructable");
+    let snapshot = loaded.snapshot_as("consent_snapshot_reload_batch").unwrap();
+    assert_eq!(loaded, ledger);
+    assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
+}
+
+#[test]
 fn same_millisecond_revoke_remains_latest_after_restart_and_sequence_is_contiguous() {
     let _guard = guard();
     let mut client = test_client();
