@@ -83,12 +83,15 @@ impl From<postgres::Error> for ConsentPersistenceError {
 ///
 /// Existing rows from the original consent migration remain deliberately
 /// unsequenced. A single legacy event is order-unambiguous and may be followed by
-/// sequenced events. Two or more legacy events fail closed during reload rather
-/// than receiving a fabricated migration order.
+/// sequenced events. If one participant already has two or more unsequenced legacy
+/// events, the ordering migration fails before changing that schema because their
+/// relative order cannot be proven without fabricating history. After upgrade, a
+/// database constraint permits at most one unsequenced legacy row per participant.
 ///
 /// # Errors
 ///
-/// Returns the `PostgreSQL` error if either migration cannot be applied.
+/// Returns the `PostgreSQL` error if either migration cannot be applied, including
+/// when legacy history lacks deterministic order evidence required for the upgrade.
 pub fn apply_consent_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
