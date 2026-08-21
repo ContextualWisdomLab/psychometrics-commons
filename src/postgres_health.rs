@@ -179,8 +179,8 @@ fn is_exact_schema_qualified_relation(relation: &str) -> bool {
     if relation.chars().any(char::is_whitespace) || relation != relation.to_ascii_lowercase() {
         return false;
     }
-    let mut parts = relation.split('.');
-    let schema = parts.next().unwrap_or_default();
-    let name = parts.next().unwrap_or_default();
-    !schema.is_empty() && !name.is_empty() && parts.next().is_none()
+    let Some((schema, name)) = relation.split_once('.') else {
+        return false;
+    };
+    !schema.is_empty() && !name.is_empty() && !name.contains('.')
 }
