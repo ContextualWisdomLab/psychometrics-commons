@@ -17,6 +17,7 @@ fn problem(type_uri: &'static str) -> Result<ApiProblem, ApiProblemContractError
 fn https_problem_types_cover_authority_port_and_suffix_edges() {
     for valid_type in [
         "https://a",
+        "HTTPS://a",
         "https://a:443",
         "https://example.test/path!$&'()*+,;=:@-._~AZaz09",
         "https://example.test/path?query/with?chars:@!$&'()*+,;=-._~AZaz09#frag/with?chars:@!$&'()*+,;=-._~AZaz09",
@@ -52,6 +53,7 @@ fn https_problem_types_cover_authority_port_and_suffix_edges() {
 fn urn_problem_types_cover_namespace_and_specific_string_edges() {
     for valid_type in [
         "urn:ab:x",
+        "URN:ab:x",
         "urn:a-b:value",
         "urn:abcdefghijklmnopqrstuvwxyz123456:value",
         "urn:example:a@b/c:d!$&'()*+,;=-._~09AZaz",
