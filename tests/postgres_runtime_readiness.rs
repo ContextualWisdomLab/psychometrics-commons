@@ -126,7 +126,8 @@ fn relation_integrity_probe_rejects_search_path_relative_relation_names() {
 #[test]
 fn relation_integrity_probe_rejects_case_folded_relation_aliases() {
     let mut client = test_client();
-    let integrity = probe_postgres_relation_integrity(&mut client, &["PG_CATALOG.PG_CLASS"]).unwrap();
+    let integrity =
+        probe_postgres_relation_integrity(&mut client, &["PG_CATALOG.PG_CLASS"]).unwrap();
 
     assert_eq!(integrity, DataIntegrityHealth::Incompatible);
 }
