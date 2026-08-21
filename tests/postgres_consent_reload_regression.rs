@@ -14,6 +14,8 @@ use psychometrics_commons_runtime::postgres_consent::{
 };
 use std::sync::{Mutex, MutexGuard};
 
+const LEGACY_CONSENT_MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
+
 static CONSENT_RELOAD_LOCK: Mutex<()> = Mutex::new(());
 
 fn guard() -> MutexGuard<'static, ()> {
@@ -36,14 +38,23 @@ fn test_client() -> Client {
     client
 }
 
-fn reset(client: &mut Client) {
+fn drop_consent_tables(client: &mut Client) {
     client
         .batch_execute(
             "DROP TABLE IF EXISTS consent_reload_regression_test.consent_event;\
              DROP TABLE IF EXISTS consent_reload_regression_test.consent_ledger;",
         )
         .unwrap();
+}
+
+fn reset(client: &mut Client) {
+    drop_consent_tables(client);
     apply_consent_migration(client).unwrap();
+}
+
+fn reset_legacy_schema(client: &mut Client) {
+    drop_consent_tables(client);
+    client.batch_execute(LEGACY_CONSENT_MIGRATION).unwrap();
 }
 
 fn persist(client: &mut Client, ledger: &ConsentLedger) {
@@ -74,6 +85,31 @@ fn research_event<'a>(
     }
 }
 
+fn insert_legacy_research_event(
+    client: &mut Client,
+    participant_ref: &str,
+    event_ref: &str,
+    decision: &str,
+    occurred_at_unix_ms: i64,
+) {
+    client
+        .execute(
+            "INSERT INTO consent_event (\
+                 participant_ref, event_ref, consent_purpose, consent_decision, \
+                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
+             ) VALUES ($1, $2, 'research_contribution', $3, $4, $5, $6)",
+            &[
+                &participant_ref,
+                &event_ref,
+                &decision,
+                &"consent_form_research_v1",
+                &"research_scope_research_v1",
+                &occurred_at_unix_ms,
+            ],
+        )
+        .unwrap();
+}
+
 #[test]
 fn missing_and_empty_ledgers_do_not_invent_consent() {
     let _guard = guard();
@@ -91,7 +127,7 @@ fn missing_and_empty_ledgers_do_not_invent_consent() {
 }
 
 #[test]
-fn same_millisecond_revoke_remains_latest_after_restart() {
+fn same_millisecond_revoke_remains_latest_after_restart_and_sequence_is_contiguous() {
     let _guard = guard();
     let mut client = test_client();
     reset(&mut client);
@@ -123,6 +159,24 @@ fn same_millisecond_revoke_remains_latest_after_restart() {
     assert_eq!(loaded, revoked);
     assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
     assert_eq!(snapshot.active_research_scope(), None);
+
+    let stored_order: Vec<(String, Option<i64>)> = client
+        .query(
+            "SELECT event_ref, event_sequence FROM consent_event \
+             WHERE participant_ref = $1 ORDER BY event_sequence",
+            &[&"participant_consent_reload_alpha"],
+        )
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect();
+    assert_eq!(
+        stored_order,
+        vec![
+            ("consent_event_zzz_grant".to_owned(), Some(1)),
+            ("consent_event_aaa_revoke".to_owned(), Some(2)),
+        ]
+    );
 }
 
 #[test]
@@ -170,52 +224,7 @@ fn wall_clock_rollback_cannot_reverse_same_millisecond_consent_order() {
 }
 
 #[test]
-fn non_monotonic_stored_history_fails_closed_instead_of_reordering() {
-    let _guard = guard();
-    let mut client = test_client();
-    reset(&mut client);
-
-    persist(
-        &mut client,
-        &ConsentLedger::new("participant_consent_reload_corrupt").unwrap(),
-    );
-    client
-        .execute(
-            "INSERT INTO consent_event (\
-                 participant_ref, event_ref, consent_purpose, consent_decision, \
-                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
-             ) VALUES ($1, $2, 'service_operation', 'granted', $3, NULL, 20000)",
-            &[
-                &"participant_consent_reload_corrupt",
-                &"consent_event_later",
-                &"consent_form_service_v1",
-            ],
-        )
-        .unwrap();
-    client
-        .execute(
-            "INSERT INTO consent_event (\
-                 participant_ref, event_ref, consent_purpose, consent_decision, \
-                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
-             ) VALUES ($1, $2, 'service_operation', 'revoked', $3, NULL, 19000)",
-            &[
-                &"participant_consent_reload_corrupt",
-                &"consent_event_earlier",
-                &"consent_form_service_v1",
-            ],
-        )
-        .unwrap();
-
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        load_consent_ledger(&mut transaction, "participant_consent_reload_corrupt"),
-        Err(ConsentPersistenceError::CorruptHistory)
-    ));
-    transaction.rollback().unwrap();
-}
-
-#[test]
-fn ambiguous_physical_order_and_noncanonical_participant_alias_fail_closed() {
+fn created_at_ties_do_not_override_sequence_and_noncanonical_aliases_fail_closed() {
     let _guard = guard();
     let mut client = test_client();
     reset(&mut client);
@@ -249,12 +258,9 @@ fn ambiguous_physical_order_and_noncanonical_participant_alias_fail_closed() {
         )
         .unwrap();
 
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        load_consent_ledger(&mut transaction, "participant_consent_reload_tie"),
-        Err(ConsentPersistenceError::CorruptHistory)
-    ));
-    transaction.rollback().unwrap();
+    let loaded = load(&mut client, "participant_consent_reload_tie")
+        .expect("created_at is evidence metadata, not the ledger order authority");
+    assert_eq!(loaded, revoked);
 
     let mut alias_transaction = client.transaction().unwrap();
     assert!(matches!(
@@ -265,6 +271,175 @@ fn ambiguous_physical_order_and_noncanonical_participant_alias_fail_closed() {
         Err(ConsentPersistenceError::InvalidReference)
     ));
     alias_transaction.rollback().unwrap();
+}
+
+#[test]
+fn non_monotonic_stored_history_fails_closed_instead_of_reordering() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    persist(
+        &mut client,
+        &ConsentLedger::new("participant_consent_reload_corrupt").unwrap(),
+    );
+    client
+        .execute(
+            "INSERT INTO consent_event (\
+                 participant_ref, event_ref, consent_purpose, consent_decision, \
+                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms, event_sequence\
+             ) VALUES ($1, $2, 'service_operation', 'granted', $3, NULL, 20000, 1)",
+            &[
+                &"participant_consent_reload_corrupt",
+                &"consent_event_later",
+                &"consent_form_service_v1",
+            ],
+        )
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO consent_event (\
+                 participant_ref, event_ref, consent_purpose, consent_decision, \
+                 consent_form_version_ref, research_scope_ref, occurred_at_unix_ms, event_sequence\
+             ) VALUES ($1, $2, 'service_operation', 'revoked', $3, NULL, 19000, 2)",
+            &[
+                &"participant_consent_reload_corrupt",
+                &"consent_event_earlier",
+                &"consent_form_service_v1",
+            ],
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut transaction, "participant_consent_reload_corrupt"),
+        Err(ConsentPersistenceError::CorruptHistory)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn gapped_sequence_and_multiple_legacy_rows_fail_closed() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    let mut ledger = ConsentLedger::new("participant_consent_reload_gap").unwrap();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "consent_event_gap_one",
+            purpose: ConsentPurpose::ServiceOperation,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "consent_form_gap_v1",
+            research_scope_ref: None,
+            occurred_at_unix_ms: 50_000,
+        })
+        .unwrap();
+    persist(&mut client, &ledger);
+    client
+        .execute(
+            "UPDATE consent_event SET event_sequence = 2 WHERE participant_ref = $1",
+            &[&"participant_consent_reload_gap"],
+        )
+        .unwrap();
+    let mut gapped = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut gapped, "participant_consent_reload_gap"),
+        Err(ConsentPersistenceError::CorruptHistory)
+    ));
+    gapped.rollback().unwrap();
+
+    reset_legacy_schema(&mut client);
+    client
+        .execute(
+            "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
+            &[&"participant_consent_reload_legacy_many"],
+        )
+        .unwrap();
+    insert_legacy_research_event(
+        &mut client,
+        "participant_consent_reload_legacy_many",
+        "consent_event_legacy_many_grant",
+        "granted",
+        51_000,
+    );
+    insert_legacy_research_event(
+        &mut client,
+        "participant_consent_reload_legacy_many",
+        "consent_event_legacy_many_revoke",
+        "revoked",
+        51_000,
+    );
+
+    apply_consent_migration(&mut client).unwrap();
+    apply_consent_migration(&mut client).unwrap();
+    let mut legacy = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut legacy, "participant_consent_reload_legacy_many"),
+        Err(ConsentPersistenceError::CorruptHistory)
+    ));
+    legacy.rollback().unwrap();
+}
+
+#[test]
+fn single_legacy_event_upgrades_without_inventing_history_order() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset_legacy_schema(&mut client);
+
+    client
+        .execute(
+            "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
+            &[&"participant_consent_reload_legacy_one"],
+        )
+        .unwrap();
+    insert_legacy_research_event(
+        &mut client,
+        "participant_consent_reload_legacy_one",
+        "consent_event_legacy_one_grant",
+        "granted",
+        52_000,
+    );
+    apply_consent_migration(&mut client).unwrap();
+
+    let legacy = load(&mut client, "participant_consent_reload_legacy_one")
+        .expect("one historical event has no relative-order ambiguity");
+    let legacy_snapshot = legacy.snapshot_as("consent_snapshot_legacy_one").unwrap();
+    assert!(legacy_snapshot.is_granted(ConsentPurpose::ResearchContribution));
+
+    let mut extended = legacy.clone();
+    extended
+        .record(research_event(
+            "consent_event_legacy_one_revoke",
+            ConsentDecision::Revoked,
+            52_000,
+        ))
+        .unwrap();
+    persist(&mut client, &extended);
+
+    let reloaded = load(&mut client, "participant_consent_reload_legacy_one")
+        .expect("a sequenced tail may extend one unambiguous legacy event");
+    let snapshot = reloaded.snapshot_as("consent_snapshot_legacy_extended").unwrap();
+    assert_eq!(reloaded, extended);
+    assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
+
+    let stored_order: Vec<(String, Option<i64>)> = client
+        .query(
+            "SELECT event_ref, event_sequence FROM consent_event \
+             WHERE participant_ref = $1 ORDER BY event_sequence ASC NULLS FIRST",
+            &[&"participant_consent_reload_legacy_one"],
+        )
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect();
+    assert_eq!(
+        stored_order,
+        vec![
+            ("consent_event_legacy_one_grant".to_owned(), None),
+            ("consent_event_legacy_one_revoke".to_owned(), Some(1)),
+        ]
+    );
 }
 
 #[test]
