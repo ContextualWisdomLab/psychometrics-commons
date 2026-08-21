@@ -95,22 +95,31 @@ Current protected-main Rust module surface on `503a4e640eeba0f5e126fa4c4078d8d21
 
 ```text
 src/lib.rs
+├── account_link.rs  # dual-proof anonymous-to-account linking evidence
 ├── anonymous_authorization.rs  # supplied-record anonymous session command authorization
+├── anonymous_credential.rs  # hashed short-lived anonymous credential evidence
+├── anonymous_session.rs  # tenant/participant/session-bound anonymous authority
 ├── authorization.rs  # fail-closed tenant/task authorization context and gates
 ├── consent.rs        # purpose-specific consent + research contribution lifecycle
 ├── data_rights.rs    # export/deletion lifecycle and retention evidence
+├── data_rights_authorization.rs  # stored participant-owned data-rights resource authorization
+├── deterministic_narrative.rs  # deterministic AI-independent approved style narrative fallback
 ├── health.rs         # operation-scoped liveness/readiness and capability-state contract
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
+├── integration_publisher.rs  # product-owned immutable integration-event publishing boundary
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
+├── longitudinal_observation.rs  # longitudinal clocks, identity, and membership-share evidence
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
+├── postgres_data_rights_processing.rs  # PostgreSQL identity-verified data-rights operation persistence
 ├── postgres_health.rs  # PostgreSQL major/write-readiness and relation-integrity probe
 ├── postgres_inbox_consumption.rs  # PostgreSQL inbox consumption distinct from receipt
 ├── postgres_instrument_release.rs  # PostgreSQL locale-specific instrument-release persistence
 ├── postgres_integration.rs  # PostgreSQL integration evidence/delivery-attempt persistence adapter
+├── postgres_item_delivery.rs  # PostgreSQL tenant/session-bound item-delivery evidence persistence
 ├── postgres_scoring_job.rs  # PostgreSQL scoring enqueue/named claim/claim-next/retry/cancel/terminal persistence
 ├── postgres_scoring_request.rs  # PostgreSQL version-pinned scoring-request identity
 ├── postgres_response_snapshot.rs # PostgreSQL immutable response-snapshot persistence
