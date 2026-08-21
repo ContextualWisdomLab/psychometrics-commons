@@ -90,12 +90,10 @@ fn lockfile_failure_evidence_is_scoped_to_the_lock_gate() {
 fn coverage_runner_preserves_both_exact_gates() {
     assert!(CI_WORKFLOW.contains("id: line_coverage_gate"));
     assert!(CI_WORKFLOW.contains("id: branch_coverage_gate"));
-    assert!(CI_WORKFLOW.contains(
-        "if: failure() && steps.line_coverage_gate.outcome == 'failure'"
-    ));
-    assert!(CI_WORKFLOW.contains(
-        "if: failure() && steps.branch_coverage_gate.outcome == 'failure'"
-    ));
+    assert!(CI_WORKFLOW.contains("if: failure() && steps.line_coverage_gate.outcome == 'failure'"));
+    assert!(
+        CI_WORKFLOW.contains("if: failure() && steps.branch_coverage_gate.outcome == 'failure'")
+    );
     assert_eq!(
         CI_WORKFLOW
             .matches("cargo install cargo-llvm-cov --locked --version \"$CARGO_LLVM_COV_VERSION\"")
