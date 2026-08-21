@@ -334,9 +334,10 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
         return false;
     }
 
-    FORBIDDEN_PUBLIC_RELEASE_COLUMNS
-        .iter()
-        .any(|forbidden| compact.contains(&compact_public_release_column(forbidden)))
+    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.iter().any(|forbidden| {
+        let forbidden = compact_public_release_column(forbidden);
+        compact.contains(forbidden.as_str())
+    })
 }
 
 fn compact_public_release_column(column_name: &str) -> String {
