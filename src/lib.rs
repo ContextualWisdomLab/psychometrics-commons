@@ -24,6 +24,7 @@ pub mod item_delivery;
 pub mod longitudinal_observation;
 pub mod narrative;
 pub mod participant;
+pub mod postgres_anonymous_credential;
 pub mod postgres_assessment_session;
 pub mod postgres_consent;
 pub mod postgres_data_rights;
