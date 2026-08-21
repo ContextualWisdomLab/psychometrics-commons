@@ -107,6 +107,29 @@ fn separator_aliases_cannot_hide_restricted_identity_columns() {
 }
 
 #[test]
+fn inserted_digits_cannot_hide_restricted_identity_columns() {
+    for column_name in [
+        "participant0ref",
+        "subject9ref",
+        "linkage2key",
+        "pseudonym7key",
+        "access3token",
+        "client4secret",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not hide a restricted marker by inserting digits"
+        );
+    }
+}
+
+#[test]
 fn pseudonym_linkage_key_aliases_cannot_enter_public_release() {
     for column_name in [
         "pseudonym_key",
