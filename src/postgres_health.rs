@@ -134,7 +134,7 @@ pub fn probe_postgres_runtime(
 /// relation set that represents its compatible schema version. Each relation identity must
 /// be an exact two-part `schema.relation` name using the repository's unquoted ASCII SQL
 /// identifier grammar: lowercase letters, digits, and underscores, with each component
-/// starting with a lowercase letter or underscore and no component exceeding PostgreSQL's
+/// starting with a lowercase letter or underscore and no component exceeding `PostgreSQL`'s
 /// 63-byte identifier limit. `PostgreSQL`'s `search_path` is the ordered list of schemas
 /// used to resolve an unqualified name, so requiring the schema explicitly prevents the
 /// answer from changing with that setting. Restricting the input to this ASCII grammar also
