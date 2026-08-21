@@ -28,6 +28,7 @@ fn https_problem_types_cover_authority_port_and_suffix_edges() {
 
     for invalid_type in [
         "ftp://example.test/problem",
+        "HTTPS:example.test/problem",
         "https://",
         "https://user@example.test/problem",
         "https://:80/problem",
