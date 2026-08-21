@@ -158,10 +158,15 @@ impl ApiProblem {
 }
 
 fn valid_problem_type_uri(type_uri: &str) -> bool {
-    if let Some(remainder) = type_uri.strip_prefix("https://") {
-        return valid_https_problem_type(remainder);
+    let Some((scheme, remainder)) = type_uri.split_once(':') else {
+        return false;
+    };
+    if scheme.eq_ignore_ascii_case("https") {
+        return remainder
+            .strip_prefix("//")
+            .is_some_and(valid_https_problem_type);
     }
-    if let Some(remainder) = type_uri.strip_prefix("urn:") {
+    if scheme.eq_ignore_ascii_case("urn") {
         return valid_urn_problem_type(remainder);
     }
     false
