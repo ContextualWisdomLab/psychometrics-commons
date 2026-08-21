@@ -141,6 +141,15 @@ fn relation_integrity_probe_rejects_whitespace_and_three_part_names() {
 }
 
 #[test]
+fn relation_integrity_probe_rejects_empty_schema_or_relation_components() {
+    let mut client = test_client();
+    for relation in [".pg_class", "pg_catalog."] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
 fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(
