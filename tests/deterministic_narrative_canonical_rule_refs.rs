@@ -83,3 +83,37 @@ fn published_rule_references_must_already_be_canonical() {
         Err(NarrativeFallbackError::InvalidReference)
     );
 }
+
+#[test]
+fn approved_selection_references_must_already_be_canonical() {
+    let canonical_units = [unit()];
+
+    let invalid_primary = ApprovedStyleSelection {
+        primary_style_ref: " style_exploratory",
+        ..selection()
+    };
+    assert_eq!(
+        bundle(&canonical_units).render(&identity(), &invalid_primary),
+        Err(NarrativeFallbackError::InvalidReference)
+    );
+
+    let padded_adjacent_refs = ["style_reflective "];
+    let invalid_adjacent = ApprovedStyleSelection {
+        adjacent_style_refs: &padded_adjacent_refs,
+        ..selection()
+    };
+    assert_eq!(
+        bundle(&canonical_units).render(&identity(), &invalid_adjacent),
+        Err(NarrativeFallbackError::InvalidReference)
+    );
+
+    let padded_interpretation_refs = ["\u{3000}unit_openness"];
+    let invalid_interpretation = ApprovedStyleSelection {
+        interpretation_unit_refs: &padded_interpretation_refs,
+        ..selection()
+    };
+    assert_eq!(
+        bundle(&canonical_units).render(&identity(), &invalid_interpretation),
+        Err(NarrativeFallbackError::InvalidReference)
+    );
+}
