@@ -392,7 +392,7 @@ fn contains_forbidden_research_namespace_prefix_marker(compact: &str) -> bool {
 fn compact_public_release_column(column_name: &str) -> String {
     column_name
         .chars()
-        .filter(|character| character.is_ascii_alphabetic())
+        .filter(char::is_ascii_alphabetic)
         .collect()
 }
 
