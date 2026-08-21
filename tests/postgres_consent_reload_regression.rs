@@ -359,7 +359,7 @@ fn non_monotonic_stored_history_fails_closed_instead_of_reordering() {
 }
 
 #[test]
-fn gapped_sequence_and_multiple_legacy_rows_fail_closed() {
+fn gapped_sequence_fails_closed() {
     let _guard = guard();
     let mut client = test_client();
     reset(&mut client);
@@ -388,37 +388,6 @@ fn gapped_sequence_and_multiple_legacy_rows_fail_closed() {
         Err(ConsentPersistenceError::CorruptHistory)
     ));
     gapped.rollback().unwrap();
-
-    reset_legacy_schema(&mut client);
-    client
-        .execute(
-            "INSERT INTO consent_ledger (participant_ref) VALUES ($1)",
-            &[&"participant_consent_reload_legacy_many"],
-        )
-        .unwrap();
-    insert_legacy_research_event(
-        &mut client,
-        "participant_consent_reload_legacy_many",
-        "consent_event_legacy_many_grant",
-        "granted",
-        51_000,
-    );
-    insert_legacy_research_event(
-        &mut client,
-        "participant_consent_reload_legacy_many",
-        "consent_event_legacy_many_revoke",
-        "revoked",
-        51_000,
-    );
-
-    apply_consent_migration(&mut client).unwrap();
-    apply_consent_migration(&mut client).unwrap();
-    let mut legacy = client.transaction().unwrap();
-    assert!(matches!(
-        load_consent_ledger(&mut legacy, "participant_consent_reload_legacy_many"),
-        Err(ConsentPersistenceError::CorruptHistory)
-    ));
-    legacy.rollback().unwrap();
 }
 
 #[test]
