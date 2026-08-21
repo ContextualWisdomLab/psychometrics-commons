@@ -59,6 +59,7 @@ DECLARE
     actual_constraints TEXT[];
     actual_constraint_manifest TEXT;
     stored_constraint_manifest TEXT;
+    reference_constraints_need_upgrade BOOLEAN;
     constraint_manifest_prefix CONSTANT TEXT :=
         'psychometrics-commons:migration-0002:constraint-manifest:';
     probe_job_ref TEXT := 'scoring_job_migration_probe_' || pg_backend_pid()::TEXT;
@@ -326,38 +327,66 @@ $create_scoring_job_state$;
         END IF;
     END IF;
 
+    SELECT
+        count(*) <> 6
+        OR COALESCE(
+            bool_or(
+                position(
+                    'scoring_job_reference_is_valid'
+                    IN pg_get_constraintdef(constraint_record.oid)
+                ) = 0
+            ),
+            TRUE
+        )
+    INTO reference_constraints_need_upgrade
+    FROM pg_constraint AS constraint_record
+    WHERE constraint_record.conrelid = relation_ref
+      AND constraint_record.conname = ANY (ARRAY[
+          'scoring_job_ref_format_check',
+          'scoring_request_ref_format_check',
+          'scoring_failure_code_format_check',
+          'scoring_worker_ref_format_check',
+          'scoring_lease_ref_format_check',
+          'scoring_result_ref_format_check'
+      ]);
+
     -- `CREATE TABLE` cannot update same-named CHECK constraints on an existing deployment.
-    -- Recreate only the six reference guards after the manifest has proven the schema was not
-    -- tampered with. PostgreSQL validates each replacement against historical rows, so an old row
-    -- that violates the stronger Rust-equivalent boundary makes the migration fail closed.
-    ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_result_ref_format_check;
-    ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_lease_ref_format_check;
-    ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_worker_ref_format_check;
-    ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_failure_code_format_check;
-    ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_request_ref_format_check;
-    ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_job_ref_format_check;
+    -- Recreate the six reference guards only when a trusted previous manifest still carries the
+    -- legacy predicate. PostgreSQL validates each replacement against historical rows, so an old
+    -- row that violates the stronger Rust-equivalent boundary makes the migration fail closed.
+    -- An already-current schema keeps the same constraint objects and avoids repeated exclusive
+    -- table locks plus full-table validation scans during normal idempotent reapplication.
+    IF reference_constraints_need_upgrade THEN
+        ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_result_ref_format_check;
+        ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_lease_ref_format_check;
+        ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_worker_ref_format_check;
+        ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_failure_code_format_check;
+        ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_request_ref_format_check;
+        ALTER TABLE scoring_job_state DROP CONSTRAINT scoring_job_ref_format_check;
 
-    ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_job_ref_format_check CHECK (
-        scoring_job_reference_is_valid(scoring_job_ref)
-    );
-    ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_request_ref_format_check CHECK (
-        scoring_job_reference_is_valid(scoring_request_ref)
-    );
-    ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_failure_code_format_check CHECK (
-        last_failure_code IS NULL OR scoring_job_reference_is_valid(last_failure_code)
-    );
-    ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_worker_ref_format_check CHECK (
-        active_worker_ref IS NULL OR scoring_job_reference_is_valid(active_worker_ref)
-    );
-    ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_lease_ref_format_check CHECK (
-        active_lease_ref IS NULL OR scoring_job_reference_is_valid(active_lease_ref)
-    );
-    ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_result_ref_format_check CHECK (
-        result_ref IS NULL OR scoring_job_reference_is_valid(result_ref)
-    );
+        ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_job_ref_format_check CHECK (
+            scoring_job_reference_is_valid(scoring_job_ref)
+        );
+        ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_request_ref_format_check CHECK (
+            scoring_job_reference_is_valid(scoring_request_ref)
+        );
+        ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_failure_code_format_check CHECK (
+            last_failure_code IS NULL OR scoring_job_reference_is_valid(last_failure_code)
+        );
+        ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_worker_ref_format_check CHECK (
+            active_worker_ref IS NULL OR scoring_job_reference_is_valid(active_worker_ref)
+        );
+        ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_lease_ref_format_check CHECK (
+            active_lease_ref IS NULL OR scoring_job_reference_is_valid(active_lease_ref)
+        );
+        ALTER TABLE scoring_job_state ADD CONSTRAINT scoring_result_ref_format_check CHECK (
+            result_ref IS NULL OR scoring_job_reference_is_valid(result_ref)
+        );
+    END IF;
 
-    -- Recompute the manifest after upgrade and persist the new exact constraint contract. On a
-    -- later reapply this is the value checked above before any DDL is allowed to mutate the table.
+    -- Recompute the manifest after any genuine upgrade and persist the exact current constraint
+    -- contract. On a later reapply this is checked above before any DDL is allowed to mutate the
+    -- table.
     SELECT ARRAY(
         SELECT format(
             '%s:%s:%s:%s:%s',
