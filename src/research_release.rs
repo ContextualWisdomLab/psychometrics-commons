@@ -295,6 +295,8 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
     "token",
 ];
 
+const FORBIDDEN_CREDENTIAL_WORDS: &[&str] = &["auth", "credential", "password", "secret", "token"];
+
 /// Reject a public-release fixture that still carries restricted identity or secrets.
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
@@ -304,16 +306,16 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
 /// bypass the privacy markers. A column in the `research_participant_ref` namespace
 /// is allowed, including clear export or staging prefixes and supported separator
 /// variants, unless its prefix contains a forbidden marker or restricted identity,
-/// authentication, credential, or internal-location namespace stem. Bare sensitive
-/// namespace stems such as `token`, `password`, or `participant` are also forbidden.
-/// Restricted identity, authentication, credential, and internal-location names remain
-/// forbidden when transport prefixes, suffixes, punctuation/whitespace separators, or
-/// inserted digits are added around or within their marker words. The caller must provide
-/// at least one published column and an effective product-authorized identity inventory;
-/// the scanner fails closed rather than treating an empty fixture or omitted inventory as
-/// evidence that the fixture is clean. Object or array cell values are not parsed here:
-/// callers must flatten them or prove a separate structured-value privacy scan before
-/// packaging.
+/// authentication, credential, or internal-location namespace stem. Bare and compound
+/// sensitive namespace words such as `token`, `password`, `credential`, and `auth` are
+/// forbidden while ordinary author metadata remains allowed. Restricted identity,
+/// authentication, credential, and internal-location names remain forbidden when
+/// transport prefixes, suffixes, punctuation/whitespace separators, or inserted digits
+/// are added around or within their marker words. The caller must provide at least one
+/// published column and an effective product-authorized identity inventory; the scanner
+/// fails closed rather than treating an empty fixture or omitted inventory as evidence
+/// that the fixture is clean. Object or array cell values are not parsed here: callers
+/// must flatten them or prove a separate structured-value privacy scan before packaging.
 ///
 /// # Errors
 ///
@@ -393,6 +395,7 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     }
 
     contains_forbidden_public_release_marker(&compact)
+        || contains_forbidden_credential_word(&normalized, &compact)
         || FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
             .iter()
             .any(|marker| compact == *marker)
@@ -409,6 +412,24 @@ fn contains_forbidden_research_namespace_prefix_marker(compact: &str) -> bool {
     FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
         .iter()
         .any(|marker| compact.contains(marker))
+}
+
+fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
+    let mut words = normalized
+        .split(|character: char| !character.is_ascii_alphabetic())
+        .filter(|word| !word.is_empty());
+    let first_word = words.next();
+
+    if first_word.is_some_and(|word| FORBIDDEN_CREDENTIAL_WORDS.contains(&word))
+        || words.any(|word| FORBIDDEN_CREDENTIAL_WORDS.contains(&word))
+    {
+        return true;
+    }
+
+    ["credential", "password", "secret", "token"]
+        .iter()
+        .any(|marker| compact.ends_with(marker))
+        || (compact.starts_with("auth") && first_word != Some("author"))
 }
 
 fn compact_public_release_column(column_name: &str) -> String {
