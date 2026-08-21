@@ -65,9 +65,9 @@ FORBIDDEN_CROSS_DATABASE_SQL = re.compile(
 
 
 def is_runtime_text_file(path: Path) -> bool:
-    """Return whether a discovered runtime path is an expected UTF-8 text artifact."""
+    """Return whether a runtime path has a repository-scanned text suffix."""
 
-    return path.is_file() and path.suffix.lower() in RUNTIME_TEXT_SUFFIXES
+    return path.suffix.lower() in RUNTIME_TEXT_SUFFIXES
 
 
 def is_deployment_manifest(path: Path) -> bool:
@@ -101,7 +101,11 @@ def runtime_files() -> list[Path]:
     for root in RUNTIME_ROOTS:
         if not root.exists():
             continue
-        files.extend(path for path in root.rglob("*") if is_runtime_text_file(path))
+        files.extend(
+            path
+            for path in root.rglob("*")
+            if path.is_file() and is_runtime_text_file(path)
+        )
     files.extend(path for path in RUNTIME_FILES if path.exists())
     files.extend(
         path
