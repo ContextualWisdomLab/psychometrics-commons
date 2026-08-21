@@ -164,6 +164,15 @@ class MigrationTableNamingContractTests(unittest.TestCase):
         self.assertEqual(created_table_names(sql), ["visible_runtime_table"])
         self.assertFalse(contains_unreviewable_dynamic_create_table(sql))
 
+    def test_comment_scanner_uses_standard_conforming_string_backslashes(self) -> None:
+        sql = r"""
+        SELECT 'ends-with-backslash\';
+        -- CREATE TABLE misleading_comment (row_ref text);
+        CREATE TABLE visible_runtime_table (row_ref text);
+        """
+
+        self.assertEqual(created_table_names(sql), ["visible_runtime_table"])
+
     def test_only_generated_dynamic_create_table_is_unreviewable(self) -> None:
         static_dynamic_sql = "EXECUTE 'CREATE TABLE static_archive_table (row_ref text)'"
         generated_dynamic_sql = """EXECUTE format(
@@ -177,6 +186,14 @@ class MigrationTableNamingContractTests(unittest.TestCase):
                 "CREATE TABLE visible_table (row_ref text);"
             )
         )
+
+    def test_dynamic_execute_scanner_keeps_quoted_semicolons_together(self) -> None:
+        generated_dynamic_sql = """EXECUTE format($ddl$
+            SELECT 1;
+            CREATE TABLE %I (row_ref text)
+        $ddl$, generated_name);"""
+
+        self.assertTrue(contains_unreviewable_dynamic_create_table(generated_dynamic_sql))
 
     def test_name_contract_rejects_single_word_mixed_case_and_quoted_aliases(self) -> None:
         for invalid_name in ["session", "AssessmentSession", '"assessment_session"']:
