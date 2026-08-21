@@ -1,0 +1,117 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public response-event API
+  version: 0.1.0
+  description: >
+    As-built public write of one response event on an Active assessment
+    session. A purchaser posts item_version_ref and payload_digest for an
+    item that belongs to the session's published release. Exact
+    Idempotency-Key replay returns the original event. This family does not
+    create sessions, list instruments, or persist ledgers across restart.
+paths:
+  /v1/sessions/{session_ref}/responses:
+    post:
+      operationId: recordSessionResponse
+      summary: Record one answer on an active session
+      description: >
+        Accepts one response event while the session is Active and the item
+        belongs to the bound published release. Send the same Idempotency-Key
+        to replay the original event. After every item is recorded, use
+        POST /v1/sessions/{session_ref}/commands to Complete the session.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque assessment-session reference minted at create time.
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque client event reference used for exact replay.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponseWrite"
+      responses:
+        "200":
+          description: Exact idempotent replay of an already accepted event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordedResponse"
+        "201":
+          description: Newly accepted response event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordedResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    ResponseWrite:
+      type: object
+      additionalProperties: false
+      required:
+        - item_version_ref
+        - payload_digest
+      properties:
+        item_version_ref:
+          type: string
+        payload_digest:
+          type: string
+    RecordedResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - server_event_ref
+        - client_event_ref
+        - item_version_ref
+        - payload_digest
+        - sequence
+      properties:
+        session_ref:
+          type: string
+        server_event_ref:
+          type: string
+        client_event_ref:
+          type: string
+        item_version_ref:
+          type: string
+        payload_digest:
+          type: string
+        sequence:
+          type: integer
+          minimum: 1
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

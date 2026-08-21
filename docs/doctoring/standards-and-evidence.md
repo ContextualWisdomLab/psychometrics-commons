@@ -137,6 +137,16 @@ Product consequences:
 - missing sessions return 404 that tells the buyer to POST the same
   Idempotency-Key.
 
+## Public HTTP contracts
+
+Implemented public HTTP families are described by an exact OpenAPI 3.2.0 as-built document and return RFC 9457 problem details. HTTP semantics, including method and target parsing, follow RFC 9110. A response, catalog, or session operation that is not in the as-built document is not available to a purchaser.
+
+Product consequences:
+
+- `POST /v1/sessions/{session_ref}/responses` records one answer on an Active session; use an `item_version_ref` from the bound published release and replay with the same `Idempotency-Key`;
+- problem details use stable URNs and never echo raw request bodies, SQL, or provider text;
+- Created or paused sessions stay rejected so a purchaser cannot write answers before Activate.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
