@@ -15,6 +15,15 @@ use std::fmt::{Display, Formatter};
 
 const ANONYMOUS_CREDENTIAL_MIGRATION: &str =
     include_str!("../migrations/0020_anonymous_credential_evidence.sql");
+const EXISTING_CREDENTIAL_SQL: &str =
+    "SELECT tenant_ref, participant_ref, session_ref, proof_digest, issued_at_unix_ms, \
+            expires_at_unix_ms, revoked_at_unix_ms \
+     FROM anonymous_credential_evidence WHERE credential_ref = $1";
+const REVOCATION_UPDATE_SQL: &str =
+    "UPDATE anonymous_credential_evidence SET revoked_at_unix_ms = $1 \
+     WHERE credential_ref = $2 AND revoked_at_unix_ms IS NULL";
+const REVOCATION_STATE_SQL: &str = "SELECT revoked_at_unix_ms FROM anonymous_credential_evidence \
+     WHERE credential_ref = $1";
 
 /// Outcome of persisting one anonymous credential record.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -217,12 +226,8 @@ fn classify_existing_credential(
     credential: &AnonymousCredential,
     incoming_revoked_at: Option<i64>,
 ) -> Result<AnonymousCredentialPersistenceDisposition, AnonymousCredentialPersistenceError> {
-    let row = transaction.query_one(
-        "SELECT tenant_ref, participant_ref, session_ref, proof_digest, \
-                issued_at_unix_ms, expires_at_unix_ms, revoked_at_unix_ms \
-         FROM anonymous_credential_evidence WHERE credential_ref = $1",
-        &[&credential.credential_ref()],
-    )?;
+    let credential_ref = credential.credential_ref();
+    let row = transaction.query_one(EXISTING_CREDENTIAL_SQL, &[&credential_ref])?;
     let stored_tenant: String = row.get(0);
     let stored_participant: String = row.get(1);
     let stored_session: String = row.get(2);
@@ -248,10 +253,8 @@ fn classify_existing_credential(
         }
         (None, Some(revoked_at_unix_ms)) => {
             let updated = transaction.execute(
-                "UPDATE anonymous_credential_evidence \
-                 SET revoked_at_unix_ms = $1 \
-                 WHERE credential_ref = $2 AND revoked_at_unix_ms IS NULL",
-                &[&revoked_at_unix_ms, &credential.credential_ref()],
+                REVOCATION_UPDATE_SQL,
+                &[&revoked_at_unix_ms, &credential_ref],
             )?;
             if updated == 1 {
                 return Ok(AnonymousCredentialPersistenceDisposition::Revoked);
@@ -261,11 +264,7 @@ fn classify_existing_credential(
             // competing updater released the row lock. Reclassify only an exact
             // committed revocation as an idempotent duplicate; a different durable
             // timestamp still fails closed.
-            let row = transaction.query_one(
-                "SELECT revoked_at_unix_ms FROM anonymous_credential_evidence \
-                 WHERE credential_ref = $1",
-                &[&credential.credential_ref()],
-            )?;
+            let row = transaction.query_one(REVOCATION_STATE_SQL, &[&credential_ref])?;
             let committed_revoked_at: Option<i64> = row.get(0);
             if committed_revoked_at == Some(revoked_at_unix_ms) {
                 Ok(AnonymousCredentialPersistenceDisposition::Duplicate)

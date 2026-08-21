@@ -15,6 +15,8 @@ use std::sync::{Mutex, MutexGuard};
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_NUMERIC: &str =
+    "sha256:0123456789012345678901234567890123456789012345678901234567890123";
 
 static CREDENTIAL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -55,6 +57,26 @@ fn credential_named(credential_ref: &str, proof_digest: &str) -> AnonymousCreden
         proof_digest,
         1_000,
         2_000,
+    )
+    .unwrap()
+}
+
+fn credential_with_binding(
+    tenant_ref: &str,
+    participant_ref: &str,
+    session_ref: &str,
+    proof_digest: &str,
+    issued_at_unix_ms: u64,
+    expires_at_unix_ms: u64,
+) -> AnonymousCredential {
+    AnonymousCredential::new(
+        "anonymous_credential_alpha",
+        tenant_ref,
+        participant_ref,
+        session_ref,
+        proof_digest,
+        issued_at_unix_ms,
+        expires_at_unix_ms,
     )
     .unwrap()
 }
@@ -167,6 +189,83 @@ fn credential_identity_and_digest_rebinding_fail_closed() {
         ),
         AnonymousCredentialPersistenceError::ConflictingReplay
     ));
+}
+
+#[test]
+fn every_immutable_binding_field_rebinding_fails_closed() {
+    let _guard = credential_test_guard();
+    let mut client = test_client();
+    reset_credential_table(&mut client);
+    apply_anonymous_credential_migration(&mut client).unwrap();
+    persist_ok(
+        &mut client,
+        &credential_with_binding(
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            DIGEST_A,
+            1_000,
+            2_000,
+        ),
+    );
+
+    let variants = [
+        credential_with_binding(
+            "tenant_other",
+            "participant_alpha",
+            "session_alpha",
+            DIGEST_A,
+            1_000,
+            2_000,
+        ),
+        credential_with_binding(
+            "tenant_alpha",
+            "participant_other",
+            "session_alpha",
+            DIGEST_A,
+            1_000,
+            2_000,
+        ),
+        credential_with_binding(
+            "tenant_alpha",
+            "participant_alpha",
+            "session_other",
+            DIGEST_A,
+            1_000,
+            2_000,
+        ),
+        credential_with_binding(
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            DIGEST_NUMERIC,
+            1_000,
+            2_000,
+        ),
+        credential_with_binding(
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            DIGEST_A,
+            1_001,
+            2_000,
+        ),
+        credential_with_binding(
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            DIGEST_A,
+            1_000,
+            2_001,
+        ),
+    ];
+
+    for variant in variants {
+        assert!(matches!(
+            persist_err(&mut client, &variant),
+            AnonymousCredentialPersistenceError::ConflictingReplay
+        ));
+    }
 }
 
 #[test]
