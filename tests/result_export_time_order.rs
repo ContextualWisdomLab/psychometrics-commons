@@ -14,6 +14,7 @@ const RESULT_CREATED_AT_UNIX_MS: u64 = 1_700_000_000_000;
 const ENGINE_DIGEST: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 
+/// Build one immutable scored result with a fixed server-authoritative creation time.
 fn snapshot() -> ResultSnapshot {
     let mut ledger = ResponseLedger::new("session_export_time_order").unwrap();
     ledger
@@ -68,6 +69,7 @@ fn snapshot() -> ResultSnapshot {
     .unwrap()
 }
 
+/// Attempt a personal export at the supplied server-authoritative timestamp.
 fn export_at(
     snapshot: &ResultSnapshot,
     exported_at_unix_ms: u64,
@@ -83,6 +85,7 @@ fn export_at(
     )
 }
 
+/// Prove an export cannot claim to predate the immutable result it copies.
 #[test]
 fn export_before_result_creation_fails_closed() {
     let snapshot = snapshot();
@@ -93,6 +96,7 @@ fn export_before_result_creation_fails_closed() {
     );
 }
 
+/// Preserve the exact-boundary case for same-millisecond result creation and export.
 #[test]
 fn export_at_result_creation_time_is_allowed() {
     let snapshot = snapshot();
