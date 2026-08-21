@@ -94,6 +94,29 @@ fn insert_with_reference(
     }
 }
 
+fn reference_constraint_oids(client: &mut Client) -> Vec<(String, i64)> {
+    client
+        .query(
+            "SELECT conname, oid::bigint \
+             FROM pg_constraint \
+             WHERE conrelid = 'scoring_job_state'::regclass \
+               AND conname = ANY (ARRAY[ \
+                   'scoring_job_ref_format_check', \
+                   'scoring_request_ref_format_check', \
+                   'scoring_failure_code_format_check', \
+                   'scoring_worker_ref_format_check', \
+                   'scoring_lease_ref_format_check', \
+                   'scoring_result_ref_format_check' \
+               ]) \
+             ORDER BY conname",
+            &[],
+        )
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect()
+}
+
 #[test]
 fn every_scoring_job_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
     let _guard = guard();
@@ -128,6 +151,20 @@ fn every_scoring_job_reference_rejects_unicode_numeric_whitespace_and_control_al
             assert_check(&error, constraint);
         }
     }
+}
+
+#[test]
+fn reapplying_current_schema_preserves_reference_constraints() {
+    let _guard = guard();
+    let mut client = client("scoring_job_reference_reapply_test");
+    let before = reference_constraint_oids(&mut client);
+    assert_eq!(before.len(), 6);
+
+    apply_scoring_job_migration(&mut client)
+        .expect("reapplying an already-current scoring-job schema must succeed");
+
+    let after = reference_constraint_oids(&mut client);
+    assert_eq!(after, before, "current reference guards must not be recreated");
 }
 
 fn reseal_current_constraint_manifest(client: &mut Client) {
