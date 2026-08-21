@@ -495,7 +495,7 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
 | at most one current Active `participant_identity_link` per participant under the accepted single-account-link policy | unambiguous current account projection |
 | unique active `(tenant_ref, identity_issuer, identity_subject_ref)` unless an explicit account-merge ADR permits otherwise | prevent one external subject from silently owning multiple product participants |
-| unique `(enrollment_ref, source_system_ref, source_observation_ref)` | longitudinal ingestion replay safety |
+| unique `(tenant_ref, enrollment_ref, source_system_ref, source_observation_ref)` | tenant-scoped longitudinal ingestion replay safety |
 | unique analysis-submission idempotency identity per `(enrollment_ref, analysis_spec_ref, observation_set_digest)` | repeatable TEPP dispatch |
 | unique `(tenant_ref, source, outbox_event_ref)` or an equivalently stronger globally unique event identity with tenant binding | durable outbound event identity |
 | unique `(tenant_ref, consumer_name, source, source_event_ref)` | tenant-bound inbox deduplication |
