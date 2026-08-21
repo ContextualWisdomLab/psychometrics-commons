@@ -1,7 +1,7 @@
 # Logical Entity-Relationship Model
 
 - Status: Normative logical data model
-- Date: 2026-08-13
+- Date: 2026-08-21
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
@@ -26,6 +26,9 @@ erDiagram
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
     assessment_session ||--o{ assessment_session_command : accepts
+    tenant_account ||--o{ anonymous_credential_evidence : scopes
+    assessment_participant ||--o{ anonymous_credential_evidence : holds
+    assessment_session ||--o{ anonymous_credential_evidence : authorizes
     assessment_session ||--o{ item_delivery_event : delivers
     item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
@@ -161,6 +164,18 @@ erDiagram
       int command_sequence
       string command_name
       string resulting_state
+    }
+
+    anonymous_credential_evidence {
+      string credential_ref PK
+      string tenant_ref FK
+      string participant_ref FK
+      string session_ref FK
+      string proof_digest UK
+      int issued_at_unix_ms
+      int expires_at_unix_ms
+      int revoked_at_unix_ms
+      timestamp recorded_at
     }
 
     item_delivery_event {
@@ -439,6 +454,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
 - Physical `assessment_session` exists only on Active PR #218 (`migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path. Protected main still has the `src/session.rs` aggregate only.
+- `anonymous_credential_evidence` is `IMPLEMENTED_ON_ACTIVE_PR` #302 through `migrations/0020_anonymous_credential_evidence.sql` plus `src/postgres_anonymous_credential.rs`. The physical aggregate stores only a canonical lowercase SHA-256 digest and exact tenant/participant/session binding, survives restart, and permits only append-only revocation after first persist. Raw bearer proof generation/hashing, HTTP issuance, audience enforcement, and deployment-specific maximum TTL remain Target; this line must become protected-main truth only after #302 merges.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
 - `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains Active PR #52; it is not protected-main truth until integrated. Do not name closed #158, #147, #133, #114, or #124 as the current persist landing.
@@ -460,6 +476,8 @@ The ERD includes only Psychometrics Commons-owned state. The following values ar
 
 No local foreign key is created into another service's database.
 
+`anonymous_credential_evidence` is operational authentication evidence owned by Psychometrics Commons, not a Keyverse credential store and not a research-identity namespace. It stores a one-way proof digest plus resource binding only. Raw bearer secrets, Keyverse subject identifiers, and research pseudonyms are prohibited columns.
+
 ## 4. Immutable and append-only aggregates
 
 Once semantically published/frozen, the following are append-only or superseded rather than mutated in place:
@@ -467,6 +485,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `instrument_version` after publication;
 - `instrument_release` manifest columns after first persist (only `publication_state` may advance);
 - `item_version` after publication;
+- `anonymous_credential_evidence` identity, proof digest, binding, issuance, and expiry after first persist (only `revoked_at_unix_ms` may be appended once);
 - `item_delivery_event`;
 - `response_snapshot` and `response_snapshot_entry`;
 - `result_snapshot`;
@@ -484,6 +503,8 @@ A physical schema must enforce equivalents of the following constraints:
 
 | Constraint | Purpose |
 |---|---|
+| unique `credential_ref` for one anonymous credential evidence identity | no credential-record identity reuse |
+| unique canonical `proof_digest` | prevent one anonymous bearer proof from authorizing multiple bindings |
 | unique `(session_ref, delivery_sequence)` | authoritative item-presentation order |
 | unique `delivery_event_ref` | no delivery evidence identity reuse |
 | unique `(session_ref, client_event_ref)` | response replay idempotency |
@@ -589,7 +610,7 @@ Database objects use at least two descriptive words and `snake_case` by default.
 
 ## 12. Migration contract
 
-The first physical migration must be reviewed against this logical model and the accepted ADRs. Subsequent migrations must:
+Every physical migration must be reviewed against this logical model and the accepted ADRs. Subsequent migrations must:
 
 1. preserve a backward-compatible application deployment window;
 2. include explicit data transformation and rollback/roll-forward evidence;
@@ -598,8 +619,9 @@ The first physical migration must be reviewed against this logical model and the
 5. prove tenant and identity-boundary constraints after migration;
 6. pass backup/restore verification before destructive changes;
 7. preserve tenant-bound outbox/inbox uniqueness and crash-recoverable processing state;
-8. preserve append-only participant identity-link history and longitudinal source-time semantics.
+8. preserve append-only participant identity-link history and longitudinal source-time semantics;
+9. preserve anonymous-credential proof secrecy by storing only reviewed digest evidence and append-only revocation state.
 
 ## 13. As-built rule
 
-Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, identity-link history, longitudinal time semantics, and ownership rules against this model. Silent divergence is a release defect.
+This document remains the normative **logical target ERD** even after individual physical migrations land. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, identity-link history, anonymous-credential proof boundaries, longitudinal time semantics, and ownership rules against this model. Silent divergence is a release defect.
