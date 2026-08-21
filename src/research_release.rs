@@ -419,6 +419,9 @@ fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
         .split(|character: char| !character.is_ascii_alphabetic())
         .filter(|word| !word.is_empty());
     let first_word = words.next();
+    let author_metadata_word = first_word.is_some_and(|word| {
+        ["author", "authors", "authored", "authoring"].contains(&word)
+    });
 
     if first_word.is_some_and(|word| FORBIDDEN_CREDENTIAL_WORDS.contains(&word))
         || words.any(|word| FORBIDDEN_CREDENTIAL_WORDS.contains(&word))
@@ -429,7 +432,7 @@ fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
     ["credential", "password", "secret", "token"]
         .iter()
         .any(|marker| compact.ends_with(marker))
-        || (compact.starts_with("auth") && first_word != Some("author"))
+        || (compact.starts_with("auth") && !author_metadata_word)
 }
 
 fn compact_public_release_column(column_name: &str) -> String {
