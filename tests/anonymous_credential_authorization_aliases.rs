@@ -26,13 +26,7 @@ fn every_bound_reference_must_use_its_exact_canonical_spelling() {
         ("tenant_alpha", " participant_alpha ", "session_alpha"),
         ("tenant_alpha", "participant_alpha", " session_alpha "),
     ] {
-        assert!(!credential.authorizes(
-            DIGEST,
-            tenant_ref,
-            participant_ref,
-            session_ref,
-            1_500,
-        ));
+        assert!(!credential.authorizes(DIGEST, tenant_ref, participant_ref, session_ref, 1_500,));
     }
 }
 
