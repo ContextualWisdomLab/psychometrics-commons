@@ -255,6 +255,7 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "operational_participant_ref",
     "participant_id",
     "participant_ref",
+    "pseudonym_key",
     "pseudonym_key_version",
     "subject_ref",
     "access_token",
@@ -286,16 +287,18 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
 /// research that needs the restricted mapping keeps those values outside this
-/// fixture. A column in the `research_participant_ref` namespace is allowed,
-/// including clear export or staging prefixes and supported separator variants,
-/// unless its prefix contains a forbidden marker or restricted-identity namespace stem.
-/// Restricted identity, authentication, credential, and internal-location names remain
-/// forbidden when transport prefixes, suffixes, or punctuation/whitespace separators
-/// are added around them. The caller must also supply an effective product-authorized
-/// identity inventory; the scanner fails closed rather than treating an omitted inventory
-/// as evidence that the fixture is clean. Object or array cell values are not parsed here:
-/// callers must flatten them or prove a separate structured-value privacy scan before
-/// packaging.
+/// fixture. Public-release column names use the service's ASCII schema grammar;
+/// non-ASCII aliases fail closed before normalization so Unicode confusables cannot
+/// bypass the privacy markers. A column in the `research_participant_ref` namespace
+/// is allowed, including clear export or staging prefixes and supported separator
+/// variants, unless its prefix contains a forbidden marker or restricted-identity
+/// namespace stem. Restricted identity, authentication, credential, and internal-location
+/// names remain forbidden when transport prefixes, suffixes, or punctuation/whitespace
+/// separators are added around them. The caller must also supply an effective
+/// product-authorized identity inventory; the scanner fails closed rather than treating
+/// an omitted inventory as evidence that the fixture is clean. Object or array cell
+/// values are not parsed here: callers must flatten them or prove a separate structured-
+/// value privacy scan before packaging.
 ///
 /// # Errors
 ///
@@ -353,6 +356,10 @@ fn has_effective_restricted_identity_inventory(
 }
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
+    if !column_name.is_ascii() {
+        return true;
+    }
+
     let normalized = normalize_public_release_column(column_name);
     let compact = compact_public_release_column(&normalized);
     let research_namespace = compact_public_release_column("research_participant_ref");
