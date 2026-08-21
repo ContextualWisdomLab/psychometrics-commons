@@ -23,7 +23,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
-| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
+| Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; **Active PR #284** adds PostgreSQL 18 mid-session persist/reload, contiguous restart reconstruction, distinct observed/received clocks, and Rust-equivalent durable reference validation in `migrations/0020_response_event.sql` / `src/postgres_response_event.rs`; this is not protected-main truth until integrated |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
@@ -56,7 +56,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation | **Active PR** persist/load created-session identity, sealed stored-publication start, and persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}`; command HTTP and tenant isolation remain missing |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
-| Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
+| Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs`; **Active PR #284** adds exact-replay versus conflicting durable replay classification, stored receipt-history validation, and sequence-gap rejection under PostgreSQL `READ COMMITTED` | exact-current-head integration evidence before #284 can become protected-main truth; public response transport remains missing |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
 | Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, named claim, claim-next poll, retry, terminal outcomes, expired-lease recovery, and cancellation without transferring a fence | live adapter evidence |
@@ -139,6 +139,8 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
 
+**Active PR** #284 response-event restart persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It adds `migrations/0020_response_event.sql`, `src/postgres_response_event.rs`, real PostgreSQL persistence/reload/recovery contracts, and `docs/architecture/RESPONSE_EVENT_PERSISTENCE.md`. The slice preserves distinct observed/received clocks, requires a contiguous `1..=n` accepted prefix, validates write-time sequence allocation before mutation, classifies exact replay versus conflicting immutable evidence under `READ COMMITTED`, rejects corrupted stored receipt identity, and gives direct SQL/recovery paths the same Unicode 17 opaque-reference boundary as Rust 1.97. Migration reapplication repairs weakened owned reference checks when historical rows are valid and fails closed otherwise. HTTP response transport, participant persistence, psychometric arithmetic, and external-service database access remain outside this slice.
+
 ## 5. ADR traceability by concern
 
 | Concern | Governing ADR(s) |
@@ -218,15 +220,3 @@ A PR that materially changes any of the following must update this document or p
 - database support/transaction semantics;
 - quality-attribute/recovery claim;
 - material risk/evidence state;
-- consumer/research acceptance criterion;
-- deployment profile/recovery contract.
-
-CI should validate linked documentation paths and status/name consistency now and, when machine-readable contracts/migrations exist, validate that documented references map to real contract/schema artifacts.
-
-## 10. References
-
-Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
-
-OpenAPI Initiative. (2025). *OpenAPI Specification, Version 3.2.0*.
-
-AsyncAPI Initiative. (2026). *AsyncAPI Specification, Version 3.1.0*.
