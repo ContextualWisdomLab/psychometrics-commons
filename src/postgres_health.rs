@@ -132,12 +132,14 @@ pub fn probe_postgres_runtime(
 ///
 /// The application or packaged deployment remains responsible for declaring the exact
 /// relation set that represents its compatible schema version. Each relation identity must
-/// be an exact lowercase two-part `schema.relation` name with no whitespace. PostgreSQL's
-/// `search_path` is the ordered list of schemas used to resolve an unqualified name, so
-/// requiring the schema explicitly prevents the answer from changing with that setting.
-/// Lowercase spelling prevents PostgreSQL from silently folding an alias such as
-/// `Public.MyTable` to a different lowercase identity. Relation names are passed as query
-/// parameters, never interpolated into SQL.
+/// be an exact two-part `schema.relation` name using the repository's unquoted ASCII SQL
+/// identifier grammar: lowercase letters, digits, and underscores, with each component
+/// starting with a lowercase letter or underscore. PostgreSQL's `search_path` is the
+/// ordered list of schemas used to resolve an unqualified name, so requiring the schema
+/// explicitly prevents the answer from changing with that setting. Restricting the input
+/// to this ASCII grammar also prevents case-folding or Unicode-confusable aliases from
+/// resolving to an identity different from the declared one. Relation names are passed as
+/// query parameters, never interpolated into SQL.
 ///
 /// Here, *integrity evidence* means the observed fact that every required relation exists.
 /// *State-changing readiness* means whether the product may accept new writes. The probe
@@ -176,11 +178,14 @@ pub fn probe_postgres_relation_integrity(
 }
 
 fn is_exact_schema_qualified_relation(relation: &str) -> bool {
-    if relation.chars().any(char::is_whitespace) || relation != relation.to_ascii_lowercase() {
-        return false;
-    }
     let Some((schema, name)) = relation.split_once('.') else {
         return false;
     };
-    !schema.is_empty() && !name.is_empty() && !name.contains('.')
+    is_exact_unquoted_identifier(schema) && is_exact_unquoted_identifier(name)
+}
+
+fn is_exact_unquoted_identifier(identifier: &str) -> bool {
+    let mut bytes = identifier.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
 }
