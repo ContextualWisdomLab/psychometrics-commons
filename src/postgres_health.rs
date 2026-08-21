@@ -131,8 +131,10 @@ pub fn probe_postgres_runtime(
 /// Probe whether every caller-declared relation required by this application build exists.
 ///
 /// The application or packaged deployment remains responsible for declaring the exact
-/// relation set that represents its compatible schema version. Relation names are passed
-/// as query parameters, never interpolated into SQL. A missing required relation is a
+/// relation set that represents its compatible schema version. Each relation identity must
+/// be an exact two-part `schema.relation` name so the evidence cannot change with the
+/// connection's `search_path`. Relation names are passed as query parameters, never
+/// interpolated into SQL. An unqualified, malformed, or missing required relation is a
 /// known incompatibility and therefore fails state-changing readiness closed through
 /// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is insufficient
 /// integrity evidence and returns [`DataIntegrityHealth::Unknown`] so write readiness
@@ -156,6 +158,9 @@ pub fn probe_postgres_relation_integrity(
     }
 
     for relation in required_relations {
+        if !is_exact_schema_qualified_relation(relation) {
+            return Ok(DataIntegrityHealth::Incompatible);
+        }
         let row = client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation])?;
         let exists: bool = row.get(0);
         if !exists {
@@ -163,4 +168,14 @@ pub fn probe_postgres_relation_integrity(
         }
     }
     Ok(DataIntegrityHealth::Verified)
+}
+
+fn is_exact_schema_qualified_relation(relation: &str) -> bool {
+    if relation.trim() != relation {
+        return false;
+    }
+    let mut parts = relation.split('.');
+    let schema = parts.next().unwrap_or_default();
+    let name = parts.next().unwrap_or_default();
+    !schema.is_empty() && !name.is_empty() && parts.next().is_none()
 }
