@@ -291,6 +291,8 @@ mod tests {
             "pg_catalog.tablé",
             "1schema.table",
             "schema.1table",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.table",
+            "schema.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ] {
             assert!(!is_exact_schema_qualified_relation(relation), "{relation}");
         }
