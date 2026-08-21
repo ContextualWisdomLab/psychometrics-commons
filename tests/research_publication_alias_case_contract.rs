@@ -63,6 +63,28 @@ fn prefixed_etl_aliases_cannot_hide_restricted_identity_columns() {
 }
 
 #[test]
+fn suffixed_aliases_cannot_hide_restricted_identity_columns() {
+    for column_name in [
+        "participant_ref_v2",
+        "subject_reference",
+        "linked_subject_ref_backup",
+        "linkage-key-version-old",
+        "pseudonym key version legacy",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not hide a restricted identity field behind a suffix"
+        );
+    }
+}
+
+#[test]
 fn separator_aliases_cannot_hide_restricted_identity_columns() {
     for column_name in [
         "export-participant-ref",
