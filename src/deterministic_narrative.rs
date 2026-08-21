@@ -254,7 +254,7 @@ fn validate_interpretation_selection(
     if interpretation_unit_refs.is_empty() {
         return Err(NarrativeFallbackError::EmptySelection);
     }
-    let mut seen = Vec::with_capacity(interpre­tation_unit_refs.len());
+    let mut seen = Vec::with_capacity(interpretation_unit_refs.len());
     for unit_ref in interpretation_unit_refs {
         let unit_ref = required_reference(unit_ref)?;
         if seen.contains(&unit_ref) {
