@@ -45,6 +45,12 @@ Trusted server time and exclusive authenticator validity follow NIST SP 800-63-4
 
 The lower-level `authorize_anonymous_session(actor, resource, now)` check remains for callers that already hold a stored assessment-session `ResourceScope`. It is not sufficient by itself for a command against a different supplied session.
 
+## Durable anonymous credential evidence
+
+`AnonymousCredential` lifecycle semantics are `IMPLEMENTED_ON_PROTECTED_MAIN`. Durable PostgreSQL restart evidence is `IMPLEMENTED_ON_ACTIVE_PR` #302: `migrations/0020_anonymous_credential_evidence.sql` and `src/postgres_anonymous_credential.rs` persist one canonical lowercase SHA-256 proof digest with exact tenant, participant, and session binding under `READ COMMITTED`; identity, binding, issuance, and expiry are immutable after first persist, and revocation is append-only. Database guards reject delete, truncate, and identity/lifetime rewrite. This status must not be promoted to protected-main truth before #302 merges.
+
+Raw bearer proofs remain outside the product database and routine logs. Proof generation and hashing remain a reviewed transport/secret-handling responsibility. HTTP issuance, audience enforcement, and an evidence-backed deployment maximum TTL remain Target. This persistence does not move Keyverse credentials or research pseudonyms into Psychometrics Commons.
+
 ## Invariants
 
 1. Core anonymous assessment does not require a Keyverse account.
@@ -53,10 +59,13 @@ The lower-level `authorize_anonymous_session(actor, resource, now)` check remain
 4. Account linking requires proof of control of both the anonymous session and the authenticated account.
 5. Account merge and unlink operations are append-only audited.
 6. Research-release data cannot be joined to Keyverse using fields present in the release bundle.
+7. Anonymous credential persistence stores only a reviewed one-way proof digest plus exact resource binding; raw bearer proof material is prohibited.
+8. A persisted anonymous credential cannot be rebound, silently un-revoked, deleted, or truncated as a normal lifecycle operation.
 
 ## Failure modes
 
 - Keyverse outage: new authenticated sessions may be unavailable, but anonymous sessions and already validated short-lived sessions continue within their validity window.
+- Anonymous runtime restart: after #302 lands, server-side proof evidence reloads from PostgreSQL and must still satisfy the exact tenant/participant/session binding and server-authoritative validity window; missing/corrupt evidence fails closed.
 - JWKS rotation: cached keys are refreshed with bounded retry; unknown key IDs fail closed.
 - Account-link conflict: no automatic last-write-wins; the operation enters adjudication.
 - Deleted account: operational obligations and legal retention are evaluated separately from account credential removal.
@@ -65,11 +74,14 @@ The lower-level `authorize_anonymous_session(actor, resource, now)` check remain
 
 The product does not rely on blanket PII masking that destroys operational utility. It uses identity separation, purpose-bound schemas, field-level authorization, encryption, audited privileged views, and tokenized references. Construct-relevant personal data is processed only under an explicit purpose and access policy.
 
+Anonymous credential persistence is operational authentication evidence, not an identity-provider credential store and not a research identity namespace. Raw bearer proofs, Keyverse subject identifiers, and research pseudonyms are prohibited from `anonymous_credential_evidence`.
+
 ## Validation
 
 - token validation and audience-confusion tests;
 - cross-tenant authorization tests;
 - anonymous command-path tests that classify tenant before ownership and leave the session unmutated on authorization failure;
+- real-PostgreSQL anonymous-credential restart/reload, exact-binding, expiry, replay, rebinding, append-only revocation, padded-alias, unsupported-isolation, and missing-relation tests on #302;
 - anonymous-to-account linking replay and conflict tests;
 - research-release joinability tests;
 - account deletion/export end-to-end tests.
@@ -79,6 +91,7 @@ The product does not rely on blanket PII masking that destroys operational utili
 - **Build a new IdP:** duplicate and high-risk.
 - **Require accounts for all tests:** harms access and introduces unnecessary PII.
 - **Use Keyverse roles as all product authorization:** too coarse and couples domain governance to identity administration.
+- **Persist raw anonymous bearer proofs:** unnecessary secret concentration and wider disclosure blast radius; persist a one-way digest and exact binding instead.
 
 ## Reversal conditions
 
