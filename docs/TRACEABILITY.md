@@ -139,8 +139,6 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
 
-**Active PR** #288 is the current-protected-main landing vehicle for the Runtime CI allocation remedy. It keeps independent Rust quality checks while combining line and branch coverage on one PostgreSQL-backed runner, preserving both exact 100% coverage gates, exact pull-request-head checkout, immutable PostgreSQL image, ephemeral credentials, and scoped failure diagnostics. This operational/recovery evidence is not protected-main truth until the unchanged current-base head passes all required workflows and qualifying independent review; #286 remains historical predecessor evidence.
-
 ## 5. ADR traceability by concern
 
 | Concern | Governing ADR(s) |
