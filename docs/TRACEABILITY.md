@@ -139,7 +139,7 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 **Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
 
-**Active PR** #284 response-event restart persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It adds `migrations/0020_response_event.sql`, `src/postgres_response_event.rs`, real PostgreSQL persistence/reload/recovery contracts, and `docs/architecture/RESPONSE_EVENT_PERSISTENCE.md`. The slice preserves distinct observed/received clocks, requires a contiguous `1..=n` accepted prefix, validates write-time sequence allocation before mutation, classifies exact replay versus conflicting immutable evidence under `READ COMMITTED`, rejects corrupted stored receipt identity, and gives direct SQL/recovery paths the same Unicode 17 opaque-reference boundary as Rust 1.97. Migration reapplication repairs weakened owned reference checks when historical rows are valid and fails closed otherwise. HTTP response transport, participant persistence, psychometric arithmetic, and external-service database access remain outside this slice.
+**Active PR** #284 response-event restart persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It adds `migrations/0020_response_event.sql`, `src/postgres_response_event.rs`, real PostgreSQL persistence/reload/recovery contracts, and `docs/architecture/RESPONSE_EVENT_PERSISTENCE.md`. The slice preserves distinct observed/received clocks, requires a contiguous `1..=n` accepted prefix, validates write-time sequence allocation before mutation, classifies exact replay versus conflicting immutable evidence under PostgreSQL `READ COMMITTED`, rejects corrupted stored receipt identity, and gives direct SQL/recovery paths the same Unicode 17 opaque-reference boundary as Rust 1.97. Migration reapplication repairs weakened owned reference checks when historical rows are valid and fails closed otherwise. HTTP response transport, participant persistence, psychometric arithmetic, and external-service database access remain outside this slice.
 
 ## 5. ADR traceability by concern
 
@@ -220,3 +220,15 @@ A PR that materially changes any of the following must update this document or p
 - database support/transaction semantics;
 - quality-attribute/recovery claim;
 - material risk/evidence state;
+- consumer/research acceptance criterion;
+- deployment profile/recovery contract.
+
+CI should validate linked documentation paths and status/name consistency now and, when machine-readable contracts/migrations exist, validate that documented references map to real contract/schema artifacts.
+
+## 10. References
+
+Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
+
+OpenAPI Initiative. (2025). *OpenAPI Specification, Version 3.2.0*.
+
+AsyncAPI Initiative. (2026). *AsyncAPI Specification, Version 3.1.0*.
