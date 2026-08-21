@@ -122,7 +122,6 @@ pub fn load_consent_ledger(
     let participant_ref = required_reference(participant_ref)?;
     let mut ledger = ConsentLedger::new(participant_ref)
         .map_err(|_| ConsentPersistenceError::InvalidReference)?;
-    let participant_ref = ledger.participant_ref().to_owned();
     if transaction
         .query_opt(
             "SELECT participant_ref FROM consent_ledger WHERE participant_ref = $1 FOR SHARE",
