@@ -3,8 +3,8 @@
 //! The adapter stores only canonical SHA-256 proof digests and exact tenant,
 //! participant, and session bindings. Raw bearer proofs stay outside this
 //! boundary. Callers own the connection, credentials, and transaction. Replay
-//! classification requires `READ COMMITTED` so a concurrent insert that wins a
-//! unique-key race is visible to the exact-replay classifier.
+//! classification requires `READ COMMITTED` so a concurrent insert or revocation
+//! that wins a unique/update race is visible to the exact-replay classifier.
 
 use crate::anonymous_credential::AnonymousCredential;
 use crate::reference::normalized_reference;
@@ -108,9 +108,9 @@ pub fn apply_anonymous_credential_migration(
 /// Persist one anonymous credential record and its append-only revocation evidence.
 ///
 /// Exact replay of the same identity, digest, lifetime, and revocation is
-/// idempotent. Rebinding `credential_ref` or `proof_digest` fails closed.
-/// Revocation may move from absent to one recorded timestamp; a different
-/// timestamp cannot replace it.
+/// idempotent, including two concurrent attempts to record the same revocation.
+/// Rebinding `credential_ref` or `proof_digest` fails closed. Revocation may move
+/// from absent to one recorded timestamp; a different timestamp cannot replace it.
 ///
 /// # Errors
 ///
@@ -254,7 +254,21 @@ fn classify_existing_credential(
                 &[&revoked_at_unix_ms, &credential.credential_ref()],
             )?;
             if updated == 1 {
-                Ok(AnonymousCredentialPersistenceDisposition::Revoked)
+                return Ok(AnonymousCredentialPersistenceDisposition::Revoked);
+            }
+
+            // Under READ COMMITTED this statement gets a fresh snapshot after a
+            // competing updater released the row lock. Reclassify only an exact
+            // committed revocation as an idempotent duplicate; a different durable
+            // timestamp still fails closed.
+            let row = transaction.query_one(
+                "SELECT revoked_at_unix_ms FROM anonymous_credential_evidence \
+                 WHERE credential_ref = $1",
+                &[&credential.credential_ref()],
+            )?;
+            let committed_revoked_at: Option<i64> = row.get(0);
+            if committed_revoked_at == Some(revoked_at_unix_ms) {
+                Ok(AnonymousCredentialPersistenceDisposition::Duplicate)
             } else {
                 Err(AnonymousCredentialPersistenceError::ConflictingRevocation)
             }
