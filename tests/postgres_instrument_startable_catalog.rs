@@ -44,17 +44,11 @@ fn test_client() -> Client {
 
 fn reset_tables(client: &mut Client) {
     client
-        .batch_execute(
-            "DROP TABLE IF EXISTS instrument_startable_catalog_test.instrument_release;",
-        )
+        .batch_execute("DROP TABLE IF EXISTS instrument_startable_catalog_test.instrument_release;")
         .unwrap();
 }
 
-fn manifest(
-    release_ref: &str,
-    instrument_ref: &str,
-    locale: &str,
-) -> InstrumentReleaseManifest {
+fn manifest(release_ref: &str, instrument_ref: &str, locale: &str) -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
         release_ref,
         instrument_ref,
@@ -107,11 +101,7 @@ fn approved_evidence(release_ref: &str, locale: &str) -> PublicationEvidenceReco
     .unwrap()
 }
 
-fn published_release(
-    release_ref: &str,
-    instrument_ref: &str,
-    locale: &str,
-) -> InstrumentRelease {
+fn published_release(release_ref: &str, instrument_ref: &str, locale: &str) -> InstrumentRelease {
     let mut release =
         InstrumentRelease::new(manifest(release_ref, instrument_ref, locale), 40_000).unwrap();
     release
@@ -134,11 +124,7 @@ fn published_release(
     release
 }
 
-fn suspended_release(
-    release_ref: &str,
-    instrument_ref: &str,
-    locale: &str,
-) -> InstrumentRelease {
+fn suspended_release(release_ref: &str, instrument_ref: &str, locale: &str) -> InstrumentRelease {
     let mut release = published_release(release_ref, instrument_ref, locale);
     release
         .apply_command(
@@ -229,10 +215,7 @@ fn startable_catalog_omits_a_release_after_persisted_suspension() {
         let mut transaction = client.transaction().unwrap();
         let listed = list_startable_instrument_releases(&mut transaction).unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(
-            listed[0].manifest().release_ref(),
-            "release_big_five_ko_v1"
-        );
+        assert_eq!(listed[0].manifest().release_ref(), "release_big_five_ko_v1");
         transaction.commit().unwrap();
     }
 

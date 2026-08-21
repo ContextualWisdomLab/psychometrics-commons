@@ -124,11 +124,7 @@ fn published_release(release_ref: &str, instrument_ref: &str, locale: &str) -> I
     release
 }
 
-fn suspended_release(
-    release_ref: &str,
-    instrument_ref: &str,
-    locale: &str,
-) -> InstrumentRelease {
+fn suspended_release(release_ref: &str, instrument_ref: &str, locale: &str) -> InstrumentRelease {
     let mut release = published_release(release_ref, instrument_ref, locale);
     release
         .apply_command(
@@ -171,11 +167,9 @@ fn family_catalog_returns_only_the_exact_family_in_locale_release_order() {
     );
 
     let mut transaction = client.transaction().unwrap();
-    let listed = list_startable_instrument_releases_for_family(
-        &mut transaction,
-        "instrument_big_five",
-    )
-    .unwrap();
+    let listed =
+        list_startable_instrument_releases_for_family(&mut transaction, "instrument_big_five")
+            .unwrap();
     let identities: Vec<(&str, &str, &str)> = listed
         .iter()
         .map(|release| {
@@ -241,12 +235,11 @@ fn family_catalog_returns_empty_for_a_valid_unknown_family() {
     );
 
     let mut transaction = client.transaction().unwrap();
-    assert!(list_startable_instrument_releases_for_family(
-        &mut transaction,
-        "instrument_unknown",
-    )
-    .unwrap()
-    .is_empty());
+    assert!(
+        list_startable_instrument_releases_for_family(&mut transaction, "instrument_unknown",)
+            .unwrap()
+            .is_empty()
+    );
     transaction.commit().unwrap();
 }
 
@@ -257,7 +250,13 @@ fn family_catalog_rejects_blank_numeric_and_noncanonical_family_refs() {
     reset_tables(&mut client);
     apply_instrument_release_migration(&mut client).unwrap();
 
-    for invalid in ["", " ", "123", " instrument_big_five", "instrument_big_five "] {
+    for invalid in [
+        "",
+        " ",
+        "123",
+        " instrument_big_five",
+        "instrument_big_five ",
+    ] {
         let mut transaction = client.transaction().unwrap();
         assert!(matches!(
             list_startable_instrument_releases_for_family(&mut transaction, invalid),
