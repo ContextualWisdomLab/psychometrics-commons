@@ -18,7 +18,7 @@ fn coverage_jobs_preserve_their_check_identities() {
 #[test]
 fn branch_coverage_is_serialized_without_becoming_fail_open() {
     assert!(CI_WORKFLOW.contains(
-        "\n  branch-coverage:\n    name: Production branch coverage\n    needs: line-coverage\n    if: ${{ !cancelled() }}\n"
+        "\n  branch-coverage:\n    name: Production branch coverage\n    needs: line-coverage\n    if: ${{ always() && !cancelled() }}\n"
     ));
     assert_eq!(CI_WORKFLOW.matches("runs-on: ubuntu-latest").count(), 3);
 }
