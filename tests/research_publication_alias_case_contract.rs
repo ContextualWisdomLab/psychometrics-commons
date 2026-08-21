@@ -89,6 +89,10 @@ fn prefixed_research_participant_namespace_remains_public() {
     for column_name in [
         "public_research_participant_ref",
         "exportResearchParticipantRef",
+        "export-research-participant-ref",
+        "research.participant.ref",
+        "warehouse/research/participant/ref",
+        "public research participant ref",
     ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
