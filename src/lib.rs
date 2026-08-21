@@ -21,6 +21,7 @@ pub mod instrument;
 pub mod integration;
 pub mod integration_publisher;
 pub mod item_delivery;
+pub mod item_delivery_http;
 pub mod longitudinal_observation;
 pub mod narrative;
 pub mod participant;
