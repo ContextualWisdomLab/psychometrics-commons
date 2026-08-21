@@ -293,12 +293,12 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
 /// is allowed, including clear export or staging prefixes and supported separator
 /// variants, unless its prefix contains a forbidden marker or restricted-identity
 /// namespace stem. Restricted identity, authentication, credential, and internal-location
-/// names remain forbidden when transport prefixes, suffixes, or punctuation/whitespace
-/// separators are added around them. The caller must also supply an effective
-/// product-authorized identity inventory; the scanner fails closed rather than treating
-/// an omitted inventory as evidence that the fixture is clean. Object or array cell
-/// values are not parsed here: callers must flatten them or prove a separate structured-
-/// value privacy scan before packaging.
+/// names remain forbidden when transport prefixes, suffixes, punctuation/whitespace
+/// separators, or inserted digits are added around or within their marker words. The
+/// caller must also supply an effective product-authorized identity inventory; the
+/// scanner fails closed rather than treating an omitted inventory as evidence that the
+/// fixture is clean. Object or array cell values are not parsed here: callers must
+/// flatten them or prove a separate structured-value privacy scan before packaging.
 ///
 /// # Errors
 ///
@@ -392,7 +392,7 @@ fn contains_forbidden_research_namespace_prefix_marker(compact: &str) -> bool {
 fn compact_public_release_column(column_name: &str) -> String {
     column_name
         .chars()
-        .filter(|character| character.is_alphanumeric())
+        .filter(|character| character.is_ascii_alphabetic())
         .collect()
 }
 
