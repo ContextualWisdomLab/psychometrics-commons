@@ -4,8 +4,8 @@
 //! research scope, privacy/scientific review evidence, licensing, measurement provenance,
 //! access classification, citation metadata, and independent approval before release.
 //! This module validates those references and rejects public fixtures that still carry
-//! operational, Keyverse, or restricted-linkage identifiers. It does not publish artifacts
-//! or call the external research catalog.
+//! restricted identity, authentication, credential, or internal-location fields. It does
+//! not publish artifacts or call the external research catalog.
 
 use crate::reference::normalized_reference;
 use std::error::Error;
@@ -169,8 +169,9 @@ impl ApprovedResearchRelease {
 ///
 /// A buyer packaging a public release passes the column name the fixture would
 /// publish and the cell values in that column. Research identities are allowed.
-/// Operational, Keyverse, and restricted-linkage names are not. Structured values
-/// must be flattened or independently scanned before this boundary accepts them.
+/// Operational identity, authentication, credential, and restricted internal-location
+/// names are not. Structured values must be flattened or independently scanned before
+/// this boundary accepts them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PublicReleaseFixtureColumn<'a> {
     /// Published column name.
@@ -201,7 +202,7 @@ pub struct RestrictedReleaseIdentities<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PublicReleaseLeakageError {
-    /// A published column name is an operational, Keyverse, or linkage field.
+    /// A published column name contains a forbidden identity/security marker.
     ForbiddenColumn,
     /// No effective restricted-identity inventory was supplied for the scan.
     IdentityInventoryUnavailable,
@@ -219,7 +220,7 @@ impl Display for PublicReleaseLeakageError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ForbiddenColumn => {
-                "remove operational, Keyverse, or restricted-linkage columns from the public release fixture"
+                "remove restricted identity, authentication, credential, or internal-location columns from the public release fixture"
             }
             Self::IdentityInventoryUnavailable => {
                 "supply an authorized restricted-identity inventory before packaging the public release fixture"
@@ -256,20 +257,32 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "participant_ref",
     "pseudonym_key_version",
     "subject_ref",
+    "access_token",
+    "auth_token",
+    "refresh_token",
+    "api_key",
+    "client_secret",
+    "database_url",
+    "database_dsn",
+    "database_password",
+    "object_store_access_key",
+    "object_store_secret_key",
+    "object_store_endpoint",
 ];
 
-/// Reject a public-release fixture that still carries restricted identity.
+/// Reject a public-release fixture that still carries restricted identity or secrets.
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
 /// research that needs the restricted mapping keeps those values outside this
 /// fixture. A column in the `research_participant_ref` namespace is allowed,
-/// including clear export or staging prefixes and supported separator variants.
-/// Restricted identity names remain forbidden when transport prefixes, suffixes,
-/// or punctuation/whitespace separators are added around them. The caller must also
-/// supply an effective product-authorized identity inventory; the scanner fails
-/// closed rather than treating an omitted inventory as evidence that the fixture is
-/// clean. Object or array cell values are not parsed here: callers must flatten them
-/// or prove a separate structured-value privacy scan before packaging.
+/// including clear export or staging prefixes and supported separator variants,
+/// unless its prefix itself contains a forbidden marker. Restricted identity,
+/// authentication, credential, and internal-location names remain forbidden when
+/// transport prefixes, suffixes, or punctuation/whitespace separators are added around
+/// them. The caller must also supply an effective product-authorized identity inventory;
+/// the scanner fails closed rather than treating an omitted inventory as evidence that
+/// the fixture is clean. Object or array cell values are not parsed here: callers must
+/// flatten them or prove a separate structured-value privacy scan before packaging.
 ///
 /// # Errors
 ///
@@ -336,13 +349,13 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     }
 
     if let Some(prefix) = compact.strip_suffix(&research_namespace) {
-        return contains_forbidden_public_release_identity(prefix);
+        return contains_forbidden_public_release_marker(prefix);
     }
 
-    contains_forbidden_public_release_identity(&compact)
+    contains_forbidden_public_release_marker(&compact)
 }
 
-fn contains_forbidden_public_release_identity(compact: &str) -> bool {
+fn contains_forbidden_public_release_marker(compact: &str) -> bool {
     FORBIDDEN_PUBLIC_RELEASE_COLUMNS.iter().any(|forbidden| {
         let forbidden = compact_public_release_column(forbidden);
         compact.contains(forbidden.as_str())
