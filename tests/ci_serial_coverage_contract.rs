@@ -25,26 +25,24 @@ fn branch_coverage_is_serialized_without_becoming_fail_open() {
 
 #[test]
 fn line_generation_failure_has_operator_diagnostics() {
-    assert!(CI_WORKFLOW.contains(
-        "- name: Generate line coverage\n        id: line_coverage_generation"
-    ));
+    assert!(CI_WORKFLOW
+        .contains("- name: Generate line coverage\n        id: line_coverage_generation"));
     assert!(CI_WORKFLOW.contains(
         "- name: Diagnose line coverage generation failure\n        if: ${{ !cancelled() && steps.line_coverage_generation.outcome == 'failure' }}"
     ));
-    assert!(CI_WORKFLOW.contains(
-        "::error::line coverage generation failed before the coverage gate"
-    ));
+    assert!(
+        CI_WORKFLOW.contains("::error::line coverage generation failed before the coverage gate")
+    );
 }
 
 #[test]
 fn branch_generation_failure_has_operator_diagnostics() {
-    assert!(CI_WORKFLOW.contains(
-        "- name: Generate branch coverage\n        id: branch_coverage_generation"
-    ));
+    assert!(CI_WORKFLOW
+        .contains("- name: Generate branch coverage\n        id: branch_coverage_generation"));
     assert!(CI_WORKFLOW.contains(
         "- name: Diagnose branch coverage generation failure\n        if: ${{ !cancelled() && steps.branch_coverage_generation.outcome == 'failure' }}"
     ));
-    assert!(CI_WORKFLOW.contains(
-        "::error::branch coverage generation failed before the coverage gate"
-    ));
+    assert!(
+        CI_WORKFLOW.contains("::error::branch coverage generation failed before the coverage gate")
+    );
 }
