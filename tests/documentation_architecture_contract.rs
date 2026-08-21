@@ -305,6 +305,7 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
     let erd = read_required(&repository_root().join("docs/architecture/ERD.md"));
 
     for logical_entity in [
+        "anonymous_credential_evidence",
         "item_delivery_event",
         "participant_identity_link",
         "longitudinal_enrollment",
@@ -334,6 +335,78 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
             "longitudinal ERD must preserve time field {time_field}"
         );
     }
+}
+
+#[test]
+fn anonymous_credential_persistence_docs_match_active_schema() {
+    let root = repository_root();
+    let migration = read_required(&root.join("migrations/0020_anonymous_credential_evidence.sql"));
+    let adr =
+        read_required(&root.join("docs/adr/0003-keyverse-identity-and-anonymous-participation.md"));
+    let erd = read_required(&root.join("docs/architecture/ERD.md"));
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+
+    for required_schema_marker in [
+        "anonymous_credential_evidence",
+        "credential_ref",
+        "tenant_ref",
+        "participant_ref",
+        "session_ref",
+        "proof_digest",
+        "issued_at_unix_ms",
+        "expires_at_unix_ms",
+        "revoked_at_unix_ms",
+        "UNIQUE (proof_digest)",
+        "BEFORE UPDATE OR DELETE",
+        "BEFORE TRUNCATE",
+    ] {
+        assert!(
+            migration.contains(required_schema_marker),
+            "anonymous credential migration must preserve {required_schema_marker}"
+        );
+    }
+
+    let lower_migration = migration.to_ascii_lowercase();
+    for prohibited_secret_column in [
+        "raw_bearer",
+        "bearer_secret",
+        "keyverse_subject",
+        "research_participant",
+        "research_pseudonym",
+    ] {
+        assert!(
+            !lower_migration.contains(prohibited_secret_column),
+            "anonymous credential persistence must not add prohibited identity/secret column {prohibited_secret_column}"
+        );
+    }
+
+    for (label, document) in [
+        ("ADR-0003", adr.as_str()),
+        ("ERD", erd.as_str()),
+        ("TRACEABILITY", traceability.as_str()),
+    ] {
+        assert!(
+            document.contains("#302"),
+            "{label} must identify #302 as active anonymous-credential persistence evidence"
+        );
+        assert!(
+            document.contains("not protected-main truth")
+                || document.contains("must not be promoted to protected-main truth")
+                || document.contains("must become protected-main truth only after #302 merges"),
+            "{label} must not promote active anonymous-credential persistence to shipped truth"
+        );
+    }
+
+    assert!(
+        erd.contains("migrations/0020_anonymous_credential_evidence.sql")
+            && erd.contains("IMPLEMENTED_ON_ACTIVE_PR"),
+        "ERD must connect the logical credential entity to its active-PR migration without claiming protected-main implementation"
+    );
+    assert!(
+        adr.contains("Raw bearer proofs remain outside the product database")
+            && traceability.contains("Raw anonymous bearer proof is not persisted"),
+        "ADR and traceability must preserve the raw-bearer-proof exclusion"
+    );
 }
 
 #[test]
