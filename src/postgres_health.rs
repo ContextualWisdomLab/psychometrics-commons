@@ -132,10 +132,11 @@ pub fn probe_postgres_runtime(
 ///
 /// The application or packaged deployment remains responsible for declaring the exact
 /// relation set that represents its compatible schema version. Each relation identity must
-/// be an exact two-part `schema.relation` name so the evidence cannot change with the
-/// connection's `search_path`. Relation names are passed as query parameters, never
-/// interpolated into SQL. An unqualified, malformed, or missing required relation is a
-/// known incompatibility and therefore fails state-changing readiness closed through
+/// be an exact lowercase two-part `schema.relation` name so the evidence cannot change
+/// with PostgreSQL identifier case-folding or the connection's `search_path`. Relation
+/// names are passed as query parameters, never interpolated into SQL. An unqualified,
+/// malformed, case-folded alias, or missing required relation is a known incompatibility
+/// and therefore fails state-changing readiness closed through
 /// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is insufficient
 /// integrity evidence and returns [`DataIntegrityHealth::Unknown`] so write readiness
 /// remains fail-closed instead of treating an absent schema contract as verified.
@@ -171,7 +172,7 @@ pub fn probe_postgres_relation_integrity(
 }
 
 fn is_exact_schema_qualified_relation(relation: &str) -> bool {
-    if relation.trim() != relation {
+    if relation.trim() != relation || relation != relation.to_ascii_lowercase() {
         return false;
     }
     let mut parts = relation.split('.');
