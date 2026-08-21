@@ -124,6 +124,22 @@ fn published_release(release_ref: &str, instrument_ref: &str, locale: &str) -> I
     release
 }
 
+fn suspended_release(
+    release_ref: &str,
+    instrument_ref: &str,
+    locale: &str,
+) -> InstrumentRelease {
+    let mut release = published_release(release_ref, instrument_ref, locale);
+    release
+        .apply_command(
+            "publication_suspend_event",
+            PublicationCommand::Suspend,
+            50_300,
+        )
+        .unwrap();
+    release
+}
+
 fn persist(client: &mut Client, release: &InstrumentRelease) {
     let mut transaction = client.transaction().unwrap();
     persist_instrument_release(&mut transaction, release).unwrap();
@@ -179,6 +195,38 @@ fn family_catalog_returns_only_the_exact_family_in_locale_release_order() {
         ]
     );
     transaction.commit().unwrap();
+}
+
+#[test]
+fn family_catalog_does_not_block_concurrent_release_suspension() {
+    let _guard = test_guard();
+    let mut catalog_client = test_client();
+    reset_tables(&mut catalog_client);
+    apply_instrument_release_migration(&mut catalog_client).unwrap();
+
+    persist(
+        &mut catalog_client,
+        &published_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+
+    let mut catalog_transaction = catalog_client.transaction().unwrap();
+    let listed = list_startable_instrument_releases_for_family(
+        &mut catalog_transaction,
+        "instrument_big_five",
+    )
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+
+    let mut lifecycle_client = test_client();
+    lifecycle_client
+        .batch_execute("SET lock_timeout TO '250ms';")
+        .unwrap();
+    persist(
+        &mut lifecycle_client,
+        &suspended_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+
+    catalog_transaction.commit().unwrap();
 }
 
 #[test]
