@@ -1,12 +1,16 @@
 //! `PostgreSQL` 18 persistence for purpose-specific consent evidence.
 //!
-//! This adapter stores product-owned consent events only. Identity credentials
-//! remain in Keyverse. The caller owns the connection, credentials, and
-//! transaction boundary. Ledger and event replay require `READ COMMITTED` so a
-//! concurrent insert that wins a unique-key race is visible to the exact-replay
-//! classifier.
+//! This adapter stores and reloads product-owned consent events only. Identity
+//! credentials remain in Keyverse. The caller owns the connection, credentials,
+//! and transaction boundary. Ledger persist, exact-replay classification, and
+//! restart reload require `READ COMMITTED` so a concurrent insert that wins a
+//! unique-key race is visible to the classifier and so a later-inserted
+//! same-millisecond revocation is not hidden behind a grant whose identity
+//! sorts later.
 
-use crate::consent::{ConsentDecision, ConsentEvent, ConsentLedger, ConsentPurpose};
+use crate::consent::{
+    ConsentDecision, ConsentEvent, ConsentEventInput, ConsentLedger, ConsentPurpose,
+};
 use crate::reference::normalized_reference;
 use postgres::Transaction;
 use std::error::Error;
@@ -36,6 +40,8 @@ pub enum ConsentPersistenceError {
     InvalidTimestamp,
     /// Consent persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
+    /// Stored events cannot reconstruct a valid append-only consent ledger.
+    CorruptHistory,
     /// `PostgreSQL` rejected or could not execute the persistence operation.
     Database(postgres::Error),
 }
@@ -51,6 +57,7 @@ impl Display for ConsentPersistenceError {
             Self::UnsupportedIsolationLevel => {
                 "consent persistence requires read committed isolation"
             }
+            Self::CorruptHistory => "stored consent events cannot reconstruct a valid ledger",
             Self::Database(_) => "PostgreSQL consent persistence failed",
         })
     }
@@ -80,6 +87,102 @@ pub fn apply_consent_migration(
     client: &mut impl postgres::GenericClient,
 ) -> Result<(), postgres::Error> {
     client.batch_execute(CONSENT_MIGRATION)
+}
+
+/// Reload one participant-bound consent ledger after process restart.
+///
+/// Events are reconstructed in physical insertion time (`created_at`). A
+/// later-inserted same-millisecond revocation therefore remains after the grant
+/// whose opaque identity sorts later. Two events that share `created_at` are an
+/// ambiguous tail and fail closed instead of being ordered by event identity. A
+/// missing ledger is absent rather than an empty grant. Stored events that
+/// violate append-only domain rules, including an earlier `occurred_at` after a
+/// later insertion, fail closed instead of being reordered into a newer grant.
+///
+/// The caller owns the `READ COMMITTED` transaction. The load takes `FOR SHARE`
+/// on the ledger header. [`persist_consent_ledger`] inserts the header without a
+/// matching exclusive row lock, so callers must not treat the share lock as a
+/// serialization mechanism for concurrent appends.
+///
+/// # Errors
+///
+/// Returns [`ConsentPersistenceError`] for an invalid participant reference,
+/// unsupported isolation, stored events that cannot reconstruct a valid ledger,
+/// a timestamp outside the `PostgreSQL` range, or a database failure.
+pub fn load_consent_ledger(
+    transaction: &mut Transaction<'_>,
+    participant_ref: &str,
+) -> Result<Option<ConsentLedger>, ConsentPersistenceError> {
+    require_read_committed(transaction)?;
+    let participant_ref = required_reference(participant_ref)?;
+    let mut ledger = ConsentLedger::new(participant_ref)
+        .map_err(|_| ConsentPersistenceError::InvalidReference)?;
+    let participant_ref = ledger.participant_ref().to_owned();
+    if transaction
+        .query_opt(
+            "SELECT participant_ref FROM consent_ledger WHERE participant_ref = $1 FOR SHARE",
+            &[&participant_ref],
+        )?
+        .is_none()
+    {
+        return Ok(None);
+    }
+
+    let rows = transaction.query(
+        "SELECT event_ref, consent_purpose, consent_decision, \
+                consent_form_version_ref, research_scope_ref, occurred_at_unix_ms, \
+                COUNT(*) OVER (PARTITION BY created_at) \
+         FROM consent_event \
+         WHERE participant_ref = $1 \
+         ORDER BY created_at ASC",
+        &[&participant_ref],
+    )?;
+    let mut loaded_events = Vec::with_capacity(rows.len());
+    for row in rows {
+        loaded_events.push(LoadedConsentEvent {
+            event_ref: row.get(0),
+            purpose: parse_purpose(row.get::<_, String>(1).as_str())?,
+            decision: parse_decision(row.get::<_, String>(2).as_str())?,
+            consent_form_version_ref: row.get(3),
+            research_scope_ref: row.get(4),
+            occurred_at_unix_ms: stored_timestamp(row.get(5))?,
+            created_at_tie_count: row.get(6),
+        });
+    }
+    reconstruct_loaded_events(&mut ledger, loaded_events)?;
+    Ok(Some(ledger))
+}
+
+struct LoadedConsentEvent {
+    event_ref: String,
+    purpose: ConsentPurpose,
+    decision: ConsentDecision,
+    consent_form_version_ref: String,
+    research_scope_ref: Option<String>,
+    occurred_at_unix_ms: u64,
+    created_at_tie_count: i64,
+}
+
+fn reconstruct_loaded_events(
+    ledger: &mut ConsentLedger,
+    rows: Vec<LoadedConsentEvent>,
+) -> Result<(), ConsentPersistenceError> {
+    for row in rows {
+        if row.created_at_tie_count > 1 {
+            return Err(ConsentPersistenceError::CorruptHistory);
+        }
+        ledger
+            .record(ConsentEventInput {
+                event_ref: &row.event_ref,
+                purpose: row.purpose,
+                decision: row.decision,
+                consent_form_version_ref: &row.consent_form_version_ref,
+                research_scope_ref: row.research_scope_ref.as_deref(),
+                occurred_at_unix_ms: row.occurred_at_unix_ms,
+            })
+            .map_err(|_| ConsentPersistenceError::CorruptHistory)?;
+    }
+    Ok(())
 }
 
 /// Persist one participant-bound consent ledger and its accepted events.
@@ -190,6 +293,17 @@ fn purpose_name(purpose: ConsentPurpose) -> &'static str {
     }
 }
 
+fn parse_purpose(purpose: &str) -> Result<ConsentPurpose, ConsentPersistenceError> {
+    match purpose {
+        "service_operation" => Ok(ConsentPurpose::ServiceOperation),
+        "account_persistence" => Ok(ConsentPurpose::AccountPersistence),
+        "longitudinal_observation" => Ok(ConsentPurpose::LongitudinalObservation),
+        "research_contribution" => Ok(ConsentPurpose::ResearchContribution),
+        "communications" => Ok(ConsentPurpose::Communications),
+        _ => Err(ConsentPersistenceError::CorruptHistory),
+    }
+}
+
 fn decision_name(decision: ConsentDecision) -> &'static str {
     match decision {
         ConsentDecision::Granted => "granted",
@@ -197,8 +311,23 @@ fn decision_name(decision: ConsentDecision) -> &'static str {
     }
 }
 
+fn parse_decision(decision: &str) -> Result<ConsentDecision, ConsentPersistenceError> {
+    match decision {
+        "granted" => Ok(ConsentDecision::Granted),
+        "revoked" => Ok(ConsentDecision::Revoked),
+        _ => Err(ConsentPersistenceError::CorruptHistory),
+    }
+}
+
+fn stored_timestamp(value: i64) -> Result<u64, ConsentPersistenceError> {
+    u64::try_from(value).map_err(|_| ConsentPersistenceError::InvalidTimestamp)
+}
+
 fn required_reference(reference: &str) -> Result<&str, ConsentPersistenceError> {
-    normalized_reference(reference).ok_or(ConsentPersistenceError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(normalized),
+        _ => Err(ConsentPersistenceError::InvalidReference),
+    }
 }
 
 fn require_read_committed(
@@ -215,21 +344,177 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{required_reference, ConsentPersistenceError};
+    use super::{
+        decision_name, parse_decision, parse_purpose, purpose_name, reconstruct_loaded_events,
+        required_reference, stored_timestamp, ConsentPersistenceError, LoadedConsentEvent,
+    };
+    use crate::consent::{ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose};
 
     #[test]
-    fn blank_and_numeric_references_fail_closed() {
-        assert!(matches!(
-            required_reference(" "),
-            Err(ConsentPersistenceError::InvalidReference)
-        ));
-        assert!(matches!(
-            required_reference("12"),
-            Err(ConsentPersistenceError::InvalidReference)
-        ));
+    fn blank_numeric_and_noncanonical_references_fail_closed() {
+        for invalid in [" ", "12", " participant_consent_alpha"] {
+            assert!(matches!(
+                required_reference(invalid),
+                Err(ConsentPersistenceError::InvalidReference)
+            ));
+        }
         assert_eq!(
             required_reference("participant_consent_alpha").unwrap(),
             "participant_consent_alpha"
         );
+    }
+
+    #[test]
+    fn stored_labels_round_trip_or_fail_closed() {
+        for purpose in [
+            ConsentPurpose::ServiceOperation,
+            ConsentPurpose::AccountPersistence,
+            ConsentPurpose::LongitudinalObservation,
+            ConsentPurpose::ResearchContribution,
+            ConsentPurpose::Communications,
+        ] {
+            assert_eq!(parse_purpose(purpose_name(purpose)).unwrap(), purpose);
+        }
+        assert!(matches!(
+            parse_purpose("unknown_purpose"),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+        assert_eq!(
+            parse_decision(decision_name(ConsentDecision::Granted)).unwrap(),
+            ConsentDecision::Granted
+        );
+        assert_eq!(
+            parse_decision(decision_name(ConsentDecision::Revoked)).unwrap(),
+            ConsentDecision::Revoked
+        );
+        assert!(matches!(
+            parse_decision("unknown_decision"),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+        assert_eq!(stored_timestamp(32_000).unwrap(), 32_000);
+        assert!(matches!(
+            stored_timestamp(-1),
+            Err(ConsentPersistenceError::InvalidTimestamp)
+        ));
+    }
+
+    fn loaded_event(
+        event_ref: &str,
+        purpose: ConsentPurpose,
+        decision: ConsentDecision,
+        research_scope_ref: Option<&str>,
+        occurred_at_unix_ms: u64,
+        created_at_tie_count: i64,
+    ) -> LoadedConsentEvent {
+        LoadedConsentEvent {
+            event_ref: event_ref.to_owned(),
+            purpose,
+            decision,
+            consent_form_version_ref: "consent_form_reconstruct".to_owned(),
+            research_scope_ref: research_scope_ref.map(str::to_owned),
+            occurred_at_unix_ms,
+            created_at_tie_count,
+        }
+    }
+
+    #[test]
+    fn insertion_order_keeps_same_millisecond_revoke_latest() {
+        let mut ledger = ConsentLedger::new("participant_consent_reconstruct").unwrap();
+        reconstruct_loaded_events(
+            &mut ledger,
+            vec![
+                loaded_event(
+                    "consent_event_zzz_reload_grant",
+                    ConsentPurpose::ResearchContribution,
+                    ConsentDecision::Granted,
+                    Some("research_scope_reconstruct"),
+                    32_000,
+                    1,
+                ),
+                loaded_event(
+                    "consent_event_aaa_reload_revoke",
+                    ConsentPurpose::ResearchContribution,
+                    ConsentDecision::Revoked,
+                    Some("research_scope_reconstruct"),
+                    32_000,
+                    1,
+                ),
+            ],
+        )
+        .unwrap();
+        let snapshot = ledger.snapshot_as("consent_snapshot_reconstruct").unwrap();
+        assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
+    }
+
+    #[test]
+    fn corrupt_reconstruction_fails_closed() {
+        let mut non_monotonic = ConsentLedger::new("participant_consent_reconstruct").unwrap();
+        assert!(matches!(
+            reconstruct_loaded_events(
+                &mut non_monotonic,
+                vec![
+                    loaded_event(
+                        "consent_event_later",
+                        ConsentPurpose::ServiceOperation,
+                        ConsentDecision::Granted,
+                        None,
+                        20_000,
+                        1,
+                    ),
+                    loaded_event(
+                        "consent_event_earlier",
+                        ConsentPurpose::ServiceOperation,
+                        ConsentDecision::Revoked,
+                        None,
+                        19_000,
+                        1,
+                    ),
+                ],
+            ),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+
+        let mut tied = ConsentLedger::new("participant_consent_tied").unwrap();
+        assert!(matches!(
+            reconstruct_loaded_events(
+                &mut tied,
+                vec![loaded_event(
+                    "consent_event_tied",
+                    ConsentPurpose::ServiceOperation,
+                    ConsentDecision::Granted,
+                    None,
+                    21_000,
+                    2,
+                )],
+            ),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
+        assert!(tied.is_empty());
+
+        let mut invalid_event = ConsentLedger::new("participant_consent_invalid_event").unwrap();
+        invalid_event
+            .record(ConsentEventInput {
+                event_ref: "consent_event_service",
+                purpose: ConsentPurpose::ServiceOperation,
+                decision: ConsentDecision::Granted,
+                consent_form_version_ref: "consent_form_reconstruct",
+                research_scope_ref: None,
+                occurred_at_unix_ms: 10_000,
+            })
+            .unwrap();
+        assert!(matches!(
+            reconstruct_loaded_events(
+                &mut invalid_event,
+                vec![loaded_event(
+                    " ",
+                    ConsentPurpose::ServiceOperation,
+                    ConsentDecision::Revoked,
+                    None,
+                    11_000,
+                    1,
+                )],
+            ),
+            Err(ConsentPersistenceError::CorruptHistory)
+        ));
     }
 }
