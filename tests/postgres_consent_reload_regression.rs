@@ -581,6 +581,7 @@ fn stored_label_time_and_relation_corruption_propagate_as_typed_failures() {
         Err(ConsentPersistenceError::Database(_))
     ));
     missing_header.rollback().unwrap();
+    reset(&mut client);
 }
 
 #[test]
