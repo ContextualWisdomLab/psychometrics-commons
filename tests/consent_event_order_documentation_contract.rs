@@ -21,7 +21,7 @@ fn consent_event_order_migration_is_mapped_in_the_logical_erd() {
         .expect("logical ERD must be readable");
 
     assert!(
-        migration.contains("ADD COLUMN IF NOT EXISTS event_sequence BIGINT")
+        migration.contains("ADD COLUMN event_sequence BIGINT")
             && migration.contains("CHECK (event_sequence IS NULL OR event_sequence > 0)")
             && migration.contains("ON consent_event (participant_ref, event_sequence)")
             && migration.contains("WHERE event_sequence IS NOT NULL"),
