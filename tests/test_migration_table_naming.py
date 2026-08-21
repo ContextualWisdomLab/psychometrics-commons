@@ -17,6 +17,10 @@ CREATE_TABLE_PATTERN = re.compile(
     r"(?:\.(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)",
     re.IGNORECASE | re.MULTILINE,
 )
+DYNAMIC_CREATE_TABLE_PATTERN = re.compile(
+    r"^\s*EXECUTE\b(?:(?!;).)*?\bCREATE\s+TABLE\b",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
+)
 DESCRIPTIVE_SNAKE_CASE_PATTERN = re.compile(
     r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$"
 )
@@ -26,11 +30,16 @@ MIGRATION_FILENAME_PATTERN = re.compile(
 
 
 def created_table_names(sql: str) -> list[str]:
-    """Return table names from PostgreSQL CREATE TABLE variants used in migrations."""
+    """Return statically declared PostgreSQL table names used in migrations."""
     return [
         match.group("qualified_name").rsplit(".", maxsplit=1)[-1]
         for match in CREATE_TABLE_PATTERN.finditer(sql)
     ]
+
+
+def contains_dynamic_create_table(sql: str) -> bool:
+    """Flag dynamic table DDL whose identifier cannot be reviewed statically."""
+    return DYNAMIC_CREATE_TABLE_PATTERN.search(sql) is not None
 
 
 def is_descriptive_snake_case_table_name(table_name: str) -> bool:
@@ -66,9 +75,18 @@ class MigrationTableNamingContractTests(unittest.TestCase):
         )
 
     def test_dynamic_create_table_is_detected_as_unreviewable(self) -> None:
-        sql = "EXECUTE 'CREATE TABLE hidden_alias (row_ref text)'"
+        dynamic_sql = "EXECUTE 'CREATE TABLE hidden_alias (row_ref text)'"
+        multiline_dynamic_sql = """EXECUTE format(
+            'CREATE TABLE %I (row_ref text)', generated_name
+        );"""
 
-        self.assertTrue(contains_dynamic_create_table(sql))
+        self.assertTrue(contains_dynamic_create_table(dynamic_sql))
+        self.assertTrue(contains_dynamic_create_table(multiline_dynamic_sql))
+        self.assertFalse(
+            contains_dynamic_create_table(
+                "CREATE TABLE visible_table (row_ref text);"
+            )
+        )
 
     def test_name_contract_rejects_single_word_mixed_case_and_quoted_aliases(self) -> None:
         for invalid_name in ["session", "AssessmentSession", '"assessment_session"']:
@@ -118,15 +136,25 @@ class MigrationTableNamingContractTests(unittest.TestCase):
     def test_every_owned_migration_table_uses_descriptive_snake_case(self) -> None:
         observed: list[tuple[Path, str]] = []
         invalid: list[str] = []
+        dynamic_ddl: list[str] = []
 
         for migration_path in sorted(MIGRATIONS_DIR.glob("*.sql")):
             sql = migration_path.read_text(encoding="utf-8")
+            if contains_dynamic_create_table(sql):
+                dynamic_ddl.append(str(migration_path.relative_to(REPOSITORY_ROOT)))
+
             for table_name in created_table_names(sql):
                 observed.append((migration_path, table_name))
                 if not is_descriptive_snake_case_table_name(table_name):
                     invalid.append(f"{migration_path.relative_to(REPOSITORY_ROOT)}:{table_name}")
 
         self.assertTrue(observed, "migration naming gate found no CREATE TABLE statements")
+        self.assertEqual(
+            dynamic_ddl,
+            [],
+            "dynamic CREATE TABLE bypasses static owned-table naming review; "
+            f"migrations={dynamic_ddl}",
+        )
         self.assertEqual(
             invalid,
             [],
