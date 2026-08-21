@@ -256,12 +256,12 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
 /// research that needs the restricted mapping keeps those values outside this
-/// fixture. A column named `research_participant_ref` is allowed; columns
-/// named `participant_ref`, `assessment_participant_ref`, `subject_ref`,
-/// `identity_subject_ref`, `linked_subject_ref`, or `pseudonym_key_version`
-/// are not. The caller must also supply an effective product-authorized identity
-/// inventory; the scanner fails closed rather than treating an omitted inventory as
-/// evidence that the fixture is clean.
+/// fixture. A column named `research_participant_ref` is allowed, including a clear
+/// export or staging prefix ending in that exact research namespace. Restricted
+/// identity names remain forbidden even when an ETL, export, source, or warehouse
+/// prefix is added before them. The caller must also supply an effective
+/// product-authorized identity inventory; the scanner fails closed rather than
+/// treating an omitted inventory as evidence that the fixture is clean.
 ///
 /// # Errors
 ///
@@ -317,13 +317,22 @@ fn has_effective_restricted_identity_inventory(
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
     let normalized = normalize_public_release_column(column_name);
-    FORBIDDEN_PUBLIC_RELEASE_COLUMNS.iter().any(|forbidden| {
-        normalized == *forbidden
-            || normalized
-                .bytes()
-                .filter(|byte| *byte != b'_')
-                .eq(forbidden.bytes().filter(|byte| *byte != b'_'))
-    })
+    if normalized == "research_participant_ref" || normalized.ends_with("_research_participant_ref")
+    {
+        return false;
+    }
+
+    let compact = compact_public_release_column(&normalized);
+    FORBIDDEN_PUBLIC_RELEASE_COLUMNS
+        .iter()
+        .any(|forbidden| compact.ends_with(&compact_public_release_column(forbidden)))
+}
+
+fn compact_public_release_column(column_name: &str) -> String {
+    column_name
+        .chars()
+        .filter(|character| *character != '_')
+        .collect()
 }
 
 /// Fold ASCII case and camelCase/PascalCase acronym boundaries so CSV/JSON export aliases match the denylist.
