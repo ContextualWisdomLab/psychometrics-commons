@@ -5,8 +5,11 @@ use psychometrics_commons_runtime::postgres_response_snapshot::{
     apply_response_snapshot_migration, persist_response_snapshot,
     ResponseSnapshotPersistenceDisposition, ResponseSnapshotPersistenceError,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
-use psychometrics_commons_runtime::session::SessionState;
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
+use response_support::{frozen_snapshot, unbound_frozen_snapshot};
 use std::sync::{Mutex, MutexGuard};
 
 const PAYLOAD_DIGEST: &str =
@@ -63,20 +66,6 @@ fn persist_err(
     let error = persist_response_snapshot(&mut transaction, snapshot).unwrap_err();
     transaction.rollback().unwrap();
     error
-}
-
-fn frozen_snapshot(
-    session_ref: &str,
-    snapshot_ref: &str,
-    writes: &[ResponseWrite<'_>],
-) -> psychometrics_commons_runtime::response::ResponseSnapshot {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
-    for request in writes {
-        ledger.record(SessionState::Active, *request).unwrap();
-    }
-    ledger
-        .freeze_as(SessionState::Completed, snapshot_ref)
-        .unwrap()
 }
 
 fn write<'a>(
@@ -259,19 +248,15 @@ fn unbound_snapshot_fails_closed_before_insert() {
     reset_response_snapshot_tables(&mut client);
     apply_response_snapshot_migration(&mut client).unwrap();
 
-    let mut ledger = ResponseLedger::new("session_snapshot_unbound").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            write(
-                "server_event_unbound",
-                "client_event_unbound",
-                "item_version_001",
-                PAYLOAD_DIGEST,
-            ),
-        )
-        .unwrap();
-    let snapshot = ledger.freeze(SessionState::Completed).unwrap();
+    let snapshot = unbound_frozen_snapshot(
+        "session_snapshot_unbound",
+        &[write(
+            "server_event_unbound",
+            "client_event_unbound",
+            "item_version_001",
+            PAYLOAD_DIGEST,
+        )],
+    );
     assert!(matches!(
         persist_err(&mut client, &snapshot),
         ResponseSnapshotPersistenceError::InvalidReference
