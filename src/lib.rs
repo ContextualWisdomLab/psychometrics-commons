@@ -44,6 +44,7 @@ pub mod result;
 pub mod result_authorization;
 pub mod result_export;
 pub mod scoring;
+pub mod scoring_engine;
 pub mod scoring_job;
 pub mod session;
 #[path = "session_http_boundary.rs"]
