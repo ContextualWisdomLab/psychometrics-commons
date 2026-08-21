@@ -44,6 +44,8 @@ The implementation must distinguish at least:
 
 Readiness must not fail solely because an optional capability is unavailable if the selected operation can safely proceed without it. Conversely, a process can be live while not ready to accept new state-changing requests.
 
+Operator HTTP probes, when implemented, are GET `/live` and GET `/ready`. `/live` answers process liveness only and must not perform store I/O; a hung or failed PostgreSQL connection must not restart a still-live process. `/ready` answers operation-scoped readiness and may name required capabilities as repeated `capability` query parameters. When the PostgreSQL adapter answers a bare GET `/ready` (no `capability=`), it requires `postgres_operational_store` so a read-only or unsupported store cannot advertise readiness to a load balancer. These probes do not publish measured SLO values. A bound TCP listener, when present, serves those same operations in a blocking accept loop until accept fails, or one request per accepted connection. Interrupted, aborted, or reset accepts retry, including `ConnectionReset` before `accept` returns, matching TCP reset processing in RFC 9293. A dropped probe connection does not stop later probes. It applies a bounded read/write timeout, rejects oversized requests without echoing them, and is not a measured availability claim. PostgreSQL observation happens after accept and only for GET `/ready`. Probe failure is unknown/unready and must not expose driver errors. Unsupported methods and paths use explicit `urn:psychometrics-commons:problem:` types rather than `about:blank`. Operators start the probe process with `run_health_process` after setting `HEALTH_LISTEN_ADDR` or platform `PORT`. Optional `DATABASE_URL` is observed only for GET `/ready`. Optional `HEALTH_BACKLOG_HEALTH` must be `within_bounds`, `stalled`, or `unknown`; missing backlog stays unknown and not ready. Point liveness at GET `/live` and readiness at GET `/ready`. Do not treat a single `accept_one_*` call as a running probe server.
+
 ## 4. Capability degradation matrix
 
 | Dependency/capability failure | Required product behavior |
@@ -229,6 +231,12 @@ Never collapse these maturity levels. SOC 2/CSAP readiness work may map evidence
 
 ## 15. References
 
+Eddy, W. (Ed.). (2022). *Transmission Control Protocol (TCP)* (RFC 9293). Internet Engineering Task Force. https://doi.org/10.17487/RFC9293
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP Semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
 International Organization for Standardization & International Electrotechnical Commission. (2023). *ISO/IEC 25010:2023 Systems and software engineering—Systems and software Quality Requirements and Evaluation (SQuaRE)—Product quality model*.
+
+Kubernetes Authors. (2024). *Configure liveness, readiness and startup probes*. Kubernetes Documentation. https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 
 National Institute of Standards and Technology. (2022). *Secure Software Development Framework (SSDF) Version 1.1: Recommendations for mitigating the risk of software vulnerabilities* (NIST SP 800-218). https://doi.org/10.6028/NIST.SP.800-218

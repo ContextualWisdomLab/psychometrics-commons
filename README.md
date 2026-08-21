@@ -56,6 +56,10 @@ Active PR #231 — not protected-main truth until an unchanged reviewed/check-cl
 - [CLAUDE.md](CLAUDE.md) — concise coding-agent entry point into the same normative contracts.
 - [Changelog](CHANGELOG.md) — unreleased and released product/architecture changes.
 
+## Operator health probes
+
+To run the first process surface, set `HEALTH_LISTEN_ADDR` (for example `127.0.0.1:8080`) or platform `PORT`, then call `psychometrics_commons_runtime::health_process::run_health_process`. Point liveness at GET `/live` and readiness at GET `/ready`. Set `DATABASE_URL` only when the process should observe PostgreSQL for readiness, and set `HEALTH_BACKLOG_HEALTH=within_bounds` only after backlog is actually measured. A down store must not take `/live` with it.
+
 ## Architecture authority and implementation status
 
 An accepted ADR must define concrete ownership, interfaces, invariants, failure behavior, security/privacy/tenancy boundaries, migration and rollback, validation evidence, alternatives, and reversal conditions. Material implementation that contradicts an accepted ADR requires an explicit superseding decision rather than silent architectural drift.
