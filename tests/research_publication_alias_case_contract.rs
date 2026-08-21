@@ -107,6 +107,33 @@ fn separator_aliases_cannot_hide_restricted_identity_columns() {
 }
 
 #[test]
+fn credential_and_internal_location_columns_cannot_enter_public_release() {
+    for column_name in [
+        "service_access_token",
+        "oauth_refresh_token",
+        "oidc_client_secret",
+        "provider_api_key",
+        "database_url",
+        "database_dsn",
+        "database_password",
+        "object_store_access_key",
+        "object_store_secret_key",
+        "object_store_endpoint",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not expose authentication, credential, or internal-location fields in a public release"
+        );
+    }
+}
+
+#[test]
 fn restricted_prefix_cannot_hide_behind_research_participant_namespace() {
     for column_name in [
         "linkage_ref_research_participant_ref",
