@@ -1,0 +1,93 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons personal result-export API
+  version: 0.1.0
+  description: >
+    As-built in-process POST transport for one already-authorized immutable result
+    export. The host runtime supplies stored participant/result/export records and
+    an authenticated authorization context; request values never establish tenant
+    or owner authority. The handler authorizes stored records before comparing the
+    route result identity or Idempotency-Key with those records.
+paths:
+  /v1/results/{result_ref}/exports:
+    post:
+      operationId: createPersonalResultExport
+      summary: Return one authorized immutable personal result export
+      description: >
+        Returns the exact JSON export by default, or the exact human-readable
+        report when Accept is text/plain. Idempotency-Key is the opaque export
+        identity already bound to the server-owned ResultExport. Reusing another
+        export identity for the authorized result fails closed as a conflict.
+      parameters:
+        - name: result_ref
+          in: path
+          required: true
+          description: Opaque immutable result-snapshot reference.
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Opaque immutable personal-export reference.
+          schema:
+            type: string
+        - name: Accept
+          in: header
+          required: false
+          description: application/json, text/plain, or */*. Defaults to application/json.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authorized personal export bound to the exact immutable result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: >
+                  Exact ResultExport JSON document generated from the immutable
+                  ResultSnapshot. Scientific numeric values and provenance are
+                  copied; the HTTP adapter does not recompute them.
+            text/plain:
+              schema:
+                type: string
+                description: Exact human-readable ResultExport report.
+        "400":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "406":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem details without raw participant/result/export identities.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
