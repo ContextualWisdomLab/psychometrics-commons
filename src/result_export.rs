@@ -48,7 +48,7 @@ pub enum ResultExportError {
     InvalidReference,
     /// The report locale is not an exact whitespace-free BCP 47-style tag.
     InvalidLocale,
-    /// The export timestamp was zero.
+    /// The export timestamp was zero or preceded its immutable result snapshot.
     InvalidTimestamp,
     /// No participant-facing limitation text was supplied.
     MissingLimitations,
@@ -63,7 +63,9 @@ impl Display for ResultExportError {
             Self::InvalidLocale => {
                 "result export locale must be an exact whitespace-free BCP 47-style tag"
             }
-            Self::InvalidTimestamp => "result export timestamps must be greater than zero",
+            Self::InvalidTimestamp => {
+                "result export timestamp must be nonzero and not precede result creation"
+            }
             Self::MissingLimitations => {
                 "personal result export must include participant-facing limitations"
             }
@@ -89,7 +91,8 @@ impl ResultExport {
     /// # Errors
     ///
     /// Returns [`ResultExportError`] when the export identity, locale, timestamp,
-    /// or limitation text is invalid.
+    /// or limitation text is invalid. Export time may equal result creation time,
+    /// but cannot be zero or earlier than the immutable source result.
     pub fn from_snapshot(
         snapshot: &ResultSnapshot,
         input: ResultExportInput<'_>,
@@ -98,7 +101,9 @@ impl ResultExport {
         if input.locale.trim() != input.locale || !valid_locale(input.locale) {
             return Err(ResultExportError::InvalidLocale);
         }
-        if input.exported_at_unix_ms == 0 {
+        if input.exported_at_unix_ms == 0
+            || input.exported_at_unix_ms < snapshot.created_at_unix_ms()
+        {
             return Err(ResultExportError::InvalidTimestamp);
         }
         if input.limitations.is_empty() {
