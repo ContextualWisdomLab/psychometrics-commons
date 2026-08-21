@@ -140,6 +140,14 @@ fn restricted_prefix_cannot_hide_behind_research_participant_namespace() {
         "keyverse_subject_research_participant_ref",
         "participant_ref_research_participant_ref",
         "participant_research_participant_ref",
+        "subject_research_participant_ref",
+        "linkage_research_participant_ref",
+        "keyverse_research_participant_ref",
+        "pseudonym_research_participant_ref",
+        "operational_research_participant_ref",
+        "assessment_research_participant_ref",
+        "identity_research_participant_ref",
+        "linked_research_participant_ref",
         "identity-subject-ref-research-participant-ref",
     ] {
         let columns = [PublicReleaseFixtureColumn {
