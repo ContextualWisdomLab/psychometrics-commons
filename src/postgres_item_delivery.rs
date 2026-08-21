@@ -123,24 +123,13 @@ fn persist_ledger_header(
     session_ref: &str,
 ) -> Result<bool, ItemDeliveryPersistenceError> {
     let allowed_item_version_refs = ledger.allowed_item_version_refs().to_vec();
-    let row = transaction.query_one(
-        "WITH inserted AS (\
-             INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
-             ) VALUES ($1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (session_ref) DO NOTHING \
-             RETURNING tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                       allowed_item_version_refs, TRUE AS inserted\
-         ) \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, inserted \
-         FROM inserted \
-         UNION ALL \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, FALSE AS inserted \
-         FROM item_delivery_ledger WHERE session_ref = $2 \
-         LIMIT 1",
+    let inserted = transaction.query_opt(
+        "INSERT INTO item_delivery_ledger (\
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
+             allowed_item_version_refs\
+         ) VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (session_ref) DO NOTHING \
+         RETURNING TRUE",
         &[
             &tenant_ref,
             &session_ref,
@@ -150,19 +139,31 @@ fn persist_ledger_header(
             &allowed_item_version_refs,
         ],
     )?;
+    if inserted.is_some() {
+        return Ok(true);
+    }
+
+    // Under READ COMMITTED, ON CONFLICT can wait for another transaction and then skip its
+    // insert even though that row was invisible to the INSERT command's original snapshot.
+    // A separate command gets a fresh snapshot and can classify that newly committed row.
+    let row = transaction.query_one(
+        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
+                allowed_item_version_refs \
+         FROM item_delivery_ledger WHERE session_ref = $1",
+        &[&session_ref],
+    )?;
     let stored_tenant_ref: String = row.get(0);
     let stored_release_ref: String = row.get(1);
     let stored_digest: String = row.get(2);
     let stored_locale: String = row.get(3);
     let stored_allowed: Vec<String> = row.get(4);
-    let inserted: bool = row.get(5);
     if stored_tenant_ref == tenant_ref
         && stored_release_ref == ledger.instrument_release_ref()
         && stored_digest == ledger.release_content_digest()
         && stored_locale == ledger.locale()
         && stored_allowed == allowed_item_version_refs
     {
-        Ok(inserted)
+        Ok(false)
     } else {
         Err(ItemDeliveryPersistenceError::ConflictingReplay)
     }
@@ -178,25 +179,13 @@ fn persist_one_event(
     #[allow(clippy::cast_possible_wrap)]
     let sequence = event.sequence() as i64;
     let selection_evidence_ref = event.selection_evidence_ref();
-    let row = match transaction.query_one(
-        "WITH inserted AS (\
-             INSERT INTO item_delivery_event (\
-                 tenant_ref, session_ref, delivery_event_ref, item_version_ref, \
-                 presentation_context_ref, selection_evidence_ref, delivery_sequence\
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
-             ON CONFLICT (session_ref, delivery_event_ref) DO NOTHING \
-             RETURNING tenant_ref, item_version_ref, presentation_context_ref, \
-                       selection_evidence_ref, delivery_sequence, TRUE AS inserted\
-         ) \
-         SELECT tenant_ref, item_version_ref, presentation_context_ref, \
-                selection_evidence_ref, delivery_sequence, inserted \
-         FROM inserted \
-         UNION ALL \
-         SELECT tenant_ref, item_version_ref, presentation_context_ref, \
-                selection_evidence_ref, delivery_sequence, FALSE AS inserted \
-         FROM item_delivery_event \
-         WHERE session_ref = $2 AND delivery_event_ref = $3 \
-         LIMIT 1",
+    let inserted = match transaction.query_opt(
+        "INSERT INTO item_delivery_event (\
+             tenant_ref, session_ref, delivery_event_ref, item_version_ref, \
+             presentation_context_ref, selection_evidence_ref, delivery_sequence\
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
+         ON CONFLICT (session_ref, delivery_event_ref) DO NOTHING \
+         RETURNING TRUE",
         &[
             &tenant_ref,
             &session_ref,
@@ -210,12 +199,20 @@ fn persist_one_event(
         Ok(row) => row,
         Err(error) => return Err(classify_unique_violation(error)),
     };
-    let inserted: bool = row.get(5);
-    if inserted {
-        Ok(true)
-    } else {
-        classify_existing_event(&row, tenant_ref, event, sequence)
+    if inserted.is_some() {
+        return Ok(true);
     }
+
+    // The separate read is intentional: it receives the post-wait READ COMMITTED snapshot when
+    // another transaction won the same event identity immediately before this command.
+    let row = transaction.query_one(
+        "SELECT tenant_ref, item_version_ref, presentation_context_ref, \
+                selection_evidence_ref, delivery_sequence \
+         FROM item_delivery_event \
+         WHERE session_ref = $1 AND delivery_event_ref = $2",
+        &[&session_ref, &delivery_event_ref],
+    )?;
+    classify_existing_event(&row, tenant_ref, event, sequence)
 }
 
 fn classify_existing_event(
