@@ -134,7 +134,7 @@ pub fn probe_postgres_runtime(
 /// relation set that represents its compatible schema version. Each relation identity must
 /// be an exact two-part `schema.relation` name using the repository's unquoted ASCII SQL
 /// identifier grammar: lowercase letters, digits, and underscores, with each component
-/// starting with a lowercase letter or underscore. PostgreSQL's `search_path` is the
+/// starting with a lowercase letter or underscore. `PostgreSQL`'s `search_path` is the
 /// ordered list of schemas used to resolve an unqualified name, so requiring the schema
 /// explicitly prevents the answer from changing with that setting. Restricting the input
 /// to this ASCII grammar also prevents case-folding or Unicode-confusable aliases from
@@ -188,4 +188,110 @@ fn is_exact_unquoted_identifier(identifier: &str) -> bool {
     let mut bytes = identifier.bytes();
     matches!(bytes.next(), Some(b'a'..=b'z' | b'_'))
         && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use postgres::{Client, NoTls};
+
+    fn test_client() -> Client {
+        let connection = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+        Client::connect(&connection, NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable")
+    }
+
+    #[test]
+    fn runtime_health_covers_supported_read_only_and_unsupported_states() {
+        let ready = classify_postgres_runtime(180_004, false);
+        assert_eq!(ready.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
+        assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
+        assert_eq!(ready.capability_state(), CapabilityState::Available);
+        assert!(ready.accepts_new_work());
+        assert!(ready.capability_health().unwrap().accepts_new_work());
+
+        let read_only = classify_postgres_runtime(180_004, true);
+        assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
+        assert_eq!(read_only.capability_state(), CapabilityState::Unavailable);
+        assert!(!read_only.accepts_new_work());
+        assert!(!read_only.capability_health().unwrap().accepts_new_work());
+
+        let unsupported = classify_postgres_runtime(170_009, false);
+        assert_eq!(
+            unsupported.status(),
+            PostgresRuntimeStatus::UnsupportedMajorVersion
+        );
+        assert_eq!(unsupported.capability_state(), CapabilityState::Unavailable);
+        assert!(!unsupported.accepts_new_work());
+    }
+
+    #[test]
+    fn live_runtime_probe_covers_success_read_only_and_database_error() {
+        let mut client = test_client();
+        let ready = probe_postgres_runtime(&mut client).unwrap();
+        assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
+
+        let mut transaction = client.build_transaction().read_only(true).start().unwrap();
+        let read_only = probe_postgres_runtime(&mut transaction).unwrap();
+        assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
+        transaction.rollback().unwrap();
+
+        let mut transaction = client.transaction().unwrap();
+        assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+        assert!(probe_postgres_runtime(&mut transaction).is_err());
+    }
+
+    #[test]
+    fn relation_probe_covers_unknown_verified_incompatible_and_database_error() {
+        let mut client = test_client();
+        assert_eq!(
+            probe_postgres_relation_integrity(&mut client, &[]).unwrap(),
+            DataIntegrityHealth::Unknown
+        );
+        assert_eq!(
+            probe_postgres_relation_integrity(&mut client, &["pg_catalog.pg_class"]).unwrap(),
+            DataIntegrityHealth::Verified
+        );
+        assert_eq!(
+            probe_postgres_relation_integrity(&mut client, &["pg_class"]).unwrap(),
+            DataIntegrityHealth::Incompatible
+        );
+        assert_eq!(
+            probe_postgres_relation_integrity(
+                &mut client,
+                &["public.psychometrics_commons_missing_relation"]
+            )
+            .unwrap(),
+            DataIntegrityHealth::Incompatible
+        );
+
+        let mut transaction = client.transaction().unwrap();
+        assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+        assert!(probe_postgres_relation_integrity(&mut transaction, &["pg_catalog.pg_class"])
+            .is_err());
+    }
+
+    #[test]
+    fn exact_relation_identifier_contract_covers_component_boundaries() {
+        assert!(is_exact_schema_qualified_relation("pg_catalog.pg_class"));
+        assert!(is_exact_schema_qualified_relation("_private.table_2"));
+
+        for relation in [
+            "pg_class",
+            ".pg_class",
+            "pg_catalog.",
+            "pg_catalog.pg_class.extra",
+            "PG_catalog.pg_class",
+            "pg_catalog.PG_class",
+            "pg_catalog. pg_class",
+            "pg_catalog.pg-class",
+            "pg_catalog.pg$class",
+            "pg_catalog.tablé",
+            "1schema.table",
+            "schema.1table",
+        ] {
+            assert!(!is_exact_schema_qualified_relation(relation), "{relation}");
+        }
+    }
 }
