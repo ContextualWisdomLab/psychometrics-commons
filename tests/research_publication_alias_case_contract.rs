@@ -201,6 +201,22 @@ fn credential_and_internal_location_columns_cannot_enter_public_release() {
 }
 
 #[test]
+fn benign_author_metadata_columns_remain_public() {
+    for column_name in ["authors", "authored_by", "authoring_tool"] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_team_alpha"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Ok(()),
+            "{column_name} is author metadata, not an authentication namespace"
+        );
+    }
+}
+
+#[test]
 fn restricted_prefix_cannot_hide_behind_research_participant_namespace() {
     for column_name in [
         "linkage_ref_research_participant_ref",
