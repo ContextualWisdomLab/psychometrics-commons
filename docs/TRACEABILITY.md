@@ -93,7 +93,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `085ef4b4714796a77fd4645eeb46b028f95929fc`:
+Current protected-main Rust module surface on `5544149ca5dc55d2bfc3402cc59c03c44830de5f`:
 
 ```text
 src/lib.rs
