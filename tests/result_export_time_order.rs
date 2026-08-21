@@ -68,7 +68,10 @@ fn snapshot() -> ResultSnapshot {
     .unwrap()
 }
 
-fn export_at(snapshot: &ResultSnapshot, exported_at_unix_ms: u64) -> Result<ResultExport, ResultExportError> {
+fn export_at(
+    snapshot: &ResultSnapshot,
+    exported_at_unix_ms: u64,
+) -> Result<ResultExport, ResultExportError> {
     ResultExport::from_snapshot(
         snapshot,
         ResultExportInput {
