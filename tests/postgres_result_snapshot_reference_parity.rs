@@ -142,6 +142,7 @@ fn invalid_case(field: SnapshotField, invalid_ref: &str, suffix: &str) -> Snapsh
 
 fn assert_field_rejects(client: &mut Client, field: SnapshotField, constraint: &str) {
     for (index, invalid_ref) in [
+        "12",
         "½",
         "²",
         "Ⅳ",
@@ -216,6 +217,7 @@ fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
     let _guard = guard();
     let mut client = client();
     let invalid_references = [
+        "12",
         "½",
         "²",
         "Ⅳ",
