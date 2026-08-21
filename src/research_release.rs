@@ -304,14 +304,16 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
 /// bypass the privacy markers. A column in the `research_participant_ref` namespace
 /// is allowed, including clear export or staging prefixes and supported separator
 /// variants, unless its prefix contains a forbidden marker or restricted identity,
-/// authentication, credential, or internal-location namespace stem. Restricted identity,
-/// authentication, credential, and internal-location names remain forbidden when transport
-/// prefixes, suffixes, punctuation/whitespace separators, or inserted digits are added
-/// around or within their marker words. The caller must provide at least one published
-/// column and an effective product-authorized identity inventory; the scanner fails closed
-/// rather than treating an empty fixture or omitted inventory as evidence that the fixture
-/// is clean. Object or array cell values are not parsed here: callers must flatten them or
-/// prove a separate structured-value privacy scan before packaging.
+/// authentication, credential, or internal-location namespace stem. Bare sensitive
+/// namespace stems such as `token`, `password`, or `participant` are also forbidden.
+/// Restricted identity, authentication, credential, and internal-location names remain
+/// forbidden when transport prefixes, suffixes, punctuation/whitespace separators, or
+/// inserted digits are added around or within their marker words. The caller must provide
+/// at least one published column and an effective product-authorized identity inventory;
+/// the scanner fails closed rather than treating an empty fixture or omitted inventory as
+/// evidence that the fixture is clean. Object or array cell values are not parsed here:
+/// callers must flatten them or prove a separate structured-value privacy scan before
+/// packaging.
 ///
 /// # Errors
 ///
@@ -391,6 +393,9 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     }
 
     contains_forbidden_public_release_marker(&compact)
+        || FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
+            .iter()
+            .any(|marker| compact == *marker)
 }
 
 fn contains_forbidden_public_release_marker(compact: &str) -> bool {
