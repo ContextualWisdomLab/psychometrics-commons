@@ -164,7 +164,10 @@ fn reapplying_current_schema_preserves_reference_constraints() {
         .expect("reapplying an already-current scoring-job schema must succeed");
 
     let after = reference_constraint_oids(&mut client);
-    assert_eq!(after, before, "current reference guards must not be recreated");
+    assert_eq!(
+        after, before,
+        "current reference guards must not be recreated"
+    );
 }
 
 fn reseal_current_constraint_manifest(client: &mut Client) {
