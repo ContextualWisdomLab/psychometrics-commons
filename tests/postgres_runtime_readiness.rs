@@ -131,11 +131,11 @@ fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
 }
 
 #[test]
-fn empty_relation_requirement_is_vacuously_verified() {
+fn empty_relation_requirement_fails_closed_as_unknown_integrity() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(&mut client, &[]).unwrap();
 
-    assert_eq!(integrity, DataIntegrityHealth::Verified);
+    assert_eq!(integrity, DataIntegrityHealth::Unknown);
 }
 
 #[test]
