@@ -58,7 +58,9 @@ fn framing_error(request: &[u8]) -> std::io::ErrorKind {
     let client = std::thread::spawn(move || {
         let mut stream = TcpStream::connect(address).unwrap();
         stream.write_all(&payload).unwrap();
-        stream.shutdown(Shutdown::Write).unwrap();
+        // The server is expected to close malformed requests immediately; the
+        // client-side half-close can therefore race with the peer close.
+        stream.shutdown(Shutdown::Write).ok();
         let mut response = String::new();
         let _ = stream.read_to_string(&mut response);
     });
