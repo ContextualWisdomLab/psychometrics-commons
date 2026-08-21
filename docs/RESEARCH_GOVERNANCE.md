@@ -83,7 +83,15 @@ Public or controlled release bundles must not contain:
 - service authentication identifiers/tokens;
 - internal object-store or database credentials/locations that bypass access policy.
 
-Before packaging a public fixture, call `scan_public_release_fixture` with the columns that would be published and a product-authorized restricted-identity inventory for the represented people. The scan rejects governance/product identity columns and exact restricted cell values, and fails closed if every supplied inventory category is empty or blank so an unavailable identity inventory cannot be mistaken for clean release evidence. `research_participant_ref` remains allowed. This product boundary does not query Keyverse, a linkage service, or any other service's application database to fill missing inventory.
+Before packaging a public fixture, call `scan_public_release_fixture`.
+
+- Give the scanner the columns that the fixture will publish. Column names must use the service's ASCII schema grammar; non-ASCII aliases fail closed.
+- Give the scanner the product-authorized restricted-identity inventory for the represented people.
+- The scanner rejects governance/product identity columns, restricted linkage-key aliases, authentication/credential/internal-location columns, structured cells it cannot inspect safely, and exact restricted identity values.
+- If every restricted-identity inventory category is empty or blank, the scanner fails closed. Missing inventory is not clean release evidence.
+- The separately governed `research_participant_ref` namespace remains allowed unless a restricted-identity namespace is prepended to it.
+
+This product boundary must not query Keyverse, a linkage service, or another service's application database to supplement missing inventory.
 
 ## 5. Research staging projection
 
