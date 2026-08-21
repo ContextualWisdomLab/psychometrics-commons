@@ -222,6 +222,8 @@ stateDiagram-v2
 
 Idempotent command replays may confirm an already-applied transition when the underlying evidence is identical. They must never rewind a later state or change frozen evidence.
 
+**Active PR** in-process `POST /v1/sessions/{session_ref}/commands` exposes Activate, Pause, Resume, Complete, and Cancel only. It is not protected-main truth. Scoring and operator commands stay off that public route.
+
 ## 3. Instrument-publication state machine
 
 ```mermaid
