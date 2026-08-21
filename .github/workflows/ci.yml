@@ -112,10 +112,10 @@ jobs:
       - name: Build warning-free documentation
         run: cargo doc --no-deps
 
-  line-coverage:
-    name: Production line coverage
+  coverage:
+    name: Production line and branch coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
@@ -142,18 +142,23 @@ jobs:
         run: |
           printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-      - name: Install pinned Rust toolchain with LLVM tools
+      - name: Install pinned stable Rust toolchain with LLVM tools
         run: rustup toolchain install 1.97.1 --profile minimal --component llvm-tools-preview
+      - name: Install pinned nightly with LLVM tools
+        run: rustup toolchain install nightly-2026-08-18 --profile minimal --component llvm-tools-preview
       - name: Install pinned cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
-      - name: Verify cargo-llvm-cov version
+      - name: Verify stable cargo-llvm-cov version
         run: cargo llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
+      - name: Verify nightly cargo-llvm-cov version
+        run: cargo +nightly-2026-08-18 llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
       - name: Generate line coverage
         run: cargo llvm-cov --json --summary-only --output-path coverage.json
       - name: Enforce complete line coverage
+        id: line_coverage_gate
         run: python3 scripts/check_coverage.py coverage.json --kind lines
       - name: Diagnose missing line coverage
-        if: failure()
+        if: failure() && steps.line_coverage_gate.outcome == 'failure'
         run: |
           python3 - <<'PY'
           import json
@@ -174,94 +179,5 @@ jobs:
           PY
           cargo llvm-cov report --lcov --output-path coverage-lines.lcov
           python3 - <<'PY'
-          from pathlib import Path
-
-          workspace = Path.cwd().resolve()
-          source = None
-          for raw_line in Path("coverage-lines.lcov").read_text(encoding="utf-8").splitlines():
-              if raw_line.startswith("SF:"):
-                  source_path = Path(raw_line[3:]).resolve()
-                  try:
-                      source = source_path.relative_to(workspace).as_posix()
-                  except ValueError:
-                      source = source_path.as_posix()
-              elif raw_line.startswith("DA:") and source is not None:
-                  line, hits, *_ = raw_line[3:].split(",")
-                  if hits == "0":
-                      print(f"::error file={source},line={line}::uncovered production line")
-          PY
-          cargo llvm-cov report --text --show-missing-lines --show-instantiations
-
-  branch-coverage:
-    name: Production branch coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ci_${{ github.run_id }}_${{ github.run_attempt }}
-          POSTGRES_DB: psychometrics_commons_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d psychometrics_commons_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-          --health-start-period 5s
-    steps:
-      - name: Checkout exact head
-        uses: actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - name: Configure ephemeral PostgreSQL test connection
-        shell: bash
-        run: |
-          printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
-            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
-      - name: Install pinned nightly with LLVM tools
-        run: rustup toolchain install nightly-2026-08-18 --profile minimal --component llvm-tools-preview
-      - name: Install pinned cargo-llvm-cov
-        run: cargo +nightly-2026-08-18 install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
-      - name: Verify cargo-llvm-cov version
-        run: cargo +nightly-2026-08-18 llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
-      - name: Generate branch coverage
-        run: cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json
-      - name: Enforce complete branch coverage
-        run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
-      - name: Diagnose missing branch coverage
-        if: failure()
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-
-          payload = json.loads(Path("coverage-branches.json").read_text(encoding="utf-8"))
-          entry = payload["data"][0]
-          kind = "branches"
-          for file_entry in entry.get("files", []):
-              summary = file_entry.get("summary", {})
-              metric = summary.get(kind)
-              if isinstance(metric, dict) and metric.get("covered") != metric.get("count"):
-                  print(
-                      "INCOMPLETE_FILE "
-                      f"{kind} {metric.get('covered')}/{metric.get('count')} "
-                      f"{file_entry.get('filename')}"
-                  )
-          PY
-          cargo +nightly-2026-08-18 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
-          python3 - <<'PY'
-          from pathlib import Path
-
-          source = None
-          for raw_line in Path("coverage-branches.lcov").read_text(encoding="utf-8").splitlines():
-              if raw_line.startswith("SF:"):
-                  source = raw_line[3:]
-              elif raw_line.startswith("BRDA:"):
-                  line, block, branch, taken = raw_line[5:].split(",", 3)
-                  if taken in {"0", "-"}:
-                      print(f"UNCOVERED_BRANCH {source}:{line}:{block}:{branch}")
+          from pathlib import import Path
           PY
