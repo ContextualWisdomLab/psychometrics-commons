@@ -121,12 +121,13 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
     """Keep read-only bounded-context dependencies out of this product database."""
 
     def test_runtime_scan_accepts_only_expected_text_artifacts(self) -> None:
-        """Exclude binary-looking source fixtures before strict UTF-8 decoding."""
+        """Classify runtime text by suffix without relying on fixture existence."""
 
         self.assertTrue(is_runtime_text_file(ROOT / "src" / "lib.rs"))
         self.assertTrue(
             is_runtime_text_file(ROOT / ".github" / "workflows" / "ci.yml")
         )
+        self.assertTrue(is_runtime_text_file(ROOT / "src" / "future_module.rs"))
         self.assertFalse(is_runtime_text_file(ROOT / "src" / "fixture.png"))
         self.assertFalse(is_runtime_text_file(ROOT / "migrations" / "fixture.bin"))
 
