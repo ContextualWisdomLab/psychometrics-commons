@@ -65,6 +65,11 @@ class MigrationTableNamingContractTests(unittest.TestCase):
             ],
         )
 
+    def test_dynamic_create_table_is_detected_as_unreviewable(self) -> None:
+        sql = "EXECUTE 'CREATE TABLE hidden_alias (row_ref text)'"
+
+        self.assertTrue(contains_dynamic_create_table(sql))
+
     def test_name_contract_rejects_single_word_mixed_case_and_quoted_aliases(self) -> None:
         for invalid_name in ["session", "AssessmentSession", '"assessment_session"']:
             with self.subTest(invalid_name=invalid_name):
