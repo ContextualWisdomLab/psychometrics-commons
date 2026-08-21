@@ -52,7 +52,9 @@ fn persist_initial(client: &mut Client, credential: &AnonymousCredential) {
     transaction.commit().unwrap();
 }
 
-fn revoke_worker(application_name: &'static str) -> thread::JoinHandle<Result<AnonymousCredentialPersistenceDisposition, String>> {
+fn revoke_worker(
+    application_name: &'static str,
+) -> thread::JoinHandle<Result<AnonymousCredentialPersistenceDisposition, String>> {
     thread::spawn(move || {
         let mut client = connect(application_name);
         let mut revoked = credential();
@@ -128,7 +130,10 @@ fn concurrent_identical_revocations_are_one_revoke_plus_one_duplicate() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, Ok(AnonymousCredentialPersistenceDisposition::Revoked)))
+            .filter(|result| matches!(
+                result,
+                Ok(AnonymousCredentialPersistenceDisposition::Revoked)
+            ))
             .count(),
         1,
         "exactly one racer must append the revocation"
