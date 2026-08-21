@@ -153,10 +153,15 @@ jobs:
       - name: Verify nightly cargo-llvm-cov version
         run: cargo +nightly-2026-08-18 llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
       - name: Generate line coverage
+        id: line_coverage_generation
         run: cargo llvm-cov --json --summary-only --output-path coverage.json
       - name: Enforce complete line coverage
         id: line_coverage_gate
+        if: ${{ !cancelled() && steps.line_coverage_generation.outcome == 'success' }}
         run: python3 scripts/check_coverage.py coverage.json --kind lines
+      - name: Diagnose line coverage generation failure
+        if: ${{ !cancelled() && steps.line_coverage_generation.outcome == 'failure' }}
+        run: echo "::error::line coverage generation failed before the coverage gate"
       - name: Diagnose missing line coverage
         if: failure() && steps.line_coverage_gate.outcome == 'failure'
         run: |
