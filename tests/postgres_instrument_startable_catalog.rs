@@ -249,6 +249,34 @@ fn startable_catalog_omits_a_release_after_persisted_suspension() {
 }
 
 #[test]
+fn startable_catalog_does_not_block_concurrent_release_suspension() {
+    let _guard = test_guard();
+    let mut catalog_client = test_client();
+    reset_tables(&mut catalog_client);
+    apply_instrument_release_migration(&mut catalog_client).unwrap();
+
+    persist(
+        &mut catalog_client,
+        &published_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+
+    let mut catalog_transaction = catalog_client.transaction().unwrap();
+    let listed = list_startable_instrument_releases(&mut catalog_transaction).unwrap();
+    assert_eq!(listed.len(), 1);
+
+    let mut lifecycle_client = test_client();
+    lifecycle_client
+        .batch_execute("SET lock_timeout TO '250ms';")
+        .unwrap();
+    persist(
+        &mut lifecycle_client,
+        &suspended_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+
+    catalog_transaction.commit().unwrap();
+}
+
+#[test]
 fn startable_catalog_is_empty_without_published_rows() {
     let _guard = test_guard();
     let mut client = test_client();
