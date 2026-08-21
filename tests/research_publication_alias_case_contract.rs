@@ -107,6 +107,50 @@ fn separator_aliases_cannot_hide_restricted_identity_columns() {
 }
 
 #[test]
+fn pseudonym_linkage_key_aliases_cannot_enter_public_release() {
+    for column_name in [
+        "pseudonym_key",
+        "export_pseudonym_key",
+        "pseudonym_key_backup",
+        "pseudonym-key",
+        "pseudonym.key",
+        "pseudonym key",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not expose a restricted pseudonym linkage key"
+        );
+    }
+}
+
+#[test]
+fn non_ascii_column_aliases_fail_closed() {
+    for column_name in [
+        "аccess_token",
+        "access_tоken",
+        "participant_rеf",
+        "research_participant_rеf",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["research_participant_program_alpha_one"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not bypass the ASCII public-release column grammar"
+        );
+    }
+}
+
+#[test]
 fn credential_and_internal_location_columns_cannot_enter_public_release() {
     for column_name in [
         "service_access_token",
