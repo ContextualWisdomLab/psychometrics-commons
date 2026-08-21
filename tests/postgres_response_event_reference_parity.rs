@@ -2,6 +2,7 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::apply_response_event_migration;
+use psychometrics_commons_runtime::response::ResponseEvent;
 use std::sync::{Mutex, MutexGuard};
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -93,6 +94,52 @@ fn direct_sql_rejects_every_rust_invalid_response_reference_family() {
         .unwrap()
         .get(0);
     assert_eq!(persisted_rows, 0);
+}
+
+#[test]
+fn sql_numeric_validation_matches_rust_for_every_unicode_scalar() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let rust_numeric: Vec<i32> = (1..=0x0010_ffff)
+        .filter_map(|codepoint| {
+            let character = char::from_u32(codepoint)?;
+            if !character.is_numeric() {
+                return None;
+            }
+            let reference = character.to_string();
+            assert!(ResponseEvent::from_persisted(
+                reference,
+                "client_event_valid",
+                "item_version_valid",
+                digest,
+                1,
+            )
+            .is_err());
+            Some(i32::try_from(codepoint).expect("Unicode scalar values fit in PostgreSQL int4"))
+        })
+        .collect();
+    let sql_invalid: Vec<i32> = client
+        .query_one(
+            r"SELECT ARRAY(
+                SELECT codepoint
+                FROM unnest($1::int4[]) AS codepoint
+                WHERE NOT response_event_reference_is_valid(chr(codepoint))
+                ORDER BY codepoint)",
+            &[&rust_numeric],
+        )
+        .unwrap()
+        .get(0);
+
+    assert_eq!(rust_numeric, sql_invalid);
+    assert!(ResponseEvent::from_persisted(
+        "\0",
+        "client_event_valid",
+        "item_version_valid",
+        digest,
+        1,
+    )
+    .is_err());
 }
 
 #[test]

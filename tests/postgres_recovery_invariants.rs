@@ -141,6 +141,7 @@ fn copy_table_in(client: &mut Client, schema: &str, table: &str, bytes: &[u8]) {
         .unwrap_or_else(|error| panic!("{schema}.{table} restore stream must commit: {error}"));
 }
 
+#[allow(clippy::too_many_lines)]
 fn assert_restored_evidence(client: &mut Client) {
     let restored_outbox = client
         .query_one(
@@ -222,7 +223,7 @@ fn assert_restored_evidence(client: &mut Client) {
     let restored_event = client
         .query_one(
             &format!(
-                "SELECT session_ref, client_event_ref, payload_digest, server_sequence,
+                "SELECT session_ref, client_event_ref, item_version_ref, payload_digest, server_sequence,
                         observed_at, received_at
                  FROM {RESTORED_SCHEMA}.response_event
                  WHERE response_event_ref = 'response_event_recovery_alpha'"
@@ -235,14 +236,18 @@ fn assert_restored_evidence(client: &mut Client) {
         restored_event.get::<_, String>(1),
         "client_event_recovery_alpha"
     );
-    assert_eq!(restored_event.get::<_, String>(2), DIGEST_A);
-    assert_eq!(restored_event.get::<_, i64>(3), 1);
     assert_eq!(
-        restored_event.get::<_, SystemTime>(4),
+        restored_event.get::<_, String>(2),
+        "item_version_recovery_alpha"
+    );
+    assert_eq!(restored_event.get::<_, String>(3), DIGEST_A);
+    assert_eq!(restored_event.get::<_, i64>(4), 1);
+    assert_eq!(
+        restored_event.get::<_, SystemTime>(5),
         UNIX_EPOCH + Duration::from_secs(1_700_000_000)
     );
     assert_eq!(
-        restored_event.get::<_, SystemTime>(5),
+        restored_event.get::<_, SystemTime>(6),
         UNIX_EPOCH + Duration::from_millis(1_700_000_000_250)
     );
 }

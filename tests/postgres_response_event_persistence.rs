@@ -276,6 +276,50 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
 }
 
 #[test]
+fn persisted_replay_uses_canonical_in_memory_references() {
+    let _guard = response_event_test_guard();
+    let mut client = test_client();
+    reset_response_event_table(&mut client);
+    apply_response_event_migration(&mut client).unwrap();
+
+    let mut ledger = ResponseLedger::new("session_ipip_ko_alias").unwrap();
+    let event = ledger
+        .record(
+            SessionState::Active,
+            write(
+                " server_event_item_01 ",
+                " client_event_item_01 ",
+                " item_version_n1_ko ",
+                DIGEST_N1,
+            ),
+        )
+        .unwrap();
+    assert_eq!(event.client_event_ref(), "client_event_item_01");
+    assert_eq!(event.item_version_ref(), "item_version_n1_ko");
+    assert_eq!(
+        persist_ok(&mut client, "session_ipip_ko_alias", &event),
+        ResponseEventPersistenceDisposition::Inserted
+    );
+
+    let replay = ledger
+        .record(
+            SessionState::Active,
+            write(
+                "ignored_server_event_ref",
+                " client_event_item_01 ",
+                " item_version_n1_ko ",
+                DIGEST_N1,
+            ),
+        )
+        .unwrap();
+    assert_eq!(replay, event);
+    assert_eq!(
+        persist_ok(&mut client, "session_ipip_ko_alias", &replay),
+        ResponseEventPersistenceDisposition::Duplicate
+    );
+}
+
+#[test]
 fn empty_session_reload_is_an_empty_ledger() {
     let _guard = response_event_test_guard();
     let mut client = test_client();

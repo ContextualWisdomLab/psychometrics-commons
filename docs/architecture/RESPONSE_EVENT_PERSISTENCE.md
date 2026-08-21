@@ -28,7 +28,6 @@ erDiagram
         timestamptz received_at
     }
 
-    RESPONSE_EVENT ||--|| RESPONSE_EVENT : "immutable accepted event"
 ```
 
 The relation is intentionally narrow. It stores accepted event identity and provenance, not plaintext response bodies or scores. `response_event_ref` is the immutable primary identity. `(session_ref, client_event_ref)` is the client-idempotency identity. `(session_ref, server_sequence)` prevents two accepted events from occupying the same server position.
