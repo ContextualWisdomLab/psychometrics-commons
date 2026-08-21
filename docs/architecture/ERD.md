@@ -5,7 +5,7 @@
 - Scope: Psychometrics Commons-owned persistence only
 - Important: this is **not** a claim that physical DDL or all tables are already implemented
 
-The ERD defines target cardinalities, ownership, immutable boundaries, restricted identity linkage, longitudinal orchestration records, and integration evidence. Physical migrations may split or combine tables for performance, but they must preserve these semantics and may not create cross-service application-database coupling.
+The ERD defines target cardinalities, ownership, immutable boundaries, restricted identity linkage, longitudinal orchestration records, integration evidence, and purpose-bound audit evidence. Physical migrations may split or combine tables for performance, but they must preserve these semantics and may not create cross-service application-database coupling.
 
 ## 1. Logical ERD
 
@@ -14,6 +14,7 @@ erDiagram
     tenant_account ||--o{ assessment_participant : owns
     tenant_account ||--o{ instrument_definition : owns
     tenant_account ||--o{ data_rights_request : scopes
+    tenant_account ||--o{ audit_evidence_record : scopes
 
     instrument_definition ||--|{ instrument_version : versions
     item_definition ||--|{ item_version : versions
@@ -67,6 +68,19 @@ erDiagram
       string tenant_ref PK
       string tenant_status
       timestamp created_at
+    }
+
+    audit_evidence_record {
+      string audit_event_ref PK
+      string tenant_ref FK
+      string actor_ref
+      string purpose_code
+      string action_code
+      string resource_ref
+      string outcome_code
+      string evidence_digest
+      int occurred_at_unix_ms
+      timestamp recorded_at
     }
 
     instrument_definition {
@@ -438,6 +452,7 @@ The target ERD deliberately includes several logical entities that are not yet p
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
+- `audit_evidence_record` is the Commons-owned purpose-bound audit evidence entity. **Active PR #242** provides `migrations/0040_audit_evidence_record.sql` and `src/postgres_audit.rs`; it records tenant, actor, purpose, action, resource, outcome, SHA-256 evidence digest, event time, and independent durable-record time as immutable evidence. The physical relation is not protected-main truth until #242 is integrated, and `actor_ref` / `resource_ref` are opaque references rather than cross-service database foreign keys.
 - Physical `assessment_session` exists only on Active PR #218 (`migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path. Protected main still has the `src/session.rs` aggregate only.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
 - `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
@@ -458,7 +473,7 @@ The ERD includes only Psychometrics Commons-owned state. The following values ar
 - semantic-data-portal catalog/release references → research catalog/release presentation;
 - contextual-orchestrator execution references → bounded AI domain.
 
-No local foreign key is created into another service's database.
+No local foreign key is created into another service's database. Audit `actor_ref` and `resource_ref` values follow the same rule: they identify the audited subject/resource without creating application-database coupling to an external bounded context.
 
 ## 4. Immutable and append-only aggregates
 
@@ -472,6 +487,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `result_snapshot`;
 - `consent_snapshot`;
 - `participant_identity_link` history;
+- `audit_evidence_record` once recorded; corrections require a new audit event rather than update/delete/truncate of prior evidence;
 - accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
 - published `research_release`.
@@ -493,6 +509,7 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `release_ref` for one locale-specific publication identity | instrument-release replay safety |
 | unique `(instrument_version_ref, item_order)` | deterministic published order |
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
+| unique `audit_event_ref` with exact-evidence replay classification | one immutable audit identity cannot be rebound to different tenant/actor/purpose/action/resource/outcome/digest/time evidence |
 | at most one current Active `participant_identity_link` per participant under the accepted single-account-link policy | unambiguous current account projection |
 | unique active `(tenant_ref, identity_issuer, identity_subject_ref)` unless an explicit account-merge ADR permits otherwise | prevent one external subject from silently owning multiple product participants |
 | unique `(enrollment_ref, source_system_ref, source_observation_ref)` | longitudinal ingestion replay safety |
@@ -598,8 +615,9 @@ The first physical migration must be reviewed against this logical model and the
 5. prove tenant and identity-boundary constraints after migration;
 6. pass backup/restore verification before destructive changes;
 7. preserve tenant-bound outbox/inbox uniqueness and crash-recoverable processing state;
-8. preserve append-only participant identity-link history and longitudinal source-time semantics.
+8. preserve append-only participant identity-link history and longitudinal source-time semantics;
+9. preserve append-only audit identities and purpose/tenant/resource binding without rewriting prior evidence.
 
 ## 13. As-built rule
 
-Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, identity-link history, longitudinal time semantics, and ownership rules against this model. Silent divergence is a release defect.
+Until physical migrations exist, this document is the **logical target ERD**. When migrations are introduced, CI must generate or validate an as-built schema representation and compare its required entities, relationships, uniqueness constraints, tenant bindings, processing-state semantics, identity-link history, audit-evidence immutability, longitudinal time semantics, and ownership rules against this model. Silent divergence is a release defect.
