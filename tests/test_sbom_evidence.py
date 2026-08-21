@@ -67,22 +67,25 @@ class SbomEvidenceContract(unittest.TestCase):
             "workflow token authority must fail closed at the top level",
         )
         jobs = mapping_block(text, "jobs", 0)
-        for job_name in ["generate", "verify-evidence"]:
-            job = mapping_block(jobs, job_name, 2)
-            permissions = mapping_block(job, "permissions", 4)
-            self.assertEqual(
-                [line.strip() for line in permissions.splitlines() if line.strip()],
-                ["contents: read"],
-            )
-            for forbidden_permission in [
-                "contents: write",
-                "id-token:",
-                "attestations:",
-                "artifact-metadata:",
-                "packages: write",
-            ]:
-                self.assertNotIn(forbidden_permission, job)
         generate_job = mapping_block(jobs, "generate", 2)
+        permissions = mapping_block(generate_job, "permissions", 4)
+        self.assertEqual(
+            [line.strip() for line in permissions.splitlines() if line.strip()],
+            ["contents: read"],
+        )
+        for forbidden_permission in [
+            "contents: write",
+            "id-token:",
+            "attestations:",
+            "artifact-metadata:",
+            "packages: write",
+        ]:
+            self.assertNotIn(forbidden_permission, generate_job)
+        self.assertNotIn(
+            "  verify-evidence:",
+            jobs,
+            "artifact reverification must not require a second hosted runner allocation",
+        )
         self.assertIn("dependency-snapshot: false", generate_job)
         self.assertIn("upload-artifact: false", generate_job)
         self.assertIn("upload-release-assets: false", generate_job)
@@ -105,28 +108,31 @@ class SbomEvidenceContract(unittest.TestCase):
         )
 
     def test_preserved_sbom_is_reverified_after_artifact_handoff(self) -> None:
-        """A separate job must prove checksum and lock coverage survive artifact storage."""
+        """The uploaded artifact must be downloaded and reverified before the runner exits."""
         text = self.workflow_text()
-        jobs = mapping_block(text, "jobs", 0)
-        verify_job = mapping_block(jobs, "verify-evidence", 2)
-        self.assertIn("needs: generate", verify_job)
-        self.assertIn(
-            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-            verify_job,
+        generate_job = mapping_block(mapping_block(text, "jobs", 0), "generate", 2)
+        upload = "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+        download = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+        self.assertIn(download, generate_job)
+        self.assertLess(
+            generate_job.index(upload),
+            generate_job.index(download),
+            "reverification must consume artifact-service output rather than the pre-upload file",
         )
         self.assertIn(
             "name: sbom-spdx-${{ github.event.pull_request.head.sha || github.sha }}",
-            verify_job,
+            generate_job,
         )
-        self.assertIn("sha256sum --check sbom.spdx.json.sha256", verify_job)
+        self.assertIn("path: evidence", generate_job)
+        self.assertIn("sha256sum --check sbom.spdx.json.sha256", generate_job)
         self.assertIn(
             "python3 scripts/validate_spdx_sbom.py evidence/sbom.spdx.json Cargo.lock",
-            verify_job,
+            generate_job,
         )
         self.assertGreaterEqual(
-            verify_job.count("github.event.pull_request.head.sha || github.sha"),
-            2,
-            "verification must bind checkout and artifact identity to the exact revision",
+            generate_job.count("github.event.pull_request.head.sha || github.sha"),
+            3,
+            "checkout, upload, and download identities must bind to the exact revision",
         )
 
 
