@@ -1,8 +1,8 @@
 //! Real PostgreSQL regression contract for restart-safe consent reconstruction.
 //!
-//! Purpose-specific consent is append-only evidence. Reload must preserve physical
-//! insertion order for same-millisecond decisions and fail closed when stored
-//! history cannot be reconstructed without guessing an order.
+//! Purpose-specific consent is append-only evidence. Reload must preserve the
+//! persisted event order for same-millisecond decisions and fail closed when
+//! stored history cannot be reconstructed without guessing an order.
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::consent::{
@@ -123,6 +123,50 @@ fn same_millisecond_revoke_remains_latest_after_restart() {
     assert_eq!(loaded, revoked);
     assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
     assert_eq!(snapshot.active_research_scope(), None);
+}
+
+#[test]
+fn wall_clock_rollback_cannot_reverse_same_millisecond_consent_order() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    let mut grant_only = ConsentLedger::new("participant_consent_reload_clock").unwrap();
+    grant_only
+        .record(research_event(
+            "consent_event_clock_grant",
+            ConsentDecision::Granted,
+            35_000,
+        ))
+        .unwrap();
+    persist(&mut client, &grant_only);
+
+    let mut revoked = grant_only.clone();
+    revoked
+        .record(research_event(
+            "consent_event_clock_revoke",
+            ConsentDecision::Revoked,
+            35_000,
+        ))
+        .unwrap();
+    persist(&mut client, &revoked);
+
+    client
+        .execute(
+            "UPDATE consent_event \
+             SET created_at = CASE event_ref \
+                 WHEN 'consent_event_clock_grant' THEN TIMESTAMPTZ '2026-08-21 00:00:02+00' \
+                 ELSE TIMESTAMPTZ '2026-08-21 00:00:01+00' END \
+             WHERE participant_ref = $1",
+            &[&"participant_consent_reload_clock"],
+        )
+        .unwrap();
+
+    let loaded = load(&mut client, "participant_consent_reload_clock")
+        .expect("wall-clock movement must not destroy durable event order");
+    let snapshot = loaded.snapshot_as("consent_snapshot_reload_clock").unwrap();
+    assert_eq!(loaded, revoked);
+    assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
 }
 
 #[test]
