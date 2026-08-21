@@ -278,14 +278,21 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
 
 const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
     "assessment",
+    "auth",
+    "credential",
+    "database",
     "identity",
     "keyverse",
     "linkage",
     "linked",
+    "objectstore",
     "operational",
     "participant",
+    "password",
     "pseudonym",
+    "secret",
     "subject",
+    "token",
 ];
 
 /// Reject a public-release fixture that still carries restricted identity or secrets.
@@ -296,15 +303,15 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
 /// non-ASCII aliases fail closed before normalization so Unicode confusables cannot
 /// bypass the privacy markers. A column in the `research_participant_ref` namespace
 /// is allowed, including clear export or staging prefixes and supported separator
-/// variants, unless its prefix contains a forbidden marker or restricted-identity
-/// namespace stem. Restricted identity, authentication, credential, and internal-location
-/// names remain forbidden when transport prefixes, suffixes, punctuation/whitespace
-/// separators, or inserted digits are added around or within their marker words. The
-/// caller must provide at least one published column and an effective product-authorized
-/// identity inventory; the scanner fails closed rather than treating an empty fixture or
-/// omitted inventory as evidence that the fixture is clean. Object or array cell values
-/// are not parsed here: callers must flatten them or prove a separate structured-value
-/// privacy scan before packaging.
+/// variants, unless its prefix contains a forbidden marker or restricted identity,
+/// authentication, credential, or internal-location namespace stem. Restricted identity,
+/// authentication, credential, and internal-location names remain forbidden when transport
+/// prefixes, suffixes, punctuation/whitespace separators, or inserted digits are added
+/// around or within their marker words. The caller must provide at least one published
+/// column and an effective product-authorized identity inventory; the scanner fails closed
+/// rather than treating an empty fixture or omitted inventory as evidence that the fixture
+/// is clean. Object or array cell values are not parsed here: callers must flatten them or
+/// prove a separate structured-value privacy scan before packaging.
 ///
 /// # Errors
 ///
