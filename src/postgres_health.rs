@@ -268,8 +268,9 @@ mod tests {
 
         let mut transaction = client.transaction().unwrap();
         assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
-        assert!(probe_postgres_relation_integrity(&mut transaction, &["pg_catalog.pg_class"])
-            .is_err());
+        assert!(
+            probe_postgres_relation_integrity(&mut transaction, &["pg_catalog.pg_class"]).is_err()
+        );
     }
 
     #[test]
