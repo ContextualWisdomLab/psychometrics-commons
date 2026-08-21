@@ -134,7 +134,9 @@ pub fn probe_postgres_runtime(
 /// relation set that represents its compatible schema version. Relation names are passed
 /// as query parameters, never interpolated into SQL. A missing required relation is a
 /// known incompatibility and therefore fails state-changing readiness closed through
-/// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is vacuously verified.
+/// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is insufficient
+/// integrity evidence and returns [`DataIntegrityHealth::Unknown`] so write readiness
+/// remains fail-closed instead of treating an absent schema contract as verified.
 ///
 /// This probe deliberately does not claim that relation presence alone proves migration,
 /// column, constraint, digest, tenant, or provenance integrity. Those stronger invariants
@@ -149,6 +151,10 @@ pub fn probe_postgres_relation_integrity(
     client: &mut impl GenericClient,
     required_relations: &[&str],
 ) -> Result<DataIntegrityHealth, postgres::Error> {
+    if required_relations.is_empty() {
+        return Ok(DataIntegrityHealth::Unknown);
+    }
+
     for relation in required_relations {
         let row = client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation])?;
         let exists: bool = row.get(0);
