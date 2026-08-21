@@ -15,3 +15,13 @@ fn branch_coverage_still_runs_after_line_coverage_failure() {
         "- name: Enforce complete branch coverage\n        id: branch_coverage_gate\n        if: ${{ !cancelled() && steps.branch_coverage_generation.outcome == 'success' }}"
     ));
 }
+
+#[test]
+fn branch_generation_failure_has_operator_diagnostics() {
+    assert!(CI_WORKFLOW.contains(
+        "- name: Diagnose branch coverage generation failure\n        if: ${{ !cancelled() && steps.branch_coverage_generation.outcome == 'failure' }}"
+    ));
+    assert!(CI_WORKFLOW.contains(
+        "::error::branch coverage generation failed before the coverage gate"
+    ));
+}
