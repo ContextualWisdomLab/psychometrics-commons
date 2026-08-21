@@ -1,7 +1,7 @@
 # Response-event persistence view
 
 - Status: **IMPLEMENTED_ON_ACTIVE_PR** #284
-- Protected-main baseline evaluated: `503a4e640eeba0f5e126fa4c4078d8d21aebb93b`
+- Protected-main baseline evaluated: `4499d9c0889c082487ddbd7fd8d0d5d18257995d`
 - Governing decisions: ADR-0005, ADR-0010, ADR-0015
 - Product owner: Psychometrics Commons
 

@@ -2,7 +2,7 @@
 
 - Status: Normative traceability index
 - Date: 2026-08-14
-- Evaluated protected-main implementation baseline: `085ef4b4714796a77fd4645eeb46b028f95929fc`
+- Evaluated protected-main implementation baseline: `4499d9c0889c082487ddbd7fd8d0d5d18257995d`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -91,7 +91,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `085ef4b4714796a77fd4645eeb46b028f95929fc`:
+Current protected-main Rust module surface on `4499d9c0889c082487ddbd7fd8d0d5d18257995d`:
 
 ```text
 src/lib.rs
