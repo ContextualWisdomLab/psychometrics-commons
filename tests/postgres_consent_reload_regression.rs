@@ -4,7 +4,7 @@
 //! insertion order for same-millisecond decisions and fail closed when stored
 //! history cannot be reconstructed without guessing an order.
 
-use postgres::{Client, NoTls};
+use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::consent::{
     ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose,
 };
@@ -72,6 +72,22 @@ fn research_event<'a>(
         research_scope_ref: Some("research_scope_research_v1"),
         occurred_at_unix_ms,
     }
+}
+
+#[test]
+fn missing_and_empty_ledgers_do_not_invent_consent() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    assert!(load(&mut client, "participant_consent_reload_missing").is_none());
+
+    let empty = ConsentLedger::new("participant_consent_reload_empty").unwrap();
+    persist(&mut client, &empty);
+    let loaded = load(&mut client, "participant_consent_reload_empty")
+        .expect("an explicitly persisted empty ledger must reload");
+    assert_eq!(loaded, empty);
+    assert!(loaded.is_empty());
 }
 
 #[test]
@@ -205,4 +221,134 @@ fn ambiguous_physical_order_and_noncanonical_participant_alias_fail_closed() {
         Err(ConsentPersistenceError::InvalidReference)
     ));
     alias_transaction.rollback().unwrap();
+}
+
+#[test]
+fn stored_label_time_and_relation_corruption_propagate_as_typed_failures() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    let mut ledger = ConsentLedger::new("participant_consent_reload_labels").unwrap();
+    ledger
+        .record(ConsentEventInput {
+            event_ref: "consent_event_service_label",
+            purpose: ConsentPurpose::ServiceOperation,
+            decision: ConsentDecision::Granted,
+            consent_form_version_ref: "consent_form_service_label",
+            research_scope_ref: None,
+            occurred_at_unix_ms: 11_000,
+        })
+        .unwrap();
+    persist(&mut client, &ledger);
+
+    client
+        .batch_execute("ALTER TABLE consent_event DROP CONSTRAINT consent_event_purpose_value_check;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE consent_event SET consent_purpose = 'unknown_purpose' WHERE event_ref = $1",
+            &[&"consent_event_service_label"],
+        )
+        .unwrap();
+    let mut unknown_purpose = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut unknown_purpose, "participant_consent_reload_labels"),
+        Err(ConsentPersistenceError::CorruptHistory)
+    ));
+    unknown_purpose.rollback().unwrap();
+
+    client
+        .execute(
+            "UPDATE consent_event SET consent_purpose = 'service_operation' WHERE event_ref = $1",
+            &[&"consent_event_service_label"],
+        )
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE consent_event DROP CONSTRAINT consent_event_decision_value_check;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE consent_event SET consent_decision = 'unknown_decision' WHERE event_ref = $1",
+            &[&"consent_event_service_label"],
+        )
+        .unwrap();
+    let mut unknown_decision = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut unknown_decision, "participant_consent_reload_labels"),
+        Err(ConsentPersistenceError::CorruptHistory)
+    ));
+    unknown_decision.rollback().unwrap();
+
+    client
+        .execute(
+            "UPDATE consent_event SET consent_decision = 'granted' WHERE event_ref = $1",
+            &[&"consent_event_service_label"],
+        )
+        .unwrap();
+    client
+        .batch_execute("ALTER TABLE consent_event DROP CONSTRAINT consent_event_occurred_at_positive_check;")
+        .unwrap();
+    client
+        .execute(
+            "UPDATE consent_event SET occurred_at_unix_ms = -1 WHERE event_ref = $1",
+            &[&"consent_event_service_label"],
+        )
+        .unwrap();
+    let mut negative_time = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut negative_time, "participant_consent_reload_labels"),
+        Err(ConsentPersistenceError::InvalidTimestamp)
+    ));
+    negative_time.rollback().unwrap();
+
+    reset(&mut client);
+    persist(
+        &mut client,
+        &ConsentLedger::new("participant_consent_reload_relation").unwrap(),
+    );
+    client.batch_execute("DROP TABLE consent_event;").unwrap();
+    let mut missing_events = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut missing_events, "participant_consent_reload_relation"),
+        Err(ConsentPersistenceError::Database(_))
+    ));
+    missing_events.rollback().unwrap();
+
+    client.batch_execute("DROP TABLE consent_ledger;").unwrap();
+    let mut missing_header = client.transaction().unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut missing_header, "participant_consent_reload_relation"),
+        Err(ConsentPersistenceError::Database(_))
+    ));
+    missing_header.rollback().unwrap();
+}
+
+#[test]
+fn reload_requires_read_committed() {
+    let _guard = guard();
+    let mut client = test_client();
+    reset(&mut client);
+
+    let mut serializable = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::Serializable)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut serializable, "participant_consent_reload_isolation"),
+        Err(ConsentPersistenceError::UnsupportedIsolationLevel)
+    ));
+    serializable.rollback().unwrap();
+
+    let mut repeatable = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        load_consent_ledger(&mut repeatable, "participant_consent_reload_isolation"),
+        Err(ConsentPersistenceError::UnsupportedIsolationLevel)
+    ));
+    repeatable.rollback().unwrap();
 }
