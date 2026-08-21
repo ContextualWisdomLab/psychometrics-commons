@@ -270,19 +270,32 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "object_store_endpoint",
 ];
 
+const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
+    "assessment",
+    "identity",
+    "keyverse",
+    "linkage",
+    "linked",
+    "operational",
+    "participant",
+    "pseudonym",
+    "subject",
+];
+
 /// Reject a public-release fixture that still carries restricted identity or secrets.
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
 /// research that needs the restricted mapping keeps those values outside this
 /// fixture. A column in the `research_participant_ref` namespace is allowed,
 /// including clear export or staging prefixes and supported separator variants,
-/// unless its prefix itself contains a forbidden marker. Restricted identity,
-/// authentication, credential, and internal-location names remain forbidden when
-/// transport prefixes, suffixes, or punctuation/whitespace separators are added around
-/// them. The caller must also supply an effective product-authorized identity inventory;
-/// the scanner fails closed rather than treating an omitted inventory as evidence that
-/// the fixture is clean. Object or array cell values are not parsed here: callers must
-/// flatten them or prove a separate structured-value privacy scan before packaging.
+/// unless its prefix contains a forbidden marker or restricted-identity namespace stem.
+/// Restricted identity, authentication, credential, and internal-location names remain
+/// forbidden when transport prefixes, suffixes, or punctuation/whitespace separators
+/// are added around them. The caller must also supply an effective product-authorized
+/// identity inventory; the scanner fails closed rather than treating an omitted inventory
+/// as evidence that the fixture is clean. Object or array cell values are not parsed here:
+/// callers must flatten them or prove a separate structured-value privacy scan before
+/// packaging.
 ///
 /// # Errors
 ///
@@ -349,7 +362,8 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     }
 
     if let Some(prefix) = compact.strip_suffix(&research_namespace) {
-        return contains_forbidden_public_release_marker(prefix);
+        return contains_forbidden_public_release_marker(prefix)
+            || contains_forbidden_research_namespace_prefix_marker(prefix);
     }
 
     contains_forbidden_public_release_marker(&compact)
@@ -360,6 +374,12 @@ fn contains_forbidden_public_release_marker(compact: &str) -> bool {
         let forbidden = compact_public_release_column(forbidden);
         compact.contains(forbidden.as_str())
     })
+}
+
+fn contains_forbidden_research_namespace_prefix_marker(compact: &str) -> bool {
+    FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
+        .iter()
+        .any(|marker| compact.contains(marker))
 }
 
 fn compact_public_release_column(column_name: &str) -> String {
