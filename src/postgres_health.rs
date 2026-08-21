@@ -132,14 +132,18 @@ pub fn probe_postgres_runtime(
 ///
 /// The application or packaged deployment remains responsible for declaring the exact
 /// relation set that represents its compatible schema version. Each relation identity must
-/// be an exact lowercase two-part `schema.relation` name so the evidence cannot change
-/// with PostgreSQL identifier case-folding or the connection's `search_path`. Relation
-/// names are passed as query parameters, never interpolated into SQL. An unqualified,
-/// malformed, case-folded alias, or missing required relation is a known incompatibility
-/// and therefore fails state-changing readiness closed through
-/// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is insufficient
-/// integrity evidence and returns [`DataIntegrityHealth::Unknown`] so write readiness
-/// remains fail-closed instead of treating an absent schema contract as verified.
+/// be an exact lowercase two-part `schema.relation` name with no whitespace. PostgreSQL's
+/// `search_path` is the ordered list of schemas used to resolve an unqualified name, so
+/// requiring the schema explicitly prevents the answer from changing with that setting.
+/// Lowercase spelling prevents PostgreSQL from silently folding an alias such as
+/// `Public.MyTable` to a different lowercase identity. Relation names are passed as query
+/// parameters, never interpolated into SQL.
+///
+/// Here, *integrity evidence* means the observed fact that every required relation exists.
+/// *State-changing readiness* means whether the product may accept new writes. The probe
+/// *fails closed*: malformed or missing evidence returns [`DataIntegrityHealth::Incompatible`]
+/// (or [`DataIntegrityHealth::Unknown`] when no requirement set was supplied), so callers
+/// deny write readiness instead of assuming the schema is safe.
 ///
 /// This probe deliberately does not claim that relation presence alone proves migration,
 /// column, constraint, digest, tenant, or provenance integrity. Those stronger invariants
@@ -172,7 +176,7 @@ pub fn probe_postgres_relation_integrity(
 }
 
 fn is_exact_schema_qualified_relation(relation: &str) -> bool {
-    if relation.trim() != relation || relation != relation.to_ascii_lowercase() {
+    if relation.chars().any(char::is_whitespace) || relation != relation.to_ascii_lowercase() {
         return false;
     }
     let mut parts = relation.split('.');
