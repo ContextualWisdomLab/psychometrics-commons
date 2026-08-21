@@ -340,7 +340,7 @@ fn public_release_leakage_errors_tell_the_operator_what_to_remove() {
     let cases = [
         (
             PublicReleaseLeakageError::ForbiddenColumn,
-            "remove operational, Keyverse, or restricted-linkage columns from the public release fixture",
+            "remove restricted identity, authentication, credential, or internal-location columns from the public release fixture",
         ),
         (
             PublicReleaseLeakageError::OperationalParticipant,
