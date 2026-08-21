@@ -330,10 +330,19 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     let normalized = normalize_public_release_column(column_name);
     let compact = compact_public_release_column(&normalized);
     let research_namespace = compact_public_release_column("research_participant_ref");
-    if compact == research_namespace || compact.ends_with(&research_namespace) {
+
+    if compact == research_namespace {
         return false;
     }
 
+    if let Some(prefix) = compact.strip_suffix(&research_namespace) {
+        return contains_forbidden_public_release_identity(prefix);
+    }
+
+    contains_forbidden_public_release_identity(&compact)
+}
+
+fn contains_forbidden_public_release_identity(compact: &str) -> bool {
     FORBIDDEN_PUBLIC_RELEASE_COLUMNS.iter().any(|forbidden| {
         let forbidden = compact_public_release_column(forbidden);
         compact.contains(forbidden.as_str())
