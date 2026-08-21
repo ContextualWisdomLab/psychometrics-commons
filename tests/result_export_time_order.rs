@@ -30,7 +30,10 @@ fn snapshot() -> ResultSnapshot {
         )
         .unwrap();
     let response_snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_export_time_order")
+        .freeze_as(
+            SessionState::Completed,
+            "response_snapshot_export_time_order",
+        )
         .unwrap();
     let request = ScoringRequest::from_snapshot(
         &response_snapshot,
