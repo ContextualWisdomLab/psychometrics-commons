@@ -134,12 +134,13 @@ pub fn probe_postgres_runtime(
 /// relation set that represents its compatible schema version. Each relation identity must
 /// be an exact two-part `schema.relation` name using the repository's unquoted ASCII SQL
 /// identifier grammar: lowercase letters, digits, and underscores, with each component
-/// starting with a lowercase letter or underscore. `PostgreSQL`'s `search_path` is the
-/// ordered list of schemas used to resolve an unqualified name, so requiring the schema
-/// explicitly prevents the answer from changing with that setting. Restricting the input
-/// to this ASCII grammar also prevents case-folding or Unicode-confusable aliases from
-/// resolving to an identity different from the declared one. Relation names are passed as
-/// query parameters, never interpolated into SQL.
+/// starting with a lowercase letter or underscore and no component exceeding PostgreSQL's
+/// 63-byte identifier limit. `PostgreSQL`'s `search_path` is the ordered list of schemas
+/// used to resolve an unqualified name, so requiring the schema explicitly prevents the
+/// answer from changing with that setting. Restricting the input to this ASCII grammar also
+/// prevents case-folding, truncation, or Unicode-confusable aliases from resolving to an
+/// identity different from the declared one. Relation names are passed as query parameters,
+/// never interpolated into SQL.
 ///
 /// Here, *integrity evidence* means the observed fact that every required relation exists.
 /// *State-changing readiness* means whether the product may accept new writes. The probe
@@ -185,6 +186,9 @@ fn is_exact_schema_qualified_relation(relation: &str) -> bool {
 }
 
 fn is_exact_unquoted_identifier(identifier: &str) -> bool {
+    if identifier.len() > 63 {
+        return false;
+    }
     let mut bytes = identifier.bytes();
     matches!(bytes.next(), Some(b'a'..=b'z' | b'_'))
         && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
@@ -277,6 +281,9 @@ mod tests {
     fn exact_relation_identifier_contract_covers_component_boundaries() {
         assert!(is_exact_schema_qualified_relation("pg_catalog.pg_class"));
         assert!(is_exact_schema_qualified_relation("_private.table_2"));
+        assert!(is_exact_schema_qualified_relation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.table"
+        ));
 
         for relation in [
             "pg_class",
