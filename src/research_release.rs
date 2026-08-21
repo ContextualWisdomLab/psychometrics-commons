@@ -262,15 +262,15 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
 /// research that needs the restricted mapping keeps those values outside this
-/// fixture. A column named `research_participant_ref` is allowed, including a clear
-/// export or staging prefix ending in that exact research namespace. Restricted
-/// identity names remain forbidden even when an ETL, export, source, or warehouse
-/// prefix is added before them or punctuation/whitespace replaces underscores. The
-/// caller must also supply an effective product-authorized identity inventory; the
-/// scanner fails closed rather than treating an omitted inventory as evidence that
-/// the fixture is clean. Object or array cell values are not parsed here: callers
-/// must flatten them or prove a separate structured-value privacy scan before
-/// packaging.
+/// fixture. A column in the `research_participant_ref` namespace is allowed,
+/// including clear export or staging prefixes and supported separator variants.
+/// Restricted identity names remain forbidden even when an ETL, export, source, or
+/// warehouse prefix is added before them or punctuation/whitespace replaces
+/// underscores. The caller must also supply an effective product-authorized identity
+/// inventory; the scanner fails closed rather than treating an omitted inventory as
+/// evidence that the fixture is clean. Object or array cell values are not parsed
+/// here: callers must flatten them or prove a separate structured-value privacy scan
+/// before packaging.
 ///
 /// # Errors
 ///
@@ -329,12 +329,12 @@ fn has_effective_restricted_identity_inventory(
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
     let normalized = normalize_public_release_column(column_name);
-    if normalized == "research_participant_ref" || normalized.ends_with("_research_participant_ref")
-    {
+    let compact = compact_public_release_column(&normalized);
+    let research_namespace = compact_public_release_column("research_participant_ref");
+    if compact == research_namespace || compact.ends_with(&research_namespace) {
         return false;
     }
 
-    let compact = compact_public_release_column(&normalized);
     FORBIDDEN_PUBLIC_RELEASE_COLUMNS
         .iter()
         .any(|forbidden| compact.ends_with(&compact_public_release_column(forbidden)))
