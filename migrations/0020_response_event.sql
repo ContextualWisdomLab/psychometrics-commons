@@ -91,6 +91,38 @@ $create_response_event$;
             MESSAGE = 'response_event migration did not create its owned table';
     END IF;
 
+    -- Reject an incompatible pre-existing relation before dropping any owned constraints.
+    -- The migration must report a stable contract failure rather than leaking an undefined
+    -- column/function error from the replacement checks.
+    SELECT ARRAY(
+        SELECT format(
+            '%s:%s:%s',
+            attribute.attname,
+            format_type(attribute.atttypid, attribute.atttypmod),
+            CASE WHEN attribute.attnotnull THEN 'not_null' ELSE 'nullable' END
+        )
+        FROM pg_attribute AS attribute
+        WHERE attribute.attrelid = relation_ref
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+        ORDER BY attribute.attnum
+    ) INTO actual_columns;
+    expected_columns := ARRAY[
+        'response_event_ref:text:not_null',
+        'session_ref:text:not_null',
+        'client_event_ref:text:not_null',
+        'item_version_ref:text:not_null',
+        'payload_digest:text:not_null',
+        'server_sequence:bigint:not_null',
+        'observed_at:timestamp with time zone:not_null',
+        'received_at:timestamp with time zone:not_null'
+    ];
+    IF actual_columns IS DISTINCT FROM expected_columns THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'response_event column contract does not match migration 0020';
+    END IF;
+
     -- Reapplication must repair a weakened same-named reference CHECK rather than treating its
     -- presence as evidence. Adding the replacement constraints validates all historical rows and
     -- therefore fails closed if an earlier schema admitted an identity Rust cannot reconstruct.

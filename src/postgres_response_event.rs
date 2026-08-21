@@ -368,7 +368,10 @@ fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResponseEventPersistenceError> {
-    normalized_reference(reference).ok_or(ResponseEventPersistenceError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(ResponseEventPersistenceError::InvalidReference),
+    }
 }
 
 fn postgres_sequence(value: usize) -> Result<i64, ResponseEventPersistenceError> {

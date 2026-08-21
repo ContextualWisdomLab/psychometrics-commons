@@ -1,7 +1,16 @@
-//! Real PostgreSQL parity contracts for durable response-event references.
+//! Real `PostgreSQL` parity contracts for durable response-event references.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::apply_response_event_migration;
+use std::sync::{Mutex, MutexGuard};
+
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn test_guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -45,6 +54,7 @@ fn insert_reference_tuple(
 
 #[test]
 fn direct_sql_rejects_every_rust_invalid_response_reference_family() {
+    let _guard = test_guard();
     let mut client = test_client();
     let invalid_references = [
         "½",
@@ -87,6 +97,7 @@ fn direct_sql_rejects_every_rust_invalid_response_reference_family() {
 
 #[test]
 fn migration_reapplication_repairs_a_weakened_owned_reference_constraint() {
+    let _guard = test_guard();
     let mut client = test_client();
     client
         .batch_execute(
@@ -117,6 +128,7 @@ fn migration_reapplication_repairs_a_weakened_owned_reference_constraint() {
 
 #[test]
 fn migration_reapplication_fails_closed_when_historical_invalid_identity_exists() {
+    let _guard = test_guard();
     let mut client = test_client();
     client
         .batch_execute(

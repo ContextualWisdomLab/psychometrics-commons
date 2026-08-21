@@ -5,9 +5,20 @@ use psychometrics_commons_runtime::postgres_response_event::{
     apply_response_event_migration, persist_response_event, ResponseEventPersistenceError,
 };
 use psychometrics_commons_runtime::response::ResponseEvent;
+use std::sync::{Mutex, MutexGuard};
 
 const OBSERVED_AT_MS: u64 = 1_700_000_000_000;
 const RECEIVED_AT_MS: u64 = 1_700_000_000_250;
+const OBSERVED_AT_MS_FLOAT: f64 = 1_700_000_000_000.0;
+const RECEIVED_AT_MS_FLOAT: f64 = 1_700_000_000_250.0;
+
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn test_guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -27,6 +38,7 @@ fn test_client() -> Client {
 
 #[test]
 fn persist_rejects_a_server_sequence_gap_before_commit() {
+    let _guard = test_guard();
     let mut client = test_client();
     let gapped = ResponseEvent::from_persisted(
         "server_event_item_02",
@@ -65,6 +77,7 @@ fn persist_rejects_a_server_sequence_gap_before_commit() {
 
 #[test]
 fn persist_rejects_extension_of_a_preexisting_corrupt_prefix() {
+    let _guard = test_guard();
     let mut client = test_client();
     client
         .execute(
@@ -79,8 +92,8 @@ fn persist_rejects_extension_of_a_preexisting_corrupt_prefix() {
                 &"client_event_corrupt_02",
                 &"item_version_n2_ko",
                 &"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-                &(OBSERVED_AT_MS as f64),
-                &(RECEIVED_AT_MS as f64),
+                &OBSERVED_AT_MS_FLOAT,
+                &RECEIVED_AT_MS_FLOAT,
             ],
         )
         .unwrap();

@@ -194,6 +194,16 @@ fn persisted_event_reconstruction_fails_closed_on_identity_and_sequence() {
     ));
     assert!(matches!(
         ResponseEvent::from_persisted(
+            " server_event_item_01 ",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            DIGEST_N1,
+            1
+        ),
+        Err(psychometrics_commons_runtime::response::WriteError::InvalidReference)
+    ));
+    assert!(matches!(
+        ResponseEvent::from_persisted(
             "server_event_item_01",
             "client_event_item_01",
             " ",
@@ -254,6 +264,10 @@ fn persisted_ledger_reconstruction_fails_closed_on_gaps_and_duplicate_identities
     .unwrap();
     assert!(matches!(
         ResponseLedger::from_persisted(" ", vec![]),
+        Err(psychometrics_commons_runtime::response::WriteError::InvalidReference)
+    ));
+    assert!(matches!(
+        ResponseLedger::from_persisted(" session_ipip_ko_quick ", vec![]),
         Err(psychometrics_commons_runtime::response::WriteError::InvalidReference)
     ));
     assert!(matches!(

@@ -1,4 +1,4 @@
-//! PostgreSQL migration contracts for durable response-event history.
+//! `PostgreSQL` migration contracts for durable response-event history.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::apply_response_event_migration;
