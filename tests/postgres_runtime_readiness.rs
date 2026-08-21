@@ -166,7 +166,7 @@ fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
         &mut client,
         &[
             "pg_catalog.pg_class",
-            "psychometrics_commons_missing_relation",
+            "public.psychometrics_commons_missing_relation",
         ],
     )
     .unwrap();
