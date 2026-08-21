@@ -139,6 +139,7 @@ fn restricted_prefix_cannot_hide_behind_research_participant_namespace() {
         "linkage_ref_research_participant_ref",
         "keyverse_subject_research_participant_ref",
         "participant_ref_research_participant_ref",
+        "participant_research_participant_ref",
         "identity-subject-ref-research-participant-ref",
     ] {
         let columns = [PublicReleaseFixtureColumn {
@@ -180,8 +181,8 @@ fn prefixed_research_participant_namespace_remains_public() {
 #[test]
 fn structured_cells_must_be_flattened_before_identity_scanning() {
     for cell_value in [
-        r#"{"participant_ref":"participant_seoul_clinic_one"}"#,
-        r#"[{"subject_ref":"keyverse_subject_seoul_clinic_one"}]"#,
+        r#"{\"participant_ref\":\"participant_seoul_clinic_one\"}"#,
+        r#"[{\"subject_ref\":\"keyverse_subject_seoul_clinic_one\"}]"#,
         "  {\"linkage_ref\":\"linkage_seoul_clinic_one\"}  ",
         "\n[\"linkage_key_version_2026_q3\"]\t",
     ] {
