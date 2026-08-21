@@ -22,6 +22,7 @@ DYNAMIC_EXECUTE_STATEMENT_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 CREATE_TABLE_KEYWORD_PATTERN = re.compile(r"\bCREATE\s+TABLE\b", re.IGNORECASE)
+DOLLAR_QUOTE_START_PATTERN = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 DESCRIPTIVE_SNAKE_CASE_PATTERN = re.compile(
     r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$"
 )
@@ -30,17 +31,85 @@ MIGRATION_FILENAME_PATTERN = re.compile(
 )
 
 
+def sql_without_comments(sql: str) -> str:
+    """Remove PostgreSQL comments without rewriting quoted SQL text."""
+    output: list[str] = []
+    index = 0
+
+    while index < len(sql):
+        if sql.startswith("--", index):
+            while index < len(sql) and sql[index] not in "\r\n":
+                index += 1
+            output.append(" ")
+            continue
+
+        if sql.startswith("/*", index):
+            output.append(" ")
+            index += 2
+            depth = 1
+            while index < len(sql) and depth:
+                if sql.startswith("/*", index):
+                    depth += 1
+                    index += 2
+                elif sql.startswith("*/", index):
+                    depth -= 1
+                    index += 2
+                else:
+                    if sql[index] in "\r\n":
+                        output.append(sql[index])
+                    index += 1
+            output.append(" ")
+            continue
+
+        if sql[index] in "'\"":
+            quote = sql[index]
+            output.append(quote)
+            index += 1
+            while index < len(sql):
+                output.append(sql[index])
+                if sql[index] == "\\" and index + 1 < len(sql):
+                    index += 1
+                    output.append(sql[index])
+                elif sql[index] == quote:
+                    if index + 1 < len(sql) and sql[index + 1] == quote:
+                        index += 1
+                        output.append(sql[index])
+                    else:
+                        index += 1
+                        break
+                index += 1
+            continue
+
+        if sql[index] == "$":
+            dollar_quote = DOLLAR_QUOTE_START_PATTERN.match(sql, index)
+            if dollar_quote is not None:
+                delimiter = dollar_quote.group(0)
+                end = sql.find(delimiter, dollar_quote.end())
+                if end >= 0:
+                    end += len(delimiter)
+                    output.append(sql[index:end])
+                    index = end
+                    continue
+
+        output.append(sql[index])
+        index += 1
+
+    return "".join(output)
+
+
 def created_table_names(sql: str) -> list[str]:
     """Return table names whose identifiers are statically visible in migrations."""
+    uncommented_sql = sql_without_comments(sql)
     return [
         match.group("qualified_name").rsplit(".", maxsplit=1)[-1]
-        for match in CREATE_TABLE_PATTERN.finditer(sql)
+        for match in CREATE_TABLE_PATTERN.finditer(uncommented_sql)
     ]
 
 
 def contains_unreviewable_dynamic_create_table(sql: str) -> bool:
     """Flag dynamic table DDL whose identifier cannot be reviewed statically."""
-    for execute_match in DYNAMIC_EXECUTE_STATEMENT_PATTERN.finditer(sql):
+    uncommented_sql = sql_without_comments(sql)
+    for execute_match in DYNAMIC_EXECUTE_STATEMENT_PATTERN.finditer(uncommented_sql):
         body = execute_match.group("body")
         if CREATE_TABLE_KEYWORD_PATTERN.search(body) and CREATE_TABLE_PATTERN.search(body) is None:
             return True
@@ -80,6 +149,20 @@ class MigrationTableNamingContractTests(unittest.TestCase):
                 "static_archive_table",
             ],
         )
+
+    def test_parser_ignores_create_table_keywords_in_sql_comments(self) -> None:
+        sql = """
+        -- CREATE TABLE IF NOT
+        -- EXISTS misleading_line_comment (row_ref text);
+        /*
+         * CREATE TABLE misleading_block_comment (row_ref text);
+         * /* CREATE TABLE misleading_nested_comment (row_ref text); */
+         */
+        CREATE TABLE visible_runtime_table (row_ref text);
+        """
+
+        self.assertEqual(created_table_names(sql), ["visible_runtime_table"])
+        self.assertFalse(contains_unreviewable_dynamic_create_table(sql))
 
     def test_only_generated_dynamic_create_table_is_unreviewable(self) -> None:
         static_dynamic_sql = "EXECUTE 'CREATE TABLE static_archive_table (row_ref text)'"
