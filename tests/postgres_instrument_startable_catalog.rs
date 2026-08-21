@@ -9,9 +9,9 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::postgres_instrument_catalog::list_startable_instrument_releases;
 use psychometrics_commons_runtime::postgres_instrument_release::{
-    apply_instrument_release_migration, list_startable_instrument_releases,
-    persist_instrument_release, InstrumentReleaseQueryError,
+    apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
 };
 use std::sync::{Mutex, MutexGuard};
 
