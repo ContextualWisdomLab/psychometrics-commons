@@ -37,3 +37,36 @@ fn sensitive_prefixes_cannot_hide_behind_research_participant_namespace() {
         );
     }
 }
+
+#[test]
+fn bare_sensitive_marker_columns_fail_closed() {
+    for column_name in [
+        "assessment",
+        "auth",
+        "credential",
+        "database",
+        "identity",
+        "keyverse",
+        "linkage",
+        "linked",
+        "object_store",
+        "operational",
+        "participant",
+        "password",
+        "pseudonym",
+        "secret",
+        "subject",
+        "token",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["opaque_public_value"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} is itself a sensitive namespace marker and must fail closed"
+        );
+    }
+}
