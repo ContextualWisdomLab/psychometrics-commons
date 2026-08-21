@@ -1,4 +1,4 @@
-//! Adversarial alias cases for public research-release fixture identity columns.
+//! Adversarial alias and structured-value cases for public research-release fixtures.
 
 use psychometrics_commons_runtime::research_release::{
     scan_public_release_fixture, PublicReleaseFixtureColumn, PublicReleaseLeakageError,
@@ -79,6 +79,34 @@ fn prefixed_research_participant_namespace_remains_public() {
             "{column_name} must remain in the explicit public research identity namespace"
         );
     }
+}
+
+#[test]
+fn structured_cells_must_be_flattened_before_identity_scanning() {
+    for cell_value in [
+        r#"{"participant_ref":"participant_seoul_clinic_one"}"#,
+        r#"[{"subject_ref":"keyverse_subject_seoul_clinic_one"}]"#,
+        "  {\"linkage_ref\":\"linkage_seoul_clinic_one\"}  ",
+        "\n[\"linkage_key_version_2026_q3\"]\t",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name: "analysis_payload",
+            cell_values: &[cell_value],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::StructuredValueUnsupported),
+            "structured fixture cells must fail closed instead of bypassing exact identity matching"
+        );
+    }
+
+    let message = PublicReleaseLeakageError::StructuredValueUnsupported.to_string();
+    assert_eq!(
+        message,
+        "flatten or independently scan structured public-release values before packaging the fixture"
+    );
+    assert!(!message.contains("participant_seoul_clinic_one"));
 }
 
 #[test]
