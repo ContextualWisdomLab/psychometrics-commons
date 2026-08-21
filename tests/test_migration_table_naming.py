@@ -17,10 +17,7 @@ CREATE_TABLE_PATTERN = re.compile(
     r"(?:\.(?:\"[^\"]+\"|[A-Za-z_][A-Za-z0-9_]*))?)",
     re.IGNORECASE,
 )
-DYNAMIC_EXECUTE_STATEMENT_PATTERN = re.compile(
-    r"\bEXECUTE\b(?P<body>(?:(?!;).)*)",
-    re.IGNORECASE | re.DOTALL,
-)
+EXECUTE_KEYWORD_PATTERN = re.compile(r"\bEXECUTE\b", re.IGNORECASE)
 CREATE_TABLE_KEYWORD_PATTERN = re.compile(r"\bCREATE\s+TABLE\b", re.IGNORECASE)
 DOLLAR_QUOTE_START_PATTERN = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 DESCRIPTIVE_SNAKE_CASE_PATTERN = re.compile(
@@ -29,6 +26,30 @@ DESCRIPTIVE_SNAKE_CASE_PATTERN = re.compile(
 MIGRATION_FILENAME_PATTERN = re.compile(
     r"^(?P<number>[0-9]{4})_(?P<slug>[a-z][a-z0-9]*(?:_[a-z0-9]+)+)\.sql$"
 )
+
+
+def quoted_region_end(sql: str, index: int) -> int | None:
+    """Return the first byte after one quoted SQL region, if one starts here."""
+    if sql[index] in "'\"":
+        quote = sql[index]
+        index += 1
+        while index < len(sql):
+            if sql[index] == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    index += 2
+                    continue
+                return index + 1
+            index += 1
+        return len(sql)
+
+    if sql[index] == "$":
+        dollar_quote = DOLLAR_QUOTE_START_PATTERN.match(sql, index)
+        if dollar_quote is not None:
+            delimiter = dollar_quote.group(0)
+            end = sql.find(delimiter, dollar_quote.end())
+            return len(sql) if end < 0 else end + len(delimiter)
+
+    return None
 
 
 def sql_without_comments(sql: str) -> str:
@@ -61,40 +82,40 @@ def sql_without_comments(sql: str) -> str:
             output.append(" ")
             continue
 
-        if sql[index] in "'\"":
-            quote = sql[index]
-            output.append(quote)
-            index += 1
-            while index < len(sql):
-                output.append(sql[index])
-                if sql[index] == "\\" and index + 1 < len(sql):
-                    index += 1
-                    output.append(sql[index])
-                elif sql[index] == quote:
-                    if index + 1 < len(sql) and sql[index + 1] == quote:
-                        index += 1
-                        output.append(sql[index])
-                    else:
-                        index += 1
-                        break
-                index += 1
+        quoted_end = quoted_region_end(sql, index)
+        if quoted_end is not None:
+            output.append(sql[index:quoted_end])
+            index = quoted_end
             continue
-
-        if sql[index] == "$":
-            dollar_quote = DOLLAR_QUOTE_START_PATTERN.match(sql, index)
-            if dollar_quote is not None:
-                delimiter = dollar_quote.group(0)
-                end = sql.find(delimiter, dollar_quote.end())
-                if end >= 0:
-                    end += len(delimiter)
-                    output.append(sql[index:end])
-                    index = end
-                    continue
 
         output.append(sql[index])
         index += 1
 
     return "".join(output)
+
+
+def dynamic_execute_bodies(sql: str) -> list[str]:
+    """Return EXECUTE bodies through semicolons outside quoted SQL regions."""
+    bodies: list[str] = []
+    search_start = 0
+
+    while True:
+        execute_match = EXECUTE_KEYWORD_PATTERN.search(sql, search_start)
+        if execute_match is None:
+            return bodies
+
+        index = execute_match.end()
+        while index < len(sql):
+            quoted_end = quoted_region_end(sql, index)
+            if quoted_end is not None:
+                index = quoted_end
+                continue
+            if sql[index] == ";":
+                break
+            index += 1
+
+        bodies.append(sql[execute_match.end():index])
+        search_start = index + 1
 
 
 def created_table_names(sql: str) -> list[str]:
@@ -109,9 +130,11 @@ def created_table_names(sql: str) -> list[str]:
 def contains_unreviewable_dynamic_create_table(sql: str) -> bool:
     """Flag dynamic table DDL whose identifier cannot be reviewed statically."""
     uncommented_sql = sql_without_comments(sql)
-    for execute_match in DYNAMIC_EXECUTE_STATEMENT_PATTERN.finditer(uncommented_sql):
-        body = execute_match.group("body")
-        if CREATE_TABLE_KEYWORD_PATTERN.search(body) and CREATE_TABLE_PATTERN.search(body) is None:
+    for body in dynamic_execute_bodies(uncommented_sql):
+        if (
+            CREATE_TABLE_KEYWORD_PATTERN.search(body)
+            and CREATE_TABLE_PATTERN.search(body) is None
+        ):
             return True
     return False
 
@@ -255,7 +278,9 @@ class MigrationTableNamingContractTests(unittest.TestCase):
             for table_name in created_table_names(sql):
                 observed.append((migration_path, table_name))
                 if not is_descriptive_snake_case_table_name(table_name):
-                    invalid.append(f"{migration_path.relative_to(REPOSITORY_ROOT)}:{table_name}")
+                    invalid.append(
+                        f"{migration_path.relative_to(REPOSITORY_ROOT)}:{table_name}"
+                    )
 
         self.assertTrue(observed, "migration naming gate found no CREATE TABLE statements")
         self.assertEqual(
