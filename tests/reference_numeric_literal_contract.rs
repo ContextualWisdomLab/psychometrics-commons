@@ -52,5 +52,9 @@ fn numeric_punctuation_remains_valid_inside_opaque_mixed_references() {
         let participant = ParticipantRecord::new_anonymous(valid_ref, "tenant_alpha", 1)
             .expect("mixed opaque participant references remain valid");
         assert_eq!(participant.participant_ref(), valid_ref);
+
+        let tenant = ParticipantRecord::new_anonymous("participant_alpha", valid_ref, 1)
+            .expect("mixed opaque tenant references remain valid");
+        assert_eq!(tenant.tenant_ref(), valid_ref);
     }
 }
