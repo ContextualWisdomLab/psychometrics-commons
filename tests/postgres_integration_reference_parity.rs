@@ -79,10 +79,7 @@ fn insert_inbox(
 
 fn reference_is_valid(client: &mut Client, reference: &str) -> bool {
     client
-        .query_one(
-            "SELECT integration_reference_is_valid($1)",
-            &[&reference],
-        )
+        .query_one("SELECT integration_reference_is_valid($1)", &[&reference])
         .expect("the migrated reference validator must be callable")
         .get(0)
 }
@@ -247,11 +244,41 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
     let mut client = client();
 
     let cases = [
-        ("1e5", "source_alpha", "tenant_alpha", "event_alpha", "subject_alpha"),
-        ("consumer_alpha", "1e5", "tenant_alpha", "event_alpha", "subject_alpha"),
-        ("consumer_alpha", "source_alpha", "1e5", "event_alpha", "subject_alpha"),
-        ("consumer_alpha", "source_alpha", "tenant_alpha", "1e5", "subject_alpha"),
-        ("consumer_alpha", "source_alpha", "tenant_alpha", "event_alpha", "1e5"),
+        (
+            "1e5",
+            "source_alpha",
+            "tenant_alpha",
+            "event_alpha",
+            "subject_alpha",
+        ),
+        (
+            "consumer_alpha",
+            "1e5",
+            "tenant_alpha",
+            "event_alpha",
+            "subject_alpha",
+        ),
+        (
+            "consumer_alpha",
+            "source_alpha",
+            "1e5",
+            "event_alpha",
+            "subject_alpha",
+        ),
+        (
+            "consumer_alpha",
+            "source_alpha",
+            "tenant_alpha",
+            "1e5",
+            "subject_alpha",
+        ),
+        (
+            "consumer_alpha",
+            "source_alpha",
+            "tenant_alpha",
+            "event_alpha",
+            "1e5",
+        ),
     ];
 
     for (consumer_ref, source_ref, tenant_ref, source_event_ref, subject_ref) in cases {
