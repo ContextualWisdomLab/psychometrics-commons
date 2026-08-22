@@ -453,7 +453,7 @@ fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
         "tokens",
     ]
     .iter()
-    .any(|marker| compact.starts_with(marker) || compact.ends_with(marker))
+    .any(|marker| compact.contains(marker))
         || (compact.starts_with("auth") && !author_metadata_word)
 }
 
