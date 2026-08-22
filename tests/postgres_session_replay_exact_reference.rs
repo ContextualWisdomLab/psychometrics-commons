@@ -18,8 +18,7 @@ use std::sync::{Mutex, MutexGuard};
 const SCHEMA: &str = "session_replay_exact_reference_test";
 const PARTICIPANT_REF: &str = "participant_replay_exact_alpha";
 const RELEASE_REF: &str = "release_replay_exact_alpha";
-const DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
