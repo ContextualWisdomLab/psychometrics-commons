@@ -98,15 +98,9 @@ fn worker_and_lease_references_reject_unicode_numeric_whitespace_and_control_ali
         assert_check(&error, "integration_outbox_lease_worker_ref_format_check");
     }
 
-    for (index, invalid_ref) in [
-        "½",
-        "²",
-        "Ⅳ",
-        "\u{00a0}lease_alpha",
-        "lease_\u{0001}_alpha",
-    ]
-    .into_iter()
-    .enumerate()
+    for (index, invalid_ref) in ["½", "²", "Ⅳ", "\u{00a0}lease_alpha", "lease_\u{0001}_alpha"]
+        .into_iter()
+        .enumerate()
     {
         let suffix = format!("lease_{index}");
         insert_outbox(&mut client, &suffix);
