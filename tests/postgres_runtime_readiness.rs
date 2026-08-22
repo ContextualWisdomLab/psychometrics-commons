@@ -38,13 +38,29 @@ fn supported_postgres_with_non_utf8_encoding_fails_readiness_closed() {
     let health = classify_postgres_runtime_with_encoding(180_002, false, "LATIN1");
 
     assert_eq!(health.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
-    assert_eq!(health.status(), PostgresRuntimeStatus::UnsupportedServerEncoding);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedServerEncoding
+    );
     assert_eq!(health.capability_state(), CapabilityState::Unavailable);
     assert!(!health.accepts_new_work());
 
     let capability = health.capability_health().unwrap();
     assert_eq!(capability.state(), CapabilityState::Unavailable);
     assert!(!capability.accepts_new_work());
+}
+
+#[test]
+fn encoding_aware_classifier_rejects_an_unsupported_major_before_encoding() {
+    let health = classify_postgres_runtime_with_encoding(170_009, false, "UTF8");
+
+    assert_eq!(health.server_major_version(), 17);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
 }
 
 #[test]
