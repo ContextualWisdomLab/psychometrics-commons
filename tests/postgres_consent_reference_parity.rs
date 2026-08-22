@@ -124,7 +124,10 @@ fn migration_numeric_ranges_exactly_match_pinned_rust_unicode_tables() {
 fn migration_declares_and_runs_under_the_required_utf8_database_encoding() {
     let _guard = guard();
     let mut client = client();
-    let encoding: String = client.query_one("SHOW server_encoding", &[]).unwrap().get(0);
+    let encoding: String = client
+        .query_one("SHOW server_encoding", &[])
+        .unwrap()
+        .get(0);
     assert_eq!(encoding, "UTF8");
 
     const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
@@ -158,11 +161,9 @@ fn legacy_invalid_reference_blocks_upgrade_without_rewriting_consent_evidence() 
         database_error.message(),
         "consent reference migration blocked by legacy references outside the current opaque-reference contract"
     );
-    assert!(
-        database_error
-            .detail()
-            .is_some_and(|detail| detail.contains("ledger_participant_ref=1"))
-    );
+    assert!(database_error
+        .detail()
+        .is_some_and(|detail| detail.contains("ledger_participant_ref=1")));
     assert!(!database_error.message().contains('½'));
     assert!(!database_error.detail().unwrap_or_default().contains('½'));
 
@@ -176,13 +177,20 @@ fn legacy_invalid_reference_blocks_upgrade_without_rewriting_consent_evidence() 
     assert_eq!(preserved, "½");
 
     client
-        .execute("DELETE FROM consent_ledger WHERE participant_ref = '½'", &[])
+        .execute(
+            "DELETE FROM consent_ledger WHERE participant_ref = '½'",
+            &[],
+        )
         .unwrap();
-    apply_consent_migration(&mut client)
-        .expect("migration must be retryable after operator-adjudicated legacy evidence is removed");
+    apply_consent_migration(&mut client).expect(
+        "migration must be retryable after operator-adjudicated legacy evidence is removed",
+    );
 
     let error = client
-        .execute("INSERT INTO consent_ledger (participant_ref) VALUES ('½')", &[])
+        .execute(
+            "INSERT INTO consent_ledger (participant_ref) VALUES ('½')",
+            &[],
+        )
         .expect_err("strengthened constraint must reject the legacy alias after successful retry");
     assert_check(&error, "consent_ledger_participant_ref_format_check");
 }
