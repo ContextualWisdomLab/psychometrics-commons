@@ -307,6 +307,9 @@ const FORBIDDEN_CREDENTIAL_WORDS: &[&str] = &[
     "tokens",
 ];
 
+const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
+    &["author", "authors", "authoredby", "authoringtool"];
+
 /// Reject a public-release fixture that still carries restricted identity or secrets.
 ///
 /// Call this before packaging a public or catalog-facing release. Authorized
@@ -400,6 +403,9 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     }
 
     if let Some(prefix) = compact.strip_suffix(&research_namespace) {
+        if ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES.contains(&prefix) {
+            return false;
+        }
         return contains_forbidden_public_release_marker(prefix)
             || contains_forbidden_research_namespace_prefix_marker(prefix);
     }
