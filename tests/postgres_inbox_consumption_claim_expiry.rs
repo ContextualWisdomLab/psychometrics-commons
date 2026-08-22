@@ -9,7 +9,10 @@ use psychometrics_commons_runtime::postgres_inbox_consumption::{
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static SCHEMA_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const LEGACY_INBOX_CONSUMPTION_MIGRATION: &str =
@@ -24,7 +27,12 @@ fn schema_client(prefix: &str) -> (Client, String) {
         .duration_since(UNIX_EPOCH)
         .expect("system clock must be after the Unix epoch")
         .as_nanos();
-    let schema_name = format!("{prefix}_{}_{}", std::process::id(), nonce);
+    let schema_name = format!(
+        "{prefix}_{}_{}_{}",
+        std::process::id(),
+        nonce,
+        SCHEMA_SEQ.fetch_add(1, Ordering::Relaxed)
+    );
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"

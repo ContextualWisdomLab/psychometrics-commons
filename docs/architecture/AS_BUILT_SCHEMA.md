@@ -19,8 +19,15 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | Implemented subset |
 | `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
+| `audit_evidence_record` | purpose-bound product audit evidence | **Active PR** #242 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
+
+## Active PR audit-evidence physical schema
+
+PR #242 (`migrations/0040_audit_evidence_record.sql`, `src/audit.rs`, and `src/postgres_audit.rs`) adds one append-only `audit_evidence_record` relation. This slice is **Active PR**, not protected-main truth. Each row binds an opaque audit-event identity to the exact `tenant_ref`, `actor_ref`, `purpose_code`, `action_code`, `resource_ref`, bounded outcome, SHA-256 evidence digest, server-observed occurrence time, and independent database-recorded time. PostgreSQL rejects malformed references/codes/digests and non-positive event times, while update, delete, and truncate triggers reject mutation with SQLSTATE `55000`. Exact replay remains idempotent only when all persisted evidence matches; conflicting identity reuse fails closed. The owning adapter exposes tenant-scoped reads and does not turn this table into a cross-service audit database or a certification claim.
+
+The migration validates the owned table's ordered column/type/nullability contract, default, complete relevant constraint inventory, and a stored normalized constraint manifest on reapplication. The supporting PostgreSQL tests exercise persistence/replay, tenant isolation, mutation rejection, concurrency, missing-relation/database-error mapping, schema-shape drift, and migration integrity. #242 must remain **Active PR** until its unchanged exact head satisfies live review and CI/security/coverage/provenance gates and is integrated into protected main.
 
 ## Active PR assessment-session physical schema
 
