@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons-owned durable state, local transactions, migration boundaries, outbox/inbox integration
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: protected main contains in-memory/domain lifecycle primitives only; active PR #24 carries the first PostgreSQL integration-evidence migration/adapter but is not protected-main truth until merged
+- Current/as-built status: protected main contains multiple PostgreSQL 18 persistence slices (integration, scoring, instrument, consent, data rights, item delivery, response/result snapshots). Active PR #250 adds anonymous participant-base persistence and is not protected-main truth until merged.
 - Target status: upstream PostgreSQL 18.x operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
-- Migration status: active PR #24 introduces only the bounded integration-evidence slice; the remaining product schema still must be established from the logical ERD and this ADR without synthetic provenance backfills
+- Migration status: remaining logical ERD aggregates still must be established without synthetic provenance backfills; participant base is the Active PR #250 slice on this branch
 
 ## Context
 
@@ -111,6 +111,16 @@ On receipt, a consumer validates source/schema/digest/tenant/resource identity a
 The first physical inbox deduplication slice also uses an insert-then-inspect duplicate classifier and therefore has the same explicit `READ COMMITTED` requirement as outbox enqueue.
 
 An inbox row that merely proves receipt is never marked `completed` before the required effect is locally atomic or durably recoverable. Unknown/mismatched semantics are quarantined without applying the effect.
+
+### Anonymous participant base persist
+
+The anonymous participant-base adapter inserts one immutable `(participant_ref, tenant_ref, created_at_unix_ms)` row. `INSERT ... ON CONFLICT (participant_ref) DO NOTHING` is followed by a winner reread only when the insert created no row. Because a caller may supply its own transaction, this algorithm explicitly requires `READ COMMITTED`, where the conflict wait completes before the next statement's snapshot. Classification is deterministic:
+
+- exact stored tenant and creation time → `Duplicate`;
+- any other stored tenant or creation time → `ConflictingReplay`;
+- a unique-key conflict with no recoverable winner → `CorruptStoredIdentity`.
+
+Stronger isolation is rejected before the insert. The physical CHECK constraints reject the same numeric-like references as Rust `char::is_numeric` (Nd/Nl/No), including `½`, `²`, and `Ⅳ`. Optional Keyverse account-link history is a separate append-only concern and is never written through this boundary.
 
 ### Consent and data rights
 

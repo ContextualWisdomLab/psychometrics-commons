@@ -1,8 +1,8 @@
 # As-Built PostgreSQL Schema Map
 
 - Status: Normative evidence map
-- Date: 2026-08-14
-- Protected-main baseline: `cc5850a0d1eacbbf16d03075534fce460a8286e6`
+- Date: 2026-08-20
+- Protected-main baseline: `5544149ca5dc55d2bfc3402cc59c03c44830de5f`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
@@ -41,6 +41,14 @@ The active slice adds:
 - fail-closed stale fencing before replay classification whenever a current lease exists, while exact replay after a completed attempt has cleared its lease remains idempotent.
 
 Real PostgreSQL evidence on the active PR is carried by `tests/postgres_outbox_delivery_lease.rs`, `tests/postgres_outbox_delivery_lease_fencing_integrity.rs`, `tests/postgres_outbox_delivery_lease_authority.rs`, `tests/postgres_outbox_delivery_lease_concurrency.rs`, `tests/postgres_outbox_delivery_lease_coverage_edges.rs`, and `tests/postgres_outbox_delivery_lease_migration_isolation.rs`. These tests cover exclusive claim/recovery, monotonic fencing, invalid physical state rejection, database-authoritative expiry, rejection of a future caller timestamp against a still-live lease, stale-fence replay precedence, blocking-proven concurrent claims, schema isolation, and persistence failure paths. The slice must remain **Active PR** until the exact reviewed/check-clean head is merged and protected main is refetched.
+
+## Active PR participant-base physical schema
+
+PR #250 (`migrations/0030_assessment_participant.sql`, `src/postgres_participant.rs`) adds a durable anonymous-first participant base record. This slice is **Active PR**, not protected-main truth. It stores only opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time; optional Keyverse link history remains a separate append-only identity-link concern.
+
+The adapter requires `READ COMMITTED`, waits for a concurrent uncommitted unique-key winner, then classifies exact replay separately from conflicting tenant/time rebinding. Reload uses the exact participant-and-tenant pair and never returns raw identity-provider subject data. The physical table rejects the same numeric-like public identities as Rust `char::is_numeric` and blocks update, delete, and truncate paths that would silently rewrite or erase stable participant evidence.
+
+Real PostgreSQL persistence, recovery, numeric-parity, and concurrency tests exercise these contracts. This slice does **not** claim participant HTTP transport, account-link history persistence, or Keyverse federation. It must remain **Active PR** until the exact reviewed/check-clean head is integrated and the protected-main baseline is refetched.
 
 ## Protected-main inbox-consumption physical schema
 
