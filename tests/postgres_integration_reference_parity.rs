@@ -9,6 +9,7 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 use std::sync::{Mutex, MutexGuard};
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
+const SCALAR_PARITY_BATCH_SIZE: usize = 32_768;
 
 fn guard() -> MutexGuard<'static, ()> {
     TEST_LOCK
@@ -51,6 +52,30 @@ fn insert_outbox(client: &mut Client, event_ref: &str) -> Result<u64, postgres::
     )
 }
 
+fn assert_scalar_parity_batch(client: &mut Client, references: &[String], expected: &[bool]) {
+    let mismatches: Vec<String> = client
+        .query_one(
+            "SELECT COALESCE(array_agg(reference_text), ARRAY[]::text[]) \
+             FROM (\
+                 SELECT reference_text \
+                 FROM unnest($1::text[], $2::boolean[]) \
+                      AS candidate(reference_text, expected_valid) \
+                 WHERE integration_reference_is_valid(reference_text) \
+                       IS DISTINCT FROM expected_valid \
+                 LIMIT 8\
+             ) AS mismatch",
+            &[&references, &expected],
+        )
+        .expect("the scalar parity probe must execute against the migrated validator")
+        .get(0);
+
+    assert!(
+        mismatches.is_empty(),
+        "PostgreSQL reference classification diverged from Rust for {:?}",
+        mismatches
+    );
+}
+
 #[test]
 fn outbox_identity_rejects_unicode_numeric_whitespace_and_control_aliases() {
     let _guard = guard();
@@ -64,30 +89,37 @@ fn outbox_identity_rejects_unicode_numeric_whitespace_and_control_aliases() {
 }
 
 #[test]
-fn database_numeric_set_matches_rust_is_numeric_for_every_unicode_scalar() {
+fn database_validator_matches_rust_scalar_classes_exhaustively() {
     let _guard = guard();
     let mut client = client();
-    let numeric_references: Vec<String> = (0..=char::MAX as u32)
-        .filter_map(char::from_u32)
-        .filter(|character| character.is_numeric())
-        .map(|character| character.to_string())
-        .collect();
+    let mut references = Vec::with_capacity(SCALAR_PARITY_BATCH_SIZE);
+    let mut expected = Vec::with_capacity(SCALAR_PARITY_BATCH_SIZE);
+    let mut checked_scalars = 0usize;
 
-    assert!(!numeric_references.is_empty());
-    let accepted_numeric_count: i64 = client
-        .query_one(
-            "SELECT count(*) \
-             FROM unnest($1::text[]) AS candidate(reference_text) \
-             WHERE integration_reference_is_valid(reference_text)",
-            &[&numeric_references],
-        )
-        .expect("the parity probe must execute against the migrated validator")
-        .get(0);
+    for character in (0..=char::MAX as u32).filter_map(char::from_u32) {
+        if character == '\0' {
+            // PostgreSQL text cannot represent U+0000. The validator's embedded-control
+            // behavior is exercised with representable control scalars below and in the
+            // focused outbox test.
+            continue;
+        }
+        references.push(character.to_string());
+        expected.push(
+            !character.is_numeric() && !character.is_whitespace() && !character.is_control(),
+        );
+        checked_scalars += 1;
 
-    assert_eq!(
-        accepted_numeric_count, 0,
-        "every single-character reference Rust classifies as numeric must be rejected by PostgreSQL"
-    );
+        if references.len() == SCALAR_PARITY_BATCH_SIZE {
+            assert_scalar_parity_batch(&mut client, &references, &expected);
+            references.clear();
+            expected.clear();
+        }
+    }
+
+    if !references.is_empty() {
+        assert_scalar_parity_batch(&mut client, &references, &expected);
+    }
+    assert!(checked_scalars > 1_000_000);
 }
 
 #[test]
