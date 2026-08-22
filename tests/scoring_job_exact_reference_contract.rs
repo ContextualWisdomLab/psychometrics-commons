@@ -50,13 +50,18 @@ fn scoring_job_commands_reject_padded_evidence_aliases() {
         ScoringJobError::InvalidReference
     );
 
-    let mut result_job = ScoringJob::new("scoring_job_result", "scoring_request_result", 2).unwrap();
+    let mut result_job =
+        ScoringJob::new("scoring_job_result", "scoring_request_result", 2).unwrap();
     let result_lease = result_job
         .claim("worker_result", "lease_result", 10_000, 20_000)
         .unwrap();
     assert_eq!(
         result_job
-            .record_success(result_lease.fencing_token(), "scoring_result_alpha ", 11_000)
+            .record_success(
+                result_lease.fencing_token(),
+                "scoring_result_alpha ",
+                11_000,
+            )
             .unwrap_err(),
         ScoringJobError::InvalidReference
     );
