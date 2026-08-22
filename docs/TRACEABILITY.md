@@ -1,8 +1,8 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-14
-- Evaluated protected-main implementation baseline: `085ef4b4714796a77fd4645eeb46b028f95929fc`
+- Date: 2026-08-21
+- Evaluated protected-main implementation baseline: `4499d9c0889c082487ddbd7fd8d0d5d18257995d`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -25,10 +25,11 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
-| Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance plus `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence; live fast-mlsirm integration is Target |
+| Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance, `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence, and protected-main request-bound external adapter `src/scoring_engine.rs`; live fast-mlsirm execution remains Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
-| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result-serving transport is Target |
-| Personal JSON and human-readable result export | PRD §3.1, §9.4 | TRD §18 `POST /v1/results/{result_ref}/exports`; ADR-0010 export provenance | ADR-0010 | **Active PR** #231 domain copy of snapshot scores, uncertainty, and version provenance into JSON and a human-readable report; HTTP export transport remains Target |
+| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; authorized result-read transport is active PR #257 and not protected-main truth |
+| Authorized immutable personal result read | PRD §3.1, §9.4 | TRD §18 `GET /v1/results/{result_ref}`; result authorization boundary | ADR-0003, ADR-0010 | **Active PR** #257 exposes an authorized immutable result read that checks server-owned participant/result bindings before route identity; it is not protected-main truth |
+| Personal JSON and human-readable result export | PRD §3.1, §9.4 | TRD §18 `POST /v1/results/{result_ref}/exports`; ADR-0010 export provenance | ADR-0010 | **Implemented** domain copy through merged #231; HTTP export transport remains Target and is tracked by active #256 |
 | Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010, ADR-0018 | Target |
 | Continuous scores remain source of truth; Personality Style is presentation | PRD §3.2 | Measurement Governance; AI Governance | ADR-0018 | Target product narrative mapping; numeric source remains External fast-mlsirm contract |
 | Immutable instrument release/version lifecycle | PRD §6, §9 | TRD §7; UML publication state | ADR-0005, ADR-0010 | **Implemented** in `src/instrument.rs` plus `migrations/0006_instrument_release.sql` and `src/postgres_instrument_release.rs`: immutable release manifest, exact version/digest/locale/item set, fail-closed Draft/Review/Published/Suspended/Retired lifecycle, idempotent publication events, and new-session eligibility |
@@ -58,11 +59,12 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
-| Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest | live adapter + retry/outbox integration |
+| Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest and protected-main `src/scoring_engine.rs` rejects mismatched request/result provenance | live fast-mlsirm adapter + retry/outbox integration |
 | Stale scoring worker cannot complete a newer attempt | TRD §8; ADR-0015 | `src/scoring_job.rs` uses monotonically increasing fencing tokens and rejects stale/expired completion or failure evidence; `src/postgres_scoring_job.rs` persists enqueue, named claim, claim-next poll, retry, terminal outcomes, expired-lease recovery, and cancellation without transferring a fence | live adapter evidence |
 | Scientific failure is typed, no invented score | TRD §8; Measurement Governance | scoring contract tests | cross-process failure injection |
 | Historical result does not mutate | TRD §9 | `src/result.rs` snapshot semantics | persistence and API supersession tests |
-| Result export includes machine-readable provenance and the same scores | ADR-0010; PRD §3.1 | Active PR #231 `src/result_export.rs` copies snapshot scores, standard errors, dispositions, owner identity, and version provenance into JSON and a human-readable report | HTTP `POST /v1/results/{result_ref}/exports` |
+| Authorized result read does not expose cross-tenant existence | TRD §11, §18; Security/Data | Active PR #257 `src/result_http.rs` authorizes server-owned participant/result records before comparing the requested reference and uses safe RFC 9457-style problem responses | protected-main transport, PostgreSQL resource loading, and cross-tenant HTTP E2E |
+| Result export includes machine-readable provenance and the same scores | ADR-0010; PRD §3.1 | Protected-main `src/result_export.rs` copies snapshot scores, standard errors, dispositions, owner identity, and version provenance into JSON and a human-readable report | HTTP `POST /v1/results/{result_ref}/exports` remains active #256/Target |
 | Narrative cannot mutate score / deterministic fallback exists | AI Governance; ADR-0018 | architecture policy | mapping implementation + canonical style-assignment key + fallback/no-score-mutation tests |
 | Instrument release bytes/version/item order are immutable | TRD §7 | `src/instrument.rs` + publication contract tests; `src/postgres_instrument_release.rs` persists immutable manifest columns | API publication integration |
 | Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; `AssessmentSession` creation copies exact published release/version/locale provenance and fails closed on unpublished eligibility or locale mismatch | **Active PR** stored-publication start lock plus persist-backed HTTP create/reload (`start_created_assessment_session_from_stored_release`); load still restores created identity without re-checking current eligibility; command HTTP remains missing |
@@ -91,7 +93,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `085ef4b4714796a77fd4645eeb46b028f95929fc`:
+Current protected-main Rust module surface on `4499d9c0889c082487ddbd7fd8d0d5d18257995d`:
 
 ```text
 src/lib.rs
@@ -117,6 +119,7 @@ src/lib.rs
 ├── research_release.rs  # product-side Research Commons release-evidence gate
 ├── response.rs       # idempotent response ledger + immutable response snapshots
 ├── result.rs         # immutable result provenance/supersession
+├── scoring_engine.rs # request-bound external scoring-engine adapter boundary
 ├── scoring.rs        # version-pinned scoring dispatch contract
 ├── scoring_job.rs    # bounded retry/quarantine lifecycle with lease fencing
 └── session.rs        # server-authoritative assessment-session transitions bound to a published locale release
@@ -135,7 +138,9 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #231 personal result export is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ResultExport::from_snapshot` copies the stored construct scores, standard errors, dispositions, owner `participant_ref`, and version provenance into a JSON document and a human-readable report. Approved limitation text is required so the report cannot imply diagnosis, employment fitness, or a type score. Padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains. The snapshot is not mutated. HTTP `POST /v1/results/{result_ref}/exports` remains Target. Do not fold persistence or public transport into this domain slice.
+Merged #231 personal result export is protected-main domain evidence. `ResultExport::from_snapshot` copies the stored construct scores, standard errors, dispositions, owner `participant_ref`, and version provenance into a JSON document and a human-readable report. Approved limitation text is required so the report cannot imply diagnosis, employment fitness, or a type score. Padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains. The snapshot is not mutated. HTTP `POST /v1/results/{result_ref}/exports` remains Target/active #256. Do not fold persistence or public transport into this domain slice.
+
+**Active PR** #257 authorized immutable personal result reads are not protected-main truth until an unchanged reviewed/check-clean head is integrated. `src/result_http.rs` accepts only exact `GET /v1/results/{result_ref}` targets, checks server-owned participant/result authorization before identity comparison, returns no result existence oracle to an unauthorized actor, and serializes the stored immutable provenance without recomputation. PostgreSQL result loading and cross-tenant HTTP E2E remain required before this becomes a complete product path.
 
 **Active PR** #86 anonymous-session resource authorization, plus follow-up #104, #118, #135, #144, #159, and honesty successor #225 that compare the verified actor to the supplied participant tenant/owner and session and apply a lifecycle command only after that check, is not protected-main truth until an unchanged reviewed/check-clean head is integrated. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
 
