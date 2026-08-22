@@ -58,9 +58,8 @@ fn framing_error(request: &[u8]) -> std::io::ErrorKind {
     let client = std::thread::spawn(move || {
         let mut stream = TcpStream::connect(address).unwrap();
         stream.write_all(&payload).unwrap();
-        // The server is expected to close malformed requests immediately; the
-        // client-side half-close can therefore race with the peer close.
-        stream.shutdown(Shutdown::Write).ok();
+        // The server may reject malformed framing before the client half-closes.
+        let _ = stream.shutdown(Shutdown::Write);
         let mut response = String::new();
         let _ = stream.read_to_string(&mut response);
     });
@@ -152,6 +151,12 @@ fn listener_rejects_ambiguous_http_message_framing() {
     assert_eq!(
         framing_error(
             b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_duplicate_same\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}"
+        ),
+        std::io::ErrorKind::InvalidData
+    );
+    assert_eq!(
+        framing_error(
+            b"POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_duplicate_a\r\nIdempotency-Key: ses_duplicate_b\r\n\r\n"
         ),
         std::io::ErrorKind::InvalidData
     );
