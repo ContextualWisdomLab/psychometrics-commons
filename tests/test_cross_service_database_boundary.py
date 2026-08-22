@@ -169,6 +169,14 @@ class CrossServiceDatabaseBoundaryTest(unittest.TestCase):
             self.assertTrue(is_deployment_manifest(path), str(path))
         self.assertFalse(is_deployment_manifest(ROOT / "docs" / "example.json"))
 
+    def test_build_and_composite_action_inputs_are_in_scan_contract(self) -> None:
+        """Do not let build hooks or reusable Actions bypass the database boundary gate."""
+
+        self.assertIn(ROOT / "build.rs", RUNTIME_FILES)
+        self.assertIn(ROOT / ".cargo" / "config", RUNTIME_FILES)
+        self.assertIn(ROOT / ".cargo" / "config.toml", RUNTIME_FILES)
+        self.assertIn(ROOT / ".github" / "actions", RUNTIME_ROOTS)
+
     def test_deployment_manifest_scope_is_repository_relative(self) -> None:
         """Ignore deployment-like checkout ancestors and paths outside the repository."""
 
