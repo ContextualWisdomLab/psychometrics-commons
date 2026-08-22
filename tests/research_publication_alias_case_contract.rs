@@ -201,6 +201,31 @@ fn credential_and_internal_location_columns_cannot_enter_public_release() {
 }
 
 #[test]
+fn plural_credential_columns_cannot_enter_public_release() {
+    for column_name in [
+        "tokens",
+        "passwords",
+        "secrets",
+        "credentials",
+        "session_tokens",
+        "user_passwords",
+        "api_secrets",
+        "service_credentials",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["credential_material_not_in_identity_inventory"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not expose plural credential fields in a public release"
+        );
+    }
+}
+
+#[test]
 fn benign_author_metadata_columns_remain_public() {
     for column_name in ["authors", "authored_by", "authoring_tool"] {
         let columns = [PublicReleaseFixtureColumn {
