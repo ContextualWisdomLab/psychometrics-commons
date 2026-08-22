@@ -295,7 +295,17 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
     "token",
 ];
 
-const FORBIDDEN_CREDENTIAL_WORDS: &[&str] = &["auth", "credential", "password", "secret", "token"];
+const FORBIDDEN_CREDENTIAL_WORDS: &[&str] = &[
+    "auth",
+    "credential",
+    "credentials",
+    "password",
+    "passwords",
+    "secret",
+    "secrets",
+    "token",
+    "tokens",
+];
 
 /// Reject a public-release fixture that still carries restricted identity or secrets.
 ///
@@ -419,9 +429,8 @@ fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
         .split(|character: char| !character.is_ascii_alphabetic())
         .filter(|word| !word.is_empty());
     let first_word = words.next();
-    let author_metadata_word = first_word.is_some_and(|word| {
-        ["author", "authors", "authored", "authoring"].contains(&word)
-    });
+    let author_metadata_word = first_word
+        .is_some_and(|word| ["author", "authors", "authored", "authoring"].contains(&word));
 
     if first_word.is_some_and(|word| FORBIDDEN_CREDENTIAL_WORDS.contains(&word))
         || words.any(|word| FORBIDDEN_CREDENTIAL_WORDS.contains(&word))
@@ -429,9 +438,18 @@ fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
         return true;
     }
 
-    ["credential", "password", "secret", "token"]
-        .iter()
-        .any(|marker| compact.ends_with(marker))
+    [
+        "credential",
+        "credentials",
+        "password",
+        "passwords",
+        "secret",
+        "secrets",
+        "token",
+        "tokens",
+    ]
+    .iter()
+    .any(|marker| compact.ends_with(marker))
         || (compact.starts_with("auth") && !author_metadata_word)
 }
 
