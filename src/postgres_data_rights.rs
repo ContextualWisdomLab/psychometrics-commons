@@ -241,7 +241,9 @@ pub fn persist_data_rights_identity_verification(
 ) -> Result<DataRightsVerificationDisposition, DataRightsPersistenceError> {
     let (evidence_ref, verified_at) = match (
         request.state(),
-        request.verification_evidence_ref().and_then(exact_reference),
+        request
+            .verification_evidence_ref()
+            .and_then(exact_reference),
         request.verified_at_unix_ms(),
     ) {
         (DataRightsState::IdentityVerified, Some(evidence_ref), Some(verified_at_ms)) => {
