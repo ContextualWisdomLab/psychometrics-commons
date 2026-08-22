@@ -2,7 +2,7 @@
 //!
 //! A previously accepted session may be replayed after its release is suspended
 //! or retired, but only when the caller presents the exact originally-issued
-//! session and participant references. Padded aliases must never reopen it.
+//! session, participant, and release references. Padded aliases must never reopen it.
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -131,7 +131,7 @@ fn assert_invalid_reference<T>(result: Result<T, AssessmentSessionStartError>) {
 }
 
 #[test]
-fn closed_publication_replay_rejects_padded_session_and_participant_aliases() {
+fn closed_publication_replay_rejects_padded_session_participant_and_release_aliases() {
     let (_database_test_guard, mut client) = test_client();
     let published = published_release();
     let mut transaction = client.transaction().unwrap();
@@ -165,6 +165,7 @@ fn closed_publication_replay_rejects_padded_session_and_participant_aliases() {
 
         let padded_session = format!(" {session_ref}");
         let padded_participant = format!("{PARTICIPANT_REF} ");
+        let padded_release = format!(" {RELEASE_REF}");
         let mut transaction = client.transaction().unwrap();
 
         assert_invalid_reference(start_created_assessment_session(
@@ -196,6 +197,14 @@ fn closed_publication_replay_rejects_padded_session_and_participant_aliases() {
             session_ref,
             &padded_participant,
             RELEASE_REF,
+            "ko-KR",
+            created_at_unix_ms,
+        ));
+        assert_invalid_reference(start_created_assessment_session_from_stored_release(
+            &mut transaction,
+            session_ref,
+            PARTICIPANT_REF,
+            &padded_release,
             "ko-KR",
             created_at_unix_ms,
         ));
