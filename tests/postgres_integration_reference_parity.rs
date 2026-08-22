@@ -64,6 +64,33 @@ fn outbox_identity_rejects_unicode_numeric_whitespace_and_control_aliases() {
 }
 
 #[test]
+fn database_numeric_set_matches_rust_is_numeric_for_every_unicode_scalar() {
+    let _guard = guard();
+    let mut client = client();
+    let numeric_references: Vec<String> = (0..=char::MAX as u32)
+        .filter_map(char::from_u32)
+        .filter(|character| character.is_numeric())
+        .map(|character| character.to_string())
+        .collect();
+
+    assert!(!numeric_references.is_empty());
+    let accepted_numeric_count: i64 = client
+        .query_one(
+            "SELECT count(*) \
+             FROM unnest($1::text[]) AS candidate(reference_text) \
+             WHERE integration_reference_is_valid(reference_text)",
+            &[&numeric_references],
+        )
+        .expect("the parity probe must execute against the migrated validator")
+        .get(0);
+
+    assert_eq!(
+        accepted_numeric_count, 0,
+        "every single-character reference Rust classifies as numeric must be rejected by PostgreSQL"
+    );
+}
+
+#[test]
 fn delivery_attempt_and_inbox_identity_reject_unicode_numeric_aliases() {
     let _guard = guard();
     let mut client = client();
