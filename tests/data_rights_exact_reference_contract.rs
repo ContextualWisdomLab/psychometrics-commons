@@ -7,10 +7,30 @@ use psychometrics_commons_runtime::data_rights::{
 #[test]
 fn request_creation_rejects_padded_public_reference_aliases() {
     let cases = [
-        (" request_ref ", "tenant_ref", "participant_ref", "account_data_scope"),
-        ("request_ref", "\u{00a0}tenant_ref\u{00a0}", "participant_ref", "account_data_scope"),
-        ("request_ref", "tenant_ref", "\u{2003}participant_ref\u{2003}", "account_data_scope"),
-        ("request_ref", "tenant_ref", "participant_ref", "\u{202f}account_data_scope\u{202f}"),
+        (
+            " request_ref ",
+            "tenant_ref",
+            "participant_ref",
+            "account_data_scope",
+        ),
+        (
+            "request_ref",
+            "\u{00a0}tenant_ref\u{00a0}",
+            "participant_ref",
+            "account_data_scope",
+        ),
+        (
+            "request_ref",
+            "tenant_ref",
+            "\u{2003}participant_ref\u{2003}",
+            "account_data_scope",
+        ),
+        (
+            "request_ref",
+            "tenant_ref",
+            "participant_ref",
+            "\u{202f}account_data_scope\u{202f}",
+        ),
     ];
 
     for (request_ref, tenant_ref, participant_ref, scope_ref) in cases {
