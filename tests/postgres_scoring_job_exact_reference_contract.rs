@@ -12,17 +12,17 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 };
 use std::mem::discriminant;
 
-fn test_client() -> Client {
+fn test_client(schema_name: &str) -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
-        .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS scoring_job_exact_reference_test;\
-             SET search_path TO scoring_job_exact_reference_test;\
-             DROP TABLE IF EXISTS scoring_job_state;",
-        )
+        .batch_execute(&format!(
+            "CREATE SCHEMA IF NOT EXISTS {schema_name};\
+             SET search_path TO {schema_name};\
+             DROP TABLE IF EXISTS scoring_job_state;"
+        ))
         .unwrap();
     apply_scoring_job_migration(&mut client).unwrap();
     client
@@ -37,7 +37,7 @@ fn assert_invalid_reference(error: ScoringJobPersistenceError) {
 
 #[test]
 fn persisted_claim_rejects_padded_job_worker_and_lease_aliases_before_lookup() {
-    let mut client = test_client();
+    let mut client = test_client("scoring_job_exact_reference_claim_test");
 
     for (job_ref, worker_ref, lease_ref) in [
         (" missing_scoring_job", "worker_alpha", "lease_alpha"),
@@ -61,7 +61,7 @@ fn persisted_claim_rejects_padded_job_worker_and_lease_aliases_before_lookup() {
 
 #[test]
 fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
-    let mut client = test_client();
+    let mut client = test_client("scoring_job_exact_reference_terminal_test");
 
     {
         let mut transaction = client.transaction().unwrap();
