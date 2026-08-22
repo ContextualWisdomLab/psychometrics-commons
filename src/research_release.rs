@@ -312,23 +312,21 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 
 /// Reject a public-release fixture that still carries restricted identity or secrets.
 ///
-/// Call this before packaging a public or catalog-facing release. Authorized
-/// research that needs the restricted mapping keeps those values outside this
-/// fixture. Public-release column names use the service's ASCII schema grammar;
-/// non-ASCII aliases fail closed before normalization so Unicode confusables cannot
-/// bypass the privacy markers. A column in the `research_participant_ref` namespace
-/// is allowed, including clear export or staging prefixes and supported separator
-/// variants, unless its prefix contains a forbidden marker or restricted identity,
-/// authentication, credential, or internal-location namespace stem. Bare and compound
-/// sensitive namespace words such as `token`, `password`, `credential`, and `auth` are
-/// forbidden while ordinary author metadata remains allowed. Restricted identity,
-/// authentication, credential, and internal-location names remain forbidden when
-/// transport prefixes, suffixes, punctuation/whitespace separators, or inserted digits
-/// are added around or within their marker words. The caller must provide at least one
-/// published column and an effective product-authorized identity inventory; the scanner
-/// fails closed rather than treating an empty fixture or omitted inventory as evidence
-/// that the fixture is clean. Object or array cell values are not parsed here: callers
-/// must flatten them or prove a separate structured-value privacy scan before packaging.
+/// Call this before packaging a public or catalog-facing release.
+///
+/// - Publish only ASCII column names. Non-ASCII aliases fail closed before normalization.
+/// - `research_participant_ref` is the allowed public research identity namespace. Clear
+///   export, staging, and author-metadata prefixes remain allowed unless they also carry a
+///   restricted identity, authentication, credential, or internal-location marker.
+/// - Identity, authentication, credential, and internal-location column names fail closed
+///   even when aliases add transport prefixes, suffixes, separators, or inserted digits.
+/// - Supply at least one published column and a product-authorized restricted-identity
+///   inventory. An empty fixture or unavailable inventory is never clean-release evidence.
+/// - Flat cell values are checked against the authorized restricted identities. Object and
+///   array values must be flattened or independently privacy-scanned before packaging.
+///
+/// This boundary never queries Keyverse, a linkage service, or another service's application
+/// database to supplement the caller's authorized inventory.
 ///
 /// # Errors
 ///
@@ -455,7 +453,7 @@ fn contains_forbidden_credential_word(normalized: &str, compact: &str) -> bool {
         "tokens",
     ]
     .iter()
-    .any(|marker| compact.ends_with(marker))
+    .any(|marker| compact.starts_with(marker) || compact.ends_with(marker))
         || (compact.starts_with("auth") && !author_metadata_word)
 }
 
