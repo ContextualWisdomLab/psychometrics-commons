@@ -14,6 +14,10 @@ use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
+fn exact_reference(value: &str) -> Option<&str> {
+    normalized_reference(value).filter(|normalized| *normalized == value)
+}
+
 /// Server-authoritative lifecycle state for one assessment session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
@@ -61,7 +65,7 @@ impl SessionState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SessionCreationError {
-    /// A session or participant reference was blank or numeric-like.
+    /// A session or participant reference was blank, numeric-like, or not exact.
     InvalidReference,
     /// The server-authoritative session creation timestamp was zero.
     InvalidTimestamp,
@@ -75,7 +79,7 @@ impl Display for SessionCreationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "assessment session references must be opaque non-numeric values"
+                "assessment session references must use their exact opaque non-numeric spelling"
             }
             Self::InvalidTimestamp => "assessment session creation time must be greater than zero",
             Self::InstrumentReleaseUnavailable => {
@@ -182,17 +186,19 @@ pub struct AssessmentSession {
 impl AssessmentSession {
     /// Create a session from one exact published locale-specific instrument release.
     ///
-    /// `requested_locale` must exactly equal the locale stored on `release`. If they differ,
-    /// session creation fails with [`SessionCreationError::LocaleMismatch`]. This method never
-    /// substitutes another published locale or language.
+    /// Session and participant references must already use their exact accepted opaque spelling;
+    /// surrounding whitespace is rejected rather than silently removed. `requested_locale` must
+    /// exactly equal the locale stored on `release`. If they differ, session creation fails with
+    /// [`SessionCreationError::LocaleMismatch`]. This method never substitutes another published
+    /// locale or language.
     ///
     /// # Errors
     ///
-    /// Returns [`SessionCreationError::InvalidReference`] for malformed session/participant
-    /// references, [`SessionCreationError::InvalidTimestamp`] for a zero server timestamp,
-    /// [`SessionCreationError::InstrumentReleaseUnavailable`] unless the exact release can
-    /// currently accept new sessions, or [`SessionCreationError::LocaleMismatch`] when the
-    /// requested locale is not exactly the release locale.
+    /// Returns [`SessionCreationError::InvalidReference`] for malformed or non-exact
+    /// session/participant references, [`SessionCreationError::InvalidTimestamp`] for a zero
+    /// server timestamp, [`SessionCreationError::InstrumentReleaseUnavailable`] unless the exact
+    /// release can currently accept new sessions, or [`SessionCreationError::LocaleMismatch`]
+    /// when the requested locale is not exactly the release locale.
     pub fn new(
         session_ref: &str,
         participant_ref: &str,
@@ -200,10 +206,9 @@ impl AssessmentSession {
         requested_locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
-        let session_ref =
-            normalized_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let session_ref = exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
         let participant_ref =
-            normalized_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+            exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
             return Err(SessionCreationError::InvalidTimestamp);
         }
@@ -225,11 +230,12 @@ impl AssessmentSession {
     /// [`crate::postgres_instrument_release::load_published_instrument_release`].
     /// It does not re-check publication lifecycle; the load boundary is the
     /// eligibility gate. Call [`AssessmentSession::new`] when the caller still
-    /// holds a live [`InstrumentRelease`].
+    /// holds a live [`InstrumentRelease`]. Session and participant references must
+    /// already use their exact accepted opaque spelling.
     ///
     /// # Errors
     ///
-    /// Returns [`SessionCreationError::InvalidReference`] for malformed
+    /// Returns [`SessionCreationError::InvalidReference`] for malformed or non-exact
     /// session/participant references, [`SessionCreationError::InvalidTimestamp`]
     /// for a zero server timestamp, or [`SessionCreationError::LocaleMismatch`]
     /// when the requested locale is not exactly the manifest locale.
@@ -240,10 +246,9 @@ impl AssessmentSession {
         requested_locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
-        let session_ref =
-            normalized_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let session_ref = exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
         let participant_ref =
-            normalized_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+            exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
             return Err(SessionCreationError::InvalidTimestamp);
         }
@@ -452,7 +457,7 @@ pub enum SessionCommand {
     BeginScoring,
     /// Record successful completion of the scoring operation.
     RecordScore,
-    /// Make a scored result available according to the result access policy.
+    /// Make a scored result available according to the product access policy.
     Release,
     /// Expire a pre-completion session according to its publication policy.
     Expire,
