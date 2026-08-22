@@ -315,8 +315,7 @@ fn next_event_sequence(
     let maximum_sequence: i64 = row.get(3);
 
     if legacy_count > 1
-        || (sequenced_count > 0
-            && (minimum_sequence != 1 || maximum_sequence != sequenced_count))
+        || (sequenced_count > 0 && (minimum_sequence != 1 || maximum_sequence != sequenced_count))
     {
         return Err(ConsentPersistenceError::CorruptHistory);
     }
