@@ -853,7 +853,12 @@ fn require_current_scoring_lease(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ScoringJobPersistenceError> {
-    normalized_reference(reference).ok_or(ScoringJobPersistenceError::InvalidReference)
+    let normalized =
+        normalized_reference(reference).ok_or(ScoringJobPersistenceError::InvalidReference)?;
+    if normalized != reference {
+        return Err(ScoringJobPersistenceError::InvalidReference);
+    }
+    Ok(normalized)
 }
 
 fn postgres_timestamp(timestamp: u64) -> Result<i64, ScoringJobPersistenceError> {
