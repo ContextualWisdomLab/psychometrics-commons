@@ -52,6 +52,41 @@ fn insert_outbox(client: &mut Client, event_ref: &str) -> Result<u64, postgres::
     )
 }
 
+fn insert_inbox(
+    client: &mut Client,
+    consumer_ref: &str,
+    source_ref: &str,
+    tenant_ref: &str,
+    source_event_ref: &str,
+    subject_ref: &str,
+) -> Result<u64, postgres::Error> {
+    client.execute(
+        "INSERT INTO integration_inbox (\
+             consumer_ref, source_ref, tenant_ref, source_event_ref, event_type, schema_version, \
+             subject_ref, payload_digest, received_at_unix_ms\
+         ) VALUES ($1,$2,$3,$4,'result.released','v1',$5,\
+                   'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',\
+                   1200)",
+        &[
+            &consumer_ref,
+            &source_ref,
+            &tenant_ref,
+            &source_event_ref,
+            &subject_ref,
+        ],
+    )
+}
+
+fn reference_is_valid(client: &mut Client, reference: &str) -> bool {
+    client
+        .query_one(
+            "SELECT integration_reference_is_valid($1)",
+            &[&reference],
+        )
+        .expect("the migrated reference validator must be callable")
+        .get(0)
+}
+
 fn constraint_oid(client: &mut Client, constraint_name: &str) -> i64 {
     client
         .query_one(
@@ -139,6 +174,101 @@ fn database_validator_matches_rust_scalar_classes_exhaustively() {
 }
 
 #[test]
+fn database_validator_rejects_numeric_literal_spellings_but_preserves_mixed_references() {
+    let _guard = guard();
+    let mut client = client();
+
+    for invalid_ref in ["-1.5", "1e5", "1\u{066b}2", "１．５"] {
+        assert!(
+            !reference_is_valid(&mut client, invalid_ref),
+            "numeric-like reference {invalid_ref:?} must be rejected"
+        );
+    }
+
+    for valid_ref in ["e", "event-1", "v1.2"] {
+        assert!(
+            reference_is_valid(&mut client, valid_ref),
+            "mixed opaque reference {valid_ref:?} must remain valid"
+        );
+    }
+}
+
+#[test]
+fn nullable_outbox_causation_and_delivery_cause_fail_closed_only_when_present_and_invalid() {
+    let _guard = guard();
+    let mut client = client();
+
+    insert_outbox(&mut client, "event_null_causation")
+        .expect("NULL causation_ref must remain valid for an otherwise valid outbox row");
+
+    let invalid_causation = client
+        .execute(
+            "INSERT INTO integration_outbox (\
+                 event_ref, event_type, schema_version, source_ref, tenant_ref, subject_ref, \
+                 occurred_at_unix_ms, correlation_ref, causation_ref, payload_digest, \
+                 max_attempts, current_state, latest_event_at_unix_ms\
+             ) VALUES ('event_invalid_causation','result.released','v1','psychometrics_commons',\
+                       'tenant_alpha','result_alpha',1000,'correlation_alpha',$1,\
+                       'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',\
+                       3,'pending',1000)",
+            &[&"1e5"],
+        )
+        .expect_err("a present invalid causation_ref must fail closed");
+    assert_check(&invalid_causation);
+
+    insert_outbox(&mut client, "event_delivery_cause").unwrap();
+    client
+        .execute(
+            "INSERT INTO integration_delivery_attempt (\
+                 source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome, \
+                 occurred_at_unix_ms, cause_code\
+             ) VALUES ('psychometrics_commons','tenant_alpha','event_delivery_cause',\
+                       'attempt_null_cause','retryable_failure',1100,NULL)",
+            &[],
+        )
+        .expect("NULL cause_code must remain valid for an otherwise valid delivery attempt");
+
+    let invalid_cause = client
+        .execute(
+            "INSERT INTO integration_delivery_attempt (\
+                 source_ref, tenant_ref, event_ref, attempt_ref, delivery_outcome, \
+                 occurred_at_unix_ms, cause_code\
+             ) VALUES ('psychometrics_commons','tenant_alpha','event_delivery_cause',\
+                       'attempt_invalid_cause','retryable_failure',1101,$1)",
+            &[&"１．５"],
+        )
+        .expect_err("a present invalid cause_code must fail closed");
+    assert_check(&invalid_cause);
+}
+
+#[test]
+fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
+    let _guard = guard();
+    let mut client = client();
+
+    let cases = [
+        ("1e5", "source_alpha", "tenant_alpha", "event_alpha", "subject_alpha"),
+        ("consumer_alpha", "1e5", "tenant_alpha", "event_alpha", "subject_alpha"),
+        ("consumer_alpha", "source_alpha", "1e5", "event_alpha", "subject_alpha"),
+        ("consumer_alpha", "source_alpha", "tenant_alpha", "1e5", "subject_alpha"),
+        ("consumer_alpha", "source_alpha", "tenant_alpha", "event_alpha", "1e5"),
+    ];
+
+    for (consumer_ref, source_ref, tenant_ref, source_event_ref, subject_ref) in cases {
+        let error = insert_inbox(
+            &mut client,
+            consumer_ref,
+            source_ref,
+            tenant_ref,
+            source_event_ref,
+            subject_ref,
+        )
+        .expect_err("every inbox identity/reference column must reject numeric-like aliases");
+        assert_check(&error);
+    }
+}
+
+#[test]
 fn delivery_attempt_and_inbox_identity_reject_unicode_numeric_aliases() {
     let _guard = guard();
     let mut client = client();
@@ -157,18 +287,15 @@ fn delivery_attempt_and_inbox_identity_reject_unicode_numeric_aliases() {
             .expect_err("attempt references must preserve the Rust reference boundary");
         assert_check(&attempt_error);
 
-        let inbox_error = client
-            .execute(
-                "INSERT INTO integration_inbox (\
-                     consumer_ref, source_ref, tenant_ref, source_event_ref, event_type, \
-                     schema_version, subject_ref, payload_digest, received_at_unix_ms\
-                 ) VALUES ($1,'external_source','tenant_alpha','source_event_alpha',\
-                           'result.released','v1','result_alpha',\
-                           'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',\
-                           1200)",
-                &[&invalid_ref],
-            )
-            .expect_err("consumer references must preserve the Rust reference boundary");
+        let inbox_error = insert_inbox(
+            &mut client,
+            invalid_ref,
+            "external_source",
+            "tenant_alpha",
+            "source_event_alpha",
+            "result_alpha",
+        )
+        .expect_err("consumer references must preserve the Rust reference boundary");
         assert_check(&inbox_error);
     }
 }
