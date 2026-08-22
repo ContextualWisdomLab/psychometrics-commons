@@ -112,7 +112,8 @@ impl ClaimedScoringJob {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ScoringJobPersistenceError {
-    /// A job, worker, lease, result, or failure identity was blank or numeric-like.
+    /// A job, worker, lease, result, or failure identity was blank, had leading or
+    /// trailing whitespace, was numeric-like, or contained control characters.
     InvalidReference,
     /// A caller-supplied timestamp was zero.
     InvalidTimestamp,
