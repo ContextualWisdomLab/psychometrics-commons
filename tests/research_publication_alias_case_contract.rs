@@ -280,6 +280,10 @@ fn prefixed_research_participant_namespace_remains_public() {
         "research.participant.ref",
         "warehouse/research/participant/ref",
         "public research participant ref",
+        "author_research_participant_ref",
+        "authors_research_participant_ref",
+        "authored_by_research_participant_ref",
+        "authoring_tool_research_participant_ref",
     ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
