@@ -21,10 +21,14 @@ RUNTIME_ROOTS = (
     ROOT / "src",
     ROOT / "migrations",
     ROOT / ".github" / "workflows",
+    ROOT / ".github" / "actions",
 )
 RUNTIME_FILES = (
     ROOT / "Cargo.toml",
     ROOT / "rust-toolchain.toml",
+    ROOT / "build.rs",
+    ROOT / ".cargo" / "config",
+    ROOT / ".cargo" / "config.toml",
 )
 RUNTIME_TEXT_SUFFIXES = frozenset({".rs", ".sql", ".toml", ".yml", ".yaml"})
 DEPLOYMENT_DIRECTORY_NAMES = frozenset(
