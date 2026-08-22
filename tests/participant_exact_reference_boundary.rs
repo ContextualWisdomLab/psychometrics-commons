@@ -64,7 +64,11 @@ fn account_link_lifecycle_rejects_padded_evidence_aliases() {
         Err(AccountLinkError::InvalidReference),
     );
     assert_eq!(
-        participant.record_link_end("link_end_event_alpha", "unlink_evidence_alpha\u{3000}", 30_200),
+        participant.record_link_end(
+            "link_end_event_alpha",
+            "unlink_evidence_alpha\u{3000}",
+            30_200,
+        ),
         Err(AccountLinkError::InvalidReference),
     );
 }
@@ -90,7 +94,10 @@ fn participant_identity_preserves_visible_multilingual_references_exactly() {
     assert_eq!(participant.link_event_ref(), Some("link_event_연결"));
     assert_eq!(participant.linked_issuer_ref(), Some("issuer_키버스"));
     assert_eq!(participant.linked_subject_ref(), Some("subject_사용자"));
-    assert_eq!(participant.anonymous_proof_ref(), Some("anonymous_proof_익명"));
+    assert_eq!(
+        participant.anonymous_proof_ref(),
+        Some("anonymous_proof_익명")
+    );
     assert_eq!(
         participant.authenticated_proof_ref(),
         Some("authenticated_proof_인증")
