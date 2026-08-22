@@ -398,7 +398,7 @@ impl Display for ScoringContractError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyReference => formatter.write_str(
-                "scoring contract references must use exact non-empty opaque spellings without surrounding whitespace or unsafe control characters",
+                "scoring contract references must use exact non-empty opaque spellings; numeric-like values, surrounding whitespace, and unsafe control characters are not allowed",
             ),
             Self::UnboundResponseSnapshot => {
                 formatter.write_str("scoring requires a durable response snapshot reference")
