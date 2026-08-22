@@ -207,7 +207,7 @@ pub fn persist_requested_data_rights_with_propagation(
                 &[
                     &request.request_ref(),
                     &request.tenant_ref(),
-                    &normalized_reference(target.dependent_system_ref)
+                    &exact_reference(target.dependent_system_ref)
                         .ok_or(DataRightsPersistenceError::InvalidReference)?,
                     &target.event.source(),
                     &target.event.event_ref(),
@@ -243,7 +243,7 @@ pub fn persist_data_rights_identity_verification(
         request.state(),
         request
             .verification_evidence_ref()
-            .and_then(normalized_reference),
+            .and_then(exact_reference),
         request.verified_at_unix_ms(),
     ) {
         (DataRightsState::IdentityVerified, Some(evidence_ref), Some(verified_at_ms)) => {
@@ -411,7 +411,7 @@ fn validate_targets(
     let mut systems = Vec::with_capacity(targets.len());
     let mut event_refs = Vec::with_capacity(targets.len());
     for target in targets {
-        let system = normalized_reference(target.dependent_system_ref)
+        let system = exact_reference(target.dependent_system_ref)
             .ok_or(DataRightsPersistenceError::InvalidReference)?;
         if systems.contains(&system) {
             return Err(DataRightsPersistenceError::DuplicateTarget);
@@ -436,6 +436,11 @@ fn validate_targets(
         }
     }
     Ok(())
+}
+
+fn exact_reference(reference: &str) -> Option<&str> {
+    let normalized = normalized_reference(reference)?;
+    (normalized == reference).then_some(normalized)
 }
 
 fn stored_targets_match(
