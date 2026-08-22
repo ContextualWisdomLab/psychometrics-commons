@@ -421,6 +421,9 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
     contains_forbidden_public_release_marker(&compact)
         || contains_forbidden_credential_word(&normalized, &compact)
         || contains_forbidden_compound_identity_marker(&compact)
+        || FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
+            .iter()
+            .any(|marker| compact == *marker)
 }
 
 fn contains_forbidden_public_release_marker(compact: &str) -> bool {
