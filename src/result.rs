@@ -252,9 +252,9 @@ pub enum ResultSnapshotError {
 impl Display for ResultSnapshotError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyReference => formatter.write_str(
-                "result snapshot references must contain accepted opaque identity material",
-            ),
+            Self::EmptyReference => {
+                formatter.write_str("result snapshot references must not be empty")
+            }
             Self::InvalidReference => formatter.write_str(
                 "result snapshot references must use their exact accepted opaque spelling",
             ),
