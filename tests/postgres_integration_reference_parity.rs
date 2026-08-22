@@ -71,8 +71,7 @@ fn assert_scalar_parity_batch(client: &mut Client, references: &[String], expect
 
     assert!(
         mismatches.is_empty(),
-        "PostgreSQL reference classification diverged from Rust for {:?}",
-        mismatches
+        "PostgreSQL reference classification diverged from Rust for {mismatches:?}"
     );
 }
 
