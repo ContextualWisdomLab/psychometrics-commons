@@ -295,6 +295,16 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
     "token",
 ];
 
+const FORBIDDEN_COMPOUND_IDENTITY_MARKERS: &[&str] = &[
+    "identity",
+    "keyverse",
+    "linkage",
+    "linked",
+    "operational",
+    "pseudonym",
+    "subject",
+];
+
 const FORBIDDEN_CREDENTIAL_WORDS: &[&str] = &[
     "auth",
     "credential",
@@ -410,9 +420,7 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
 
     contains_forbidden_public_release_marker(&compact)
         || contains_forbidden_credential_word(&normalized, &compact)
-        || FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
-            .iter()
-            .any(|marker| compact == *marker)
+        || contains_forbidden_compound_identity_marker(&compact)
 }
 
 fn contains_forbidden_public_release_marker(compact: &str) -> bool {
@@ -424,6 +432,12 @@ fn contains_forbidden_public_release_marker(compact: &str) -> bool {
 
 fn contains_forbidden_research_namespace_prefix_marker(compact: &str) -> bool {
     FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS
+        .iter()
+        .any(|marker| compact.contains(marker))
+}
+
+fn contains_forbidden_compound_identity_marker(compact: &str) -> bool {
+    FORBIDDEN_COMPOUND_IDENTITY_MARKERS
         .iter()
         .any(|marker| compact.contains(marker))
 }
