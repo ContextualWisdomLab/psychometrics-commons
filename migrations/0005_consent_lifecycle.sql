@@ -3,6 +3,16 @@
 -- `char::is_numeric` is true. The generated int4multirange below is rustc 1.97's Unicode 17
 -- numeric set, so direct SQL cannot persist a numeric-only alias that later becomes corrupt when
 -- loaded through Rust. pg_unicode_fast supplies stable Unicode whitespace/control classification.
+DO $consent_encoding$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'consent reference migration requires UTF8 database encoding';
+    END IF;
+END
+$consent_encoding$;
+
 CREATE OR REPLACE FUNCTION consent_reference_is_valid(reference_text TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -101,6 +111,56 @@ CREATE TABLE IF NOT EXISTS consent_event (
         (consent_purpose <> 'research_contribution' AND research_scope_ref IS NULL)
     )
 );
+
+-- A legacy direct-SQL path may have persisted references accepted by an older, weaker CHECK.
+-- Do not silently rewrite immutable consent identities, synthesize replacement provenance, or drop
+-- evidence during constraint strengthening. Count every incompatible field and fail before dropping
+-- the owned constraints. The operator can then preserve/adjudicate the affected evidence through an
+-- explicit provenance-preserving repair and retry this idempotent migration.
+DO $consent_reference_upgrade_preflight$
+DECLARE
+    invalid_ledger_participant_ref BIGINT;
+    invalid_event_ref BIGINT;
+    invalid_consent_form_version_ref BIGINT;
+    invalid_research_scope_ref BIGINT;
+BEGIN
+    SELECT count(*)
+    INTO invalid_ledger_participant_ref
+    FROM consent_ledger
+    WHERE NOT consent_reference_is_valid(participant_ref);
+
+    SELECT
+        count(*) FILTER (WHERE NOT consent_reference_is_valid(event_ref)),
+        count(*) FILTER (WHERE NOT consent_reference_is_valid(consent_form_version_ref)),
+        count(*) FILTER (
+            WHERE research_scope_ref IS NOT NULL
+              AND NOT consent_reference_is_valid(research_scope_ref)
+        )
+    INTO
+        invalid_event_ref,
+        invalid_consent_form_version_ref,
+        invalid_research_scope_ref
+    FROM consent_event;
+
+    IF invalid_ledger_participant_ref > 0
+        OR invalid_event_ref > 0
+        OR invalid_consent_form_version_ref > 0
+        OR invalid_research_scope_ref > 0
+    THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '23514',
+            MESSAGE = 'consent reference migration blocked by legacy references outside the current opaque-reference contract',
+            DETAIL = format(
+                'invalid consent references: ledger_participant_ref=%s, event_ref=%s, consent_form_version_ref=%s, research_scope_ref=%s',
+                invalid_ledger_participant_ref,
+                invalid_event_ref,
+                invalid_consent_form_version_ref,
+                invalid_research_scope_ref
+            ),
+            HINT = 'preserve and adjudicate the affected consent evidence through an explicit provenance-preserving repair; do not synthesize or silently rewrite identifiers';
+    END IF;
+END
+$consent_reference_upgrade_preflight$;
 
 -- CREATE TABLE IF NOT EXISTS leaves same-named constraints untouched. Replace the owned reference
 -- constraints on every apply so upgrading an existing product schema closes the direct-SQL alias
