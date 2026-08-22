@@ -1,4 +1,4 @@
-//! Real PostgreSQL regression contract for restart-safe consent reconstruction.
+//! Real `PostgreSQL` regression contract for restart-safe consent reconstruction.
 //!
 //! Purpose-specific consent is append-only evidence. Reload must preserve the
 //! persisted event order for same-millisecond decisions and fail closed when
@@ -69,11 +69,11 @@ fn load(client: &mut Client, participant_ref: &str) -> Option<ConsentLedger> {
     loaded
 }
 
-fn research_event<'a>(
-    event_ref: &'a str,
+fn research_event(
+    event_ref: &str,
     decision: ConsentDecision,
     occurred_at_unix_ms: u64,
-) -> ConsentEventInput<'a> {
+) -> ConsentEventInput<'_> {
     ConsentEventInput {
         event_ref,
         purpose: ConsentPurpose::ResearchContribution,
