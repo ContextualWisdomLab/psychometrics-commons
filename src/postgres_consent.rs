@@ -181,14 +181,13 @@ fn reconstruct_loaded_events(
     for row in rows {
         match row.event_sequence {
             None if !saw_legacy_event && !saw_sequenced_event => saw_legacy_event = true,
-            None => return Err(ConsentPersistenceError::CorruptHistory),
             Some(sequence) if sequence == expected_sequence => {
                 saw_sequenced_event = true;
                 expected_sequence = expected_sequence
                     .checked_add(1)
                     .ok_or(ConsentPersistenceError::CorruptHistory)?;
             }
-            Some(_) => return Err(ConsentPersistenceError::CorruptHistory),
+            None | Some(_) => return Err(ConsentPersistenceError::CorruptHistory),
         }
 
         ledger
