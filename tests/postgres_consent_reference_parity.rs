@@ -104,7 +104,8 @@ fn rust_numeric_ranges() -> Vec<(u32, u32)> {
         if char::from_u32(codepoint).is_some_and(char::is_numeric) {
             range_start.get_or_insert(codepoint);
             previous_numeric = Some(codepoint);
-        } else if let (Some(start), Some(previous)) = (range_start.take(), previous_numeric.take()) {
+        } else if let (Some(start), Some(previous)) = (range_start.take(), previous_numeric.take())
+        {
             ranges.push((start, previous + 1));
         }
     }
