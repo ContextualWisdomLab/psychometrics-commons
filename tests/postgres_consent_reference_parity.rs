@@ -60,6 +60,65 @@ fn insert_event(
     )
 }
 
+fn migration_numeric_ranges() -> Vec<(u32, u32)> {
+    const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
+    const RANGE_PREFIX: &str = "ascii(character_text) <@ '";
+    const RANGE_SUFFIX: &str = "'::int4multirange";
+
+    let after_prefix = MIGRATION
+        .split_once(RANGE_PREFIX)
+        .expect("consent migration must declare the Rust numeric multirange")
+        .1;
+    let literal = after_prefix
+        .split_once(RANGE_SUFFIX)
+        .expect("consent migration numeric multirange must use int4multirange")
+        .0;
+    let body = literal
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .expect("consent migration numeric multirange must use canonical braces");
+
+    body.split("),")
+        .map(|range| {
+            let range = range
+                .strip_prefix('[')
+                .expect("numeric multirange entries must be inclusive-exclusive ranges");
+            let range = range.strip_suffix(')').unwrap_or(range);
+            let (start, end) = range
+                .split_once(',')
+                .expect("numeric multirange entries must have start and end bounds");
+            (
+                start.parse().expect("numeric range start must be u32"),
+                end.parse().expect("numeric range end must be u32"),
+            )
+        })
+        .collect()
+}
+
+fn rust_numeric_ranges() -> Vec<(u32, u32)> {
+    let mut ranges = Vec::new();
+    let mut range_start = None;
+    let mut previous_numeric = None;
+
+    for codepoint in 0..=0x10_FFFF {
+        if char::from_u32(codepoint).is_some_and(char::is_numeric) {
+            range_start.get_or_insert(codepoint);
+            previous_numeric = Some(codepoint);
+        } else if let (Some(start), Some(previous)) = (range_start.take(), previous_numeric.take()) {
+            ranges.push((start, previous + 1));
+        }
+    }
+    if let (Some(start), Some(previous)) = (range_start, previous_numeric) {
+        ranges.push((start, previous + 1));
+    }
+    ranges
+}
+
+#[test]
+fn migration_numeric_ranges_exactly_match_pinned_rust_unicode_tables() {
+    assert_eq!(migration_numeric_ranges(), rust_numeric_ranges());
+}
+
 #[test]
 fn participant_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
     let _guard = guard();
