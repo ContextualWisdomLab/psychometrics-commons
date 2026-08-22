@@ -121,6 +121,73 @@ fn migration_numeric_ranges_exactly_match_pinned_rust_unicode_tables() {
 }
 
 #[test]
+fn migration_declares_and_runs_under_the_required_utf8_database_encoding() {
+    let _guard = guard();
+    let mut client = client();
+    let encoding: String = client.query_one("SHOW server_encoding", &[]).unwrap().get(0);
+    assert_eq!(encoding, "UTF8");
+
+    const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
+    assert!(MIGRATION.contains("current_setting('server_encoding')"));
+    assert!(MIGRATION.contains("consent reference migration requires UTF8 database encoding"));
+}
+
+#[test]
+fn legacy_invalid_reference_blocks_upgrade_without_rewriting_consent_evidence() {
+    let _guard = guard();
+    let mut client = client();
+
+    client
+        .batch_execute(
+            "ALTER TABLE consent_ledger \
+                 DROP CONSTRAINT consent_ledger_participant_ref_format_check; \
+             ALTER TABLE consent_ledger \
+                 ADD CONSTRAINT consent_ledger_participant_ref_format_check \
+                 CHECK (participant_ref <> '' AND participant_ref !~ '^[0-9]+$'); \
+             INSERT INTO consent_ledger (participant_ref) VALUES ('½');",
+        )
+        .unwrap();
+
+    let error = apply_consent_migration(&mut client)
+        .expect_err("legacy Rust-invalid consent evidence must block constraint strengthening");
+    let database_error = error
+        .as_db_error()
+        .expect("legacy-data preflight must return a PostgreSQL error");
+    assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
+    assert_eq!(
+        database_error.message(),
+        "consent reference migration blocked by legacy references outside the current opaque-reference contract"
+    );
+    assert!(
+        database_error
+            .detail()
+            .is_some_and(|detail| detail.contains("ledger_participant_ref=1"))
+    );
+    assert!(!database_error.message().contains('½'));
+    assert!(!database_error.detail().unwrap_or_default().contains('½'));
+
+    let preserved: String = client
+        .query_one(
+            "SELECT participant_ref FROM consent_ledger WHERE participant_ref = '½'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(preserved, "½");
+
+    client
+        .execute("DELETE FROM consent_ledger WHERE participant_ref = '½'", &[])
+        .unwrap();
+    apply_consent_migration(&mut client)
+        .expect("migration must be retryable after operator-adjudicated legacy evidence is removed");
+
+    let error = client
+        .execute("INSERT INTO consent_ledger (participant_ref) VALUES ('½')", &[])
+        .expect_err("strengthened constraint must reject the legacy alias after successful retry");
+    assert_check(&error, "consent_ledger_participant_ref_format_check");
+}
+
+#[test]
 fn participant_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
     let _guard = guard();
     let mut client = client();
