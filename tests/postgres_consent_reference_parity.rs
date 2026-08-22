@@ -9,6 +9,7 @@ use psychometrics_commons_runtime::postgres_consent::apply_consent_migration;
 use std::sync::{Mutex, MutexGuard};
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
+const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
 
 fn guard() -> MutexGuard<'static, ()> {
     TEST_LOCK
@@ -61,7 +62,6 @@ fn insert_event(
 }
 
 fn migration_numeric_ranges() -> Vec<(u32, u32)> {
-    const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
     const RANGE_PREFIX: &str = "ascii(character_text) <@ '";
     const RANGE_SUFFIX: &str = "'::int4multirange";
 
@@ -130,7 +130,6 @@ fn migration_declares_and_runs_under_the_required_utf8_database_encoding() {
         .get(0);
     assert_eq!(encoding, "UTF8");
 
-    const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
     assert!(MIGRATION.contains("current_setting('server_encoding')"));
     assert!(MIGRATION.contains("consent reference migration requires UTF8 database encoding"));
 }
