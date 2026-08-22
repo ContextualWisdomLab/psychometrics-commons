@@ -57,7 +57,10 @@ fn dominant_extraversion_assigns_social_engagement_and_replays() {
     assert_eq!(first.assignment_key, identity().assignment_key().unwrap());
     assert_eq!(first.primary_style_ref, "style_social_engagement");
     assert!(first.adjacent_style_refs.is_empty());
-    assert_eq!(first.interpretation_unit_refs, vec!["unit_social_engagement"]);
+    assert_eq!(
+        first.interpretation_unit_refs,
+        vec!["unit_social_engagement"]
+    );
     assert_eq!(observations[0].score(), Some(1.80));
 }
 
@@ -66,20 +69,47 @@ fn opposite_extraversion_pole_assigns_reserved_focus() {
     let observations = big_five(-1.80, 0.10, -0.05, 0.00, 0.20);
     let assigned = assign_personality_style(&identity(), &observations).unwrap();
     assert_eq!(assigned.primary_style_ref, "style_reserved_focus");
-    assert_eq!(assigned.interpretation_unit_refs, vec!["unit_reserved_focus"]);
+    assert_eq!(
+        assigned.interpretation_unit_refs,
+        vec!["unit_reserved_focus"]
+    );
 }
 
 #[test]
 fn remaining_dominant_poles_follow_the_named_construct() {
     let cases = [
-        (big_five(0.10, 1.70, 0.00, 0.05, -0.10), "style_cooperative_regard"),
-        (big_five(0.10, -1.70, 0.00, 0.05, -0.10), "style_independent_challenge"),
-        (big_five(0.10, 0.00, 1.60, 0.05, -0.10), "style_structured_pursuit"),
-        (big_five(0.10, 0.00, -1.60, 0.05, -0.10), "style_flexible_adaptation"),
-        (big_five(0.10, 0.00, 0.05, 1.90, -0.10), "style_affective_sensitivity"),
-        (big_five(0.10, 0.00, 0.05, -1.90, -0.10), "style_even_affect"),
-        (big_five(0.10, 0.00, 0.05, 0.00, 1.75), "style_exploratory_openness"),
-        (big_five(0.10, 0.00, 0.05, 0.00, -1.75), "style_conventional_grounding"),
+        (
+            big_five(0.10, 1.70, 0.00, 0.05, -0.10),
+            "style_cooperative_regard",
+        ),
+        (
+            big_five(0.10, -1.70, 0.00, 0.05, -0.10),
+            "style_independent_challenge",
+        ),
+        (
+            big_five(0.10, 0.00, 1.60, 0.05, -0.10),
+            "style_structured_pursuit",
+        ),
+        (
+            big_five(0.10, 0.00, -1.60, 0.05, -0.10),
+            "style_flexible_adaptation",
+        ),
+        (
+            big_five(0.10, 0.00, 0.05, 1.90, -0.10),
+            "style_affective_sensitivity",
+        ),
+        (
+            big_five(0.10, 0.00, 0.05, -1.90, -0.10),
+            "style_even_affect",
+        ),
+        (
+            big_five(0.10, 0.00, 0.05, 0.00, 1.75),
+            "style_exploratory_openness",
+        ),
+        (
+            big_five(0.10, 0.00, 0.05, 0.00, -1.75),
+            "style_conventional_grounding",
+        ),
     ];
 
     for (observations, expected) in cases {
@@ -95,7 +125,10 @@ fn close_second_dimension_is_adjacent_not_a_forced_single_type() {
     let assigned = assign_personality_style(&identity(), &observations).unwrap();
 
     assert_eq!(assigned.primary_style_ref, "style_exploratory_openness");
-    assert_eq!(assigned.adjacent_style_refs, vec!["style_social_engagement"]);
+    assert_eq!(
+        assigned.adjacent_style_refs,
+        vec!["style_social_engagement"]
+    );
     assert_eq!(
         assigned.interpretation_unit_refs,
         vec!["unit_exploratory_openness", "unit_social_engagement"]
@@ -108,7 +141,10 @@ fn near_zero_profile_is_balanced_instead_of_a_forced_category() {
     let assigned = assign_personality_style(&identity(), &observations).unwrap();
     assert_eq!(assigned.primary_style_ref, "style_balanced_profile");
     assert!(assigned.adjacent_style_refs.is_empty());
-    assert_eq!(assigned.interpretation_unit_refs, vec!["unit_balanced_profile"]);
+    assert_eq!(
+        assigned.interpretation_unit_refs,
+        vec!["unit_balanced_profile"]
+    );
 }
 
 #[test]
@@ -167,8 +203,9 @@ fn mapping_fails_closed_for_version_identity_and_coverage_errors() {
         Err(StyleMappingError::InvalidIdentity)
     );
 
+    let missing = &observations[..4];
     assert_eq!(
-        assign_personality_style(&identity(), &observations[..4]),
+        assign_personality_style(&identity(), missing),
         Err(StyleMappingError::MissingRequiredConstruct)
     );
 
@@ -179,23 +216,47 @@ fn mapping_fails_closed_for_version_identity_and_coverage_errors() {
         Err(StyleMappingError::DuplicateConstruct)
     );
 
-    for disposition in [
-        ObservationDisposition::Abstained,
-        ObservationDisposition::Failed,
-        ObservationDisposition::Excluded,
-    ] {
-        let unscored = [
-            ScoreObservation::without_score("construct_extraversion", disposition).unwrap(),
-            scored("construct_agreeableness", 0.10, Some(0.20)),
-            scored("construct_conscientiousness", 0.00, Some(0.20)),
-            scored("construct_neuroticism", 0.05, Some(0.20)),
-            scored("construct_openness", 0.20, Some(0.20)),
-        ];
-        assert_eq!(
-            assign_personality_style(&identity(), &unscored),
-            Err(StyleMappingError::UnscoredConstruct)
-        );
-    }
+    let abstained = [
+        ScoreObservation::without_score(
+            "construct_extraversion",
+            ObservationDisposition::Abstained,
+        )
+        .unwrap(),
+        scored("construct_agreeableness", 0.10, Some(0.20)),
+        scored("construct_conscientiousness", 0.00, Some(0.20)),
+        scored("construct_neuroticism", 0.05, Some(0.20)),
+        scored("construct_openness", 0.20, Some(0.20)),
+    ];
+    assert_eq!(
+        assign_personality_style(&identity(), &abstained),
+        Err(StyleMappingError::UnscoredConstruct)
+    );
+
+    let failed = [
+        ScoreObservation::without_score("construct_extraversion", ObservationDisposition::Failed)
+            .unwrap(),
+        scored("construct_agreeableness", 0.10, Some(0.20)),
+        scored("construct_conscientiousness", 0.00, Some(0.20)),
+        scored("construct_neuroticism", 0.05, Some(0.20)),
+        scored("construct_openness", 0.20, Some(0.20)),
+    ];
+    assert_eq!(
+        assign_personality_style(&identity(), &failed),
+        Err(StyleMappingError::UnscoredConstruct)
+    );
+
+    let excluded = [
+        ScoreObservation::without_score("construct_extraversion", ObservationDisposition::Excluded)
+            .unwrap(),
+        scored("construct_agreeableness", 0.10, Some(0.20)),
+        scored("construct_conscientiousness", 0.00, Some(0.20)),
+        scored("construct_neuroticism", 0.05, Some(0.20)),
+        scored("construct_openness", 0.20, Some(0.20)),
+    ];
+    assert_eq!(
+        assign_personality_style(&identity(), &excluded),
+        Err(StyleMappingError::UnscoredConstruct)
+    );
 }
 
 #[test]
@@ -227,11 +288,26 @@ fn assigned_style_renders_through_the_deterministic_fallback() {
 #[test]
 fn style_mapping_errors_are_stable_and_safe() {
     let cases = [
-        (StyleMappingError::UnsupportedMappingVersion, "personality style mapping version is not supported"),
-        (StyleMappingError::InvalidIdentity, "style-assignment identity is invalid"),
-        (StyleMappingError::MissingRequiredConstruct, "personality style mapping requires all five scored Big Five constructs"),
-        (StyleMappingError::DuplicateConstruct, "personality style mapping rejects duplicate construct observations"),
-        (StyleMappingError::UnscoredConstruct, "personality style mapping requires a finite scored observation for each Big Five construct"),
+        (
+            StyleMappingError::UnsupportedMappingVersion,
+            "personality style mapping version is not supported",
+        ),
+        (
+            StyleMappingError::InvalidIdentity,
+            "style-assignment identity is invalid",
+        ),
+        (
+            StyleMappingError::MissingRequiredConstruct,
+            "personality style mapping requires all five scored Big Five constructs",
+        ),
+        (
+            StyleMappingError::DuplicateConstruct,
+            "personality style mapping rejects duplicate construct observations",
+        ),
+        (
+            StyleMappingError::UnscoredConstruct,
+            "personality style mapping requires a finite scored observation for each Big Five construct",
+        ),
     ];
     for (error, expected) in cases {
         assert_eq!(error.to_string(), expected);
