@@ -104,9 +104,8 @@ fn database_validator_matches_rust_scalar_classes_exhaustively() {
             continue;
         }
         references.push(character.to_string());
-        expected.push(
-            !character.is_numeric() && !character.is_whitespace() && !character.is_control(),
-        );
+        expected
+            .push(!character.is_numeric() && !character.is_whitespace() && !character.is_control());
         checked_scalars += 1;
 
         if references.len() == SCALAR_PARITY_BATCH_SIZE {
