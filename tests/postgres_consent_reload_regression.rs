@@ -9,8 +9,7 @@ use psychometrics_commons_runtime::consent::{
     ConsentDecision, ConsentEventInput, ConsentLedger, ConsentPurpose,
 };
 use psychometrics_commons_runtime::postgres_consent::{
-    apply_consent_migration, load_consent_ledger, persist_consent_ledger,
-    ConsentPersistenceError,
+    apply_consent_migration, load_consent_ledger, persist_consent_ledger, ConsentPersistenceError,
 };
 use std::sync::{Mutex, MutexGuard};
 
@@ -304,10 +303,7 @@ fn created_at_ties_do_not_override_sequence_and_noncanonical_aliases_fail_closed
 
     let mut alias_transaction = client.transaction().unwrap();
     assert!(matches!(
-        load_consent_ledger(
-            &mut alias_transaction,
-            " participant_consent_reload_tie"
-        ),
+        load_consent_ledger(&mut alias_transaction, " participant_consent_reload_tie"),
         Err(ConsentPersistenceError::InvalidReference)
     ));
     alias_transaction.rollback().unwrap();
@@ -428,7 +424,9 @@ fn single_legacy_event_upgrades_without_inventing_history_order() {
 
     let reloaded = load(&mut client, "participant_consent_reload_legacy_one")
         .expect("a sequenced tail may extend one unambiguous legacy event");
-    let snapshot = reloaded.snapshot_as("consent_snapshot_legacy_extended").unwrap();
+    let snapshot = reloaded
+        .snapshot_as("consent_snapshot_legacy_extended")
+        .unwrap();
     assert_eq!(reloaded, extended);
     assert!(!snapshot.is_granted(ConsentPurpose::ResearchContribution));
 
@@ -471,7 +469,9 @@ fn stored_label_time_and_relation_corruption_propagate_as_typed_failures() {
     persist(&mut client, &ledger);
 
     client
-        .batch_execute("ALTER TABLE consent_event DROP CONSTRAINT consent_event_purpose_value_check;")
+        .batch_execute(
+            "ALTER TABLE consent_event DROP CONSTRAINT consent_event_purpose_value_check;",
+        )
         .unwrap();
     client
         .execute(
@@ -493,7 +493,9 @@ fn stored_label_time_and_relation_corruption_propagate_as_typed_failures() {
         )
         .unwrap();
     client
-        .batch_execute("ALTER TABLE consent_event DROP CONSTRAINT consent_event_decision_value_check;")
+        .batch_execute(
+            "ALTER TABLE consent_event DROP CONSTRAINT consent_event_decision_value_check;",
+        )
         .unwrap();
     client
         .execute(
@@ -515,7 +517,9 @@ fn stored_label_time_and_relation_corruption_propagate_as_typed_failures() {
         )
         .unwrap();
     client
-        .batch_execute("ALTER TABLE consent_event DROP CONSTRAINT consent_event_occurred_at_positive_check;")
+        .batch_execute(
+            "ALTER TABLE consent_event DROP CONSTRAINT consent_event_occurred_at_positive_check;",
+        )
         .unwrap();
     client
         .execute(
