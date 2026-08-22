@@ -388,7 +388,7 @@ fn every_consent_purpose_and_decision_persists() {
 }
 
 #[test]
-fn consent_replay_select_failure_is_a_database_failure() {
+fn exact_consent_replay_does_not_issue_event_insert() {
     let _guard = consent_test_guard();
     let mut client = test_client();
     reset_consent_tables(&mut client);
@@ -409,26 +409,24 @@ fn consent_replay_select_failure_is_a_database_failure() {
         persist_consent_ledger(&mut transaction, &ledger).unwrap();
         transaction.commit().unwrap();
     }
-    client
-        .batch_execute(
-            "CREATE SCHEMA IF NOT EXISTS consent_event_failure_sink;\
-             CREATE OR REPLACE FUNCTION consent_event_redirect_after_insert() \
-             RETURNS trigger LANGUAGE plpgsql AS $$ \
-             BEGIN \
-                 PERFORM set_config('search_path', 'consent_event_failure_sink', false); \
-                 RETURN NULL; \
-             END $$; \
-             CREATE TRIGGER consent_event_redirect_after_insert \
-             AFTER INSERT ON consent_event \
-             FOR EACH STATEMENT EXECUTE FUNCTION consent_event_redirect_after_insert();",
-        )
-        .unwrap();
 
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_consent_ledger(&mut transaction, &ledger),
-        Err(ConsentPersistenceError::Database(_))
-    ));
+    transaction
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION consent_event_reject_insert() \
+             RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+                 RAISE EXCEPTION 'unexpected consent_event insert during exact replay'; \
+             END $$; \
+             CREATE TRIGGER consent_event_reject_insert \
+             BEFORE INSERT ON consent_event \
+             FOR EACH STATEMENT EXECUTE FUNCTION consent_event_reject_insert();",
+        )
+        .unwrap();
+    assert_eq!(
+        persist_consent_ledger(&mut transaction, &ledger).unwrap(),
+        ConsentPersistenceDisposition::Duplicate
+    );
     transaction.rollback().unwrap();
 }
 
