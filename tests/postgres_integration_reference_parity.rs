@@ -52,6 +52,24 @@ fn insert_outbox(client: &mut Client, event_ref: &str) -> Result<u64, postgres::
     )
 }
 
+fn constraint_oid(client: &mut Client, constraint_name: &str) -> i64 {
+    client
+        .query_one(
+            "SELECT constraint_row.oid::bigint \
+             FROM pg_catalog.pg_constraint AS constraint_row \
+             JOIN pg_catalog.pg_class AS relation_row \
+               ON relation_row.oid = constraint_row.conrelid \
+             JOIN pg_catalog.pg_namespace AS namespace_row \
+               ON namespace_row.oid = relation_row.relnamespace \
+             WHERE namespace_row.nspname = current_schema() \
+               AND relation_row.relname = 'integration_outbox' \
+               AND constraint_row.conname = $1",
+            &[&constraint_name],
+        )
+        .expect("the migrated outbox constraint must exist")
+        .get(0)
+}
+
 fn assert_scalar_parity_batch(client: &mut Client, references: &[String], expected: &[bool]) {
     let mismatches: Vec<String> = client
         .query_one(
@@ -153,6 +171,22 @@ fn delivery_attempt_and_inbox_identity_reject_unicode_numeric_aliases() {
             .expect_err("consumer references must preserve the Rust reference boundary");
         assert_check(&inbox_error);
     }
+}
+
+#[test]
+fn migration_reapplication_preserves_canonical_reference_constraints() {
+    let _guard = guard();
+    let mut client = client();
+    let constraint_name = "integration_outbox_event_ref_check";
+    let first_oid = constraint_oid(&mut client, constraint_name);
+
+    apply_integration_migration(&mut client).unwrap();
+
+    let second_oid = constraint_oid(&mut client, constraint_name);
+    assert_eq!(
+        second_oid, first_oid,
+        "an unchanged migration must not drop and revalidate a canonical CHECK constraint"
+    );
 }
 
 #[test]
