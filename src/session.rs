@@ -206,7 +206,8 @@ impl AssessmentSession {
         requested_locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
-        let session_ref = exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let session_ref =
+            exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
         let participant_ref =
             exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
@@ -246,7 +247,8 @@ impl AssessmentSession {
         requested_locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
-        let session_ref = exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let session_ref =
+            exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
         let participant_ref =
             exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
