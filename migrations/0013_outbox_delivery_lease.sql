@@ -13,60 +13,27 @@ ALTER TABLE integration_outbox
 ALTER TABLE integration_outbox
     ADD COLUMN IF NOT EXISTS delivery_lease_generation BIGINT NOT NULL DEFAULT 0;
 
+-- Lease identities are product-owned opaque references too. Drop the historical definitions on
+-- every apply so upgrades revalidate them through migration 0001's Rust-equivalent predicate.
+ALTER TABLE integration_outbox
+    DROP CONSTRAINT IF EXISTS integration_outbox_lease_worker_ref_format_check;
+ALTER TABLE integration_outbox
+    DROP CONSTRAINT IF EXISTS integration_outbox_lease_ref_format_check;
+ALTER TABLE integration_outbox
+    ADD CONSTRAINT integration_outbox_lease_worker_ref_format_check
+    CHECK (
+        lease_worker_ref IS NULL
+        OR integration_reference_is_valid(lease_worker_ref)
+    );
+ALTER TABLE integration_outbox
+    ADD CONSTRAINT integration_outbox_lease_ref_format_check
+    CHECK (
+        lease_ref IS NULL
+        OR integration_reference_is_valid(lease_ref)
+    );
+
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_row
-        JOIN pg_class AS relation_row
-          ON relation_row.oid = constraint_row.conrelid
-        JOIN pg_namespace AS namespace_row
-          ON namespace_row.oid = relation_row.relnamespace
-        WHERE constraint_row.conname = 'integration_outbox_lease_worker_ref_format_check'
-          AND relation_row.relname = 'integration_outbox'
-          AND namespace_row.nspname = current_schema()
-    ) THEN
-        ALTER TABLE integration_outbox
-            ADD CONSTRAINT integration_outbox_lease_worker_ref_format_check
-            CHECK (
-                lease_worker_ref IS NULL
-                OR (
-                    lease_worker_ref = btrim(lease_worker_ref)
-                    AND lease_worker_ref <> ''
-                    AND NOT (
-                        lease_worker_ref ~ '[[:digit:]]'
-                        AND lease_worker_ref ~ '^[[:digit:]+,.eE-]+$'
-                    )
-                )
-            );
-    END IF;
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint AS constraint_row
-        JOIN pg_class AS relation_row
-          ON relation_row.oid = constraint_row.conrelid
-        JOIN pg_namespace AS namespace_row
-          ON namespace_row.oid = relation_row.relnamespace
-        WHERE constraint_row.conname = 'integration_outbox_lease_ref_format_check'
-          AND relation_row.relname = 'integration_outbox'
-          AND namespace_row.nspname = current_schema()
-    ) THEN
-        ALTER TABLE integration_outbox
-            ADD CONSTRAINT integration_outbox_lease_ref_format_check
-            CHECK (
-                lease_ref IS NULL
-                OR (
-                    lease_ref = btrim(lease_ref)
-                    AND lease_ref <> ''
-                    AND NOT (
-                        lease_ref ~ '[[:digit:]]'
-                        AND lease_ref ~ '^[[:digit:]+,.eE-]+$'
-                    )
-                )
-            );
-    END IF;
-
     IF NOT EXISTS (
         SELECT 1
         FROM pg_constraint AS constraint_row
