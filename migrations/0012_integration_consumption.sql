@@ -1,48 +1,29 @@
+-- Inbox-consumption persistence depends on the integration schema and therefore reuses the
+-- integration-owned Rust-equivalent opaque-reference predicate installed by migration 0001.
 CREATE TABLE IF NOT EXISTS integration_consumption (
     consumer_ref TEXT NOT NULL
-        CHECK (
-            consumer_ref = btrim(consumer_ref)
-            AND consumer_ref <> ''
-            AND NOT (consumer_ref ~ '[[:digit:]]' AND consumer_ref ~ '^[[:digit:]+,.eE-]+$')
+        CONSTRAINT integration_consumption_consumer_ref_check CHECK (
+            integration_reference_is_valid(consumer_ref)
         ),
     source_ref TEXT NOT NULL
-        CHECK (
-            source_ref = btrim(source_ref)
-            AND source_ref <> ''
-            AND NOT (source_ref ~ '[[:digit:]]' AND source_ref ~ '^[[:digit:]+,.eE-]+$')
+        CONSTRAINT integration_consumption_source_ref_check CHECK (
+            integration_reference_is_valid(source_ref)
         ),
     tenant_ref TEXT NOT NULL
-        CHECK (
-            tenant_ref = btrim(tenant_ref)
-            AND tenant_ref <> ''
-            AND NOT (tenant_ref ~ '[[:digit:]]' AND tenant_ref ~ '^[[:digit:]+,.eE-]+$')
+        CONSTRAINT integration_consumption_tenant_ref_check CHECK (
+            integration_reference_is_valid(tenant_ref)
         ),
     source_event_ref TEXT NOT NULL
-        CHECK (
-            source_event_ref = btrim(source_event_ref)
-            AND source_event_ref <> ''
-            AND NOT (
-                source_event_ref ~ '[[:digit:]]'
-                AND source_event_ref ~ '^[[:digit:]+,.eE-]+$'
-            )
+        CONSTRAINT integration_consumption_source_event_ref_check CHECK (
+            integration_reference_is_valid(source_event_ref)
         ),
     consumption_ref TEXT NOT NULL
-        CHECK (
-            consumption_ref = btrim(consumption_ref)
-            AND consumption_ref <> ''
-            AND NOT (
-                consumption_ref ~ '[[:digit:]]'
-                AND consumption_ref ~ '^[[:digit:]+,.eE-]+$'
-            )
+        CONSTRAINT integration_consumption_consumption_ref_check CHECK (
+            integration_reference_is_valid(consumption_ref)
         ),
     side_effect_ref TEXT NOT NULL
-        CHECK (
-            side_effect_ref = btrim(side_effect_ref)
-            AND side_effect_ref <> ''
-            AND NOT (
-                side_effect_ref ~ '[[:digit:]]'
-                AND side_effect_ref ~ '^[[:digit:]+,.eE-]+$'
-            )
+        CONSTRAINT integration_consumption_side_effect_ref_check CHECK (
+            integration_reference_is_valid(side_effect_ref)
         ),
     consumption_state TEXT NOT NULL DEFAULT 'pending'
         CHECK (consumption_state IN ('pending', 'processing', 'completed', 'quarantined')),
@@ -56,20 +37,14 @@ CREATE TABLE IF NOT EXISTS integration_consumption (
             OR claim_expires_at_unix_ms > latest_event_at_unix_ms
         ),
     completion_evidence_ref TEXT
-        CHECK (completion_evidence_ref IS NULL OR (
-            completion_evidence_ref = btrim(completion_evidence_ref)
-            AND completion_evidence_ref <> ''
-            AND NOT (
-                completion_evidence_ref ~ '[[:digit:]]'
-                AND completion_evidence_ref ~ '^[[:digit:]+,.eE-]+$'
-            )
-        )),
+        CONSTRAINT integration_consumption_completion_evidence_ref_check CHECK (
+            completion_evidence_ref IS NULL
+            OR integration_reference_is_valid(completion_evidence_ref)
+        ),
     cause_code TEXT
-        CHECK (cause_code IS NULL OR (
-            cause_code = btrim(cause_code)
-            AND cause_code <> ''
-            AND NOT (cause_code ~ '[[:digit:]]' AND cause_code ~ '^[[:digit:]+,.eE-]+$')
-        )),
+        CONSTRAINT integration_consumption_cause_code_check CHECK (
+            cause_code IS NULL OR integration_reference_is_valid(cause_code)
+        ),
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (
         consumer_ref, source_ref, tenant_ref, source_event_ref, consumption_ref
@@ -109,3 +84,57 @@ CREATE TABLE IF NOT EXISTS integration_consumption (
         )
     )
 );
+
+-- CREATE TABLE IF NOT EXISTS preserves historical CHECK definitions. Replace every
+-- integration-consumption reference CHECK on each apply so an upgrade revalidates existing rows
+-- with the exact predicate already used by the outbox/inbox persistence boundary.
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_cause_code_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_completion_evidence_ref_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_side_effect_ref_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_consumption_ref_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_source_event_ref_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_tenant_ref_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_source_ref_check;
+ALTER TABLE integration_consumption
+    DROP CONSTRAINT IF EXISTS integration_consumption_consumer_ref_check;
+
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_consumer_ref_check CHECK (
+        integration_reference_is_valid(consumer_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_source_ref_check CHECK (
+        integration_reference_is_valid(source_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_tenant_ref_check CHECK (
+        integration_reference_is_valid(tenant_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_source_event_ref_check CHECK (
+        integration_reference_is_valid(source_event_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_consumption_ref_check CHECK (
+        integration_reference_is_valid(consumption_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_side_effect_ref_check CHECK (
+        integration_reference_is_valid(side_effect_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_completion_evidence_ref_check CHECK (
+        completion_evidence_ref IS NULL
+        OR integration_reference_is_valid(completion_evidence_ref)
+    );
+ALTER TABLE integration_consumption
+    ADD CONSTRAINT integration_consumption_cause_code_check CHECK (
+        cause_code IS NULL OR integration_reference_is_valid(cause_code)
+    );
