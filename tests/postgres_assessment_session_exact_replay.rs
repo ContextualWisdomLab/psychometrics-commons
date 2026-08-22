@@ -125,8 +125,8 @@ fn published_release() -> InstrumentRelease {
 
 fn assert_invalid_reference<T>(result: Result<T, AssessmentSessionStartError>) {
     assert!(matches!(
-        result,
-        Err(AssessmentSessionStartError::InvalidReference)
+        result.err(),
+        Some(AssessmentSessionStartError::InvalidReference)
     ));
 }
 
