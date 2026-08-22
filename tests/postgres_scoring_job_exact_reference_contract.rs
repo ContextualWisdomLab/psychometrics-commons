@@ -28,9 +28,9 @@ fn test_client(schema_name: &str) -> Client {
     client
 }
 
-fn assert_invalid_reference(error: ScoringJobPersistenceError) {
+fn assert_invalid_reference(error: &ScoringJobPersistenceError) {
     assert_eq!(
-        discriminant(&error),
+        discriminant(error),
         discriminant(&ScoringJobPersistenceError::InvalidReference)
     );
 }
@@ -54,7 +54,7 @@ fn persisted_claim_rejects_padded_job_worker_and_lease_aliases_before_lookup() {
             20_000,
         )
         .unwrap_err();
-        assert_invalid_reference(error);
+        assert_invalid_reference(&error);
         transaction.rollback().unwrap();
     }
 }
@@ -66,7 +66,7 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
     {
         let mut transaction = client.transaction().unwrap();
         assert_invalid_reference(
-            cancel_scoring_job(&mut transaction, "missing_scoring_job ").unwrap_err(),
+            &cancel_scoring_job(&mut transaction, "missing_scoring_job ").unwrap_err(),
         );
         transaction.rollback().unwrap();
     }
@@ -74,7 +74,7 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
     {
         let mut transaction = client.transaction().unwrap();
         assert_invalid_reference(
-            record_retryable_scoring_failure(
+            &record_retryable_scoring_failure(
                 &mut transaction,
                 "missing_scoring_job",
                 1,
@@ -90,7 +90,7 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
     {
         let mut transaction = client.transaction().unwrap();
         assert_invalid_reference(
-            record_permanent_scoring_failure(
+            &record_permanent_scoring_failure(
                 &mut transaction,
                 "missing_scoring_job",
                 1,
@@ -104,7 +104,7 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
 
     let mut transaction = client.transaction().unwrap();
     assert_invalid_reference(
-        record_successful_scoring_completion(
+        &record_successful_scoring_completion(
             &mut transaction,
             "missing_scoring_job",
             1,
