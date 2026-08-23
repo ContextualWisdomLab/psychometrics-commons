@@ -4,6 +4,10 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+fn legacy_schema_name(prefix: &str, process_id: u32, nonce: u128) -> String {
+    format!("{prefix}_{process_id}_{nonce}")
+}
+
 fn isolated_client() -> (Client, String) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
@@ -13,7 +17,7 @@ fn isolated_client() -> (Client, String) {
         .duration_since(UNIX_EPOCH)
         .expect("system clock must be after the Unix epoch")
         .as_nanos();
-    let schema_name = format!("result_snapshot_immutable_{}_{}", std::process::id(), nonce);
+    let schema_name = legacy_schema_name("result_snapshot_immutable", std::process::id(), nonce);
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
@@ -62,6 +66,17 @@ fn expect_rejected_statement(client: &mut Client, statement: &str) {
         .expect_err("immutable result evidence mutation must be rejected");
     assert_immutable_error(&error);
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn schema_name_must_not_repeat_after_process_restart() {
+    let before_restart = legacy_schema_name("result_snapshot_immutable", 4242, 1_000_000);
+    let after_restart = legacy_schema_name("result_snapshot_immutable", 4242, 1_000_000);
+
+    assert_ne!(
+        before_restart, after_restart,
+        "test schema identity must survive PID reuse and restarted process-local state"
+    );
 }
 
 #[test]
