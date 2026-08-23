@@ -38,6 +38,18 @@ fn assert_check(error: &postgres::Error) {
     assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
 }
 
+fn assert_check_constraint(error: &postgres::Error, expected_constraint: &str) {
+    assert_check(error);
+    let database_error = error
+        .as_db_error()
+        .expect("reference rejection must expose the violated CHECK constraint");
+    assert_eq!(
+        database_error.constraint(),
+        Some(expected_constraint),
+        "the invalid reference must fail on its own column constraint"
+    );
+}
+
 fn insert_outbox(client: &mut Client, event_ref: &str) -> Result<u64, postgres::Error> {
     client.execute(
         "INSERT INTO integration_outbox (\
@@ -245,6 +257,7 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
 
     let cases = [
         (
+            "integration_inbox_consumer_ref_check",
             "1e5",
             "source_alpha",
             "tenant_alpha",
@@ -252,6 +265,7 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
             "subject_alpha",
         ),
         (
+            "integration_inbox_source_ref_check",
             "consumer_alpha",
             "1e5",
             "tenant_alpha",
@@ -259,6 +273,7 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
             "subject_alpha",
         ),
         (
+            "integration_inbox_tenant_ref_check",
             "consumer_alpha",
             "source_alpha",
             "1e5",
@@ -266,6 +281,7 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
             "subject_alpha",
         ),
         (
+            "integration_inbox_source_event_ref_check",
             "consumer_alpha",
             "source_alpha",
             "tenant_alpha",
@@ -273,6 +289,7 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
             "subject_alpha",
         ),
         (
+            "integration_inbox_subject_ref_check",
             "consumer_alpha",
             "source_alpha",
             "tenant_alpha",
@@ -281,7 +298,15 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
         ),
     ];
 
-    for (consumer_ref, source_ref, tenant_ref, source_event_ref, subject_ref) in cases {
+    for (
+        expected_constraint,
+        consumer_ref,
+        source_ref,
+        tenant_ref,
+        source_event_ref,
+        subject_ref,
+    ) in cases
+    {
         let error = insert_inbox(
             &mut client,
             consumer_ref,
@@ -291,7 +316,7 @@ fn every_inbox_reference_column_enforces_the_shared_reference_boundary() {
             subject_ref,
         )
         .expect_err("every inbox identity/reference column must reject numeric-like aliases");
-        assert_check(&error);
+        assert_check_constraint(&error, expected_constraint);
     }
 }
 
