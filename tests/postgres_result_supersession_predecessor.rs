@@ -2,7 +2,7 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::{
-    apply_result_snapshot_migration, persist_result_snapshot,
+    apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceError,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
@@ -93,6 +93,30 @@ fn snapshot(result_snapshot_ref: &str, supersedes_ref: Option<&str>) -> ResultSn
     .unwrap()
 }
 
+fn insert_raw_snapshot(
+    client: &mut Client,
+    result_snapshot_ref: &str,
+    supersedes_ref: Option<&str>,
+) -> Result<u64, postgres::Error> {
+    client.execute(
+        "INSERT INTO result_snapshot (\
+             result_snapshot_ref, participant_ref, scoring_result_ref, session_ref, \
+             response_snapshot_ref, assessment_spec_ref, instrument_version_ref, \
+             scoring_version_ref, calibration_reference, norm_version_ref, \
+             requested_output_schema_version, narrative_version_ref, consent_snapshot_refs, \
+             engine_artifact_digest, created_at_unix_ms, supersedes_ref\
+         ) VALUES (\
+             $1, 'participant_result_supersession', 'scoring_result_result_supersession', \
+             'session_result_supersession', 'response_snapshot_result_supersession', \
+             'assessment_spec_big_five_v1', 'instrument_version_big_five_ko_v1', \
+             'scoring_version_big_five_v1', 'calibration_big_five_ko_v1', \
+             'norm_version_big_five_ko_v1', 1, 'narrative_version_big_five_v1', \
+             ARRAY['consent_snapshot_service_v1'], $2, 70000, $3\
+         )",
+        &[&result_snapshot_ref, &ENGINE_DIGEST, &supersedes_ref],
+    )
+}
+
 #[test]
 fn superseding_snapshot_requires_an_existing_predecessor() {
     let _guard = test_guard();
@@ -104,11 +128,80 @@ fn superseding_snapshot_requires_an_existing_predecessor() {
         Some("result_snapshot_missing_predecessor"),
     );
     let mut transaction = client.transaction().unwrap();
-    assert!(persist_result_snapshot(&mut transaction, &successor).is_err());
+    let error = persist_result_snapshot(&mut transaction, &successor).unwrap_err();
+    assert!(matches!(
+        error,
+        ResultSnapshotPersistenceError::InvalidSupersession
+    ));
+    assert_eq!(
+        error.to_string(),
+        "result snapshot supersession predecessor must already exist"
+    );
     let stored: i64 = transaction
         .query_one("SELECT COUNT(*)::bigint FROM result_snapshot", &[])
         .unwrap()
         .get(0);
     assert_eq!(stored, 0);
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn direct_sql_cannot_bypass_supersession_predecessor_integrity() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    assert!(insert_raw_snapshot(
+        &mut client,
+        "result_snapshot_sql_successor",
+        Some("result_snapshot_missing_predecessor")
+    )
+    .is_err());
+    let stored: i64 = client
+        .query_one("SELECT COUNT(*)::bigint FROM result_snapshot", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(stored, 0);
+}
+
+#[test]
+fn migration_reapply_rejects_historical_supersession_cycles() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    insert_raw_snapshot(&mut client, "result_snapshot_cycle_a", None).unwrap();
+    insert_raw_snapshot(
+        &mut client,
+        "result_snapshot_cycle_b",
+        Some("result_snapshot_cycle_a"),
+    )
+    .unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot DISABLE TRIGGER result_snapshot_immutable_guard;\
+             UPDATE result_snapshot \
+             SET supersedes_ref = 'result_snapshot_cycle_b' \
+             WHERE result_snapshot_ref = 'result_snapshot_cycle_a';\
+             ALTER TABLE result_snapshot ENABLE TRIGGER result_snapshot_immutable_guard;",
+        )
+        .unwrap();
+
+    assert!(apply_result_snapshot_migration(&mut client).is_err());
+}
+
+#[test]
+fn predecessor_lookup_database_failure_stays_typed_as_database_error() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    let successor = snapshot(
+        "result_snapshot_missing_relation",
+        Some("result_snapshot_predecessor"),
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_result_snapshot(&mut transaction, &successor),
+        Err(ResultSnapshotPersistenceError::Database(_))
+    ));
     transaction.rollback().unwrap();
 }
