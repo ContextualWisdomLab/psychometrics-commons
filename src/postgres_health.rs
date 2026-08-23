@@ -268,12 +268,10 @@ mod tests {
             CapabilityState::Unavailable
         );
         assert!(!unverified_encoding.accepts_new_work());
-        assert!(
-            !unverified_encoding
-                .capability_health()
-                .unwrap()
-                .accepts_new_work()
-        );
+        assert!(!unverified_encoding
+            .capability_health()
+            .unwrap()
+            .accepts_new_work());
 
         let read_only = classify_postgres_runtime(180_004, true);
         assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
