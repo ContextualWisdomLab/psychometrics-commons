@@ -25,6 +25,8 @@ pub enum PostgresRuntimeStatus {
     Ready,
     /// The `PostgreSQL` server major is outside the repository's validated support boundary.
     UnsupportedMajorVersion,
+    /// The caller did not provide evidence for the database encoding prerequisite.
+    UnverifiedServerEncoding,
     /// The database encoding is outside the repository's validated UTF8 support boundary.
     UnsupportedServerEncoding,
     /// The supported `PostgreSQL` server is currently read-only for this connection.
@@ -57,6 +59,7 @@ impl PostgresRuntimeHealth {
         match self.status {
             PostgresRuntimeStatus::Ready => CapabilityState::Available,
             PostgresRuntimeStatus::UnsupportedMajorVersion
+            | PostgresRuntimeStatus::UnverifiedServerEncoding
             | PostgresRuntimeStatus::UnsupportedServerEncoding
             | PostgresRuntimeStatus::ReadOnly => CapabilityState::Unavailable,
         }
@@ -85,9 +88,12 @@ impl PostgresRuntimeHealth {
 
 /// Classify server-version and transaction-read-only evidence without performing I/O.
 ///
-/// This compatibility helper is for callers that have already established the supported
-/// database encoding. Real connection readiness must use [`probe_postgres_runtime`], which
-/// also verifies `server_encoding = UTF8` before returning [`PostgresRuntimeStatus::Ready`].
+/// This helper does not receive the database encoding, so it cannot prove complete write
+/// readiness. It still reports an unsupported server major or read-only transaction when
+/// either condition is already known; otherwise it returns
+/// [`PostgresRuntimeStatus::UnverifiedServerEncoding`] and denies new work. Call
+/// [`classify_postgres_runtime_with_encoding`] when the canonical `server_encoding` value is
+/// already available, or use [`probe_postgres_runtime`] for real connection readiness.
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
 /// integer division yields the server major used by the repository support policy.
 #[must_use]
@@ -101,7 +107,7 @@ pub const fn classify_postgres_runtime(
     } else if transaction_read_only {
         PostgresRuntimeStatus::ReadOnly
     } else {
-        PostgresRuntimeStatus::Ready
+        PostgresRuntimeStatus::UnverifiedServerEncoding
     };
     PostgresRuntimeHealth {
         server_major_version,
@@ -248,12 +254,26 @@ mod tests {
 
     #[test]
     fn runtime_health_covers_supported_read_only_and_unsupported_states() {
-        let ready = classify_postgres_runtime(180_004, false);
-        assert_eq!(ready.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
-        assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
-        assert_eq!(ready.capability_state(), CapabilityState::Available);
-        assert!(ready.accepts_new_work());
-        assert!(ready.capability_health().unwrap().accepts_new_work());
+        let unverified_encoding = classify_postgres_runtime(180_004, false);
+        assert_eq!(
+            unverified_encoding.server_major_version(),
+            SUPPORTED_POSTGRES_MAJOR
+        );
+        assert_eq!(
+            unverified_encoding.status(),
+            PostgresRuntimeStatus::UnverifiedServerEncoding
+        );
+        assert_eq!(
+            unverified_encoding.capability_state(),
+            CapabilityState::Unavailable
+        );
+        assert!(!unverified_encoding.accepts_new_work());
+        assert!(
+            !unverified_encoding
+                .capability_health()
+                .unwrap()
+                .accepts_new_work()
+        );
 
         let read_only = classify_postgres_runtime(180_004, true);
         assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
