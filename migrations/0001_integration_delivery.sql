@@ -107,49 +107,95 @@ CREATE TABLE IF NOT EXISTS integration_inbox (
     PRIMARY KEY (consumer_ref, source_ref, tenant_ref, source_event_ref)
 );
 
--- CREATE TABLE IF NOT EXISTS leaves same-named historical CHECK constraints untouched. Reapply the
--- exact owned reference definitions so upgrading an existing schema closes the direct-SQL alias gap.
-ALTER TABLE integration_outbox DROP CONSTRAINT IF EXISTS integration_outbox_event_ref_check;
-ALTER TABLE integration_outbox DROP CONSTRAINT IF EXISTS integration_outbox_source_ref_check;
-ALTER TABLE integration_outbox DROP CONSTRAINT IF EXISTS integration_outbox_tenant_ref_check;
-ALTER TABLE integration_outbox DROP CONSTRAINT IF EXISTS integration_outbox_subject_ref_check;
-ALTER TABLE integration_outbox DROP CONSTRAINT IF EXISTS integration_outbox_correlation_ref_check;
-ALTER TABLE integration_outbox DROP CONSTRAINT IF EXISTS integration_outbox_causation_ref_check;
-ALTER TABLE integration_delivery_attempt
-    DROP CONSTRAINT IF EXISTS integration_delivery_attempt_attempt_ref_check;
-ALTER TABLE integration_delivery_attempt
-    DROP CONSTRAINT IF EXISTS integration_delivery_attempt_cause_code_check;
-ALTER TABLE integration_inbox DROP CONSTRAINT IF EXISTS integration_inbox_consumer_ref_check;
-ALTER TABLE integration_inbox DROP CONSTRAINT IF EXISTS integration_inbox_source_ref_check;
-ALTER TABLE integration_inbox DROP CONSTRAINT IF EXISTS integration_inbox_tenant_ref_check;
-ALTER TABLE integration_inbox DROP CONSTRAINT IF EXISTS integration_inbox_source_event_ref_check;
-ALTER TABLE integration_inbox DROP CONSTRAINT IF EXISTS integration_inbox_subject_ref_check;
+-- CREATE TABLE IF NOT EXISTS leaves same-named historical CHECK constraints untouched. The repair
+-- marker is derived from PostgreSQL's installed validator definition, so CREATE OR REPLACE FUNCTION
+-- above automatically changes the marker whenever validator semantics or properties change. A
+-- newly created or historically weakened CHECK is rebuilt and tagged, while unchanged definitions
+-- keep the canonical constraint object stable on later reapplications.
+DO $integration_reference_constraints$
+DECLARE
+    constraint_spec RECORD;
+    existing_constraint_oid OID;
+    canonical_marker CONSTANT TEXT :=
+        'psychometrics-commons:integration-reference:'
+        || pg_catalog.md5(
+            pg_catalog.pg_get_functiondef(
+                pg_catalog.to_regprocedure(
+                    pg_catalog.format(
+                        '%I.integration_reference_is_valid(text)',
+                        pg_catalog.current_schema()
+                    )
+                )
+            )
+        );
+BEGIN
+    FOR constraint_spec IN
+        SELECT *
+        FROM (VALUES
+            ('integration_outbox', 'integration_outbox_event_ref_check',
+             'CHECK (integration_reference_is_valid(event_ref))'),
+            ('integration_outbox', 'integration_outbox_source_ref_check',
+             'CHECK (integration_reference_is_valid(source_ref))'),
+            ('integration_outbox', 'integration_outbox_tenant_ref_check',
+             'CHECK (integration_reference_is_valid(tenant_ref))'),
+            ('integration_outbox', 'integration_outbox_subject_ref_check',
+             'CHECK (integration_reference_is_valid(subject_ref))'),
+            ('integration_outbox', 'integration_outbox_correlation_ref_check',
+             'CHECK (integration_reference_is_valid(correlation_ref))'),
+            ('integration_outbox', 'integration_outbox_causation_ref_check',
+             'CHECK (causation_ref IS NULL OR integration_reference_is_valid(causation_ref))'),
+            ('integration_delivery_attempt', 'integration_delivery_attempt_attempt_ref_check',
+             'CHECK (integration_reference_is_valid(attempt_ref))'),
+            ('integration_delivery_attempt', 'integration_delivery_attempt_cause_code_check',
+             'CHECK (cause_code IS NULL OR integration_reference_is_valid(cause_code))'),
+            ('integration_inbox', 'integration_inbox_consumer_ref_check',
+             'CHECK (integration_reference_is_valid(consumer_ref))'),
+            ('integration_inbox', 'integration_inbox_source_ref_check',
+             'CHECK (integration_reference_is_valid(source_ref))'),
+            ('integration_inbox', 'integration_inbox_tenant_ref_check',
+             'CHECK (integration_reference_is_valid(tenant_ref))'),
+            ('integration_inbox', 'integration_inbox_source_event_ref_check',
+             'CHECK (integration_reference_is_valid(source_event_ref))'),
+            ('integration_inbox', 'integration_inbox_subject_ref_check',
+             'CHECK (integration_reference_is_valid(subject_ref))')
+        ) AS owned_constraint(relation_name, constraint_name, constraint_definition)
+    LOOP
+        SELECT constraint_row.oid
+        INTO existing_constraint_oid
+        FROM pg_catalog.pg_constraint AS constraint_row
+        JOIN pg_catalog.pg_class AS relation_row
+          ON relation_row.oid = constraint_row.conrelid
+        JOIN pg_catalog.pg_namespace AS namespace_row
+          ON namespace_row.oid = relation_row.relnamespace
+        WHERE namespace_row.nspname = current_schema()
+          AND relation_row.relname = constraint_spec.relation_name
+          AND constraint_row.conname = constraint_spec.constraint_name;
 
-ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_event_ref_check
-    CHECK (integration_reference_is_valid(event_ref));
-ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_source_ref_check
-    CHECK (integration_reference_is_valid(source_ref));
-ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_tenant_ref_check
-    CHECK (integration_reference_is_valid(tenant_ref));
-ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_subject_ref_check
-    CHECK (integration_reference_is_valid(subject_ref));
-ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_correlation_ref_check
-    CHECK (integration_reference_is_valid(correlation_ref));
-ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_causation_ref_check
-    CHECK (causation_ref IS NULL OR integration_reference_is_valid(causation_ref));
-ALTER TABLE integration_delivery_attempt
-    ADD CONSTRAINT integration_delivery_attempt_attempt_ref_check
-    CHECK (integration_reference_is_valid(attempt_ref));
-ALTER TABLE integration_delivery_attempt
-    ADD CONSTRAINT integration_delivery_attempt_cause_code_check
-    CHECK (cause_code IS NULL OR integration_reference_is_valid(cause_code));
-ALTER TABLE integration_inbox ADD CONSTRAINT integration_inbox_consumer_ref_check
-    CHECK (integration_reference_is_valid(consumer_ref));
-ALTER TABLE integration_inbox ADD CONSTRAINT integration_inbox_source_ref_check
-    CHECK (integration_reference_is_valid(source_ref));
-ALTER TABLE integration_inbox ADD CONSTRAINT integration_inbox_tenant_ref_check
-    CHECK (integration_reference_is_valid(tenant_ref));
-ALTER TABLE integration_inbox ADD CONSTRAINT integration_inbox_source_event_ref_check
-    CHECK (integration_reference_is_valid(source_event_ref));
-ALTER TABLE integration_inbox ADD CONSTRAINT integration_inbox_subject_ref_check
-    CHECK (integration_reference_is_valid(subject_ref));
+        IF existing_constraint_oid IS NULL
+           OR pg_catalog.obj_description(existing_constraint_oid, 'pg_constraint')
+              IS DISTINCT FROM canonical_marker
+        THEN
+            IF existing_constraint_oid IS NOT NULL THEN
+                EXECUTE format(
+                    'ALTER TABLE %I DROP CONSTRAINT %I',
+                    constraint_spec.relation_name,
+                    constraint_spec.constraint_name
+                );
+            END IF;
+
+            EXECUTE format(
+                'ALTER TABLE %I ADD CONSTRAINT %I %s',
+                constraint_spec.relation_name,
+                constraint_spec.constraint_name,
+                constraint_spec.constraint_definition
+            );
+            EXECUTE format(
+                'COMMENT ON CONSTRAINT %I ON %I IS %L',
+                constraint_spec.constraint_name,
+                constraint_spec.relation_name,
+                canonical_marker
+            );
+        END IF;
+    END LOOP;
+END
+$integration_reference_constraints$;
