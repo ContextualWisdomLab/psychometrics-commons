@@ -2,7 +2,8 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::{
-    apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceError,
+    apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
+    ResultSnapshotPersistenceError,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
@@ -146,6 +147,29 @@ fn superseding_snapshot_requires_an_existing_predecessor() {
 }
 
 #[test]
+fn predecessor_inserted_earlier_in_the_same_transaction_is_visible() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    let predecessor = snapshot("result_snapshot_same_transaction_predecessor", None);
+    let successor = snapshot(
+        "result_snapshot_same_transaction_successor",
+        Some("result_snapshot_same_transaction_predecessor"),
+    );
+    let mut transaction = client.transaction().unwrap();
+    assert_eq!(
+        persist_result_snapshot(&mut transaction, &predecessor).unwrap(),
+        ResultSnapshotPersistenceDisposition::Inserted
+    );
+    assert_eq!(
+        persist_result_snapshot(&mut transaction, &successor).unwrap(),
+        ResultSnapshotPersistenceDisposition::Inserted
+    );
+    transaction.rollback().unwrap();
+}
+
+#[test]
 fn direct_sql_cannot_bypass_supersession_predecessor_integrity() {
     let _guard = test_guard();
     let mut client = test_client();
@@ -165,7 +189,7 @@ fn direct_sql_cannot_bypass_supersession_predecessor_integrity() {
 }
 
 #[test]
-fn migration_reapply_rejects_historical_supersession_cycles() {
+fn migration_reapply_rejects_historical_supersession_cycles_with_check_violation() {
     let _guard = test_guard();
     let mut client = test_client();
     apply_result_snapshot_migration(&mut client).unwrap();
@@ -187,7 +211,29 @@ fn migration_reapply_rejects_historical_supersession_cycles() {
         )
         .unwrap();
 
-    assert!(apply_result_snapshot_migration(&mut client).is_err());
+    let error = apply_result_snapshot_migration(&mut client).unwrap_err();
+    assert_eq!(error.code().map(|code| code.code()), Some("23514"));
+}
+
+#[test]
+fn migration_reapply_rejects_historical_dangling_predecessor_with_foreign_key_violation() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_result_snapshot_migration(&mut client).unwrap();
+
+    insert_raw_snapshot(&mut client, "result_snapshot_dangling", None).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot DISABLE TRIGGER result_snapshot_immutable_guard;\
+             UPDATE result_snapshot \
+             SET supersedes_ref = 'result_snapshot_missing_historical_predecessor' \
+             WHERE result_snapshot_ref = 'result_snapshot_dangling';\
+             ALTER TABLE result_snapshot ENABLE TRIGGER result_snapshot_immutable_guard;",
+        )
+        .unwrap();
+
+    let error = apply_result_snapshot_migration(&mut client).unwrap_err();
+    assert_eq!(error.code().map(|code| code.code()), Some("23503"));
 }
 
 #[test]
