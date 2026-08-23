@@ -17,6 +17,35 @@ fn executable_line(line: &str) -> &str {
         .trim()
 }
 
+fn transaction_control_is_rejected(sql: &str) -> bool {
+    let statement = executable_line(sql).to_ascii_uppercase();
+    statement.starts_with("BEGIN;")
+        || statement.starts_with("START TRANSACTION")
+        || statement.starts_with("COMMIT;")
+        || statement.starts_with("ROLLBACK;")
+}
+
+#[test]
+fn transaction_control_variants_are_rejected_without_flagging_do_blocks() {
+    for sql in [
+        "BEGIN TRANSACTION;",
+        "BEGIN WORK;",
+        "COMMIT WORK;",
+        "ROLLBACK WORK;",
+        "CREATE TABLE example_table (id INTEGER); BEGIN;",
+    ] {
+        assert!(
+            transaction_control_is_rejected(sql),
+            "top-level transaction control must be rejected even when it is a PostgreSQL syntax variant or follows another statement: {sql}"
+        );
+    }
+
+    assert!(
+        !transaction_control_is_rejected("DO $$ BEGIN PERFORM 1; END $$;"),
+        "PL/pgSQL BEGIN/END inside a DO dollar-quoted body is not top-level transaction control"
+    );
+}
+
 #[test]
 fn integration_migration_fragments_cannot_break_single_batch_atomicity() {
     for (name, sql) in MIGRATIONS {
@@ -30,12 +59,8 @@ fn integration_migration_fragments_cannot_break_single_batch_atomicity() {
             .map(executable_line)
             .filter(|line| !line.is_empty())
         {
-            let statement = line.to_ascii_uppercase();
             assert!(
-                !statement.starts_with("BEGIN;")
-                    && !statement.starts_with("START TRANSACTION")
-                    && !statement.starts_with("COMMIT;")
-                    && !statement.starts_with("ROLLBACK;"),
+                !transaction_control_is_rejected(line),
                 "{name} must not contain top-level transaction control because apply_integration_migration relies on one simple-query batch: {line}"
             );
         }
