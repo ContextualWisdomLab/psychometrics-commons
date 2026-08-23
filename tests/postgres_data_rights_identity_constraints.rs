@@ -64,14 +64,14 @@ fn schema_client() -> SchemaClient {
 }
 
 #[test]
-fn database_transaction_identity_prevents_schema_name_reuse() {
+fn database_transaction_identity_is_unique_per_fixture_allocation() {
     let first = schema_client();
     let second = schema_client();
 
     assert_ne!(
         first.schema_name(),
         second.schema_name(),
-        "schema isolation must not depend on PID lifetime"
+        "independent fixture allocations must receive distinct database transaction identities"
     );
 }
 
