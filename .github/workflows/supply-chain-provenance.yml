@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           cd target/package
-          sha256sum *.crate > SHA256SUMS
+          sha256sum -- *.crate > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Preserve exact package evidence
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
