@@ -15,22 +15,25 @@ fn test_client() -> Client {
 }
 
 #[test]
-fn supported_writable_postgres_is_ready_for_new_operational_work() {
+fn classifier_without_encoding_evidence_fails_write_readiness_closed() {
     let health = classify_postgres_runtime(180_002, false);
 
     assert_eq!(SUPPORTED_POSTGRES_MAJOR, 18);
     assert_eq!(health.server_major_version(), 18);
-    assert_eq!(health.status(), PostgresRuntimeStatus::Ready);
-    assert_eq!(health.capability_state(), CapabilityState::Available);
-    assert!(health.accepts_new_work());
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnverifiedServerEncoding
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
 
     let capability = health.capability_health().unwrap();
     assert_eq!(
         capability.capability_ref(),
         POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF
     );
-    assert_eq!(capability.state(), CapabilityState::Available);
-    assert!(capability.accepts_new_work());
+    assert_eq!(capability.state(), CapabilityState::Unavailable);
+    assert!(!capability.accepts_new_work());
 }
 
 #[test]
