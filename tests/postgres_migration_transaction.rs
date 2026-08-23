@@ -1,6 +1,7 @@
 //! `PostgreSQL` migration-chain acceptance for transactional rollback safety.
 
 use postgres::{Client, NoTls, Transaction};
+use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -143,4 +144,64 @@ fn complete_migration_chain_reapplies_without_schema_drift() {
         !schema_exists(&mut client, REAPPLY_SCHEMA),
         "reapply-test schema cleanup must succeed"
     );
+}
+
+#[test]
+fn product_integration_apply_is_atomic_when_the_lease_phase_fails() {
+    let mut client = test_client();
+    let transaction_id: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .unwrap()
+        .get(0);
+    let schema = format!("integration_apply_atomicity_{transaction_id}");
+
+    client
+        .batch_execute(&format!("CREATE SCHEMA {schema}; SET search_path TO {schema}"))
+        .unwrap();
+    client
+        .batch_execute(include_str!("../migrations/0001_integration_delivery.sql"))
+        .unwrap();
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION integration_reference_is_valid(reference_text TEXT)
+             RETURNS BOOLEAN
+             LANGUAGE sql
+             IMMUTABLE
+             STRICT
+             PARALLEL SAFE
+             SET search_path = pg_catalog
+             AS $sentinel$ SELECT TRUE $sentinel$;
+             ALTER TABLE integration_outbox ADD COLUMN lease_worker_ref JSONB;",
+        )
+        .unwrap();
+
+    let sentinel_definition: String = client
+        .query_one(
+            "SELECT pg_get_functiondef('integration_reference_is_valid(text)'::regprocedure)",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+
+    assert!(
+        apply_integration_migration(&mut client).is_err(),
+        "the deliberately incompatible lease column must make the lease phase fail"
+    );
+
+    let definition_after_failure: String = client
+        .query_one(
+            "SELECT pg_get_functiondef('integration_reference_is_valid(text)'::regprocedure)",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(
+        definition_after_failure, sentinel_definition,
+        "a failed lease phase must roll back the first integration-migration phase"
+    );
+
+    client.batch_execute("SET search_path TO public").unwrap();
+    client
+        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .unwrap();
 }
