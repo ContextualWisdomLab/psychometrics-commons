@@ -1,4 +1,4 @@
-//! Direct-SQL lease references must preserve the shared opaque-reference boundary.
+//! These tests verify that direct SQL rejects invalid worker and lease reference values.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
