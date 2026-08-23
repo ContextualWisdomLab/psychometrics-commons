@@ -57,10 +57,11 @@ fn provenance(
 }
 
 fn evidence_with_rights(
+    publication_evidence_ref: &str,
     rights_refs: &[&str],
 ) -> Result<PublicationEvidenceRecord, InstrumentReleaseError> {
     PublicationEvidenceRecord::new(
-        "publication_evidence_big_five_ko_v1",
+        publication_evidence_ref,
         "evidence_policy_self_reflection_v1",
         "release_big_five_ko_v1",
         "instrument_version_big_five_ko_v1",
@@ -110,8 +111,20 @@ fn publication_evidence_rejects_whitespace_aliases() {
         provenance(" population_general_adult_v1"),
         Err(InstrumentReleaseError::InvalidReference)
     );
+    for publication_evidence_ref in [
+        " publication_evidence_big_five_ko_v1",
+        "publication_evidence_big_five_ko_v1 ",
+    ] {
+        assert_eq!(
+            evidence_with_rights(publication_evidence_ref, &["rights_ipip_big_five_v1"]),
+            Err(InstrumentReleaseError::InvalidReference)
+        );
+    }
     assert_eq!(
-        evidence_with_rights(&["rights_ipip_big_five_v1 "]),
+        evidence_with_rights(
+            "publication_evidence_big_five_ko_v1",
+            &["rights_ipip_big_five_v1 "],
+        ),
         Err(InstrumentReleaseError::InvalidReference)
     );
 }
