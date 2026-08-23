@@ -7,7 +7,7 @@
 - Supersedes: none
 - Superseded by: none
 - Current/as-built status: protected main contains PostgreSQL 18.x migrations and adapters for integration delivery/consumption, scoring jobs and requests, assessment sessions, item delivery, consent, instrument releases, response/result snapshots, and data-rights evidence; active PR #318 tightens integration-reference parity, migration atomicity, and PostgreSQL UTF8 readiness but is not protected-main truth until merged
-- Target status: upstream PostgreSQL 18.x UTF8 operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
+- Target status: upstream PostgreSQL 18.x UTF8 writable operational persistence with real-database concurrency/crash/recovery evidence and transactional outbox/inbox semantics
 - Migration status: protected main has multiple bounded product migrations; each additional or hardened persistence slice must preserve this ADR's ownership, transaction, compatibility, and evidence requirements without synthetic provenance backfills
 
 ## Context
@@ -28,6 +28,7 @@ The TRD and ADR-0011 already require service-owned databases and transactional o
 8. The first integration-evidence adapter uses the scoped outbox identity `(source_ref, tenant_ref, event_ref)`. `event_ref` is not assumed globally unique across sources or tenants.
 9. The first integration-evidence adapter's insert-then-inspect duplicate classifier supports PostgreSQL **READ COMMITTED** isolation only. The adapter verifies the effective transaction isolation and fails closed on `REPEATABLE READ`, `SERIALIZABLE`, or an unknown value. A future implementation may support stronger isolation only if its SQL algorithm and real concurrent replay tests prove identical duplicate-versus-conflict semantics.
 10. Operational PostgreSQL databases must report `server_encoding = 'UTF8'` before state-changing readiness is declared. Product-owned Unicode reference constraints may use PostgreSQL 18's built-in `pg_unicode_fast` collation to align whitespace/control classification with the Rust reference boundary; because that collation is available only for UTF8 databases, non-UTF8 databases fail readiness closed rather than silently running a weaker persistence contract.
+11. State-changing readiness requires a **writable** PostgreSQL transaction context. The runtime verifies `transaction_read_only = off` and fails closed on a read-only database or replica; read-only connectivity may support separately bounded observation/diagnostic paths, but it is never evidence that mutation-capable product readiness is healthy.
 
 ## Ownership and boundaries
 
@@ -49,14 +50,15 @@ The first persistence adapter targets upstream PostgreSQL 18.x only and relies o
 - transaction-scoped outbox creation;
 - `READ COMMITTED` statement-snapshot refresh for the first integration-evidence adapter's two-statement insert/replay-classification sequence;
 - UTF8 server encoding for product-owned Unicode-aware reference validation;
+- writable transaction mode for state-changing runtime readiness;
 - the PostgreSQL 18 built-in `pg_unicode_fast` collation where a migration explicitly requires Unicode-aware pattern classification;
 - JSON/JSONB only where a reviewed schema requires it, never as an excuse to avoid versioned typed contracts;
 - transactional DDL characteristics only where migrations explicitly depend on them;
 - indexes and partial/expression indexes only when the migration and supported-query contract require them.
 
-The integration-evidence adapter verifies `SHOW transaction_isolation` before a persistence effect after deterministic input validation. State-changing runtime readiness also verifies PostgreSQL major-version compatibility and `SHOW server_encoding = 'UTF8'`; a non-UTF8 database is incompatible with migrations whose reference constraints use `pg_unicode_fast` and must fail closed before product writes.
+The integration-evidence adapter verifies `SHOW transaction_isolation` before a persistence effect after deterministic input validation. State-changing runtime readiness also verifies PostgreSQL major-version compatibility, `SHOW server_encoding = 'UTF8'`, and `SHOW transaction_read_only = 'off'`; a non-UTF8 database is incompatible with migrations whose reference constraints use `pg_unicode_fast`, while a read-only database cannot safely perform the product's mutation contract. Either condition fails closed before product writes.
 
-Every supported minor version is tested through the same real-database migration/concurrency/crash suite. PostgreSQL 19 or any other major version is not added merely because it exists; support requires a compatibility PR that runs the full persistence acceptance suite and updates the supported-version contract. Cloud products or forks may be added later only with an explicit capability matrix covering transaction isolation, locking, constraints, UTF8/Unicode classification, JSON semantics, migrations/DDL, indexes, backup/restore, connection/proxy behavior, and the exact features this product uses.
+Every supported minor version is tested through the same real-database migration/concurrency/crash suite. PostgreSQL 19 or any other major version is not added merely because it exists; support requires a compatibility PR that runs the full persistence acceptance suite and updates the supported-version contract. Cloud products or forks may be added later only with an explicit capability matrix covering transaction isolation, locking, constraints, UTF8/Unicode classification, write availability, JSON semantics, migrations/DDL, indexes, backup/restore, connection/proxy behavior, and the exact features this product uses.
 
 ## Logical schema ownership
 
@@ -96,7 +98,7 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
-A scoring worker that does not already know the next job identity claims the oldest due queued or retry-scheduled `scoring_job_state` row under `READ COMMITTED` with `FOR UPDATE SKIP LOCKED` (PostgreSQL Global Development Group, 2026a, 2026b). The claim returns the stored `scoring_request_ref` and fencing lease, or `None` when no job is due. Two concurrent pollers cannot both receive the same row. A retry-scheduled row is skipped until its persisted due time. The worker is still not invoked inside the session-completion transaction.
+A scoring worker that does not already know the next job identity claims the oldest due queued or retry-scheduled `scoring_job_state` row under `READ COMMITTED` with `FOR UPDATE SKIP LOCKED` (PostgreSQL Global Development Group, 2026c, 2026d). The claim returns the stored `scoring_request_ref` and fencing lease, or `None` when no job is due. Two concurrent pollers cannot both receive the same row. A retry-scheduled row is skipped until its persisted due time. The worker is still not invoked inside the session-completion transaction.
 
 ### Integration outbox enqueue
 
@@ -174,6 +176,7 @@ Each product migration must prove its owned identities, foreign keys, tenant/sou
 - Transaction failure: no partial domain transition and no orphan outbox event.
 - Unsupported transaction isolation for an adapter path: fail before the persistence effect with a typed safe error; do not silently downgrade the caller's transaction.
 - Unsupported server encoding for a persistence path: fail state-changing readiness before product writes; do not execute Unicode-dependent migrations under a non-UTF8 database.
+- Read-only database for a state-changing path: fail state-changing readiness before product writes; do not report mutation-capable readiness from a replica or session with `transaction_read_only = on`.
 - Outbox publication failure: local committed resource remains valid; dispatch retries are bounded and observable.
 - Duplicate message: inbox deduplication reuses existing processing/completion evidence and prevents duplicate logical effect.
 - Consumer crash after receipt but before local effect: pending/processing evidence remains retryable; receipt alone does not suppress the effect.
@@ -181,7 +184,7 @@ Each product migration must prove its owned identities, foreign keys, tenant/sou
 - Poison/invalid event: bounded attempts then quarantine with typed cause and reconciliation path.
 - Cross-service outage: does not roll back already-valid local participant action.
 - Digest or tenant/resource conflict during reconciliation: fail closed and require operator/scientific adjudication; last-write-wins is forbidden.
-- Database major/minor/encoding incompatibility: readiness/upgrade fails closed rather than silently running an unvalidated persistence contract.
+- Database major/minor/encoding/write-availability incompatibility: readiness/upgrade fails closed rather than silently running an unvalidated persistence contract.
 
 ## Security, privacy, and tenancy
 
@@ -195,7 +198,7 @@ Each product migration must prove its owned identities, foreign keys, tenant/sou
 
 ## Deployment and operations impact
 
-The Community, Hosted, and Enterprise profiles may package PostgreSQL differently, but the initial product persistence contract remains upstream PostgreSQL 18.x with UTF8 server encoding unless a later adapter decision expands support. `pg_unicode_fast` is PostgreSQL 18's built-in Unicode-oriented collation used by migrations that need stable Unicode pattern classification; those migrations therefore depend on the same UTF8 prerequisite checked by runtime readiness. Operators must expose database compatibility, encoding, migration status, pool health, transaction/lock timeout failures, outbox/inbox age, processing leases, quarantine, and restore readiness without exposing sensitive payloads. Connection pool settings and retry budgets must be bounded to prevent overload amplification.
+The Community, Hosted, and Enterprise profiles may package PostgreSQL differently, but the initial state-changing product persistence contract remains upstream PostgreSQL 18.x with UTF8 server encoding and a writable transaction context unless a later adapter decision expands support. `pg_unicode_fast` is PostgreSQL 18's built-in Unicode-oriented collation used by migrations that need stable Unicode pattern classification; those migrations therefore depend on the same UTF8 prerequisite checked by runtime readiness. Operators must expose database compatibility, encoding, write availability, migration status, pool health, transaction/lock timeout failures, outbox/inbox age, processing leases, quarantine, and restore readiness without exposing sensitive payloads. Connection pool settings and retry budgets must be bounded to prevent overload amplification.
 
 The integration-evidence adapter additionally requires its caller/session configuration to use `READ COMMITTED`. A profile that forces a different isolation policy is incompatible with this adapter until an isolation-independent implementation or separately proven stronger-isolation algorithm lands. PostgreSQL major upgrades must rerun the migration/constraint acceptance suite, including Unicode reference parity and owned CHECK revalidation, before the new major can be declared supported.
 
@@ -205,6 +208,7 @@ When physical persistence exists, required evidence includes:
 
 - clean install and migration on upstream PostgreSQL 18.x current supported minor;
 - runtime proof that the supported database reports `server_encoding = 'UTF8'`, plus a negative test proving non-UTF8 readiness fails closed where Unicode-dependent persistence is required;
+- runtime proof that state-changing readiness requires `transaction_read_only = off`, plus a negative test proving a read-only database/session fails mutation readiness closed;
 - migration upgrade/rollback or tested roll-forward strategy;
 - real-database concurrency/idempotency tests;
 - exact replay and conflicting replay tests scoped by `(source_ref, tenant_ref, event_ref)`;
@@ -220,13 +224,13 @@ When physical persistence exists, required evidence includes:
 - lock/deadlock/serialization-retry tests under bounded timeouts for adapters that actually support those retry classes;
 - restore tests preserving deduplication, tenant, provenance, and restricted-linkage boundaries;
 - schema-to-logical-ERD fitness validation;
-- unsupported database/fork/major-version/encoding rejection tests until separately supported.
+- unsupported database/fork/major-version/encoding/write-availability rejection tests until separately supported.
 
 ## Architecture-view impact
 
 - `docs/architecture/ERD.md` must reflect tenant-bound outbox/inbox and processing evidence, including source/tenant-scoped event identity.
 - `docs/architecture/UML.md` sequences must not imply that receipt alone completes non-local effects.
-- `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` must name PostgreSQL 18.x and UTF8 as the initial validated store contract rather than an undefined compatible class.
+- `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` must name PostgreSQL 18.x, UTF8, and write availability as the initial state-changing validated store contract rather than an undefined compatible class.
 - `docs/TRACEABILITY.md` must classify active-PR persistence separately from protected-main implementation until migrations and real-database tests land on protected main.
 
 ## Alternatives considered
@@ -273,7 +277,7 @@ Positive:
 
 - precise database compatibility instead of an unverifiable “compatible” claim;
 - tenant/source-scoped outbox identity aligned with the event-domain contract;
-- fail-closed, explicit isolation and UTF8 readiness behavior;
+- fail-closed, explicit isolation, UTF8, and write-availability readiness behavior;
 - clear ownership and recovery boundaries;
 - crash-safe cross-service propagation;
 - independent service deployability;
@@ -281,7 +285,7 @@ Positive:
 
 Costs:
 
-- PostgreSQL 18.x with UTF8 server encoding becomes an explicit initial operational dependency;
+- PostgreSQL 18.x with UTF8 server encoding and writable mutation context becomes an explicit initial operational dependency;
 - the first integration adapter is intentionally limited to `READ COMMITTED` until redesigned/proven otherwise;
 - Unicode-aware SQL/Rust parity and major-upgrade revalidation add compatibility-test burden;
 - explicit worker/reconciliation machinery;
@@ -310,14 +314,14 @@ Costs:
 
 ## Reversal conditions
 
-The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed. The `READ COMMITTED` restriction may be removed only when a replacement replay algorithm is proven isolation-correct by real concurrent PostgreSQL tests and the documentation/traceability contract is updated in the same change. The UTF8 requirement may be removed only if every product migration and runtime path that depends on Unicode-aware PostgreSQL classification is replaced by an equally strict, independently verified mechanism and exact cross-layer parity remains proven.
+The physical database technology or decomposition may change if scale, residency, or operational evidence requires it. Any replacement must preserve logical ownership, immutable artifacts, local transaction/outbox semantics, crash-recoverable inbox/side-effect processing, tenant isolation, and no-direct-cross-service-database rules, with real conformance evidence before support is claimed. The `READ COMMITTED` restriction may be removed only when a replacement replay algorithm is proven isolation-correct by real concurrent PostgreSQL tests and the documentation/traceability contract is updated in the same change. The UTF8 requirement may be removed only if every product migration and runtime path that depends on Unicode-aware PostgreSQL classification is replaced by an equally strict, independently verified mechanism and exact cross-layer parity remains proven. The writable-readiness requirement may be changed only if state-changing and read-only operational readiness are separated into explicit, independently tested capabilities that cannot misrepresent a replica as mutation-capable.
 
 ## References
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
+PostgreSQL Global Development Group. (2026a). *PostgreSQL 18 documentation*.
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+PostgreSQL Global Development Group. (2026b). *PostgreSQL versioning policy*.
 
-PostgreSQL Global Development Group. (2026a). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+PostgreSQL Global Development Group. (2026c). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
 
-PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+PostgreSQL Global Development Group. (2026d). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
