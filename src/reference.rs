@@ -59,6 +59,9 @@ mod tests {
         assert_eq!(normalized_reference("participant_1"), Some("participant_1"));
         assert_eq!(normalized_reference("-1.5e5"), None);
         assert_eq!(normalized_reference("１２３"), None);
-        assert_eq!(normalized_reference("opaque_reference"), Some("opaque_reference"));
+        assert_eq!(
+            normalized_reference("opaque_reference"),
+            Some("opaque_reference")
+        );
     }
 }
