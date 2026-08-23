@@ -59,7 +59,7 @@ pub struct ResearchReleaseCandidate<'a> {
     pub access_class: ResearchAccessClass,
 }
 
-/// Immutable normalized evidence that passed the product-side research-release gate.
+/// Immutable evidence that passed the product-side research-release gate.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApprovedResearchRelease {
     release_ref: String,
@@ -168,7 +168,7 @@ impl ApprovedResearchRelease {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResearchReleaseGateError {
-    /// A required reference was blank or numeric-like.
+    /// A required reference was blank, numeric-like, unsafe, or not the exact issued spelling.
     InvalidReference,
     /// The manifest digest was not canonical lowercase SHA-256 evidence.
     InvalidManifestDigest,
@@ -182,7 +182,7 @@ impl Display for ResearchReleaseGateError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "research release references must be opaque non-numeric values"
+                "research release references must use the exact opaque non-numeric spelling"
             }
             Self::InvalidManifestDigest => {
                 "research release manifest digest must be canonical sha256 evidence"
@@ -198,6 +198,9 @@ impl Display for ResearchReleaseGateError {
 impl Error for ResearchReleaseGateError {}
 
 /// Validate and freeze one set of Research Commons release evidence.
+///
+/// Every reference must already use its exact issued spelling. The gate does
+/// not trim an alias and silently store or compare a different identity.
 ///
 /// # Errors
 ///
@@ -248,7 +251,11 @@ pub fn approve_research_release(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResearchReleaseGateError> {
-    normalized_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)
+    let normalized = normalized_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)?;
+    if normalized != reference {
+        return Err(ResearchReleaseGateError::InvalidReference);
+    }
+    Ok(normalized)
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {
