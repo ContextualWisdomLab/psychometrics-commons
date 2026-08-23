@@ -61,11 +61,11 @@ fn ambiguous_multi_event_legacy_history_blocks_order_migration_before_schema_cha
 
     let event_sequence_exists: bool = client
         .query_one(
-            "SELECT EXISTS (\
-                 SELECT 1 FROM information_schema.columns\
-                 WHERE table_schema = 'consent_migration_ambiguous_test'\
-                   AND table_name = 'consent_event'\
-                   AND column_name = 'event_sequence'\
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM information_schema.columns \
+                 WHERE table_schema = 'consent_migration_ambiguous_test' \
+                   AND table_name = 'consent_event' \
+                   AND column_name = 'event_sequence' \
              )",
             &[],
         )
