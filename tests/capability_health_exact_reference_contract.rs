@@ -24,6 +24,7 @@ fn capability_identity_rejects_padded_aliases() {
 
 #[test]
 fn multilingual_capability_identity_is_preserved_exactly() {
-    let capability = CapabilityHealth::new("채점_능력_α", CapabilityState::Available, true).unwrap();
+    let capability =
+        CapabilityHealth::new("채점_능력_α", CapabilityState::Available, true).unwrap();
     assert_eq!(capability.capability_ref(), "채점_능력_α");
 }
