@@ -137,8 +137,7 @@ fn is_transaction_control(statement: &str) -> bool {
             true
         }
         [first, second, ..]
-            if (first == "START" && second == "TRANSACTION")
-                || (first == "PREPARE" && second == "TRANSACTION") =>
+            if (first == "PREPARE" || first == "START") && second == "TRANSACTION" =>
         {
             true
         }
