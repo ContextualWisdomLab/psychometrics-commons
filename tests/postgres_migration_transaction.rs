@@ -156,7 +156,9 @@ fn product_integration_apply_is_atomic_when_the_lease_phase_fails() {
     let schema = format!("integration_apply_atomicity_{transaction_id}");
 
     client
-        .batch_execute(&format!("CREATE SCHEMA {schema}; SET search_path TO {schema}"))
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema}; SET search_path TO {schema}"
+        ))
         .unwrap();
     client
         .batch_execute(include_str!("../migrations/0001_integration_delivery.sql"))
