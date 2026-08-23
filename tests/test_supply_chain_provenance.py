@@ -87,7 +87,7 @@ class SupplyChainProvenanceContract(unittest.TestCase):
         self.assertIn("github.event.pull_request.head.sha || github.sha", package_job)
         self.assertIn("persist-credentials: false", package_job)
         self.assertIn("cargo package --locked", package_job)
-        self.assertIn("sha256sum *.crate > SHA256SUMS", package_job)
+        self.assertIn("sha256sum -- *.crate > SHA256SUMS", package_job)
         self.assertIn("sha256sum --check SHA256SUMS", package_job)
         self.assertIn("target/package/*.crate", package_job)
 

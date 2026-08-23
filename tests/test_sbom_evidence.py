@@ -29,6 +29,28 @@ def mapping_block(text: str, key: str, indent: int) -> str:
     return "\n".join(block)
 
 
+def named_step_block(text: str, name: str, indent: int) -> str:
+    """Return one named YAML list step without allowing adjacent steps to satisfy it."""
+    lines = text.splitlines()
+    marker = f"{' ' * indent}- name: {name}"
+    try:
+        start = lines.index(marker)
+    except ValueError as error:
+        raise AssertionError(f"missing YAML step {name!r} at indent {indent}") from error
+
+    block = [lines[start]]
+    step_prefix = f"{' ' * indent}- "
+    for line in lines[start + 1 :]:
+        if line.startswith(step_prefix):
+            break
+        if line.strip():
+            current_indent = len(line) - len(line.lstrip(" "))
+            if current_indent < indent:
+                break
+        block.append(line)
+    return "\n".join(block)
+
+
 class SbomEvidenceContract(unittest.TestCase):
     """Keep SBOM generation immutable, review-safe, and tied to Cargo.lock."""
 
@@ -67,22 +89,25 @@ class SbomEvidenceContract(unittest.TestCase):
             "workflow token authority must fail closed at the top level",
         )
         jobs = mapping_block(text, "jobs", 0)
-        for job_name in ["generate", "verify-evidence"]:
-            job = mapping_block(jobs, job_name, 2)
-            permissions = mapping_block(job, "permissions", 4)
-            self.assertEqual(
-                [line.strip() for line in permissions.splitlines() if line.strip()],
-                ["contents: read"],
-            )
-            for forbidden_permission in [
-                "contents: write",
-                "id-token:",
-                "attestations:",
-                "artifact-metadata:",
-                "packages: write",
-            ]:
-                self.assertNotIn(forbidden_permission, job)
         generate_job = mapping_block(jobs, "generate", 2)
+        permissions = mapping_block(generate_job, "permissions", 4)
+        self.assertEqual(
+            [line.strip() for line in permissions.splitlines() if line.strip()],
+            ["contents: read"],
+        )
+        for forbidden_permission in [
+            "contents: write",
+            "id-token:",
+            "attestations:",
+            "artifact-metadata:",
+            "packages: write",
+        ]:
+            self.assertNotIn(forbidden_permission, generate_job)
+        self.assertNotIn(
+            "  verify-evidence:",
+            jobs,
+            "artifact reverification must not require a second hosted runner allocation",
+        )
         self.assertIn("dependency-snapshot: false", generate_job)
         self.assertIn("upload-artifact: false", generate_job)
         self.assertIn("upload-release-assets: false", generate_job)
@@ -105,29 +130,47 @@ class SbomEvidenceContract(unittest.TestCase):
         )
 
     def test_preserved_sbom_is_reverified_after_artifact_handoff(self) -> None:
-        """A separate job must prove checksum and lock coverage survive artifact storage."""
+        """The exact-head artifact-service copy must be downloaded and reverified in order."""
         text = self.workflow_text()
-        jobs = mapping_block(text, "jobs", 0)
-        verify_job = mapping_block(jobs, "verify-evidence", 2)
-        self.assertIn("needs: generate", verify_job)
-        self.assertIn(
-            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-            verify_job,
+        generate_job = mapping_block(mapping_block(text, "jobs", 0), "generate", 2)
+        upload = "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+        download_action = (
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
         )
+        download_step = named_step_block(
+            generate_job, "Download exact SBOM evidence", 6
+        )
+        checksum_step = named_step_block(
+            generate_job, "Verify checksum after artifact handoff", 6
+        )
+        locked_dependency_step = named_step_block(
+            generate_job,
+            "Reverify locked dependency coverage after artifact handoff",
+            6,
+        )
+
+        self.assertIn(download_action, download_step)
         self.assertIn(
             "name: sbom-spdx-${{ github.event.pull_request.head.sha || github.sha }}",
-            verify_job,
+            download_step,
         )
-        self.assertIn("sha256sum --check sbom.spdx.json.sha256", verify_job)
+        self.assertIn("path: evidence", download_step)
+        self.assertIn("working-directory: evidence", checksum_step)
+        self.assertIn("run: sha256sum --check sbom.spdx.json.sha256", checksum_step)
         self.assertIn(
-            "python3 scripts/validate_spdx_sbom.py evidence/sbom.spdx.json Cargo.lock",
-            verify_job,
+            "run: python3 scripts/validate_spdx_sbom.py evidence/sbom.spdx.json Cargo.lock",
+            locked_dependency_step,
         )
-        self.assertGreaterEqual(
-            verify_job.count("github.event.pull_request.head.sha || github.sha"),
-            2,
-            "verification must bind checkout and artifact identity to the exact revision",
+
+        upload_index = generate_job.index(upload)
+        download_index = generate_job.index("- name: Download exact SBOM evidence")
+        checksum_index = generate_job.index("- name: Verify checksum after artifact handoff")
+        validation_index = generate_job.index(
+            "- name: Reverify locked dependency coverage after artifact handoff"
         )
+        self.assertLess(upload_index, download_index)
+        self.assertLess(download_index, checksum_index)
+        self.assertLess(checksum_index, validation_index)
 
 
 if __name__ == "__main__":
