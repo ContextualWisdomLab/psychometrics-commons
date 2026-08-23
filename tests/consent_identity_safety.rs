@@ -209,7 +209,10 @@ fn visible_multilingual_references_preserve_exact_spelling() {
     )
     .unwrap();
     assert_eq!(contribution.contribution_ref(), "연구_기여_가나다");
-    assert_eq!(contribution.research_participant_ref(), "연구_참여자_가나다");
+    assert_eq!(
+        contribution.research_participant_ref(),
+        "연구_참여자_가나다"
+    );
 
     let withdrawn = contribution.withdraw("철회_사건_가나다", 12_000).unwrap();
     assert_eq!(withdrawn.withdrawal_event_ref(), Some("철회_사건_가나다"));
