@@ -167,18 +167,27 @@ fn assert_restored_result(client: &mut Client) {
         .expect("restored immutable result should remain queryable");
 
     assert_eq!(restored.get::<_, String>(0), "participant_recovery_alpha");
-    assert_eq!(restored.get::<_, String>(1), "scoring_result_recovery_alpha");
+    assert_eq!(
+        restored.get::<_, String>(1),
+        "scoring_result_recovery_alpha"
+    );
     assert_eq!(restored.get::<_, String>(2), "session_recovery_alpha");
     assert_eq!(
         restored.get::<_, String>(3),
         "response_snapshot_recovery_alpha"
     );
-    assert_eq!(restored.get::<_, String>(4), "assessment_spec_recovery_alpha");
+    assert_eq!(
+        restored.get::<_, String>(4),
+        "assessment_spec_recovery_alpha"
+    );
     assert_eq!(
         restored.get::<_, String>(5),
         "instrument_version_recovery_alpha"
     );
-    assert_eq!(restored.get::<_, String>(6), "scoring_version_recovery_alpha");
+    assert_eq!(
+        restored.get::<_, String>(6),
+        "scoring_version_recovery_alpha"
+    );
     assert_eq!(restored.get::<_, String>(7), "calibration_recovery_alpha");
     assert_eq!(
         restored.get::<_, Option<String>>(8).as_deref(),
@@ -210,7 +219,10 @@ fn assert_restored_result(client: &mut Client) {
         .expect("restored result observations should remain queryable");
     assert_eq!(observations.len(), 2);
     assert_eq!(observations[0].get::<_, i32>(0), 0);
-    assert_eq!(observations[0].get::<_, String>(1), "construct_extraversion");
+    assert_eq!(
+        observations[0].get::<_, String>(1),
+        "construct_extraversion"
+    );
     assert_eq!(observations[0].get::<_, String>(2), "scored");
     assert_eq!(observations[0].get::<_, Option<f64>>(3), Some(0.625));
     assert_eq!(observations[0].get::<_, Option<f64>>(4), Some(0.125));
