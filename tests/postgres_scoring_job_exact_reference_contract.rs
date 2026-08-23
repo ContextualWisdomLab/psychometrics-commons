@@ -60,8 +60,8 @@ fn persisted_claim_rejects_padded_job_worker_and_lease_aliases_before_lookup() {
 }
 
 #[test]
-fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
-    let mut client = test_client("scoring_job_exact_reference_terminal_test");
+fn persisted_cancel_and_retryable_failure_reject_padded_evidence_before_lookup() {
+    let mut client = test_client("scoring_job_exact_reference_retryable_test");
 
     {
         let mut transaction = client.transaction().unwrap();
@@ -90,21 +90,24 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
         transaction.rollback().unwrap();
     }
 
-    {
-        let mut transaction = client.transaction().unwrap();
-        assert_invalid_reference(
-            &record_retryable_scoring_failure(
-                &mut transaction,
-                "missing_scoring_job",
-                1,
-                " provider_timeout",
-                10_500,
-                12_000,
-            )
-            .unwrap_err(),
-        );
-        transaction.rollback().unwrap();
-    }
+    let mut transaction = client.transaction().unwrap();
+    assert_invalid_reference(
+        &record_retryable_scoring_failure(
+            &mut transaction,
+            "missing_scoring_job",
+            1,
+            " provider_timeout",
+            10_500,
+            12_000,
+        )
+        .unwrap_err(),
+    );
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn persisted_permanent_failure_rejects_padded_evidence_before_lookup() {
+    let mut client = test_client("scoring_job_exact_reference_permanent_test");
 
     for scoring_job_ref in [
         " missing_scoring_job_permanent",
@@ -124,20 +127,23 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
         transaction.rollback().unwrap();
     }
 
-    {
-        let mut transaction = client.transaction().unwrap();
-        assert_invalid_reference(
-            &record_permanent_scoring_failure(
-                &mut transaction,
-                "missing_scoring_job",
-                1,
-                "invalid_contract ",
-                10_500,
-            )
-            .unwrap_err(),
-        );
-        transaction.rollback().unwrap();
-    }
+    let mut transaction = client.transaction().unwrap();
+    assert_invalid_reference(
+        &record_permanent_scoring_failure(
+            &mut transaction,
+            "missing_scoring_job",
+            1,
+            "invalid_contract ",
+            10_500,
+        )
+        .unwrap_err(),
+    );
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn persisted_success_rejects_padded_evidence_before_lookup() {
+    let mut client = test_client("scoring_job_exact_reference_success_test");
 
     for scoring_job_ref in [
         " missing_scoring_job_success",
