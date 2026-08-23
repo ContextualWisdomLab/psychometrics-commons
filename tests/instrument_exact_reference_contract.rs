@@ -10,7 +10,11 @@ const VALID_DIGEST: &str =
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
-fn manifest_with(release_ref: &str, items: &[&str], consent_refs: &[&str]) -> Result<InstrumentReleaseManifest, InstrumentReleaseError> {
+fn manifest_with(
+    release_ref: &str,
+    items: &[&str],
+    consent_refs: &[&str],
+) -> Result<InstrumentReleaseManifest, InstrumentReleaseError> {
     InstrumentReleaseManifest::new(
         release_ref,
         "instrument_big_five",
@@ -39,7 +43,9 @@ fn exact_manifest() -> InstrumentReleaseManifest {
     .unwrap()
 }
 
-fn provenance(population_ref: &str) -> Result<PublicationEvidenceProvenance, InstrumentReleaseError> {
+fn provenance(
+    population_ref: &str,
+) -> Result<PublicationEvidenceProvenance, InstrumentReleaseError> {
     PublicationEvidenceProvenance::new(
         EVIDENCE_DIGEST,
         population_ref,
@@ -50,7 +56,9 @@ fn provenance(population_ref: &str) -> Result<PublicationEvidenceProvenance, Ins
     )
 }
 
-fn evidence_with_rights(rights_refs: &[&str]) -> Result<PublicationEvidenceRecord, InstrumentReleaseError> {
+fn evidence_with_rights(
+    rights_refs: &[&str],
+) -> Result<PublicationEvidenceRecord, InstrumentReleaseError> {
     PublicationEvidenceRecord::new(
         "publication_evidence_big_five_ko_v1",
         "evidence_policy_self_reflection_v1",
