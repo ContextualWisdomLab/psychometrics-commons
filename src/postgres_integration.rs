@@ -225,9 +225,8 @@ impl From<postgres::Error> for PersistenceError {
 ///
 /// Returns the `PostgreSQL` error if any migration phase cannot be applied.
 pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
-    let mut migration = String::with_capacity(
-        INTEGRATION_MIGRATION.len() + OUTBOX_LEASE_MIGRATION.len() + 1,
-    );
+    let mut migration =
+        String::with_capacity(INTEGRATION_MIGRATION.len() + OUTBOX_LEASE_MIGRATION.len() + 1);
     migration.push_str(INTEGRATION_MIGRATION);
     migration.push('\n');
     migration.push_str(OUTBOX_LEASE_MIGRATION);
