@@ -2,6 +2,15 @@
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
+use std::sync::{Mutex, MutexGuard};
+
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -43,6 +52,7 @@ fn assert_check(error: &postgres::Error, expected_constraint: &str) {
 
 #[test]
 fn lease_worker_reference_rejects_unicode_numeric_aliases() {
+    let _guard = guard();
     let mut client = test_client();
     setup_outbox(&mut client);
 
@@ -56,14 +66,12 @@ fn lease_worker_reference_rejects_unicode_numeric_aliases() {
             &[&"½"],
         )
         .expect_err("Unicode numeric-only worker references must fail closed");
-    assert_check(
-        &error,
-        "integration_outbox_lease_worker_ref_format_check",
-    );
+    assert_check(&error, "integration_outbox_lease_worker_ref_format_check");
 }
 
 #[test]
 fn lease_reference_rejects_unicode_whitespace_aliases() {
+    let _guard = guard();
     let mut client = test_client();
     setup_outbox(&mut client);
 
