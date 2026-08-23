@@ -40,9 +40,7 @@ fn every_release_evidence_identity_rejects_padded_aliases() {
             4 => value.scientific_review_ref = "\u{3000}scientific_review_alpha",
             5 => value.metadata_bundle_ref = "metadata_bundle_alpha ",
             6 => value.license_record_ref = " license_record_alpha",
-            7 => {
-                value.measurement_provenance_ref = "measurement_provenance_alpha\u{00a0}"
-            }
+            7 => value.measurement_provenance_ref = "measurement_provenance_alpha\u{00a0}",
             8 => value.access_approval_ref = "\u{2003}access_approval_alpha",
             9 => value.citation_metadata_ref = "citation_metadata_alpha\u{202f}",
             10 => value.release_approver_ref = "\u{3000}research_release_approver_alpha",
