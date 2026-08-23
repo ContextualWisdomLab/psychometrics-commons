@@ -105,7 +105,11 @@ fn response_identity_references_preserve_exact_visible_spelling() {
     let original = ledger
         .record(
             SessionState::Active,
-            write("서버_사건_가나다", "클라이언트_사건_가나다", "문항_버전_가나다"),
+            write(
+                "서버_사건_가나다",
+                "클라이언트_사건_가나다",
+                "문항_버전_가나다",
+            ),
         )
         .unwrap();
 
