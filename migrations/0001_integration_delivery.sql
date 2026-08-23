@@ -107,15 +107,27 @@ CREATE TABLE IF NOT EXISTS integration_inbox (
     PRIMARY KEY (consumer_ref, source_ref, tenant_ref, source_event_ref)
 );
 
--- CREATE TABLE IF NOT EXISTS leaves same-named historical CHECK constraints untouched. A shape
--- marker makes the stronger migration a one-time repair: a newly created or historically weakened
--- CHECK is rebuilt and tagged, while later reapplications keep the canonical constraint object
--- stable. CREATE OR REPLACE FUNCTION above updates validator semantics without a table rewrite.
+-- CREATE TABLE IF NOT EXISTS leaves same-named historical CHECK constraints untouched. The repair
+-- marker is derived from PostgreSQL's installed validator definition, so CREATE OR REPLACE FUNCTION
+-- above automatically changes the marker whenever validator semantics or properties change. A
+-- newly created or historically weakened CHECK is rebuilt and tagged, while unchanged definitions
+-- keep the canonical constraint object stable on later reapplications.
 DO $integration_reference_constraints$
 DECLARE
     constraint_spec RECORD;
     existing_constraint_oid OID;
-    canonical_marker CONSTANT TEXT := 'psychometrics-commons:integration-reference:v1';
+    canonical_marker CONSTANT TEXT :=
+        'psychometrics-commons:integration-reference:'
+        || pg_catalog.md5(
+            pg_catalog.pg_get_functiondef(
+                pg_catalog.to_regprocedure(
+                    pg_catalog.format(
+                        '%I.integration_reference_is_valid(text)',
+                        pg_catalog.current_schema()
+                    )
+                )
+            )
+        );
 BEGIN
     FOR constraint_spec IN
         SELECT *
