@@ -106,6 +106,18 @@ fn manifest_rejects_whitespace_aliases_in_scalar_and_collection_references() {
 }
 
 #[test]
+fn manifest_rejects_reference_that_normalization_cannot_admit() {
+    assert_eq!(
+        manifest_with(
+            "123",
+            &["item_version_001"],
+            &["consent_service_v1"],
+        ),
+        Err(InstrumentReleaseError::InvalidReference)
+    );
+}
+
+#[test]
 fn publication_evidence_rejects_whitespace_aliases() {
     assert_eq!(
         provenance(" population_general_adult_v1"),
