@@ -50,4 +50,15 @@ mod tests {
             Some("construct_extraversion")
         );
     }
+
+    #[test]
+    fn numeric_guard_distinguishes_numeric_literals_from_mixed_opaque_references() {
+        // Exercise both sides of the numeric precondition and the `all` predicate: opaque
+        // references may contain digits, while a value made only of numeric material and
+        // numeric-literal punctuation must remain invalid.
+        assert_eq!(normalized_reference("participant_1"), Some("participant_1"));
+        assert_eq!(normalized_reference("-1.5e5"), None);
+        assert_eq!(normalized_reference("１２３"), None);
+        assert_eq!(normalized_reference("opaque_reference"), Some("opaque_reference"));
+    }
 }
