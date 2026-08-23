@@ -1,4 +1,4 @@
-//! Fail-closed contract for PostgreSQL readiness when encoding evidence is absent.
+//! Fail-closed contract for `PostgreSQL` readiness when encoding evidence is absent.
 
 use psychometrics_commons_runtime::health::CapabilityState;
 use psychometrics_commons_runtime::postgres_health::{
