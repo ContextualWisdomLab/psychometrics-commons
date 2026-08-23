@@ -84,9 +84,9 @@ impl ScoringJob {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringJobError::InvalidReference`] for blank or numeric-like
-    /// identity and [`ScoringJobError::InvalidAttemptLimit`] when `max_attempts`
-    /// is zero.
+    /// Returns [`ScoringJobError::InvalidReference`] for blank, numeric-like, or
+    /// padded identity and [`ScoringJobError::InvalidAttemptLimit`] when
+    /// `max_attempts` is zero.
     pub fn new(
         scoring_job_ref: impl Into<String>,
         scoring_request_ref: impl Into<String>,
@@ -426,7 +426,9 @@ pub enum ScoringJobError {
 impl Display for ScoringJobError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "scoring job references must be opaque non-numeric values",
+            Self::InvalidReference => {
+                "scoring job references must use the exact opaque non-numeric spelling"
+            }
             Self::InvalidAttemptLimit => "scoring job maximum attempts must be greater than zero",
             Self::InvalidTimestamp => "scoring job timestamps must be greater than zero",
             Self::InvalidLeaseWindow => "scoring lease expiry must be later than claim time",
@@ -448,7 +450,11 @@ impl Display for ScoringJobError {
 impl Error for ScoringJobError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringJobError> {
-    normalized_reference(reference).ok_or(ScoringJobError::InvalidReference)
+    let normalized = normalized_reference(reference).ok_or(ScoringJobError::InvalidReference)?;
+    if normalized != reference {
+        return Err(ScoringJobError::InvalidReference);
+    }
+    Ok(normalized)
 }
 
 const fn require_timestamp(timestamp: u64) -> Result<(), ScoringJobError> {
