@@ -9,11 +9,24 @@ use psychometrics_commons_runtime::postgres_data_rights::{
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
+fn fixture_schema_name() -> String {
+    format!("data_rights_iso_{}", std::process::id())
+}
+
+#[test]
+fn fixture_schema_identity_is_restart_safe() {
+    assert_ne!(
+        fixture_schema_name(),
+        fixture_schema_name(),
+        "independent fixture allocations must not reuse an operating-system process identity"
+    );
+}
+
 #[test]
 fn serializable_session_default_is_rejected() {
     let url = std::env::var("TEST_DATABASE_URL").unwrap();
     let mut db = Client::connect(&url, NoTls).unwrap();
-    let schema = format!("data_rights_iso_{}", std::process::id());
+    let schema = fixture_schema_name();
     db.batch_execute(&format!(
         "CREATE SCHEMA {schema}; SET search_path TO {schema};"
     ))
