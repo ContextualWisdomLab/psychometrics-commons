@@ -33,7 +33,10 @@ pub enum ResultSnapshotPersistenceError {
     InvalidReference,
     /// Result identity was replayed with different immutable evidence.
     ConflictingReplay,
-    /// A superseding snapshot names a predecessor that is not already durable.
+    /// A superseding snapshot names no different predecessor row visible to this transaction.
+    ///
+    /// A predecessor inserted earlier in the same transaction is visible and valid. A row
+    /// still uncommitted in another transaction is not visible yet and is rejected.
     InvalidSupersession,
     /// A timestamp cannot be represented by the bounded database column.
     InvalidTimestamp,
@@ -97,15 +100,18 @@ pub fn apply_result_snapshot_migration(
 /// Exact replay of the same snapshot identity, provenance, and observations is
 /// idempotent. Rebinding `result_snapshot_ref` to different provenance or
 /// observation evidence fails closed. A superseding snapshot may reference only
-/// a predecessor that is already durable, which prevents forward-reference
+/// a different predecessor row that is already visible to the current transaction
+/// before the successor is inserted. A predecessor inserted earlier in this same
+/// transaction is valid; an uncommitted predecessor in another transaction is not
+/// yet visible and is rejected. This insertion ordering prevents forward-reference
 /// cycles under the immutable snapshot model. Historical snapshots are never
 /// updated.
 ///
 /// # Errors
 ///
 /// Returns [`ResultSnapshotPersistenceError`] for unsupported isolation,
-/// conflicting replay, a missing supersession predecessor, an invalid reference
-/// or timestamp, or a database failure.
+/// conflicting replay, a missing or not-yet-visible supersession predecessor, an
+/// invalid reference or timestamp, or a database failure.
 pub fn persist_result_snapshot(
     transaction: &mut Transaction<'_>,
     snapshot: &ResultSnapshot,
