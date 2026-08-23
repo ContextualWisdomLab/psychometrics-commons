@@ -19,10 +19,7 @@ fn dollar_quote_delimiter(sql: &[u8], start: usize) -> Option<Vec<u8>> {
     let mut end = start + 1;
     while let Some(byte) = sql.get(end) {
         if *byte == b'$' {
-            if end == start + 1
-                || sql[start + 1].is_ascii_alphabetic()
-                || sql[start + 1] == b'_'
-            {
+            if end == start + 1 || sql[start + 1].is_ascii_alphabetic() || sql[start + 1] == b'_' {
                 return Some(sql[start..=end].to_vec());
             }
             return None;
@@ -131,7 +128,14 @@ fn statement_tokens(statement: &str) -> Vec<String> {
 fn is_transaction_control(statement: &str) -> bool {
     let tokens = statement_tokens(statement);
     match tokens.as_slice() {
-        [first, ..] if matches!(first.as_str(), "BEGIN" | "COMMIT" | "END" | "ROLLBACK" | "ABORT") => true,
+        [first, ..]
+            if matches!(
+                first.as_str(),
+                "BEGIN" | "COMMIT" | "END" | "ROLLBACK" | "ABORT"
+            ) =>
+        {
+            true
+        }
         [first, second, ..]
             if (first == "START" && second == "TRANSACTION")
                 || (first == "PREPARE" && second == "TRANSACTION") =>
