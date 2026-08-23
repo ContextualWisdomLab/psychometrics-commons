@@ -13,6 +13,10 @@ use std::thread;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+fn fixture_schema_name() -> String {
+    format!("data_rights_concurrent_{}", std::process::id())
+}
+
 fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPersistenceDisposition {
     let mut db = Client::connect(url, NoTls).unwrap();
     db.batch_execute(&format!("SET search_path TO {schema}"))
@@ -48,9 +52,18 @@ fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPers
 }
 
 #[test]
+fn fixture_schema_identity_is_restart_safe() {
+    assert_ne!(
+        fixture_schema_name(),
+        fixture_schema_name(),
+        "independent concurrent fixtures must not reuse an operating-system process identity"
+    );
+}
+
+#[test]
 fn concurrent_exact_first_write_is_idempotent() {
     let url = std::env::var("TEST_DATABASE_URL").unwrap();
-    let schema = format!("data_rights_concurrent_{}", std::process::id());
+    let schema = fixture_schema_name();
     let mut setup = Client::connect(&url, NoTls).unwrap();
     setup
         .batch_execute(&format!(
