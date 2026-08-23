@@ -2,28 +2,68 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::ops::{Deref, DerefMut};
 
-fn legacy_schema_name(prefix: &str, process_id: u32, nonce: u128) -> String {
-    format!("{prefix}_{process_id}_{nonce}")
+struct SchemaClient {
+    client: Client,
+    schema_name: String,
 }
 
-fn isolated_client() -> (Client, String) {
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
+impl Deref for SchemaClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for SchemaClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+impl Drop for SchemaClient {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "RESET search_path; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
+}
+
+fn schema_client() -> SchemaClient {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after the Unix epoch")
-        .as_nanos();
-    let schema_name = legacy_schema_name("result_snapshot_immutable", std::process::id(), nonce);
+    let database_nonce: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must allocate a durable transaction identity for test isolation")
+        .get(0);
+    let schema_name = format!("result_snapshot_immutable_{database_nonce}");
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
         ))
-        .unwrap();
-    apply_result_snapshot_migration(&mut client).unwrap();
+        .expect("isolated result-snapshot schema should be created");
+    let mut client = SchemaClient {
+        client,
+        schema_name,
+    };
+    apply_result_snapshot_migration(&mut *client)
+        .expect("result-snapshot migration should apply in the isolated schema");
+    client
+}
+
+fn isolated_client() -> SchemaClient {
+    let mut client = schema_client();
     client
         .batch_execute(
             "INSERT INTO result_snapshot (\
@@ -48,8 +88,8 @@ fn isolated_client() -> (Client, String) {
                  'result_snapshot_immutable', 0, 'construct_immutable', 'scored', 0.5, 0.1\
              );",
         )
-        .unwrap();
-    (client, schema_name)
+        .expect("immutable result evidence fixture should be inserted");
+    client
 }
 
 fn assert_immutable_error(error: &postgres::Error) {
@@ -69,19 +109,20 @@ fn expect_rejected_statement(client: &mut Client, statement: &str) {
 }
 
 #[test]
-fn schema_name_must_not_repeat_after_process_restart() {
-    let before_restart = legacy_schema_name("result_snapshot_immutable", 4242, 1_000_000);
-    let after_restart = legacy_schema_name("result_snapshot_immutable", 4242, 1_000_000);
+fn database_transaction_identity_prevents_schema_name_reuse() {
+    let first = schema_client();
+    let second = schema_client();
 
     assert_ne!(
-        before_restart, after_restart,
-        "test schema identity must survive PID reuse and restarted process-local state"
+        first.schema_name(),
+        second.schema_name(),
+        "schema isolation must not depend on wall-clock resolution or PID lifetime"
     );
 }
 
 #[test]
 fn result_evidence_rejects_update_delete_and_truncate() {
-    let (mut client, schema_name) = isolated_client();
+    let mut client = isolated_client();
 
     let mutations = [
         "UPDATE result_snapshot SET narrative_version_ref = 'narrative_version_tampered' \
@@ -109,8 +150,4 @@ fn result_evidence_rejects_update_delete_and_truncate() {
         .unwrap();
     assert_eq!(counts.get::<_, i64>(0), 1);
     assert_eq!(counts.get::<_, i64>(1), 1);
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
