@@ -13,8 +13,44 @@ use std::thread;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn fixture_schema_name() -> String {
-    format!("data_rights_concurrent_{}", std::process::id())
+fn allocate_schema_name(client: &mut Client) -> String {
+    let transaction_id: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must allocate a durable transaction identity for the test schema")
+        .get(0);
+    format!("data_rights_concurrent_{transaction_id}")
+}
+
+struct TestDatabase {
+    client: Client,
+    schema_name: String,
+}
+
+impl TestDatabase {
+    fn new(url: &str) -> Self {
+        let mut client = Client::connect(url, NoTls).unwrap();
+        let schema_name = allocate_schema_name(&mut client);
+        client
+            .batch_execute(&format!(
+                "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
+            ))
+            .unwrap();
+        apply_integration_migration(&mut client).unwrap();
+        apply_data_rights_migration(&mut client).unwrap();
+        Self {
+            client,
+            schema_name,
+        }
+    }
+}
+
+impl Drop for TestDatabase {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
 }
 
 fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPersistenceDisposition {
@@ -53,25 +89,21 @@ fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPers
 
 #[test]
 fn fixture_schema_identity_is_restart_safe() {
+    let url = std::env::var("TEST_DATABASE_URL").unwrap();
+    let mut client = Client::connect(&url, NoTls).unwrap();
+    let first = allocate_schema_name(&mut client);
+    let second = allocate_schema_name(&mut client);
     assert_ne!(
-        fixture_schema_name(),
-        fixture_schema_name(),
-        "independent concurrent fixtures must not reuse an operating-system process identity"
+        first, second,
+        "independent concurrent fixtures must use database-issued identities"
     );
 }
 
 #[test]
 fn concurrent_exact_first_write_is_idempotent() {
     let url = std::env::var("TEST_DATABASE_URL").unwrap();
-    let schema = fixture_schema_name();
-    let mut setup = Client::connect(&url, NoTls).unwrap();
-    setup
-        .batch_execute(&format!(
-            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
-        ))
-        .unwrap();
-    apply_integration_migration(&mut setup).unwrap();
-    apply_data_rights_migration(&mut setup).unwrap();
+    let setup = TestDatabase::new(&url);
+    let schema = setup.schema_name.clone();
 
     let barrier = Arc::new(Barrier::new(3));
     let first = {
