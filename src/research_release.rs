@@ -251,7 +251,8 @@ pub fn approve_research_release(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResearchReleaseGateError> {
-    let normalized = normalized_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)?;
+    let normalized =
+        normalized_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)?;
     if normalized != reference {
         return Err(ResearchReleaseGateError::InvalidReference);
     }
