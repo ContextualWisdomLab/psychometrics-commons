@@ -71,6 +71,25 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
         transaction.rollback().unwrap();
     }
 
+    for scoring_job_ref in [
+        " missing_scoring_job_retryable",
+        "missing_scoring_job_retryable ",
+    ] {
+        let mut transaction = client.transaction().unwrap();
+        assert_invalid_reference(
+            &record_retryable_scoring_failure(
+                &mut transaction,
+                scoring_job_ref,
+                1,
+                "provider_timeout",
+                10_500,
+                12_000,
+            )
+            .unwrap_err(),
+        );
+        transaction.rollback().unwrap();
+    }
+
     {
         let mut transaction = client.transaction().unwrap();
         assert_invalid_reference(
@@ -87,6 +106,24 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
         transaction.rollback().unwrap();
     }
 
+    for scoring_job_ref in [
+        " missing_scoring_job_permanent",
+        "missing_scoring_job_permanent ",
+    ] {
+        let mut transaction = client.transaction().unwrap();
+        assert_invalid_reference(
+            &record_permanent_scoring_failure(
+                &mut transaction,
+                scoring_job_ref,
+                1,
+                "invalid_contract",
+                10_500,
+            )
+            .unwrap_err(),
+        );
+        transaction.rollback().unwrap();
+    }
+
     {
         let mut transaction = client.transaction().unwrap();
         assert_invalid_reference(
@@ -95,6 +132,24 @@ fn persisted_terminal_commands_reject_padded_evidence_before_lookup() {
                 "missing_scoring_job",
                 1,
                 "invalid_contract ",
+                10_500,
+            )
+            .unwrap_err(),
+        );
+        transaction.rollback().unwrap();
+    }
+
+    for scoring_job_ref in [
+        " missing_scoring_job_success",
+        "missing_scoring_job_success ",
+    ] {
+        let mut transaction = client.transaction().unwrap();
+        assert_invalid_reference(
+            &record_successful_scoring_completion(
+                &mut transaction,
+                scoring_job_ref,
+                1,
+                "scoring_result_alpha",
                 10_500,
             )
             .unwrap_err(),
