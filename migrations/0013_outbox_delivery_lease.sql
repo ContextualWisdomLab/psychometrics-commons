@@ -1,7 +1,7 @@
 -- Lease references are opaque product references and therefore share the validator installed by
--- 0001_integration_delivery.sql. If integration_reference_is_valid changes in a way that can
--- alter existing-row validity, bump the lease-reference marker below so reapplication rebuilds
--- and revalidates both lease CHECK constraints against the new rule.
+-- 0001_integration_delivery.sql. Their repair marker is derived from the installed validator
+-- definition, so reapplication automatically rebuilds and revalidates both lease CHECK constraints
+-- whenever that validator changes.
 ALTER TABLE integration_outbox
     ADD COLUMN IF NOT EXISTS lease_worker_ref TEXT;
 
@@ -21,7 +21,17 @@ DO $$
 DECLARE
     existing_constraint_oid OID;
     canonical_reference_marker CONSTANT TEXT :=
-        'psychometrics-commons:integration-lease-reference:v1';
+        'psychometrics-commons:integration-lease-reference:'
+        || pg_catalog.md5(
+            pg_catalog.pg_get_functiondef(
+                pg_catalog.to_regprocedure(
+                    pg_catalog.format(
+                        '%I.integration_reference_is_valid(text)',
+                        pg_catalog.current_schema()
+                    )
+                )
+            )
+        );
 BEGIN
     SELECT constraint_row.oid
     INTO existing_constraint_oid
@@ -48,8 +58,10 @@ BEGIN
                 lease_worker_ref IS NULL
                 OR integration_reference_is_valid(lease_worker_ref)
             );
-        COMMENT ON CONSTRAINT integration_outbox_lease_worker_ref_format_check
-            ON integration_outbox IS 'psychometrics-commons:integration-lease-reference:v1';
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT integration_outbox_lease_worker_ref_format_check ON integration_outbox IS %L',
+            canonical_reference_marker
+        );
     END IF;
 
     SELECT constraint_row.oid
@@ -77,8 +89,10 @@ BEGIN
                 lease_ref IS NULL
                 OR integration_reference_is_valid(lease_ref)
             );
-        COMMENT ON CONSTRAINT integration_outbox_lease_ref_format_check
-            ON integration_outbox IS 'psychometrics-commons:integration-lease-reference:v1';
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT integration_outbox_lease_ref_format_check ON integration_outbox IS %L',
+            canonical_reference_marker
+        );
     END IF;
 
     IF NOT EXISTS (
