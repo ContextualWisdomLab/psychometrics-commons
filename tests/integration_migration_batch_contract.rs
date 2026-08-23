@@ -25,7 +25,11 @@ fn integration_migration_fragments_cannot_break_single_batch_atomicity() {
             "{name} must not add CONCURRENTLY operations because they cannot run inside the implicit transaction used by apply_integration_migration"
         );
 
-        for line in sql.lines().map(executable_line).filter(|line| !line.is_empty()) {
+        for line in sql
+            .lines()
+            .map(executable_line)
+            .filter(|line| !line.is_empty())
+        {
             let statement = line.to_ascii_uppercase();
             assert!(
                 !statement.starts_with("BEGIN;")
