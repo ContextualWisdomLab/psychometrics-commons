@@ -220,6 +220,83 @@ ALTER TABLE result_snapshot_observation
         )
     );
 
+-- Supersession is an immutable backward link. Reapplying the migration must fail
+-- rather than preserving dangling or cyclic lineage written by an older schema.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM result_snapshot AS successor
+        LEFT JOIN result_snapshot AS predecessor
+          ON predecessor.result_snapshot_ref = successor.supersedes_ref
+        WHERE successor.supersedes_ref IS NOT NULL
+          AND predecessor.result_snapshot_ref IS NULL
+    ) THEN
+        RAISE EXCEPTION 'result snapshot supersession predecessor must already exist'
+            USING ERRCODE = '23503';
+    END IF;
+
+    IF EXISTS (
+        WITH RECURSIVE supersession_lineage AS (
+            SELECT
+                result_snapshot_ref AS start_ref,
+                supersedes_ref AS current_ref,
+                ARRAY[result_snapshot_ref]::text[] AS visited_refs
+            FROM result_snapshot
+            WHERE supersedes_ref IS NOT NULL
+
+            UNION ALL
+
+            SELECT
+                lineage.start_ref,
+                predecessor.supersedes_ref,
+                lineage.visited_refs || predecessor.result_snapshot_ref
+            FROM supersession_lineage AS lineage
+            JOIN result_snapshot AS predecessor
+              ON predecessor.result_snapshot_ref = lineage.current_ref
+            WHERE lineage.current_ref IS NOT NULL
+              AND NOT predecessor.result_snapshot_ref = ANY(lineage.visited_refs)
+        )
+        SELECT 1
+        FROM supersession_lineage
+        WHERE current_ref IS NOT NULL
+          AND current_ref = ANY(visited_refs)
+    ) THEN
+        RAISE EXCEPTION 'result snapshot supersession lineage must be acyclic'
+            USING ERRCODE = '23514';
+    END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION require_result_snapshot_supersession_predecessor()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.supersedes_ref IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM 1
+    FROM result_snapshot
+    WHERE result_snapshot_ref = NEW.supersedes_ref;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'result snapshot supersession predecessor must already exist'
+            USING ERRCODE = '23503';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS result_snapshot_supersession_predecessor_guard
+    ON result_snapshot;
+CREATE TRIGGER result_snapshot_supersession_predecessor_guard
+    BEFORE INSERT ON result_snapshot
+    FOR EACH ROW
+    EXECUTE FUNCTION require_result_snapshot_supersession_predecessor();
+
 CREATE OR REPLACE FUNCTION reject_result_snapshot_evidence_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
