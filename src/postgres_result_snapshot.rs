@@ -33,6 +33,8 @@ pub enum ResultSnapshotPersistenceError {
     InvalidReference,
     /// Result identity was replayed with different immutable evidence.
     ConflictingReplay,
+    /// A superseding snapshot names a predecessor that is not already durable.
+    InvalidSupersession,
     /// A timestamp cannot be represented by the bounded database column.
     InvalidTimestamp,
     /// Result-snapshot persistence requires `PostgreSQL` `READ COMMITTED` isolation.
@@ -49,6 +51,9 @@ impl Display for ResultSnapshotPersistenceError {
             }
             Self::ConflictingReplay => {
                 "result snapshot identity was replayed with conflicting evidence"
+            }
+            Self::InvalidSupersession => {
+                "result snapshot supersession predecessor must already exist"
             }
             Self::InvalidTimestamp => {
                 "result snapshot timestamp exceeds the PostgreSQL bigint range"
@@ -91,18 +96,23 @@ pub fn apply_result_snapshot_migration(
 ///
 /// Exact replay of the same snapshot identity, provenance, and observations is
 /// idempotent. Rebinding `result_snapshot_ref` to different provenance or
-/// observation evidence fails closed. Historical snapshots are never updated.
+/// observation evidence fails closed. A superseding snapshot may reference only
+/// a predecessor that is already durable, which prevents forward-reference
+/// cycles under the immutable snapshot model. Historical snapshots are never
+/// updated.
 ///
 /// # Errors
 ///
 /// Returns [`ResultSnapshotPersistenceError`] for unsupported isolation,
-/// conflicting replay, an invalid reference or timestamp, or a database failure.
+/// conflicting replay, a missing supersession predecessor, an invalid reference
+/// or timestamp, or a database failure.
 pub fn persist_result_snapshot(
     transaction: &mut Transaction<'_>,
     snapshot: &ResultSnapshot,
 ) -> Result<ResultSnapshotPersistenceDisposition, ResultSnapshotPersistenceError> {
     require_read_committed(transaction)?;
     let snapshot_ref = required_reference(snapshot.result_snapshot_ref())?;
+    validate_supersession_predecessor(transaction, snapshot.supersedes_ref())?;
     let created_at = postgres_timestamp(snapshot.created_at_unix_ms())?;
     let consent_snapshot_refs = snapshot.consent_snapshot_refs().to_vec();
     let schema_version = i32::from(snapshot.requested_output_schema_version());
@@ -140,6 +150,27 @@ pub fn persist_result_snapshot(
         return Ok(ResultSnapshotPersistenceDisposition::Inserted);
     }
     classify_existing_snapshot(transaction, snapshot, created_at, schema_version)
+}
+
+fn validate_supersession_predecessor(
+    transaction: &mut Transaction<'_>,
+    supersedes_ref: Option<&str>,
+) -> Result<(), ResultSnapshotPersistenceError> {
+    let Some(supersedes_ref) = supersedes_ref else {
+        return Ok(());
+    };
+    let supersedes_ref = required_reference(supersedes_ref)?;
+    if transaction
+        .query_opt(
+            "SELECT 1 FROM result_snapshot WHERE result_snapshot_ref = $1",
+            &[&supersedes_ref],
+        )?
+        .is_some()
+    {
+        Ok(())
+    } else {
+        Err(ResultSnapshotPersistenceError::InvalidSupersession)
+    }
 }
 
 fn insert_observations(
