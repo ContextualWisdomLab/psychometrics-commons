@@ -68,13 +68,13 @@ fn schema_client(prefix: &str) -> SchemaClient {
         client,
         schema_name,
     };
-    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut *client).unwrap();
     client
 }
 
 fn isolated_client() -> SchemaClient {
     let mut client = schema_client("inbox_claim_expiry");
-    apply_inbox_consumption_migration(&mut client).unwrap();
+    apply_inbox_consumption_migration(&mut *client).unwrap();
     client
 }
 
@@ -324,8 +324,8 @@ fn forward_migration_fails_closed_for_preexisting_processing_claim() {
         .get(0);
     assert_eq!(legacy_column_count, 0);
 
-    apply_inbox_consumption_migration(&mut client).unwrap();
-    apply_inbox_consumption_migration(&mut client).unwrap();
+    apply_inbox_consumption_migration(&mut *client).unwrap();
+    apply_inbox_consumption_migration(&mut *client).unwrap();
 
     let upgraded = client
         .query_one(
@@ -366,7 +366,7 @@ fn forward_migrations_roll_back_together_when_hardening_cannot_apply() {
         )
         .unwrap();
 
-    let error = apply_inbox_consumption_migration(&mut client)
+    let error = apply_inbox_consumption_migration(&mut *client)
         .expect_err("a conflicting guard function signature must reject the migration batch");
     assert_eq!(
         error.code(),
