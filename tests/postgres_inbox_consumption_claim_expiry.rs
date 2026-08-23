@@ -9,22 +9,20 @@ use psychometrics_commons_runtime::postgres_inbox_consumption::{
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const LEGACY_INBOX_CONSUMPTION_MIGRATION: &str =
     include_str!("../migrations/0012_integration_consumption.sql");
+static SCHEMA_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn schema_client(prefix: &str) -> (Client, String) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after the Unix epoch")
-        .as_nanos();
-    let schema_name = format!("{prefix}_{}_{}", std::process::id(), nonce);
+    let sequence = SCHEMA_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let schema_name = format!("{prefix}_{}_{}", std::process::id(), sequence);
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
