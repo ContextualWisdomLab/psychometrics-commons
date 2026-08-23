@@ -30,7 +30,7 @@ Properties:
 - anonymous core assessment available;
 - no mandatory g7, TEPP, semantic-data-portal, contextual-orchestrator, or external model provider;
 - scoring uses a contract-compatible fast-mlsirm path;
-- initial supported relational store is upstream PostgreSQL 18.x with UTF8 server encoding per ADR-0015; forks/managed compatibility layers are not implicitly supported;
+- initial supported relational store is upstream PostgreSQL 18.x with UTF8 server encoding per ADR-0015 and the compatibility procedure defined in §4; forks/managed compatibility layers are not implicitly supported;
 - local/self-managed operators remain responsible for their own backup and security posture unless a packaged distribution explicitly includes those services.
 
 ### Hosted profile
@@ -69,7 +69,7 @@ Properties:
 - CWL services remain independently observable and deployable;
 - optional dependency outage degrades only the capability it owns;
 - product-owned state remains in the Psychometrics Commons operational store;
-- the initial validated relational persistence target is upstream PostgreSQL 18.x with UTF8 server encoding; adding a managed/forked alternative or another server encoding requires the ADR-0015 capability/conformance evidence;
+- the initial validated relational persistence target is upstream PostgreSQL 18.x with UTF8 server encoding; adding a managed/forked alternative or another server encoding requires the ADR-0015 real-database capability/conformance procedure defined in §4;
 - artifact and database backups are independently recoverable and provenance-bound.
 
 ### Enterprise profile
@@ -130,6 +130,8 @@ Readiness is capability/profile-aware. A service may be ready for anonymous resu
 The health model must expose machine-readable capability state rather than one ambiguous global green/red flag.
 
 For the product-owned operational database, state-changing readiness fails closed unless the server is an explicitly supported PostgreSQL major, uses UTF8 server encoding, and is writable. UTF8 is an execution prerequisite for the integration schema's `pg_unicode_fast` Unicode-aware reference constraints rather than a locale preference.
+
+`pg_unicode_fast` is PostgreSQL 18's built-in Unicode collation used here so character-class checks have stable Unicode semantics on the supported server. The integration schema's Unicode reference constraints are database `CHECK` constraints that reject invalid opaque identifiers even when writes bypass the Rust API. PostgreSQL exposes `pg_unicode_fast` only for UTF8 databases, so a non-UTF8 database cannot provide the same validated reference boundary and therefore fails readiness closed. ADR-0015 compatibility/conformance evidence means running the repository's real-database suite against the candidate engine/major/encoding to verify runtime probing, Unicode-reference parity with Rust, migration application and reapplication, and revalidation of affected constraints before support is declared.
 
 Example capability states:
 
@@ -229,7 +231,7 @@ Until those values exist, the product may be labelled development, preview, beta
 - New required immutable references are deterministically backfilled or the migration fails closed.
 - Rollback is used only when the storage/operation semantics are genuinely reversible; otherwise a tested roll-forward/compensation procedure is documented.
 - Migration completion includes post-migration invariant/tenant/provenance verification.
-- PostgreSQL major-version or server-encoding expansion/upgrade requires the ADR-0015 real-database compatibility suite before support is declared. Major-version changes that can alter immutable Unicode validation semantics also require reapplying the affected CHECK constraints so existing rows are revalidated.
+- PostgreSQL major-version or server-encoding expansion/upgrade requires the ADR-0015 real-database compatibility suite described in §4 before support is declared. Major-version changes that can alter immutable Unicode validation semantics also require reapplying and validating the affected `CHECK` constraints so existing rows are tested under the candidate server's rules before support is declared.
 
 ## 10. Release topology evidence
 
