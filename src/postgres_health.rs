@@ -1,15 +1,18 @@
 //! `PostgreSQL` operational-store compatibility and write-readiness evidence.
 //!
-//! The runtime's initial persistence contract supports upstream `PostgreSQL` 18.x.
-//! This module probes the caller-owned connection and classifies whether the database
-//! can safely accept product-owned state changes. It does not own credentials,
-//! connection pooling, migrations, backup, or recovery.
+//! The runtime's initial persistence contract supports upstream `PostgreSQL` 18.x
+//! databases using UTF8 server encoding. This module probes the caller-owned connection
+//! and classifies whether the database can safely accept product-owned state changes. It
+//! does not own credentials, connection pooling, migrations, backup, or recovery.
 
 use crate::health::{CapabilityHealth, CapabilityState, DataIntegrityHealth, HealthContractError};
 use postgres::GenericClient;
 
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
+
+/// Required `PostgreSQL` server encoding for Unicode-aware database constraints.
+pub const SUPPORTED_POSTGRES_ENCODING: &str = "UTF8";
 
 /// Capability identity used by operation-scoped runtime readiness.
 pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operational_store";
@@ -18,10 +21,12 @@ pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operationa
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PostgresRuntimeStatus {
-    /// The supported `PostgreSQL` major is reachable and accepts writes.
+    /// The supported `PostgreSQL` major and UTF8 encoding are reachable and accept writes.
     Ready,
     /// The `PostgreSQL` server major is outside the repository's validated support boundary.
     UnsupportedMajorVersion,
+    /// The server encoding cannot safely execute the repository's Unicode-aware constraints.
+    UnsupportedEncoding,
     /// The supported `PostgreSQL` server is currently read-only for this connection.
     ReadOnly,
 }
@@ -51,9 +56,9 @@ impl PostgresRuntimeHealth {
     pub const fn capability_state(self) -> CapabilityState {
         match self.status {
             PostgresRuntimeStatus::Ready => CapabilityState::Available,
-            PostgresRuntimeStatus::UnsupportedMajorVersion | PostgresRuntimeStatus::ReadOnly => {
-                CapabilityState::Unavailable
-            }
+            PostgresRuntimeStatus::UnsupportedMajorVersion
+            | PostgresRuntimeStatus::UnsupportedEncoding
+            | PostgresRuntimeStatus::ReadOnly => CapabilityState::Unavailable,
         }
     }
 
@@ -78,18 +83,23 @@ impl PostgresRuntimeHealth {
     }
 }
 
-/// Classify server-version and transaction-read-only evidence without performing I/O.
+/// Classify server-version, server-encoding, and transaction-read-only evidence without I/O.
 ///
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
-/// integer division yields the server major used by the repository support policy.
+/// integer division yields the server major used by the repository support policy. UTF8 is
+/// required because the integration persistence schema uses `PostgreSQL`'s Unicode-aware
+/// `pg_unicode_fast` collation for reference validation.
 #[must_use]
-pub const fn classify_postgres_runtime(
+pub fn classify_postgres_runtime(
     server_version_num: i32,
+    server_encoding: &str,
     transaction_read_only: bool,
 ) -> PostgresRuntimeHealth {
     let server_major_version = server_version_num / 10_000;
     let status = if server_major_version != SUPPORTED_POSTGRES_MAJOR {
         PostgresRuntimeStatus::UnsupportedMajorVersion
+    } else if server_encoding != SUPPORTED_POSTGRES_ENCODING {
+        PostgresRuntimeStatus::UnsupportedEncoding
     } else if transaction_read_only {
         PostgresRuntimeStatus::ReadOnly
     } else {
@@ -101,7 +111,7 @@ pub const fn classify_postgres_runtime(
     }
 }
 
-/// Probe the caller-owned `PostgreSQL` connection for supported-major and write readiness.
+/// Probe the caller-owned `PostgreSQL` connection for supported-major, UTF8, and write readiness.
 ///
 /// The probe reads only `PostgreSQL` server settings and never returns credentials,
 /// assessment content, tenant identifiers, or restricted linkage data. Callers must map
@@ -117,13 +127,16 @@ pub fn probe_postgres_runtime(
 ) -> Result<PostgresRuntimeHealth, postgres::Error> {
     let row = client.query_one(
         "SELECT current_setting('server_version_num')::integer, \
+                current_setting('server_encoding'), \
                 current_setting('transaction_read_only')::boolean",
         &[],
     )?;
     let server_version_num: i32 = row.get(0);
-    let transaction_read_only: bool = row.get(1);
+    let server_encoding: String = row.get(1);
+    let transaction_read_only: bool = row.get(2);
     Ok(classify_postgres_runtime(
         server_version_num,
+        &server_encoding,
         transaction_read_only,
     ))
 }

@@ -216,15 +216,21 @@ impl From<postgres::Error> for PersistenceError {
 /// Apply the idempotent integration-evidence migration to a `PostgreSQL` connection.
 ///
 /// The caller owns the connection, transaction policy, credentials, TLS policy, and
-/// deployment routing. Re-applying this migration is safe because it creates only
-/// the bounded first-slice integration tables when absent.
+/// deployment routing. The repository-owned table and lease phases are submitted in
+/// one `PostgreSQL` simple-query batch so a plain [`postgres::Client`] cannot commit
+/// the first phase when the second phase fails. When the caller supplies a
+/// [`postgres::Transaction`], the same batch remains inside that caller-owned transaction.
 ///
 /// # Errors
 ///
-/// Returns the `PostgreSQL` error if the migration cannot be applied.
+/// Returns the `PostgreSQL` error if any migration phase cannot be applied.
 pub fn apply_integration_migration(client: &mut impl GenericClient) -> Result<(), postgres::Error> {
-    client.batch_execute(INTEGRATION_MIGRATION)?;
-    client.batch_execute(OUTBOX_LEASE_MIGRATION)
+    let mut migration =
+        String::with_capacity(INTEGRATION_MIGRATION.len() + OUTBOX_LEASE_MIGRATION.len() + 1);
+    migration.push_str(INTEGRATION_MIGRATION);
+    migration.push('\n');
+    migration.push_str(OUTBOX_LEASE_MIGRATION);
+    client.batch_execute(&migration)
 }
 
 /// Insert an immutable integration event into the durable outbox.
