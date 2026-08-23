@@ -117,7 +117,7 @@ pub const fn classify_postgres_runtime(
 
 /// Classify complete server-version, write-mode, and database-encoding readiness evidence.
 ///
-/// Upstream PostgreSQL reports the canonical database encoding name through
+/// Upstream `PostgreSQL` reports the canonical database encoding name through
 /// `current_setting('server_encoding')`; the initial persistence contract accepts only
 /// `UTF8`. A non-UTF8 database fails closed even when the server major is supported and the
 /// connection is writable.
@@ -146,7 +146,7 @@ pub fn classify_postgres_runtime_with_encoding(
 /// Probe the caller-owned `PostgreSQL` connection for supported-major, UTF8, and write readiness.
 ///
 /// UTF8 is part of the persistence compatibility boundary because product migrations and
-/// reference-integrity contracts use PostgreSQL's Unicode-aware behavior. The probe reads only
+/// reference-integrity contracts use `PostgreSQL`'s Unicode-aware behavior. The probe reads only
 /// `PostgreSQL` server settings and never returns credentials, assessment content, tenant
 /// identifiers, or restricted linkage data. Callers must map the returned database error to an
 /// operator-safe error class before exposing it across a public health endpoint.
