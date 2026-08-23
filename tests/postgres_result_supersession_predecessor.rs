@@ -212,7 +212,10 @@ fn migration_reapply_rejects_historical_supersession_cycles_with_check_violation
         .unwrap();
 
     let error = apply_result_snapshot_migration(&mut client).unwrap_err();
-    assert_eq!(error.code().map(|code| code.code()), Some("23514"));
+    assert_eq!(
+        error.code().map(postgres::error::SqlState::code),
+        Some("23514")
+    );
 }
 
 #[test]
@@ -233,7 +236,10 @@ fn migration_reapply_rejects_historical_dangling_predecessor_with_foreign_key_vi
         .unwrap();
 
     let error = apply_result_snapshot_migration(&mut client).unwrap_err();
-    assert_eq!(error.code().map(|code| code.code()), Some("23503"));
+    assert_eq!(
+        error.code().map(postgres::error::SqlState::code),
+        Some("23503")
+    );
 }
 
 #[test]
