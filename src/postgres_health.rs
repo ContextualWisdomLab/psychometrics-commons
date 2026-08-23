@@ -87,7 +87,7 @@ impl PostgresRuntimeHealth {
 ///
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
 /// integer division yields the server major used by the repository support policy. UTF8 is
-/// required because the integration persistence schema uses PostgreSQL's Unicode-aware
+/// required because the integration persistence schema uses `PostgreSQL`'s Unicode-aware
 /// `pg_unicode_fast` collation for reference validation.
 #[must_use]
 pub fn classify_postgres_runtime(
