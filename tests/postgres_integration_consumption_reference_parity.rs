@@ -121,12 +121,12 @@ fn assert_required_field_rejects_invalid_aliases(
         let mut consumption_ref = format!("consumption_{suffix}");
         let mut side_effect_ref = format!("side_effect_{suffix}");
         match field {
-            ConsumptionReferenceField::Consumer => consumer_ref = invalid_ref.to_owned(),
-            ConsumptionReferenceField::Source => source_ref = invalid_ref.to_owned(),
-            ConsumptionReferenceField::Tenant => tenant_ref = invalid_ref.to_owned(),
-            ConsumptionReferenceField::SourceEvent => event_ref = invalid_ref.to_owned(),
-            ConsumptionReferenceField::Consumption => consumption_ref = invalid_ref.to_owned(),
-            ConsumptionReferenceField::SideEffect => side_effect_ref = invalid_ref.to_owned(),
+            ConsumptionReferenceField::Consumer => invalid_ref.clone_into(&mut consumer_ref),
+            ConsumptionReferenceField::Source => invalid_ref.clone_into(&mut source_ref),
+            ConsumptionReferenceField::Tenant => invalid_ref.clone_into(&mut tenant_ref),
+            ConsumptionReferenceField::SourceEvent => invalid_ref.clone_into(&mut event_ref),
+            ConsumptionReferenceField::Consumption => invalid_ref.clone_into(&mut consumption_ref),
+            ConsumptionReferenceField::SideEffect => invalid_ref.clone_into(&mut side_effect_ref),
         }
 
         let error = insert_pending(
