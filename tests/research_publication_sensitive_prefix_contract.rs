@@ -19,9 +19,13 @@ fn sensitive_prefixes_cannot_hide_behind_research_participant_namespace() {
     for column_name in [
         "auth_research_participant_ref",
         "secret_research_participant_ref",
+        "secrets_research_participant_ref",
         "token_research_participant_ref",
+        "tokens_research_participant_ref",
         "password_research_participant_ref",
+        "passwords_research_participant_ref",
         "credential_research_participant_ref",
+        "credentials_research_participant_ref",
         "database_research_participant_ref",
         "object_store_research_participant_ref",
     ] {
