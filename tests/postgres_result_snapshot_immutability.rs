@@ -9,6 +9,12 @@ struct SchemaClient {
     schema_name: String,
 }
 
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
 impl Deref for SchemaClient {
     type Target = Client;
 
@@ -94,6 +100,18 @@ fn expect_rejected_statement(client: &mut Client, statement: &str) {
         .expect_err("immutable result evidence mutation must be rejected");
     assert_immutable_error(&error);
     transaction.rollback().unwrap();
+}
+
+#[test]
+fn database_transaction_identity_prevents_schema_name_reuse() {
+    let first = isolated_client();
+    let second = isolated_client();
+
+    assert_ne!(
+        first.schema_name(),
+        second.schema_name(),
+        "schema isolation must not depend on wall-clock resolution or PID lifetime"
+    );
 }
 
 #[test]
