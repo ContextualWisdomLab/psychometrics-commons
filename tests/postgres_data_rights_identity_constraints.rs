@@ -58,7 +58,7 @@ fn schema_client() -> SchemaClient {
     };
     apply_integration_migration(&mut *client)
         .expect("integration migration should apply in the isolated schema");
-    apply_data_rights_migration(&mut *client)
+    apply_data_rights_migration(&mut client)
         .expect("data-rights migration should apply in the isolated schema");
     client
 }
