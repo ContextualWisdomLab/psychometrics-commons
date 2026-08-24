@@ -4,6 +4,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY: i64 = 0x4954_454D_5343_484D;
 static ITEM_DELIVERY_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
 
 fn schema_test_guard() -> MutexGuard<'static, ()> {
@@ -41,6 +42,37 @@ fn constraint_name(error: &postgres::Error) -> String {
         .and_then(postgres::error::DbError::constraint)
         .unwrap_or_default()
         .to_owned()
+}
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let _guard = schema_test_guard();
+    let _owner = test_client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
+    );
 }
 
 #[test]
