@@ -1,4 +1,4 @@
-//! Restart-safety contract for the data-rights processing-start PostgreSQL fixture.
+//! Restart-safety contract for the data-rights processing-start `PostgreSQL` fixture.
 
 #[test]
 fn processing_fixture_uses_database_issued_schema_identity_and_cleanup() {
