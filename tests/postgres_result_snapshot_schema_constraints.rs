@@ -2,15 +2,18 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
-use std::sync::{Mutex, MutexGuard};
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5253_534E_4150_434B;
-static RESULT_SNAPSHOT_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
 
-fn schema_test_guard() -> MutexGuard<'static, ()> {
-    RESULT_SNAPSHOT_SCHEMA_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn schema_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL result-snapshot schema lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
