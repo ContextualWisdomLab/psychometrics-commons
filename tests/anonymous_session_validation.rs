@@ -70,6 +70,48 @@ fn invalid_reference_is_rejected() {
 }
 
 #[test]
+fn padded_reference_aliases_are_rejected_at_context_construction() {
+    for (tenant_ref, participant_ref, session_ref, authorization_evidence_ref) in [
+        (
+            " tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            "evidence_alpha",
+        ),
+        (
+            "tenant_alpha",
+            "participant_alpha ",
+            "session_alpha",
+            "evidence_alpha",
+        ),
+        (
+            "tenant_alpha",
+            "participant_alpha",
+            "\u{2003}session_alpha",
+            "evidence_alpha",
+        ),
+        (
+            "tenant_alpha",
+            "participant_alpha",
+            "session_alpha",
+            "evidence_alpha\u{2003}",
+        ),
+    ] {
+        assert_eq!(
+            AnonymousSessionContext::new(
+                tenant_ref,
+                participant_ref,
+                session_ref,
+                authorization_evidence_ref,
+                2_000,
+            ),
+            Err(AnonymousSessionContextError::InvalidReference),
+            "authorization context references must already use their exact canonical spelling",
+        );
+    }
+}
+
+#[test]
 fn zero_validity_boundary_is_rejected() {
     assert_eq!(
         AnonymousSessionContext::new(
