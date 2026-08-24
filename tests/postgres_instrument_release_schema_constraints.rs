@@ -4,6 +4,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_instrument_release::apply_instrument_release_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const INSTRUMENT_RELEASE_SCHEMA_DATABASE_LOCK_KEY: i64 = 0x494E_5354_5253_4348;
 static INSTRUMENT_RELEASE_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
 
 fn schema_test_guard() -> MutexGuard<'static, ()> {
@@ -55,6 +56,37 @@ const VALID_VALUES: &str = "'release_schema_ko_v1', 'instrument_big_five', \
      'limitations_nonclinical_v1', \
      'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
      'draft', 40000";
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let _guard = schema_test_guard();
+    let _owner = test_client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&INSTRUMENT_RELEASE_SCHEMA_DATABASE_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&INSTRUMENT_RELEASE_SCHEMA_DATABASE_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
+    );
+}
 
 #[test]
 fn schema_rejects_numeric_identity_empty_item_set_invalid_digest_and_unknown_state() {
