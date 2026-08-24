@@ -19,6 +19,7 @@ const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x4953_4341_5441_4c47;
 
 static STARTABLE_CATALOG_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -28,11 +29,14 @@ fn test_guard() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn test_client() -> Client {
+fn connect_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn test_client() -> Client {
+    let mut client = connect_client();
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS instrument_startable_catalog_test;\
@@ -140,6 +144,31 @@ fn persist(client: &mut Client, release: &InstrumentRelease) {
     let mut transaction = client.transaction().unwrap();
     persist_instrument_release(&mut transaction, release).unwrap();
     transaction.commit().unwrap();
+}
+
+#[test]
+fn fixture_serialization_is_visible_across_postgres_sessions() {
+    let _guard = test_guard();
+    let mut contender = connect_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("contender PostgreSQL session should query the fixture lock")
+        .get(0);
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&DATABASE_TEST_LOCK_KEY],
+            )
+            .expect("contender lock cleanup should succeed");
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible to independent PostgreSQL sessions"
+    );
 }
 
 #[test]
