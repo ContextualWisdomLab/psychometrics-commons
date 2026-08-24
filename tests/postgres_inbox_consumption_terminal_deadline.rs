@@ -66,8 +66,8 @@ fn isolated_client() -> SchemaClient {
         client,
         schema_name,
     };
-    apply_integration_migration(&mut client).expect("integration migration should apply");
-    apply_inbox_consumption_migration(&mut client)
+    apply_integration_migration(&mut *client).expect("integration migration should apply");
+    apply_inbox_consumption_migration(&mut *client)
         .expect("inbox-consumption migrations should apply atomically");
     client
 }
