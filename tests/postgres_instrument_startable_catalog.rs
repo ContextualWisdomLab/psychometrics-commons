@@ -158,10 +158,7 @@ fn fixture_serialization_is_visible_across_postgres_sessions() {
         .get(0);
     if acquired {
         contender
-            .query_one(
-                "SELECT pg_advisory_unlock($1)",
-                &[&DATABASE_TEST_LOCK_KEY],
-            )
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
             .expect("contender lock cleanup should succeed");
     }
     assert!(
