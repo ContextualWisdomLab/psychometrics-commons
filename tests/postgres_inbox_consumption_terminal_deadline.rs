@@ -95,6 +95,33 @@ fn assert_terminal_lease_evidence_cleared(
 }
 
 #[test]
+fn dropping_fixture_connection_must_remove_isolated_schema() {
+    let (client, schema) = isolated_client();
+    drop(client);
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut observer = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let schema_remains: bool = observer
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+            &[&schema],
+        )
+        .expect("fixture schema presence should be observable")
+        .get(0);
+    if schema_remains {
+        observer
+            .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE;"))
+            .expect("RED regression cleanup should not leave the stale fixture schema behind");
+    }
+    assert!(
+        !schema_remains,
+        "dropping the fixture connection must remove its isolated schema even when the test exits early"
+    );
+}
+
+#[test]
 fn successful_claimed_terminal_writes_clear_both_lease_deadlines() {
     let (mut client, schema) = isolated_client();
 
