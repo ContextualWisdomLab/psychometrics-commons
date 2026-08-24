@@ -7,16 +7,20 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::mem::discriminant;
-use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
-static SCORING_JOB_TEST_LOCK: Mutex<()> = Mutex::new(());
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4F52_5045_5253;
 
-fn scoring_job_test_guard() -> MutexGuard<'static, ()> {
-    SCORING_JOB_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn scoring_job_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL scoring persistence lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
