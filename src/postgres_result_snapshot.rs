@@ -99,13 +99,15 @@ pub fn apply_result_snapshot_migration(
 ///
 /// Exact replay of the same snapshot identity, provenance, and observations is
 /// idempotent. Rebinding `result_snapshot_ref` to different provenance or
-/// observation evidence fails closed. A superseding snapshot may reference only
-/// a different predecessor row that is already visible to the current transaction
-/// before the successor is inserted. A predecessor inserted earlier in this same
-/// transaction is valid; an uncommitted predecessor in another transaction is not
-/// yet visible and is rejected. This insertion ordering prevents forward-reference
-/// cycles under the immutable snapshot model. Historical snapshots are never
-/// updated.
+/// observation evidence fails closed. Existing result identities are classified
+/// as exact or conflicting replays before any incoming predecessor is validated,
+/// so a conflicting replay cannot be mislabeled as a new supersession failure.
+/// A superseding snapshot may reference only a different predecessor row that is
+/// already visible to the current transaction before the successor is inserted.
+/// A predecessor inserted earlier in this same transaction is valid; an uncommitted
+/// predecessor in another transaction is not yet visible and is rejected. This
+/// insertion ordering prevents forward-reference cycles under the immutable
+/// snapshot model. Historical snapshots are never updated.
 ///
 /// # Errors
 ///
@@ -118,10 +120,14 @@ pub fn persist_result_snapshot(
 ) -> Result<ResultSnapshotPersistenceDisposition, ResultSnapshotPersistenceError> {
     require_read_committed(transaction)?;
     let snapshot_ref = required_reference(snapshot.result_snapshot_ref())?;
-    validate_supersession_predecessor(transaction, snapshot.supersedes_ref())?;
     let created_at = postgres_timestamp(snapshot.created_at_unix_ms())?;
-    let consent_snapshot_refs = snapshot.consent_snapshot_refs().to_vec();
     let schema_version = i32::from(snapshot.requested_output_schema_version());
+    if result_snapshot_exists(transaction, snapshot_ref)? {
+        return classify_existing_snapshot(transaction, snapshot, created_at, schema_version);
+    }
+
+    validate_supersession_predecessor(transaction, snapshot.supersedes_ref())?;
+    let consent_snapshot_refs = snapshot.consent_snapshot_refs().to_vec();
     let inserted = transaction.execute(
         "INSERT INTO result_snapshot (\
              result_snapshot_ref, participant_ref, scoring_result_ref, session_ref, \
@@ -156,6 +162,18 @@ pub fn persist_result_snapshot(
         return Ok(ResultSnapshotPersistenceDisposition::Inserted);
     }
     classify_existing_snapshot(transaction, snapshot, created_at, schema_version)
+}
+
+fn result_snapshot_exists(
+    transaction: &mut Transaction<'_>,
+    snapshot_ref: &str,
+) -> Result<bool, ResultSnapshotPersistenceError> {
+    Ok(transaction
+        .query_opt(
+            "SELECT 1 FROM result_snapshot WHERE result_snapshot_ref = $1",
+            &[&snapshot_ref],
+        )?
+        .is_some())
 }
 
 fn validate_supersession_predecessor(
