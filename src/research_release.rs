@@ -202,7 +202,7 @@ pub struct RestrictedReleaseIdentities<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PublicReleaseLeakageError {
-    /// A published column name contains a forbidden identity/security marker.
+    /// A published column name is blank or contains a forbidden identity/security marker.
     ForbiddenColumn,
     /// No published columns were supplied, so there is no fixture to verify.
     EmptyFixture,
@@ -222,7 +222,7 @@ impl Display for PublicReleaseLeakageError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::ForbiddenColumn => {
-                "remove restricted identity, authentication, credential, or internal-location columns from the public release fixture"
+                "remove blank, restricted identity, authentication, credential, or internal-location columns from the public release fixture"
             }
             Self::EmptyFixture => {
                 "supply at least one published column before treating a public release fixture scan as clean"
@@ -324,7 +324,8 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 ///
 /// Call this before packaging a public or catalog-facing release.
 ///
-/// - Publish only ASCII column names. Non-ASCII aliases fail closed before normalization.
+/// - Publish only nonblank ASCII column names. Blank or non-ASCII aliases fail closed before
+///   normalization.
 /// - `research_participant_ref` is the allowed public research identity namespace. Clear
 ///   export, staging, and author-metadata prefixes remain allowed unless they also carry a
 ///   restricted identity, authentication, credential, or internal-location marker.
@@ -340,7 +341,7 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 ///
 /// # Errors
 ///
-/// Returns [`PublicReleaseLeakageError`] when no published columns are supplied, a
+/// Returns [`PublicReleaseLeakageError`] when no published columns are supplied, a blank or
 /// forbidden column is present, the effective restricted-identity inventory is unavailable,
 /// a structured cell cannot be inspected safely, or a cell value is an operational
 /// participant, Keyverse subject, restricted linkage identity, or linkage-key version.
@@ -398,7 +399,7 @@ fn has_effective_restricted_identity_inventory(
 }
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
-    if !column_name.is_ascii() {
+    if column_name.trim().is_empty() || !column_name.is_ascii() {
         return true;
     }
 
