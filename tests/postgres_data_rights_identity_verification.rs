@@ -75,7 +75,7 @@ fn test_client(schema_prefix: &str) -> SchemaClient {
 
 fn ready_client(schema_prefix: &str) -> SchemaClient {
     let mut client = test_client(schema_prefix);
-    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut *client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     // Intentional second application proves the migration remains idempotent.
     apply_data_rights_migration(&mut client).unwrap();
