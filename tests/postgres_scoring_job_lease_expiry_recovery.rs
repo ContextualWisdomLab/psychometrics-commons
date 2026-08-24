@@ -224,14 +224,13 @@ fn expiry_classify_select_failure_is_a_database_failure() {
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
     persist_and_claim(&mut client, "scoring_job_classify_hidden", 3, 11_000);
-    let sink = format!("scoring_job_expiry_classify_sink_{}", std::process::id());
+    const SINK: &str = "scoring_job_expiry_classify_sink_unavailable";
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA {sink};\
-             CREATE OR REPLACE FUNCTION scoring_job_redirect_after_update() \
+            "CREATE OR REPLACE FUNCTION scoring_job_redirect_after_update() \
              RETURNS trigger LANGUAGE plpgsql AS $$ \
              BEGIN \
-                 PERFORM set_config('search_path', '{sink}', false); \
+                 PERFORM set_config('search_path', '{SINK}', false); \
                  RETURN NULL; \
              END $$; \
              CREATE TRIGGER scoring_job_redirect_after_update \
