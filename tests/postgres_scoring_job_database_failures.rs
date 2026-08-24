@@ -15,6 +15,12 @@ fn test_client() -> Client {
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY],
+        )
+        .expect("scoring database-failure fixture advisory lock should be acquired");
+    client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_database_failure_test;\
              SET search_path TO scoring_job_database_failure_test;\
