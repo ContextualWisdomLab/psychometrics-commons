@@ -311,3 +311,17 @@ fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn startable_catalog_fails_closed_when_release_relation_is_missing() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        list_startable_instrument_releases(&mut transaction),
+        Err(InstrumentReleaseQueryError::Database(_))
+    ));
+    transaction.rollback().unwrap();
+}
