@@ -32,12 +32,13 @@ impl TestDatabase {
                 "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
             ))
             .unwrap();
-        apply_integration_migration(&mut client).unwrap();
-        apply_data_rights_migration(&mut client).unwrap();
-        Self {
+        let mut database = Self {
             client,
             schema_name,
-        }
+        };
+        apply_integration_migration(&mut database.client).unwrap();
+        apply_data_rights_migration(&mut database.client).unwrap();
+        database
     }
 }
 
