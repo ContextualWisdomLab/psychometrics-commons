@@ -357,13 +357,13 @@ fn processing_start_classify_select_failure_is_a_database_failure() {
         .verify_identity("verification_evidence_alpha", 10_100)
         .unwrap();
     request.start_processing("operation_alpha", 10_200).unwrap();
-    const SINK: &str = "data_rights_processing_classify_sink_unavailable";
+    let sink = "data_rights_processing_classify_sink_unavailable";
     client
         .batch_execute(&format!(
             "CREATE OR REPLACE FUNCTION data_rights_processing_redirect_after_update()
              RETURNS trigger LANGUAGE plpgsql AS $$
              BEGIN
-                 PERFORM set_config('search_path', '{SINK}', false);
+                 PERFORM set_config('search_path', '{sink}', false);
                  RETURN NULL;
              END $$;
              CREATE TRIGGER data_rights_processing_redirect_after_update
