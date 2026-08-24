@@ -8,18 +8,18 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "scoring_job_cancellation_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4F52_4341_4E43;
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn test_client() -> (MutexGuard<'static, ()>, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn test_client() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL scoring cancellation lock should be acquired");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
