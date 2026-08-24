@@ -105,10 +105,7 @@ fn fixture_lock_is_visible_across_database_sessions() {
 
     if acquired {
         contender
-            .query_one(
-                "SELECT pg_advisory_unlock($1)",
-                &[&DATABASE_TEST_LOCK_KEY],
-            )
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
             .unwrap();
     }
 
