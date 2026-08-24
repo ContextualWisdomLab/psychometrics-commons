@@ -913,10 +913,12 @@ fn normalize_unique_references(
 }
 
 fn required_reference(reference: &str) -> Result<&str, InstrumentReleaseError> {
-    match normalized_reference(reference) {
-        Some(normalized) if normalized == reference => Ok(reference),
-        _ => Err(InstrumentReleaseError::InvalidReference),
+    let normalized =
+        normalized_reference(reference).ok_or(InstrumentReleaseError::InvalidReference)?;
+    if normalized != reference {
+        return Err(InstrumentReleaseError::InvalidReference);
     }
+    Ok(reference)
 }
 
 pub(crate) fn valid_sha256_digest(digest: &str) -> bool {
