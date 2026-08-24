@@ -1,4 +1,4 @@
-//! Restart-safety contract for the data-rights identity-verification PostgreSQL fixture.
+//! Restart-safety contract for the data-rights identity-verification `PostgreSQL` fixture.
 
 #[test]
 fn identity_verification_fixture_uses_database_issued_schema_identity_and_cleanup() {
