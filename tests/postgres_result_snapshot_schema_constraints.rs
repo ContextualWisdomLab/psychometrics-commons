@@ -4,6 +4,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5253_534E_4150_434B;
 static RESULT_SNAPSHOT_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
 
 fn schema_test_guard() -> MutexGuard<'static, ()> {
@@ -59,6 +60,28 @@ const VALID_SNAPSHOT_VALUES: &str = "'result_snapshot_valid', 'participant_resul
      'calibration_big_five_ko_v1', NULL, 1, 'narrative_version_big_five_v1', \
      ARRAY['consent_snapshot_service_v1'], \
      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 70000";
+
+#[test]
+fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
+    let _guard = schema_test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one("SELECT pg_try_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("cross-process fixture lock should be observable from PostgreSQL")
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .expect("RED fixture lock should be released after probing");
+    }
+    assert!(
+        !acquired,
+        "a process-local mutex cannot serialize a fixed PostgreSQL schema across CI processes"
+    );
+}
 
 #[test]
 fn schema_rejects_numeric_identity_empty_consent_and_self_supersession() {
