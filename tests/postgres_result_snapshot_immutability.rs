@@ -2,23 +2,61 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::ops::{Deref, DerefMut};
 
-fn isolated_client() -> (Client, String) {
+struct SchemaClient {
+    client: Client,
+    schema_name: String,
+}
+
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
+impl Deref for SchemaClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for SchemaClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+impl Drop for SchemaClient {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "RESET search_path; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
+}
+
+fn isolated_client() -> SchemaClient {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after the Unix epoch")
-        .as_nanos();
-    let schema_name = format!("result_snapshot_immutable_{}_{}", std::process::id(), nonce);
+    let database_nonce: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must allocate a durable transaction identity for test isolation")
+        .get(0);
+    let schema_name = format!("result_snapshot_immutable_{database_nonce}");
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
         ))
         .unwrap();
+    let mut client = SchemaClient {
+        client,
+        schema_name,
+    };
     apply_result_snapshot_migration(&mut client).unwrap();
     client
         .batch_execute(
@@ -45,7 +83,7 @@ fn isolated_client() -> (Client, String) {
              );",
         )
         .unwrap();
-    (client, schema_name)
+    client
 }
 
 fn assert_immutable_error(error: &postgres::Error) {
@@ -65,21 +103,20 @@ fn expect_rejected_statement(client: &mut Client, statement: &str) {
 }
 
 #[test]
-fn fixture_schema_identity_is_database_issued() {
-    let fixture_source = include_str!("postgres_result_snapshot_immutability.rs");
-    assert!(
-        fixture_source.contains("pg_current_xact_id"),
-        "test schema identity must come from PostgreSQL rather than process-local time"
-    );
-    assert!(
-        !fixture_source.contains("std::process::id()"),
-        "process IDs can be recycled while stale test schemas still exist"
+fn database_transaction_identity_is_unique_per_fixture_allocation() {
+    let first = isolated_client();
+    let second = isolated_client();
+
+    assert_ne!(
+        first.schema_name(),
+        second.schema_name(),
+        "independent fixture allocations must receive distinct database transaction identities"
     );
 }
 
 #[test]
 fn result_evidence_rejects_update_delete_and_truncate() {
-    let (mut client, schema_name) = isolated_client();
+    let mut client = isolated_client();
 
     let mutations = [
         "UPDATE result_snapshot SET narrative_version_ref = 'narrative_version_tampered' \
@@ -107,8 +144,4 @@ fn result_evidence_rejects_update_delete_and_truncate() {
         .unwrap();
     assert_eq!(counts.get::<_, i64>(0), 1);
     assert_eq!(counts.get::<_, i64>(1), 1);
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
