@@ -79,7 +79,7 @@ fn test_client(schema_prefix: &str) -> SchemaClient {
 
 fn ready_client(schema_prefix: &str) -> SchemaClient {
     let mut client = test_client(schema_prefix);
-    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut *client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     apply_data_rights_processing_migration(&mut client).unwrap();
@@ -533,7 +533,7 @@ fn processing_columns_enforce_pair_presence_reference_format_and_positive_time()
 #[test]
 fn processing_migration_repairs_constraints_when_columns_preexist() {
     let mut client = test_client("data_rights_process_repair_constraints");
-    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut *client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     client
         .batch_execute(
