@@ -8,7 +8,7 @@ use psychometrics_commons_runtime::postgres_data_rights::{
     DataRightsPersistenceDisposition, DataRightsPropagationTarget,
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -96,6 +96,39 @@ fn fixture_schema_identity_is_restart_safe() {
     assert_ne!(
         first, second,
         "independent concurrent fixtures must use database-issued identities"
+    );
+}
+
+#[test]
+fn fixture_setup_panic_drops_the_owned_schema() {
+    let url = std::env::var("TEST_DATABASE_URL").unwrap();
+    let captured_schema = Arc::new(Mutex::new(None::<String>));
+    let captured_for_setup = Arc::clone(&captured_schema);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = TestDatabase::new_with_initializer(&url, |_, schema_name| {
+            *captured_for_setup.lock().unwrap() = Some(schema_name.to_owned());
+            panic!("injected fixture setup failure");
+        });
+    }));
+    assert!(panic.is_err(), "the injected setup failure must unwind");
+
+    let schema_name = captured_schema
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the fixture must expose the created schema before setup fails");
+    let mut observer = Client::connect(&url, NoTls).unwrap();
+    let exists: bool = observer
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+            &[&schema_name],
+        )
+        .unwrap()
+        .get(0);
+    assert!(
+        !exists,
+        "panic unwinding during fixture setup must drop the owned schema"
     );
 }
 
