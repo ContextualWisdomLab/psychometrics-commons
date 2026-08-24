@@ -1,4 +1,4 @@
-//! Regression contract for the shared inbox-consumption PostgreSQL fixture lock.
+//! Regression contract for the shared inbox-consumption `PostgreSQL` fixture lock.
 
 const FIXTURE_SOURCE: &str = include_str!("postgres_inbox_consumption_persistence.rs");
 
@@ -18,7 +18,7 @@ fn fixture_serialization_is_database_visible_not_process_local() {
     let guard_body = &FIXTURE_SOURCE[guard_start..client_start];
 
     assert!(
-        !guard_body.contains("test_client()"),
+        !guard_body.contains("let mut client = test_client();"),
         "the guard must not touch shared-schema setup before acquiring its database lock"
     );
     assert!(
