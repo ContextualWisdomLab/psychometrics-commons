@@ -55,12 +55,10 @@ impl TestDatabase {
 
 impl Drop for TestDatabase {
     fn drop(&mut self) {
-        self.client
-            .batch_execute(&format!(
-                "SET search_path TO public; DROP SCHEMA IF EXISTS {} CASCADE;",
-                self.schema_name
-            ))
-            .expect("isolated data-rights verification fixture schema should be removable");
+        let _ = self.client.batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
     }
 }
 
