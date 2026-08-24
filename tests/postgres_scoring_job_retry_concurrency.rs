@@ -115,7 +115,10 @@ fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
     let mut contender = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     let acquired: bool = contender
-        .query_one("SELECT pg_try_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
         .expect("cross-process fixture lock should be observable from PostgreSQL")
         .get(0);
     if acquired {
