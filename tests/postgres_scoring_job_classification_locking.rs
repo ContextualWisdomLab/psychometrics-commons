@@ -9,6 +9,7 @@ use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "scoring_job_classification_locking_test";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4C41_5353_4C4B;
 static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn test_clients() -> (MutexGuard<'static, ()>, Client, Client) {
@@ -87,6 +88,32 @@ fn assert_row_update_waits_for_lock(contender: &mut Client, job_ref: &str) {
     assert_eq!(
         error.code().map(postgres::error::SqlState::code),
         Some("55P03")
+    );
+}
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let (_guard, _owner, mut contender) = test_clients();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&DATABASE_TEST_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
     );
 }
 
