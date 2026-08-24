@@ -5,28 +5,36 @@ const RUST_TOOLCHAIN: &str = include_str!("../rust-toolchain.toml");
 const DEPENDABOT: &str = include_str!("../.github/dependabot.yml");
 
 #[test]
+fn runtime_ci_uses_one_hosted_runner_allocation() {
+    assert_eq!(CI_WORKFLOW.matches("runs-on: ubuntu-latest").count(), 1);
+    assert_eq!(CI_WORKFLOW.matches("timeout-minutes:").count(), 1);
+    assert!(!CI_WORKFLOW.contains("  line-coverage:\n"));
+    assert!(!CI_WORKFLOW.contains("  branch-coverage:\n"));
+}
+
+#[test]
 fn every_checkout_is_bound_to_the_pull_request_head() {
     let exact_head_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}";
-    assert_eq!(CI_WORKFLOW.matches(exact_head_ref).count(), 3);
+    assert_eq!(CI_WORKFLOW.matches(exact_head_ref).count(), 1);
 }
 
 #[test]
 fn every_checkout_drops_persisted_credentials() {
-    assert_eq!(CI_WORKFLOW.matches("persist-credentials: false").count(), 3);
+    assert_eq!(CI_WORKFLOW.matches("persist-credentials: false").count(), 1);
 }
 
 #[test]
 fn postgres_service_image_is_immutably_pinned() {
     const PINNED_IMAGE: &str =
         "image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15";
-    assert_eq!(CI_WORKFLOW.matches(PINNED_IMAGE).count(), 3);
+    assert_eq!(CI_WORKFLOW.matches(PINNED_IMAGE).count(), 1);
 
     let postgres_images: Vec<_> = CI_WORKFLOW
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with("image: postgres"))
         .collect();
-    assert_eq!(postgres_images.len(), 3);
+    assert_eq!(postgres_images.len(), 1);
     assert!(postgres_images
         .iter()
         .all(|image| image.contains("@sha256:")));
@@ -34,7 +42,7 @@ fn postgres_service_image_is_immutably_pinned() {
 
 #[test]
 fn postgres_health_checks_allow_initialization_restart() {
-    assert_eq!(CI_WORKFLOW.matches("--health-start-period 5s").count(), 3);
+    assert_eq!(CI_WORKFLOW.matches("--health-start-period 5s").count(), 1);
 }
 
 #[test]
@@ -44,12 +52,12 @@ fn postgres_credentials_are_ephemeral_per_workflow_run() {
 
     assert!(!CI_WORKFLOW.contains("POSTGRES_PASSWORD: postgres"));
     assert!(!CI_WORKFLOW.contains("password=postgres"));
-    assert_eq!(CI_WORKFLOW.matches(EPHEMERAL_PASSWORD).count(), 3);
+    assert_eq!(CI_WORKFLOW.matches(EPHEMERAL_PASSWORD).count(), 1);
     assert_eq!(
         CI_WORKFLOW
             .matches("name: Configure ephemeral PostgreSQL test connection")
             .count(),
-        3
+        1
     );
 }
 
@@ -111,25 +119,22 @@ fn branch_coverage_failure_diagnostic_uses_lcov_branch_records() {
 #[test]
 fn rust_toolchains_are_exact_and_reviewably_updated() {
     const STABLE_QUALITY_INSTALL: &str =
-        "rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt";
-    const STABLE_COVERAGE_INSTALL: &str =
-        "rustup toolchain install 1.97.1 --profile minimal --component llvm-tools-preview";
+        "rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt --component llvm-tools-preview";
     const NIGHTLY_COVERAGE_INSTALL: &str =
         "rustup toolchain install nightly-2026-08-18 --profile minimal --component llvm-tools-preview";
-    const NIGHTLY_LLVM_COV_INSTALL: &str =
-        "cargo +nightly-2026-08-18 install cargo-llvm-cov --locked --version \"$CARGO_LLVM_COV_VERSION\"";
-    const NIGHTLY_LLVM_COV_VERSION: &str =
-        "cargo +nightly-2026-08-18 llvm-cov --version | grep -F \"$CARGO_LLVM_COV_VERSION\"";
+    const LLVM_COV_INSTALL: &str =
+        "cargo install cargo-llvm-cov --locked --version \"$CARGO_LLVM_COV_VERSION\"";
+    const LLVM_COV_VERSION: &str =
+        "cargo llvm-cov --version | grep -F \"$CARGO_LLVM_COV_VERSION\"";
     const NIGHTLY_BRANCH_JSON: &str =
         "cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json";
 
     assert!(RUST_TOOLCHAIN.contains("channel = \"1.97.1\""));
     assert!(!RUST_TOOLCHAIN.contains("channel = \"stable\""));
     assert!(CI_WORKFLOW.contains(STABLE_QUALITY_INSTALL));
-    assert!(CI_WORKFLOW.contains(STABLE_COVERAGE_INSTALL));
     assert!(CI_WORKFLOW.contains(NIGHTLY_COVERAGE_INSTALL));
-    assert!(CI_WORKFLOW.contains(NIGHTLY_LLVM_COV_INSTALL));
-    assert!(CI_WORKFLOW.contains(NIGHTLY_LLVM_COV_VERSION));
+    assert_eq!(CI_WORKFLOW.matches(LLVM_COV_INSTALL).count(), 1);
+    assert_eq!(CI_WORKFLOW.matches(LLVM_COV_VERSION).count(), 1);
     assert!(CI_WORKFLOW.contains(NIGHTLY_BRANCH_JSON));
     assert!(!CI_WORKFLOW.contains("nightly-2026-08-01"));
 
