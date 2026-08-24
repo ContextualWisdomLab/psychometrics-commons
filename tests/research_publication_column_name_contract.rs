@@ -1,3 +1,5 @@
+//! Confirms that public research-release schemas reject blank column names.
+
 use psychometrics_commons_runtime::research_release::{
     scan_public_release_fixture, PublicReleaseFixtureColumn, PublicReleaseLeakageError,
     RestrictedReleaseIdentities,
