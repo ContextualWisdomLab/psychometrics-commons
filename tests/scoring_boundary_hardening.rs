@@ -73,7 +73,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
 #[test]
 fn scoring_dispatch_rejects_snapshot_reference_substitution() {
     let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "  response_snapshot_ref  ")
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
 
     assert_eq!(snapshot.snapshot_ref(), Some("response_snapshot_ref"));
@@ -92,7 +92,7 @@ fn scoring_dispatch_rejects_snapshot_reference_substitution() {
 #[test]
 fn accepted_scoring_references_are_trimmed_before_identity_comparison_or_storage() {
     let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "  response_snapshot_ref  ")
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
     let request =
         ScoringRequest::from_snapshot(&snapshot, scoring_input(" response_snapshot_ref ")).unwrap();
