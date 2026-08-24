@@ -57,7 +57,7 @@ fn isolated_client() -> SchemaClient {
         client,
         schema_name,
     };
-    apply_result_snapshot_migration(&mut client).unwrap();
+    apply_result_snapshot_migration(&mut *client).unwrap();
     client
         .batch_execute(
             "INSERT INTO result_snapshot (\
