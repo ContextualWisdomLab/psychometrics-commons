@@ -14,8 +14,14 @@ use psychometrics_commons_runtime::postgres_integration::{
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const INBOX_CONSUMPTION_TEST_LOCK_KEY: i64 = 0x494E_424F_5843_4F4E;
 
+fn connect_test_client() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
 fn test_guard() -> Client {
-    let mut client = test_client();
+    let mut client = connect_test_client();
     client
         .query_one(
             "SELECT pg_advisory_lock($1)",
@@ -23,18 +29,18 @@ fn test_guard() -> Client {
         )
         .expect("shared PostgreSQL inbox-consumption fixture lock should be acquired");
     client
-}
-
-fn test_client() -> Client {
-    let connection = std::env::var("TEST_DATABASE_URL")
-        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
-    client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS inbox_consumption_persistence_test;\
              SET search_path TO inbox_consumption_persistence_test;",
         )
+        .unwrap();
+    client
+}
+
+fn test_client() -> Client {
+    let mut client = connect_test_client();
+    client
+        .batch_execute("SET search_path TO inbox_consumption_persistence_test;")
         .unwrap();
     client
 }
