@@ -71,6 +71,26 @@ fn requested_request(client: &mut Client) -> DataRightsRequest {
 }
 
 #[test]
+fn fixture_schema_identity_is_database_issued_and_restart_safe() {
+    let mut client = connect();
+    let first = next_schema_name(&mut client, "data_rights_verify_classification_lock");
+    let second = next_schema_name(&mut client, "data_rights_verify_classification_lock");
+
+    for schema_name in [&first, &second] {
+        let identity = schema_name
+            .strip_prefix("data_rights_verify_classification_lock_")
+            .expect("fixture schema must keep its descriptive prefix");
+        identity
+            .parse::<u64>()
+            .expect("fixture schema suffix must be a database-issued transaction identity");
+    }
+    assert_ne!(
+        first, second,
+        "separate fixture allocations must never reuse a schema identity"
+    );
+}
+
+#[test]
 fn duplicate_verification_classification_holds_row_lock_until_transaction_end() {
     let prefix = "data_rights_verify_classification_lock";
     let mut client = ready_client(prefix);
