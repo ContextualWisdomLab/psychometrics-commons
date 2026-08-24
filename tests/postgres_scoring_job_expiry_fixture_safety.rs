@@ -1,4 +1,4 @@
-//! Failure-injection fixture safety for scoring-job lease-expiry PostgreSQL tests.
+//! Failure-injection fixture safety for scoring-job lease-expiry `PostgreSQL` tests.
 
 #[test]
 fn expiry_failure_injection_does_not_create_process_named_schema() {
