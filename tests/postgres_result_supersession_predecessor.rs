@@ -11,25 +11,27 @@ use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::session::SessionState;
-use std::sync::{Mutex, MutexGuard};
 
 const ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5253_5355_5052_4544;
 
-static RESULT_SUPERSESSION_TEST_LOCK: Mutex<()> = Mutex::new(());
+fn connect_client() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
 
-fn test_guard() -> MutexGuard<'static, ()> {
-    RESULT_SUPERSESSION_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn test_guard() -> Client {
+    let mut client = connect_client();
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL result-supersession fixture lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
-    let connection = std::env::var("TEST_DATABASE_URL")
-        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
+    let mut client = connect_client();
     client
         .batch_execute(
             "DROP SCHEMA IF EXISTS result_supersession_predecessor_test CASCADE;\
@@ -122,10 +124,7 @@ fn insert_raw_snapshot(
 #[test]
 fn fixture_serialization_is_visible_across_postgres_sessions() {
     let _guard = test_guard();
-    let connection = std::env::var("TEST_DATABASE_URL")
-        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut contender = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
+    let mut contender = connect_client();
     let acquired: bool = contender
         .query_one("SELECT pg_try_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("contender PostgreSQL session should query the fixture lock")
