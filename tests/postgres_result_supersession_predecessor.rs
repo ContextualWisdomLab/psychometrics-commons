@@ -113,7 +113,7 @@ fn insert_raw_snapshot(
              $1, 'participant_result_supersession', 'scoring_result_result_supersession', \
              'session_result_supersession', 'response_snapshot_result_supersession', \
              'assessment_spec_big_five_v1', 'instrument_version_big_five_ko_v1', \
-             'scoring_version_big_five_v1', 'calibration_big_five_ko_v1', \
+             'scoring_version_big_five_v1', 'calibration_big_five_v1', \
              'norm_version_big_five_ko_v1', 1, 'narrative_version_big_five_v1', \
              ARRAY['consent_snapshot_service_v1'], $2, 70000, $3\
          )",
@@ -211,6 +211,38 @@ fn direct_sql_cannot_bypass_supersession_predecessor_integrity() {
         .unwrap()
         .get(0);
     assert_eq!(stored, 0);
+}
+
+#[test]
+fn migration_reapply_restores_self_supersession_check() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_result_snapshot_migration(&mut client).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot \
+             DROP CONSTRAINT result_snapshot_supersedes_ref_format_check;\
+             ALTER TABLE result_snapshot \
+             ADD CONSTRAINT result_snapshot_supersedes_ref_format_check CHECK (\
+                 supersedes_ref IS NULL OR (\
+                     supersedes_ref = btrim(supersedes_ref)\
+                     AND supersedes_ref <> ''\
+                 )\
+             );",
+        )
+        .unwrap();
+
+    apply_result_snapshot_migration(&mut client).unwrap();
+    let error = insert_raw_snapshot(
+        &mut client,
+        "result_snapshot_self_reference",
+        Some("result_snapshot_self_reference"),
+    )
+    .unwrap_err();
+    assert_eq!(
+        error.code().map(postgres::error::SqlState::code),
+        Some("23514")
+    );
 }
 
 #[test]
