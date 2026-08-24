@@ -78,6 +78,25 @@ impl Drop for TestDatabase {
 }
 
 #[test]
+fn fixture_schema_identity_is_database_issued_and_restart_safe() {
+    let first = TestDatabase::new();
+    let second = TestDatabase::new();
+
+    for schema_name in [&first.schema_name, &second.schema_name] {
+        let identity = schema_name
+            .strip_prefix("instrument_release_query_")
+            .expect("fixture schema must keep its descriptive prefix");
+        identity
+            .parse::<u64>()
+            .expect("fixture schema suffix must be one database-issued transaction identity");
+    }
+    assert_ne!(
+        first.schema_name, second.schema_name,
+        "separate fixture allocations must never reuse a schema identity"
+    );
+}
+
+#[test]
 fn published_release_query_returns_exact_session_provenance() {
     let mut database = TestDatabase::new();
     database.insert_release("release_big_five_en_v1", "en-US", "published");
