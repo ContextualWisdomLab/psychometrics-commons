@@ -11,9 +11,7 @@ fn expiry_failure_injection_uses_only_the_declared_unavailable_sink() {
         .map_or(target_and_rest, |(body, _)| body);
 
     assert!(
-        target.contains(
-            "const SINK: &str = \"scoring_job_expiry_classify_sink_unavailable\";"
-        ),
+        target.contains("const SINK: &str = \"scoring_job_expiry_classify_sink_unavailable\";"),
         "failure injection must declare the deliberately unavailable sink namespace"
     );
     assert!(
