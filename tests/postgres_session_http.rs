@@ -21,6 +21,7 @@ const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "session_http_persistence_test";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5345_5353_4854_5450;
 static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn test_client() -> (MutexGuard<'static, ()>, Client) {
@@ -131,6 +132,36 @@ fn create_request(session_ref: &str) -> String {
          \r\n\
          {{\"participant_ref\":\"{PARTICIPANT_REF}\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}}"
     )
+}
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let (_guard, _owner) = test_client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&DATABASE_TEST_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "session HTTP fixture serialization must be visible to separate PostgreSQL sessions"
+    );
 }
 
 #[test]
