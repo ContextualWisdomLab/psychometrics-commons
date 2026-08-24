@@ -12,10 +12,13 @@ use psychometrics_commons_runtime::postgres_scoring_request::{
     apply_scoring_request_migration, persist_scoring_dispatch, ScoringDispatchPersistenceError,
     ScoringRequestPersistenceDisposition,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const PAYLOAD_DIGEST_A: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -71,21 +74,16 @@ fn request_named(
     scoring_request_ref: &str,
     snapshot_ref: &str,
 ) -> ScoringRequest {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_dispatch_one",
-                client_event_ref: "client_event_dispatch_one",
-                item_version_ref: "item_version_dispatch_one",
-                payload_digest: PAYLOAD_DIGEST_A,
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, snapshot_ref)
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        session_ref,
+        snapshot_ref,
+        &[ResponseWrite {
+            server_event_ref: "server_event_dispatch_one",
+            client_event_ref: "client_event_dispatch_one",
+            item_version_ref: "item_version_dispatch_one",
+            payload_digest: PAYLOAD_DIGEST_A,
+        }],
+    );
     ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
