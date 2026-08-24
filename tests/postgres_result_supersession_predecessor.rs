@@ -15,6 +15,7 @@ use std::sync::{Mutex, MutexGuard};
 
 const ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5253_5355_5052_4544;
 
 static RESULT_SUPERSESSION_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -116,6 +117,28 @@ fn insert_raw_snapshot(
          )",
         &[&result_snapshot_ref, &ENGINE_DIGEST, &supersedes_ref],
     )
+}
+
+#[test]
+fn fixture_serialization_is_visible_across_postgres_sessions() {
+    let _guard = test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one("SELECT pg_try_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("contender PostgreSQL session should query the fixture lock")
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .expect("contender lock cleanup should succeed");
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible to independent PostgreSQL sessions"
+    );
 }
 
 #[test]
