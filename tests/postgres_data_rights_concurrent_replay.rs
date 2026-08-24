@@ -28,6 +28,16 @@ struct TestDatabase {
 
 impl TestDatabase {
     fn new(url: &str) -> Self {
+        Self::new_with_initializer(url, |client, _| {
+            apply_integration_migration(client).unwrap();
+            apply_data_rights_migration(client).unwrap();
+        })
+    }
+
+    fn new_with_initializer<F>(url: &str, initializer: F) -> Self
+    where
+        F: FnOnce(&mut Client, &str),
+    {
         let mut client = Client::connect(url, NoTls).unwrap();
         let schema_name = allocate_schema_name(&mut client);
         client
@@ -35,12 +45,12 @@ impl TestDatabase {
                 "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
             ))
             .unwrap();
-        apply_integration_migration(&mut client).unwrap();
-        apply_data_rights_migration(&mut client).unwrap();
-        Self {
+        let mut database = Self {
             client,
             schema_name,
-        }
+        };
+        initializer(&mut database.client, &database.schema_name);
+        database
     }
 }
 
