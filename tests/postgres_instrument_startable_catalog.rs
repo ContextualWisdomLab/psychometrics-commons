@@ -13,7 +13,6 @@ use psychometrics_commons_runtime::postgres_instrument_catalog::list_startable_i
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
 };
-use std::sync::{Mutex, MutexGuard};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -21,18 +20,18 @@ const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4953_4341_5441_4c47;
 
-static STARTABLE_CATALOG_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn test_guard() -> MutexGuard<'static, ()> {
-    STARTABLE_CATALOG_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 fn connect_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn test_guard() -> Client {
+    let mut client = connect_client();
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL startable-catalog fixture lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
