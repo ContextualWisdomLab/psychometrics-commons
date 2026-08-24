@@ -72,7 +72,8 @@ pub enum PublicationEvidenceStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InstrumentReleaseError {
-    /// A required reference was blank or numeric-like instead of opaque.
+    /// A required reference was blank, numeric-like, or not already in canonical form.
+    /// References with surrounding whitespace are rejected instead of being trimmed.
     InvalidReference,
     /// The release has no item versions.
     EmptyItemSet,
