@@ -65,6 +65,19 @@ fn expect_rejected_statement(client: &mut Client, statement: &str) {
 }
 
 #[test]
+fn fixture_schema_identity_is_database_issued() {
+    let fixture_source = include_str!("postgres_result_snapshot_immutability.rs");
+    assert!(
+        fixture_source.contains("pg_current_xact_id"),
+        "test schema identity must come from PostgreSQL rather than process-local time"
+    );
+    assert!(
+        !fixture_source.contains("std::process::id()"),
+        "process IDs can be recycled while stale test schemas still exist"
+    );
+}
+
+#[test]
 fn result_evidence_rejects_update_delete_and_truncate() {
     let (mut client, schema_name) = isolated_client();
 
