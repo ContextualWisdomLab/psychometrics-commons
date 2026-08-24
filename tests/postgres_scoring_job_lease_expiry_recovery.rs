@@ -219,12 +219,13 @@ fn lease_expiry_recovery_requires_read_committed() {
 
 #[test]
 fn expiry_classify_select_failure_is_a_database_failure() {
+    const SINK: &str = "scoring_job_expiry_classify_sink_unavailable";
+
     let _guard = scoring_job_expiry_test_guard();
     let mut client = test_client();
     reset_scoring_job_table(&mut client);
     apply_scoring_job_migration(&mut client).unwrap();
     persist_and_claim(&mut client, "scoring_job_classify_hidden", 3, 11_000);
-    const SINK: &str = "scoring_job_expiry_classify_sink_unavailable";
     client
         .batch_execute(&format!(
             "CREATE OR REPLACE FUNCTION scoring_job_redirect_after_update() \
