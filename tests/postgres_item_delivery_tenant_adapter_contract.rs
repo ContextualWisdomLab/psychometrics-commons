@@ -9,6 +9,7 @@ use psychometrics_commons_runtime::postgres_item_delivery::{
 };
 use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x4954_444C_5652_4C4B;
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static TENANT_ADAPTER_LOCK: Mutex<()> = Mutex::new(());
@@ -54,6 +55,28 @@ fn manifest() -> InstrumentReleaseManifest {
         RELEASE_DIGEST,
     )
     .unwrap()
+}
+
+#[test]
+fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
+    let _guard = test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one("SELECT pg_try_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("cross-process fixture lock should be observable from PostgreSQL")
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .expect("RED fixture lock should be released after probing");
+    }
+    assert!(
+        !acquired,
+        "a process-local mutex cannot serialize a fixed PostgreSQL schema across CI processes"
+    );
 }
 
 #[test]
