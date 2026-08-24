@@ -17,7 +17,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AnonymousSessionContextError {
-    /// A tenant, participant, session, or evidence reference was blank, padded, or numeric-only.
+    /// A tenant, participant, session, or evidence reference was blank or numeric-only.
     InvalidReference,
     /// The server-authoritative validity boundary was zero.
     InvalidValidityBoundary,
@@ -59,17 +59,12 @@ pub struct AnonymousSessionContext {
 }
 
 impl AnonymousSessionContext {
-    /// Create an anonymous-session authorization context from exact canonical references.
-    ///
-    /// References are never trimmed during authorization-context construction. Callers must
-    /// supply the same canonical opaque spelling that subsequent resource-binding checks use;
-    /// surrounding ASCII or Unicode whitespace therefore fails closed instead of becoming an
-    /// authorization alias.
+    /// Create a normalized anonymous-session authorization context.
     ///
     /// # Errors
     ///
     /// Returns [`AnonymousSessionContextError::InvalidReference`] when any reference
-    /// is not an exact canonical opaque product reference, or
+    /// is not an opaque product reference, or
     /// [`AnonymousSessionContextError::InvalidValidityBoundary`] when
     /// `valid_until_unix_ms` is zero.
     pub fn new(
@@ -169,11 +164,7 @@ impl AnonymousSessionContext {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
-    if normalized_reference(reference) == Some(reference) {
-        Ok(reference)
-    } else {
-        Err(AnonymousSessionContextError::InvalidReference)
-    }
+    normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
