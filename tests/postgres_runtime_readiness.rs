@@ -116,13 +116,57 @@ fn relation_integrity_probe_verifies_all_required_relations() {
 }
 
 #[test]
+fn relation_integrity_probe_rejects_search_path_relative_relation_names() {
+    let mut client = test_client();
+    let integrity = probe_postgres_relation_integrity(&mut client, &["pg_class"]).unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Incompatible);
+}
+
+#[test]
+fn relation_integrity_probe_rejects_case_folded_relation_aliases() {
+    let mut client = test_client();
+    let integrity =
+        probe_postgres_relation_integrity(&mut client, &["PG_CATALOG.PG_CLASS"]).unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Incompatible);
+}
+
+#[test]
+fn relation_integrity_probe_rejects_non_ascii_relation_aliases() {
+    let mut client = test_client();
+    for relation in ["public.tablé", "publıc.table", "public.таблица"] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
+fn relation_integrity_probe_rejects_whitespace_and_three_part_names() {
+    let mut client = test_client();
+    for relation in ["pg_catalog. pg_class", "pg_catalog.pg_class.extra"] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
+fn relation_integrity_probe_rejects_empty_schema_or_relation_components() {
+    let mut client = test_client();
+    for relation in [".pg_class", "pg_catalog."] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
 fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(
         &mut client,
         &[
             "pg_catalog.pg_class",
-            "psychometrics_commons_missing_relation",
+            "public.psychometrics_commons_missing_relation",
         ],
     )
     .unwrap();
@@ -131,11 +175,11 @@ fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
 }
 
 #[test]
-fn empty_relation_requirement_is_vacuously_verified() {
+fn empty_relation_requirement_fails_closed_as_unknown_integrity() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(&mut client, &[]).unwrap();
 
-    assert_eq!(integrity, DataIntegrityHealth::Verified);
+    assert_eq!(integrity, DataIntegrityHealth::Unknown);
 }
 
 #[test]
