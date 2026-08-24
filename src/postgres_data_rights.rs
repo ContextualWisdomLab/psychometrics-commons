@@ -207,8 +207,7 @@ pub fn persist_requested_data_rights_with_propagation(
                 &[
                     &request.request_ref(),
                     &request.tenant_ref(),
-                    &exact_reference(target.dependent_system_ref)
-                        .ok_or(DataRightsPersistenceError::InvalidReference)?,
+                    &target.dependent_system_ref,
                     &target.event.source(),
                     &target.event.event_ref(),
                     &requested_at,
@@ -241,9 +240,7 @@ pub fn persist_data_rights_identity_verification(
 ) -> Result<DataRightsVerificationDisposition, DataRightsPersistenceError> {
     let (evidence_ref, verified_at) = match (
         request.state(),
-        request
-            .verification_evidence_ref()
-            .and_then(exact_reference),
+        request.verification_evidence_ref(),
         request.verified_at_unix_ms(),
     ) {
         (DataRightsState::IdentityVerified, Some(evidence_ref), Some(verified_at_ms)) => {
