@@ -354,6 +354,8 @@ fn applying_data_rights_migration_without_outbox_tables_fails() {
 
 #[test]
 fn unmatched_verification_select_failure_is_a_database_failure() {
+    const SINK: &str = "data_rights_verify_select_sink_unavailable";
+
     let mut client = ready_client("data_rights_verify_select_hidden");
     let mut request = persist_requested(&mut client);
     request
@@ -367,7 +369,6 @@ fn unmatched_verification_select_failure_is_a_database_failure() {
             &[&"data_rights_request_verify"],
         )
         .unwrap();
-    const SINK: &str = "data_rights_verify_select_sink_unavailable";
     client
         .batch_execute(&format!(
             "CREATE OR REPLACE FUNCTION data_rights_verify_redirect_after_update()
