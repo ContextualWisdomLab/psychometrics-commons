@@ -1,6 +1,6 @@
 //! Stored-release retries preserve exact session and participant reference spelling.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
@@ -13,24 +13,31 @@ use psychometrics_commons_runtime::postgres_assessment_session::{
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release,
 };
-use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "session_replay_exact_reference_test";
+const DATABASE_TEST_LOCK_KEY: i64 = 7_702_093_076_572_906_642;
 const PARTICIPANT_REF: &str = "participant_replay_exact_alpha";
 const RELEASE_REF: &str = "release_replay_exact_alpha";
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn client() -> (MutexGuard<'static, ()>, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn acquire_fixture_lock(client: &mut Client, lock_timeout: &str) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])?;
+    Ok(())
+}
+
+fn client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
+    acquire_fixture_lock(&mut client, "60s")
+        .expect("fixture must acquire the database-visible advisory lock within 60 seconds");
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE; \
@@ -40,7 +47,7 @@ fn client() -> (MutexGuard<'static, ()>, Client) {
         .unwrap();
     apply_instrument_release_migration(&mut client).unwrap();
     apply_assessment_session_migration(&mut client).unwrap();
-    (guard, client)
+    client
 }
 
 fn manifest() -> InstrumentReleaseManifest {
@@ -180,8 +187,45 @@ fn assert_padded_stored_replays_fail(client: &mut Client, session_ref: &str) {
 }
 
 #[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let _client = client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible across PostgreSQL sessions"
+    );
+}
+
+#[test]
+fn fixture_lock_contention_has_a_finite_timeout() {
+    let _client = client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_fixture_lock(&mut contender, "100ms")
+        .expect_err("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+}
+
+#[test]
 fn suspended_stored_release_replay_rejects_padded_resource_aliases() {
-    let (_guard, mut client) = client();
+    let mut client = client();
     let session_ref = "session_replay_exact_suspended";
     let _release = seed_started_session(&mut client, session_ref);
     client
@@ -212,7 +256,7 @@ fn suspended_stored_release_replay_rejects_padded_resource_aliases() {
 
 #[test]
 fn retired_stored_release_replay_rejects_padded_resource_aliases() {
-    let (_guard, mut client) = client();
+    let mut client = client();
     let session_ref = "session_replay_exact_retired";
     let _release = seed_started_session(&mut client, session_ref);
     client
