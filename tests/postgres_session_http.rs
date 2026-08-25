@@ -42,8 +42,9 @@ fn test_client() -> (Client, Client) {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    acquire_database_lock(&mut guard, DATABASE_TEST_LOCK_KEY, "60s")
-        .expect("PostgreSQL session HTTP fixture advisory lock should be acquired within sixty seconds");
+    acquire_database_lock(&mut guard, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "PostgreSQL session HTTP fixture advisory lock should be acquired within sixty seconds",
+    );
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
