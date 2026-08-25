@@ -271,9 +271,18 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "database_url",
     "database_dsn",
     "database_password",
+    "database_host",
+    "database_hostname",
+    "database_port",
+    "db_host",
+    "db_endpoint",
     "object_store_access_key",
     "object_store_secret_key",
     "object_store_endpoint",
+    "object_store_host",
+    "object_store_bucket",
+    "s3_endpoint",
+    "s3_bucket",
 ];
 
 const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
