@@ -10,6 +10,8 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use std::mem::discriminant;
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_5254_5259_4552;
+
 fn test_client(schema: &str) -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
@@ -41,6 +43,44 @@ fn persist_and_claim(client: &mut Client, job_ref: &str, max_attempts: u32) {
     )
     .unwrap();
     transaction.commit().unwrap();
+}
+
+#[test]
+fn fixed_schema_serialization_is_database_visible_and_bounded() {
+    let mut guard = test_client("scoring_job_retry_fixture_lock_contract_test");
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("fixture lock wait budget should be queryable")
+        .get(0);
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("cross-process fixture lock should be observable from PostgreSQL")
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .expect("RED probe lock should be released after observation");
+    }
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "fixture lock acquisition must have a finite sixty-second PostgreSQL lock timeout"
+    );
+    assert!(
+        !acquired,
+        "fixed retry-error schemas must be serialized by a PostgreSQL-visible lease"
+    );
 }
 
 #[test]
