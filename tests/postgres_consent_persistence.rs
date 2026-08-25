@@ -10,6 +10,8 @@ use psychometrics_commons_runtime::postgres_consent::{
 };
 use std::sync::{Mutex, MutexGuard};
 
+const CONSENT_TEST_LOCK_KEY: i64 = 0x434F_4E53_454E_5450;
+
 static CONSENT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn consent_test_guard() -> MutexGuard<'static, ()> {
@@ -87,6 +89,24 @@ fn assert_conflicting_replay(client: &mut Client, ledger: &ConsentLedger) {
             ConsentPersistenceError::ConflictingReplay
         ),
         "reusing an event identity with different immutable evidence must fail closed"
+    );
+}
+
+#[test]
+fn consent_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = consent_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&CONSENT_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema consent fixture guard must serialize across PostgreSQL sessions"
     );
 }
 
