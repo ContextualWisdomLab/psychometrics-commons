@@ -201,6 +201,32 @@ fn credential_and_internal_location_columns_cannot_enter_public_release() {
 }
 
 #[test]
+fn internal_location_host_and_connection_aliases_fail_closed() {
+    for column_name in [
+        "database_host",
+        "database_hostname",
+        "database_port",
+        "db_host",
+        "db_endpoint",
+        "object_store_host",
+        "object_store_bucket",
+        "s3_endpoint",
+        "s3_bucket",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["internal_location_not_in_identity_inventory"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not expose internal database or object-store location metadata"
+        );
+    }
+}
+
+#[test]
 fn plural_credential_columns_cannot_enter_public_release() {
     for column_name in [
         "tokens",
