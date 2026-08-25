@@ -21,7 +21,7 @@ const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "session_http_persistence_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5345_5353_4854_5450;
 
-/// Configures a finite wait budget before acquiring a session-scoped PostgreSQL advisory lock.
+/// Configures a finite wait budget before acquiring a session-scoped `PostgreSQL` advisory lock.
 fn acquire_database_lock(
     client: &mut Client,
     lock_key: i64,
@@ -200,7 +200,7 @@ fn fixture_lock_wait_has_finite_postgresql_budget() {
     );
 }
 
-/// Proves PostgreSQL itself aborts a contended advisory-lock wait at the configured budget.
+/// Proves `PostgreSQL` itself aborts a contended advisory-lock wait at the configured budget.
 #[test]
 fn fixture_lock_wait_aborts_under_real_contention() {
     let connection = std::env::var("TEST_DATABASE_URL")
