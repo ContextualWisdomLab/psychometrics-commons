@@ -1,5 +1,6 @@
 //! Real `PostgreSQL` contract for atomic scoring-dispatch persistence.
 
+use postgres::error::SqlState;
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_integration::{
@@ -25,18 +26,35 @@ const PAYLOAD_DIGEST_A: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const PAYLOAD_DIGEST_B: &str =
     "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4453_5054_584e;
 
-static DISPATCH_TEST_LOCK: Mutex<()> = Mutex::new(());
+fn database_connection() -> String {
+    std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database")
+}
 
-fn dispatch_test_guard() -> MutexGuard<'static, ()> {
-    DISPATCH_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn acquire_dispatch_test_guard(lock_timeout: &str) -> Client {
+    let connection = database_connection();
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT set_config('lock_timeout', $1, false)",
+            &[&lock_timeout],
+        )
+        .expect("PostgreSQL lock timeout must be configurable for the scoring dispatch fixture");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("PostgreSQL scoring dispatch fixture advisory lock should be acquired");
+    guard
+}
+
+fn dispatch_test_guard() -> Client {
+    acquire_dispatch_test_guard("60s")
 }
 
 fn test_client() -> Client {
-    let connection = std::env::var("TEST_DATABASE_URL")
-        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let connection = database_connection();
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
@@ -116,6 +134,21 @@ fn dispatch_event(
         digest,
     )
     .unwrap()
+}
+
+#[test]
+fn fixture_lock_is_database_visible_and_timeout_bounded() {
+    let _guard = dispatch_test_guard();
+    let connection = database_connection();
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    contender
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"100ms"])
+        .expect("lock timeout must be configurable for the fixture contention probe");
+    let error = contender
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect_err("a second PostgreSQL session must not acquire the fixture lock");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]

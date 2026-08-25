@@ -129,7 +129,7 @@ impl ResponseSnapshot {
 pub enum WriteError {
     /// A new logical response was offered while the session was not active.
     SessionNotActive(SessionState),
-    /// An identity-bearing response or snapshot reference was blank or numeric-like.
+    /// An identity-bearing response or snapshot reference was not an exact valid opaque reference.
     InvalidReference,
     /// A required response-payload digest was blank.
     EmptyReference,
@@ -151,8 +151,9 @@ impl Display for WriteError {
             Self::SessionNotActive(state) => {
                 write!(formatter, "session {state:?} cannot accept response events")
             }
-            Self::InvalidReference => formatter
-                .write_str("response identity references must be opaque non-numeric values"),
+            Self::InvalidReference => formatter.write_str(
+                "response identity references must use exact opaque spelling without surrounding whitespace",
+            ),
             Self::EmptyReference => {
                 formatter.write_str("response payload digest must not be empty")
             }
@@ -189,16 +190,15 @@ pub struct ResponseLedger {
 impl ResponseLedger {
     /// Create an empty response ledger for one assessment session.
     ///
-    /// Leading and trailing whitespace is removed before the session reference
-    /// becomes identity-bearing state.
+    /// The caller-supplied opaque session reference must already use its exact
+    /// accepted spelling; the domain never trims identity-bearing input.
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::InvalidReference`] when the session reference is blank
-    /// or numeric-like instead of an opaque product identifier.
+    /// Returns [`WriteError::InvalidReference`] when the session reference is blank,
+    /// numeric-like, unsafe, or would require normalization before becoming identity.
     pub fn new(session_ref: impl AsRef<str>) -> Result<Self, WriteError> {
-        let session_ref =
-            normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
+        let session_ref = exact_reference(session_ref.as_ref())?;
         Ok(Self {
             session_ref: session_ref.to_owned(),
             events: Vec::new(),
@@ -245,16 +245,17 @@ impl ResponseLedger {
     /// even after the session leaves [`SessionState::Active`]. The supplied
     /// server event reference is ignored for that replay because the original
     /// immutable event identity is returned. Every genuinely new logical response
-    /// still requires an active session. Identity-bearing references are normalized
-    /// before replay/conflict checks so surrounding whitespace cannot create aliases.
-    /// Response-payload identity must use exact `sha256:` plus 64 lowercase hexadecimal
-    /// characters, matching the durable `PostgreSQL` digest constraint.
+    /// still requires an active session. Identity-bearing references must already
+    /// use their exact accepted spelling before replay/conflict checks; the domain
+    /// never trims aliases into existing identities. Response-payload identity must
+    /// use exact `sha256:` plus 64 lowercase hexadecimal characters, matching the
+    /// durable `PostgreSQL` digest constraint.
     ///
     /// # Errors
     ///
     /// Returns [`WriteError::SessionMismatch`] when the supplied session does not
-    /// own this ledger, [`WriteError::InvalidReference`] for blank or numeric-like
-    /// identity references, [`WriteError::EmptyReference`] for a blank payload digest,
+    /// own this ledger, [`WriteError::InvalidReference`] for an invalid or non-exact
+    /// identity reference, [`WriteError::EmptyReference`] for a blank payload digest,
     /// [`WriteError::InvalidPayloadDigest`] for a noncanonical digest,
     /// [`WriteError::IdempotencyConflict`] when a client event reference is reused
     /// with different item or payload content, [`WriteError::SessionNotActive`]
@@ -270,12 +271,9 @@ impl ResponseLedger {
             return Err(WriteError::SessionMismatch);
         }
 
-        let server_event_ref =
-            normalized_reference(request.server_event_ref).ok_or(WriteError::InvalidReference)?;
-        let client_event_ref =
-            normalized_reference(request.client_event_ref).ok_or(WriteError::InvalidReference)?;
-        let item_version_ref =
-            normalized_reference(request.item_version_ref).ok_or(WriteError::InvalidReference)?;
+        let server_event_ref = exact_reference(request.server_event_ref)?;
+        let client_event_ref = exact_reference(request.client_event_ref)?;
+        let item_version_ref = exact_reference(request.item_version_ref)?;
         let payload_digest = request.payload_digest;
         if payload_digest.trim().is_empty() {
             return Err(WriteError::EmptyReference);
@@ -337,15 +335,15 @@ impl ResponseLedger {
 
     /// Freeze the accepted event prefix with its durable opaque snapshot identity.
     ///
-    /// Leading and trailing whitespace is removed before the reference becomes
-    /// identity-bearing state.
+    /// The snapshot reference must already use its exact accepted spelling; the
+    /// domain never trims identity-bearing input.
     ///
     /// # Errors
     ///
     /// Returns [`WriteError::SessionMismatch`] when the supplied session does not
-    /// own this ledger, [`WriteError::InvalidReference`] for a blank or numeric-like
+    /// own this ledger, [`WriteError::InvalidReference`] for an invalid or non-exact
     /// snapshot reference, or [`WriteError::SnapshotRequiresCompleted`] unless the
-    /// authoritative session is exactly [`SessionState::Completed`].
+    /// authoritative session state is exactly [`SessionState::Completed`].
     pub fn freeze_as(
         &self,
         session: &AssessmentSession,
@@ -354,8 +352,7 @@ impl ResponseLedger {
         if session.session_ref() != self.session_ref {
             return Err(WriteError::SessionMismatch);
         }
-        let snapshot_ref =
-            normalized_reference(snapshot_ref).ok_or(WriteError::InvalidReference)?;
+        let snapshot_ref = exact_reference(snapshot_ref)?;
         self.freeze_internal(session, Some(snapshot_ref))
     }
 
@@ -392,6 +389,14 @@ impl ResponseLedger {
             last_sequence: self.events.last().map(ResponseEvent::sequence),
         })
     }
+}
+
+fn exact_reference(reference: &str) -> Result<&str, WriteError> {
+    let normalized = normalized_reference(reference).ok_or(WriteError::InvalidReference)?;
+    if normalized != reference {
+        return Err(WriteError::InvalidReference);
+    }
+    Ok(normalized)
 }
 
 fn is_canonical_sha256(digest: &str) -> bool {
