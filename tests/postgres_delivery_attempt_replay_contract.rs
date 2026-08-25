@@ -1,6 +1,6 @@
 //! Focused replay and operator-error contract for durable outbox delivery attempts.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent, OutboxState};
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, enqueue_outbox_event, record_outbox_delivery_attempt,
@@ -16,11 +16,23 @@ fn test_client() -> Client {
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
 }
 
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
 fn database_test_guard() -> Client {
     let mut client = test_client();
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("shared PostgreSQL integration-test advisory lock should be acquired");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s")
+        .expect("shared PostgreSQL integration-test advisory lock should be acquired within 60 seconds");
     client
 }
 
@@ -63,6 +75,29 @@ fn fixture_lock_wait_has_finite_postgresql_budget() {
         timeout_ms, 60_000,
         "delivery-attempt fixture lock acquisition must not wait indefinitely"
     );
+}
+
+#[test]
+fn fixture_lock_wait_aborts_under_real_contention() {
+    let mut holder = test_client();
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = test_client();
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended fixture lock acquisition must stop at the configured timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should release its advisory lock")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]
