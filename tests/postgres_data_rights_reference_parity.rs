@@ -12,10 +12,7 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_905;
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn acquire_fixture_lock(
-    mut guard: Client,
-    lock_timeout: &str,
-) -> Result<Client, postgres::Error> {
+fn acquire_fixture_lock(mut guard: Client, lock_timeout: &str) -> Result<Client, postgres::Error> {
     guard.query_one(
         "SELECT set_config('lock_timeout', $1, false)",
         &[&lock_timeout],
