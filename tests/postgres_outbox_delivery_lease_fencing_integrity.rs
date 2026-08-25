@@ -27,8 +27,9 @@ fn ready_client() -> Client {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s")
-        .expect("shared PostgreSQL outbox fencing integrity lock should be acquired within 60 seconds");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "shared PostgreSQL outbox fencing integrity lock should be acquired within 60 seconds",
+    );
     let schema = schema_name();
     client
         .batch_execute(&format!(
