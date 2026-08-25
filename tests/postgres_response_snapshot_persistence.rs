@@ -7,7 +7,6 @@ use psychometrics_commons_runtime::postgres_response_snapshot::{
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
-use std::sync::{Mutex, MutexGuard};
 
 const RESPONSE_SNAPSHOT_TEST_LOCK_KEY: i64 = 0x5253_5052_5354_4C4B;
 const PAYLOAD_DIGEST: &str =
@@ -15,12 +14,18 @@ const PAYLOAD_DIGEST: &str =
 const OTHER_DIGEST: &str =
     "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
-static RESPONSE_SNAPSHOT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn response_snapshot_test_guard() -> MutexGuard<'static, ()> {
-    RESPONSE_SNAPSHOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn response_snapshot_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&RESPONSE_SNAPSHOT_TEST_LOCK_KEY],
+        )
+        .expect("shared response-snapshot persistence test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
