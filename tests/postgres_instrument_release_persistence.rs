@@ -10,7 +10,6 @@ use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release,
     InstrumentReleasePersistenceDisposition, InstrumentReleasePersistenceError,
 };
-use std::sync::{Mutex, MutexGuard};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -18,13 +17,20 @@ const OTHER_DIGEST: &str =
     "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+const INSTRUMENT_RELEASE_DATABASE_LOCK_KEY: i64 = 0x4952_5045_5253_4953;
 
-static INSTRUMENT_RELEASE_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn instrument_release_test_guard() -> MutexGuard<'static, ()> {
-    INSTRUMENT_RELEASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn instrument_release_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&INSTRUMENT_RELEASE_DATABASE_LOCK_KEY],
+        )
+        .expect("PostgreSQL fixture advisory lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
@@ -47,6 +53,36 @@ fn reset_instrument_release_tables(client: &mut Client) {
             "DROP TABLE IF EXISTS instrument_release_persistence_test.instrument_release;",
         )
         .unwrap();
+}
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let _guard = instrument_release_test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&INSTRUMENT_RELEASE_DATABASE_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&INSTRUMENT_RELEASE_DATABASE_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
+    );
 }
 
 fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {

@@ -16,8 +16,8 @@ use crate::reference::normalized_reference;
 use crate::session::AssessmentSession;
 use postgres::Transaction;
 use std::collections::HashMap;
-use std::io::{self, Read};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::io;
+use std::net::{SocketAddr, TcpListener};
 use std::time::Duration;
 
 /// Public collection path for assessment sessions.
@@ -286,24 +286,6 @@ pub fn handle_session_http_request<P: SessionHttpPort>(
 /// Returns the I/O error if the operating system cannot bind the address.
 pub fn bind_session_http(addr: SocketAddr) -> io::Result<TcpListener> {
     TcpListener::bind(addr)
-}
-
-/// Accept one TCP connection and serve a single persist-backed session request.
-///
-/// # Errors
-///
-/// Returns the I/O error if accept, read, or write fails.
-pub fn accept_one_session_http<P: SessionHttpPort>(
-    listener: &TcpListener,
-    port: &mut P,
-    created_at_unix_ms: u64,
-) -> io::Result<()> {
-    let (mut stream, _) = listener.accept()?;
-    stream.set_read_timeout(Some(SESSION_HTTP_IO_TIMEOUT))?;
-    stream.set_write_timeout(Some(SESSION_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream)?;
-    let response = handle_session_http_request(&request, port, created_at_unix_ms);
-    write_http_response(&mut stream, &response)
 }
 
 fn method_not_allowed() -> SessionHttpResponse {
@@ -592,121 +574,12 @@ fn json_string(value: &str) -> String {
     encoded
 }
 
-fn reject_full_request_buffer(filled: usize, capacity: usize) -> io::Result<()> {
-    if filled == capacity {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "session HTTP request exceeded the accepted size",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn reject_oversized_request(expected: usize, capacity: usize) -> io::Result<()> {
-    if expected > capacity {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "session HTTP request exceeded the accepted size",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn declared_request_end(body_start: usize, content_length: &str) -> io::Result<usize> {
-    let content_length = content_length.parse::<usize>().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid session HTTP Content-Length",
-        )
-    })?;
-    body_start.checked_add(content_length).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "session HTTP request exceeded the accepted size",
-        )
-    })
-}
-
-fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
-    let mut buffer = vec![0_u8; SESSION_HTTP_MAX_REQUEST_BYTES];
-    let mut filled = 0;
-    loop {
-        reject_full_request_buffer(filled, buffer.len())?;
-        let read = stream.read(&mut buffer[filled..])?;
-        if read == 0 {
-            break;
-        }
-        filled += read;
-        let Some(header_offset) = buffer[..filled]
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-        else {
-            continue;
-        };
-        let body_start = header_offset + 4;
-        let headers = std::str::from_utf8(&buffer[..body_start])
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        if let Some(value) = header_value(headers, "content-length") {
-            let expected = declared_request_end(body_start, value)?;
-            reject_oversized_request(expected, buffer.len())?;
-            if filled < expected {
-                continue;
-            }
-            filled = expected;
-        }
-        break;
-    }
-    decode_request_bytes(&buffer[..filled])
-}
-
-fn decode_request_bytes(bytes: &[u8]) -> io::Result<String> {
-    String::from_utf8(bytes.to_vec())
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-}
-
-fn write_session_bytes(stream: &mut impl io::Write, bytes: &[u8]) -> io::Result<()> {
-    stream.write_all(bytes)
-}
-
-fn write_http_response(
-    stream: &mut impl io::Write,
-    response: &SessionHttpResponse,
-) -> io::Result<()> {
-    let header = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n",
-        status = response.status,
-        reason = reason_phrase(response.status),
-        content_type = response.content_type,
-        len = response.body.len()
-    );
-    write_session_bytes(stream, header.as_bytes())?;
-    write_session_bytes(stream, response.body.as_bytes())?;
-    Ok(())
-}
-
-const fn reason_phrase(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        201 => "Created",
-        400 => "Bad Request",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        500 => "Internal Server Error",
-        _ => "Error",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        bind_session_http, declared_request_end, decode_request_bytes, handle_session_http_request,
-        json_string, parse_create_body, parse_json_string, parse_request_line, parse_string_object,
-        reason_phrase, reject_full_request_buffer, reject_oversized_request, request_body,
-        split_target, valid_idempotency_key, write_http_response, write_session_bytes,
-        MemorySessionHttpPort, PostgresSessionHttpPort, SessionHttpPort, SessionHttpResponse,
+        bind_session_http, handle_session_http_request, json_string, parse_create_body,
+        parse_json_string, parse_request_line, parse_string_object, request_body, split_target,
+        valid_idempotency_key, MemorySessionHttpPort, PostgresSessionHttpPort, SessionHttpPort,
         DIGEST,
     };
     use crate::instrument::{
@@ -723,56 +596,9 @@ mod tests {
     use std::io::Write;
     use std::net::{SocketAddr, TcpStream};
 
-    struct FailWrite;
-
-    struct FailAfterFirstWrite {
-        writes: u8,
-    }
-
-    impl std::io::Write for FailWrite {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "closed",
-            ))
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::BrokenPipe,
-                "flush fail",
-            ))
-        }
-    }
-
-    impl std::io::Write for FailAfterFirstWrite {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            if self.writes == 0 {
-                self.writes = 1;
-                Ok(buf.len())
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "second write fail",
-                ))
-            }
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     #[test]
     fn helpers_cover_json_http_and_reason_edges() {
         assert_eq!(json_string("a\"b\\c\n\r\t"), "\"a\\\"b\\\\c\\n\\r\\t\"");
-        assert_eq!(reason_phrase(200), "OK");
-        assert_eq!(reason_phrase(201), "Created");
-        assert_eq!(reason_phrase(400), "Bad Request");
-        assert_eq!(reason_phrase(404), "Not Found");
-        assert_eq!(reason_phrase(405), "Method Not Allowed");
-        assert_eq!(reason_phrase(409), "Conflict");
-        assert_eq!(reason_phrase(500), "Internal Server Error");
-        assert_eq!(reason_phrase(418), "Error");
         assert_eq!(split_target("/v1/sessions?x=1"), ("/v1/sessions", "x=1"));
         assert!(parse_request_line("POST /v1/sessions HTTP/1.1 extra").is_none());
         assert!(parse_request_line("POST /v1/sessions SMTP/1.0").is_none());
@@ -794,67 +620,6 @@ mod tests {
             request_body("POST /v1/sessions HTTP/1.1\r\n\r\n{}"),
             Some("{}")
         );
-        assert_eq!(declared_request_end(32, "8").unwrap(), 40);
-        assert_eq!(
-            declared_request_end(32, "no").unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
-        assert_eq!(
-            declared_request_end(32, "18446744073709551615")
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::InvalidData
-        );
-        assert!(reject_oversized_request(100, 8_192).is_ok());
-        assert_eq!(
-            reject_oversized_request(20_000, 8_192).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
-        assert!(reject_full_request_buffer(100, 8_192).is_ok());
-        assert_eq!(
-            reject_full_request_buffer(8_192, 8_192).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
-        assert_eq!(
-            decode_request_bytes(b"POST /v1/sessions").unwrap(),
-            "POST /v1/sessions"
-        );
-        assert_eq!(
-            decode_request_bytes(&[0xff, 0xfe]).unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
-        assert_eq!(
-            write_session_bytes(&mut FailWrite, b"HTTP/1.1")
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::BrokenPipe
-        );
-        assert_eq!(
-            std::io::Write::flush(&mut FailWrite).unwrap_err().kind(),
-            std::io::ErrorKind::BrokenPipe
-        );
-        let created = SessionHttpResponse {
-            status: 201,
-            content_type: "application/json",
-            body: String::from("{\"ok\":true}"),
-        };
-        assert_eq!(
-            write_http_response(&mut FailWrite, &created)
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::BrokenPipe
-        );
-        let mut sink = Vec::new();
-        write_http_response(&mut sink, &created).unwrap();
-        assert!(String::from_utf8(sink).unwrap().starts_with("HTTP/1.1 201"));
-        let mut second = FailAfterFirstWrite { writes: 0 };
-        assert_eq!(
-            write_http_response(&mut second, &created)
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::BrokenPipe
-        );
-        assert!(std::io::Write::flush(&mut second).is_ok());
     }
 
     #[test]
@@ -989,10 +754,15 @@ mod tests {
         };
         let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let addr = listener.local_addr().unwrap();
-        let request = "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_loopback\r\n\r\n{\"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}";
+        let body = "{\"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\"instrument_release_ref\":\"release_big_five_ko_v1\",\"locale\":\"ko-KR\"}";
+        let request = format!(
+            "POST /v1/sessions HTTP/1.1\r\nIdempotency-Key: ses_loopback\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let client_request = request.clone();
         let worker = std::thread::spawn(move || {
             let mut stream = TcpStream::connect(addr).unwrap();
-            stream.write_all(request.as_bytes()).unwrap();
+            stream.write_all(client_request.as_bytes()).unwrap();
             let mut body = String::new();
             std::io::Read::read_to_string(&mut stream, &mut body).unwrap();
             body
@@ -1001,7 +771,7 @@ mod tests {
         accept_one_session_http(&listener, &mut port, 20_000).unwrap();
         let response = worker.join().unwrap();
         assert!(response.contains("201"));
-        let replay = handle_session_http_request(request, &mut port, 20_000);
+        let replay = handle_session_http_request(&request, &mut port, 20_000);
         assert_eq!(replay.status(), 200);
     }
 
