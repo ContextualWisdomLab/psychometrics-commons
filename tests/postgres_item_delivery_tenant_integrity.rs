@@ -2,14 +2,21 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
-use std::sync::{Mutex, MutexGuard};
 
-static ITEM_DELIVERY_TENANT_LOCK: Mutex<()> = Mutex::new(());
+const ITEM_DELIVERY_TENANT_LOCK_KEY: i64 = 0x4954_544E_544C_4F43;
 
-fn tenant_test_guard() -> MutexGuard<'static, ()> {
-    ITEM_DELIVERY_TENANT_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn tenant_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&ITEM_DELIVERY_TENANT_LOCK_KEY],
+        )
+        .expect("shared item-delivery tenant integrity test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
@@ -55,6 +62,24 @@ fn insert_ledger(client: &mut Client, tenant_ref: &str, session_ref: &str) {
             &[&tenant_ref, &session_ref],
         )
         .unwrap();
+}
+
+#[test]
+fn item_delivery_tenant_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = tenant_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ITEM_DELIVERY_TENANT_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema item-delivery tenant fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
