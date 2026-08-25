@@ -1,6 +1,6 @@
 //! Failure-path coverage for atomic scoring-dispatch persistence.
 
-use postgres::{Client, IsolationLevel, NoTls};
+use postgres::{error::SqlState, Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, PersistenceError,
@@ -22,15 +22,25 @@ const ERROR_PATH_TEST_LOCK_KEY: i64 = 0x5343_4453_4552_5250;
 const PAYLOAD_DIGEST: &str =
     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
+fn acquire_error_path_guard(
+    mut guard: Client,
+    lock_timeout: &str,
+) -> Result<Client, postgres::Error> {
+    guard.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    guard.query_one("SELECT pg_advisory_lock($1)", &[&ERROR_PATH_TEST_LOCK_KEY])?;
+    Ok(guard)
+}
+
 fn error_path_guard() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut guard = Client::connect(&connection, NoTls)
+    let guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    guard
-        .query_one("SELECT pg_advisory_lock($1)", &[&ERROR_PATH_TEST_LOCK_KEY])
-        .expect("shared scoring-dispatch error-path test lock should be acquired");
-    guard
+    acquire_error_path_guard(guard, "60s")
+        .expect("shared scoring-dispatch error-path lock must be acquired within 60 seconds")
 }
 
 fn test_client() -> Client {
@@ -129,6 +139,19 @@ fn error_path_fixture_guard_is_visible_to_another_postgres_session() {
         !acquired,
         "fixed-schema fixture guard must serialize across PostgreSQL sessions"
     );
+}
+
+#[test]
+fn error_path_fixture_lock_contention_has_a_finite_timeout() {
+    let _guard = error_path_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_error_path_guard(contender, "100ms")
+        .err()
+        .expect("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
