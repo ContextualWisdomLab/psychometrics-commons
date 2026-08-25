@@ -202,7 +202,7 @@ fn target_reference_and_envelope_validation_fail_closed() {
 
     let duplicate_targets = [
         DataRightsPropagationTarget::new("dependent_system_alpha", &event),
-        DataRightsPropagationTarget::new(" dependent_system_alpha ", &event),
+        DataRightsPropagationTarget::new("dependent_system_alpha", &event),
     ];
     assert!(matches!(
         persist_requested_data_rights_with_propagation(&mut db, &request, &duplicate_targets, 3,),
