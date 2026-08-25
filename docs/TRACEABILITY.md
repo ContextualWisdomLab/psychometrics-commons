@@ -153,6 +153,10 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
+**Active PR** #284 durable accepted response-event persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `migrations/0020_response_event.sql` and `src/postgres_response_event.rs` keep the accepted mid-session ledger prefix durable across process restart with exact replay classification, contiguous sequence recovery, immutable provenance, and fail-closed migration/reference contracts. Public response HTTP transport and completed snapshot reload remain separate slices.
+
+**Active PR** #301 consolidated public-release identity privacy gate is not protected-main truth until an unchanged reviewed/check-clean head is integrated. It consolidates the identity-column denylist, cell-value scanner, separator/prefix hardening, structured-value fail-closed behavior, and the `IdentityInventoryUnavailable` fail-closed inventory contract required by issue #260. A missing or blank effective restricted-identity inventory must fail closed before public fixture approval rather than being read as "nothing to match".
+
 Merged #249 `authorize_result_export_read` is protected-main delivery-guard evidence in `src/result_export_authorization.rs`: it authorizes the stored participant/result with existing `ReadOwnResult` (ADR-0010 export provenance; ADR-0003 tenant-bound authorization) and then requires the export's `result_snapshot_ref` and copied `participant_ref` to match that exact immutable snapshot. Cross-tenant callers fail closed with the ordinary result-authorization denial before export-binding details are evaluated. No new permission or persistence was introduced.
 
 Merged #256 authorized personal result export HTTP is protected-main transport evidence: `src/result_export_http.rs` and `openapi/result-exports.yaml` bind the stored result to the authenticated participant/resource scope and preserve the immutable export provenance from `src/result_export.rs`.
