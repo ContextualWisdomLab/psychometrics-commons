@@ -8,16 +8,18 @@ use psychometrics_commons_runtime::postgres_consent::{
     apply_consent_migration, persist_consent_ledger, ConsentPersistenceDisposition,
     ConsentPersistenceError,
 };
-use std::sync::{Mutex, MutexGuard};
 
 const CONSENT_TEST_LOCK_KEY: i64 = 0x434F_4E53_454E_5450;
 
-static CONSENT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn consent_test_guard() -> MutexGuard<'static, ()> {
-    CONSENT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn consent_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&CONSENT_TEST_LOCK_KEY])
+        .expect("shared consent persistence test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
