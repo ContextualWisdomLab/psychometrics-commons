@@ -52,9 +52,7 @@ fn reset_result_snapshot_tables(client: &mut Client) {
 fn cleanup_result_snapshot_fault_injection(client: &mut Client) {
     client
         .batch_execute(
-            "DROP TRIGGER IF EXISTS result_snapshot_redirect_after_insert \
-                 ON result_snapshot_persistence_test.result_snapshot;\
-             DROP FUNCTION IF EXISTS result_snapshot_persistence_test.result_snapshot_redirect_after_insert();\
+            "SET search_path TO result_snapshot_persistence_test;\
              DROP SCHEMA IF EXISTS result_snapshot_select_failure_sink CASCADE;\
              DROP TRIGGER IF EXISTS result_snapshot_reject_observation \
                  ON result_snapshot_persistence_test.result_snapshot_observation;\
@@ -372,7 +370,7 @@ fn missing_result_snapshot_relation_is_a_database_failure() {
 }
 
 #[test]
-fn replay_select_failure_is_a_database_failure() {
+fn replay_existence_select_failure_is_a_database_failure() {
     let _guard = result_snapshot_test_guard();
     let mut client = test_client();
     reset_result_snapshot_tables(&mut client);
@@ -385,15 +383,7 @@ fn replay_select_failure_is_a_database_failure() {
         .batch_execute(
             "DROP SCHEMA IF EXISTS result_snapshot_select_failure_sink CASCADE;\
              CREATE SCHEMA result_snapshot_select_failure_sink;\
-             CREATE OR REPLACE FUNCTION result_snapshot_redirect_after_insert() \
-             RETURNS trigger LANGUAGE plpgsql AS $$ \
-             BEGIN \
-                 PERFORM set_config('search_path', 'result_snapshot_select_failure_sink', false); \
-                 RETURN NULL; \
-             END $$; \
-             CREATE TRIGGER result_snapshot_redirect_after_insert \
-             AFTER INSERT ON result_snapshot \
-             FOR EACH STATEMENT EXECUTE FUNCTION result_snapshot_redirect_after_insert();",
+             SET search_path TO result_snapshot_select_failure_sink;",
         )
         .unwrap();
 
