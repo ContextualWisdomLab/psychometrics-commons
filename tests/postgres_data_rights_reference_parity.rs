@@ -10,6 +10,7 @@ use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migra
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_905;
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -94,6 +95,29 @@ fn seed_request_and_outbox(client: &mut Client, suffix: &str) -> (String, String
         )
         .unwrap();
     (request_ref, tenant_ref, event_ref)
+}
+
+#[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let _guard = guard();
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut contender = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible across PostgreSQL sessions"
+    );
 }
 
 #[test]
