@@ -59,6 +59,23 @@ fn fixture_serialization_is_visible_to_other_postgresql_sessions() {
 }
 
 #[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut fixture = test_client();
+    let timeout_ms: i64 = fixture
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "the database-failure fixture must not wait indefinitely for its advisory lock"
+    );
+}
+
+#[test]
 fn persistence_operations_wrap_missing_table_failures() {
     let mut client = test_client();
     let job = ScoringJob::new("scoring_job_dberror", "scoring_request_dberror", 3).unwrap();
