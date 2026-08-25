@@ -1,6 +1,6 @@
 //! Persist-backed session HTTP uses the sealed stored-release start path.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
@@ -21,6 +21,20 @@ const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "session_http_persistence_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5345_5353_4854_5450;
 
+/// Configures a finite wait budget before acquiring a session-scoped `PostgreSQL` advisory lock.
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
 /// Acquires the cross-process `PostgreSQL` fixture lock and returns the lock-owning
 /// session together with a client scoped to the session HTTP test schema.
 fn test_client() -> (Client, Client) {
@@ -28,9 +42,9 @@ fn test_client() -> (Client, Client) {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    guard
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("PostgreSQL session HTTP fixture advisory lock should be acquired");
+    acquire_database_lock(&mut guard, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "PostgreSQL session HTTP fixture advisory lock should be acquired within sixty seconds",
+    );
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
@@ -166,6 +180,52 @@ fn fixture_lock_is_visible_across_database_sessions() {
         !acquired,
         "session HTTP fixture serialization must be visible to separate PostgreSQL sessions"
     );
+}
+
+/// Proves fixture acquisition cannot wait forever behind a stalled lock owner.
+#[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let (mut guard, _owner) = test_client();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("session HTTP fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "session HTTP fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+/// Proves `PostgreSQL` itself aborts a contended advisory-lock wait at the configured budget.
+#[test]
+fn fixture_lock_wait_aborts_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended session HTTP fixture lock must stop at the configured timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test advisory lock should be released")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 /// Proves persisted session replay survives restart while new starts fail after release suspension.
