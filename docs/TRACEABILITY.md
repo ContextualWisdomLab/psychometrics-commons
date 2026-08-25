@@ -140,7 +140,6 @@ Still-Target logical modules/adapters include remaining product aggregate persis
 
 ### Active implementation work that is not protected-main truth
 
-<<<<<<< HEAD
 **Active PR #303** adds `src/postgres_instrument_catalog.rs` plus `tests/postgres_instrument_startable_catalog.rs` as a PostgreSQL persistence API for deterministic discovery of currently Published instrument-release candidates. The catalog validates full persisted release evidence in one non-locking query and intentionally does not authorize or create sessions. Final session start remains the authority boundary and must reload/lock the exact release because publication state can change after discovery. HTTP catalog transport is still Target.
 
 Merged #249 `authorize_result_export_read` is protected-main delivery-guard evidence in `src/result_export_authorization.rs`; merged #256 ships the authorized export HTTP transport (`src/result_export_http.rs`, `openapi/result-exports.yaml`). Merged #231 personal result export remains protected-main domain evidence with approved limitation text required so the report cannot imply diagnosis or a type score; padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains.
