@@ -8,20 +8,39 @@ use psychometrics_commons_runtime::postgres_scoring_request::{
 #[path = "response_support/mod.rs"]
 mod response_support;
 
-use psychometrics_commons_runtime::response::ResponseWrite;
+use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
-use response_support::frozen_snapshot;
-use std::sync::{Mutex, MutexGuard};
+use psychometrics_commons_runtime::session::SessionState;
+use response_support::{advance_to, active_session};
+
+/// Freeze one session-bound completed snapshot through the authoritative ledger API.
+fn frozen_snapshot(
+    session_ref: &str,
+    snapshot_ref: &str,
+    writes: &[ResponseWrite<'_>],
+) -> psychometrics_commons_runtime::response::ResponseSnapshot {
+    let mut session = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    for request in writes {
+        ledger.record(&session, *request).unwrap();
+    }
+    advance_to(&mut session, SessionState::Completed);
+    ledger.freeze_as(&session, snapshot_ref).unwrap()
+}
 
 const PAYLOAD_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4F52_5251_5053;
 
-static SCORING_REQUEST_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn scoring_request_test_guard() -> MutexGuard<'static, ()> {
-    SCORING_REQUEST_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn scoring_request_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL scoring request lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
@@ -92,6 +111,31 @@ fn request_named(
         },
     )
     .unwrap()
+}
+
+#[test]
+fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
+    let _guard = scoring_request_test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("cross-process fixture lock should be observable from PostgreSQL")
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .expect("RED fixture lock should be released after probing");
+    }
+    assert!(
+        !acquired,
+        "a process-local mutex cannot serialize a fixed PostgreSQL schema across CI processes"
+    );
 }
 
 #[test]

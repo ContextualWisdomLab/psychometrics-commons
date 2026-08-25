@@ -8,21 +8,28 @@ use psychometrics_commons_runtime::postgres_response_snapshot::{
 #[path = "response_support/mod.rs"]
 mod response_support;
 
-use psychometrics_commons_runtime::response::ResponseWrite;
-use response_support::{frozen_snapshot, unbound_frozen_snapshot};
-use std::sync::{Mutex, MutexGuard};
+use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+use psychometrics_commons_runtime::session::SessionState;
+use response_support::{advance_to, active_session};
 
+const RESPONSE_SNAPSHOT_TEST_LOCK_KEY: i64 = 0x5253_5052_5354_4C4B;
 const PAYLOAD_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_DIGEST: &str =
     "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
-static RESPONSE_SNAPSHOT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn response_snapshot_test_guard() -> MutexGuard<'static, ()> {
-    RESPONSE_SNAPSHOT_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn response_snapshot_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&RESPONSE_SNAPSHOT_TEST_LOCK_KEY],
+        )
+        .expect("shared response-snapshot persistence test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
@@ -68,6 +75,35 @@ fn persist_err(
     error
 }
 
+/// Freeze one session-bound completed snapshot through the authoritative ledger API.
+fn frozen_snapshot(
+    session_ref: &str,
+    snapshot_ref: &str,
+    writes: &[ResponseWrite<'_>],
+) -> psychometrics_commons_runtime::response::ResponseSnapshot {
+    let mut session = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    for request in writes {
+        ledger.record(&session, *request).unwrap();
+    }
+    advance_to(&mut session, SessionState::Completed);
+    ledger.freeze_as(&session, snapshot_ref).unwrap()
+}
+
+/// Freeze one session-bound snapshot without pinning a server snapshot reference.
+fn unbound_frozen_snapshot(
+    session_ref: &str,
+    writes: &[ResponseWrite<'_>],
+) -> psychometrics_commons_runtime::response::ResponseSnapshot {
+    let mut session = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    for request in writes {
+        ledger.record(&session, *request).unwrap();
+    }
+    advance_to(&mut session, SessionState::Completed);
+    ledger.freeze(&session).unwrap()
+}
+
 fn write<'a>(
     server_event_ref: &'a str,
     client_event_ref: &'a str,
@@ -80,6 +116,24 @@ fn write<'a>(
         item_version_ref,
         payload_digest,
     }
+}
+
+#[test]
+fn response_snapshot_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = response_snapshot_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&RESPONSE_SNAPSHOT_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema response-snapshot fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
