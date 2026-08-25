@@ -32,7 +32,9 @@ fn test_client() -> Client {
         SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY,
         "60s",
     )
-    .expect("scoring database-failure fixture advisory lock should be acquired within sixty seconds");
+    .expect(
+        "scoring database-failure fixture advisory lock should be acquired within sixty seconds",
+    );
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_database_failure_test;\
