@@ -303,14 +303,63 @@ fn migration_reapply_rejects_historical_dangling_predecessor_with_foreign_key_vi
 fn predecessor_lookup_database_failure_stays_typed_as_database_error() {
     let _guard = test_guard();
     let mut client = test_client();
+    apply_result_snapshot_migration(&mut client).unwrap();
+    insert_raw_snapshot(&mut client, "result_snapshot_predecessor", None).unwrap();
+    client
+        .batch_execute(
+            "ALTER TABLE result_snapshot RENAME TO result_snapshot_storage;\
+             CREATE FUNCTION fail_result_snapshot_predecessor_lookup(candidate_ref text) \
+             RETURNS boolean \
+             LANGUAGE plpgsql \
+             VOLATILE \
+             COST 100000 \
+             AS $$\
+             BEGIN \
+                 IF candidate_ref = 'result_snapshot_predecessor' THEN \
+                     RAISE EXCEPTION 'forced predecessor lookup failure' USING ERRCODE = 'XX000'; \
+                 END IF; \
+                 RETURN TRUE; \
+             END;\
+             $$;\
+             CREATE VIEW result_snapshot AS \
+             SELECT * \
+             FROM result_snapshot_storage \
+             WHERE fail_result_snapshot_predecessor_lookup(result_snapshot_ref);",
+        )
+        .unwrap();
+
+    assert!(client
+        .query_opt(
+            "SELECT 1 FROM result_snapshot WHERE result_snapshot_ref = $1",
+            &[&"result_snapshot_missing_relation"],
+        )
+        .unwrap()
+        .is_none());
+    let probe_error = client
+        .query_opt(
+            "SELECT 1 FROM result_snapshot WHERE result_snapshot_ref = $1",
+            &[&"result_snapshot_predecessor"],
+        )
+        .unwrap_err();
+    assert_eq!(
+        probe_error.code().map(postgres::error::SqlState::code),
+        Some("XX000")
+    );
+
     let successor = snapshot(
         "result_snapshot_missing_relation",
         Some("result_snapshot_predecessor"),
     );
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        persist_result_snapshot(&mut transaction, &successor),
-        Err(ResultSnapshotPersistenceError::Database(_))
-    ));
+    let error = persist_result_snapshot(&mut transaction, &successor).unwrap_err();
+    match error {
+        ResultSnapshotPersistenceError::Database(error) => {
+            assert_eq!(
+                error.code().map(postgres::error::SqlState::code),
+                Some("XX000")
+            );
+        }
+        other => panic!("expected typed database error from predecessor lookup, got {other}"),
+    }
     transaction.rollback().unwrap();
 }
