@@ -1,4 +1,4 @@
-//! Static regression contract for assessment-session PostgreSQL fixture ownership.
+//! Static regression contract for assessment-session `PostgreSQL` fixture ownership.
 //!
 //! This test intentionally reads the integration-test source so a process-local
 //! mutex cannot silently return after the fixture is made database-visible.
