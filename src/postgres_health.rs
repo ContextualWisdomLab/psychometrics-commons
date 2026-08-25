@@ -83,14 +83,42 @@ impl PostgresRuntimeHealth {
     }
 }
 
-/// Classify server-version, server-encoding, and transaction-read-only evidence without I/O.
+/// Classify server-version and transaction-read-only evidence without performing I/O.
+///
+/// This compatibility helper preserves the original public, constant-evaluable API for callers
+/// that do not have server-encoding evidence. It therefore cannot prove the UTF8 prerequisite and
+/// must not be used as the complete operational readiness gate. New readiness code should use
+/// [`classify_postgres_runtime_with_encoding`] or [`probe_postgres_runtime`].
 ///
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
-/// integer division yields the server major used by the repository support policy. UTF8 is
-/// required because the integration persistence schema uses `PostgreSQL`'s Unicode-aware
-/// `pg_unicode_fast` collation for reference validation.
+/// integer division yields the server major used by the repository support policy.
 #[must_use]
-pub fn classify_postgres_runtime(
+pub const fn classify_postgres_runtime(
+    server_version_num: i32,
+    transaction_read_only: bool,
+) -> PostgresRuntimeHealth {
+    let server_major_version = server_version_num / 10_000;
+    let status = if server_major_version != SUPPORTED_POSTGRES_MAJOR {
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    } else if transaction_read_only {
+        PostgresRuntimeStatus::ReadOnly
+    } else {
+        PostgresRuntimeStatus::Ready
+    };
+    PostgresRuntimeHealth {
+        server_major_version,
+        status,
+    }
+}
+
+/// Classify server-version, server-encoding, and transaction-read-only evidence without I/O.
+///
+/// UTF8 is required because the integration persistence schema uses `PostgreSQL`'s
+/// Unicode-aware `pg_unicode_fast` collation for reference validation. Use this function when
+/// explicit encoding evidence is already available; live callers should normally use
+/// [`probe_postgres_runtime`].
+#[must_use]
+pub fn classify_postgres_runtime_with_encoding(
     server_version_num: i32,
     server_encoding: &str,
     transaction_read_only: bool,
@@ -134,7 +162,7 @@ pub fn probe_postgres_runtime(
     let server_version_num: i32 = row.get(0);
     let server_encoding: String = row.get(1);
     let transaction_read_only: bool = row.get(2);
-    Ok(classify_postgres_runtime(
+    Ok(classify_postgres_runtime_with_encoding(
         server_version_num,
         &server_encoding,
         transaction_read_only,
@@ -221,20 +249,20 @@ mod tests {
 
     #[test]
     fn runtime_health_covers_supported_read_only_and_unsupported_states() {
-        let ready = classify_postgres_runtime(180_004, "UTF8", false);
+        let ready = classify_postgres_runtime_with_encoding(180_004, "UTF8", false);
         assert_eq!(ready.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
         assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
         assert_eq!(ready.capability_state(), CapabilityState::Available);
         assert!(ready.accepts_new_work());
         assert!(ready.capability_health().unwrap().accepts_new_work());
 
-        let read_only = classify_postgres_runtime(180_004, "UTF8", true);
+        let read_only = classify_postgres_runtime_with_encoding(180_004, "UTF8", true);
         assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
         assert_eq!(read_only.capability_state(), CapabilityState::Unavailable);
         assert!(!read_only.accepts_new_work());
         assert!(!read_only.capability_health().unwrap().accepts_new_work());
 
-        let unsupported = classify_postgres_runtime(170_009, "UTF8", false);
+        let unsupported = classify_postgres_runtime_with_encoding(170_009, "UTF8", false);
         assert_eq!(
             unsupported.status(),
             PostgresRuntimeStatus::UnsupportedMajorVersion
