@@ -76,6 +76,23 @@ fn fixture_lock_is_visible_across_database_sessions() {
 }
 
 #[test]
+fn fixture_lock_wait_is_bounded() {
+    let (mut guard, _owner) = test_clients();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("fixture lock wait budget should be queryable")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "item-delivery schema fixture lock acquisition must have a finite sixty-second timeout"
+    );
+}
+
+#[test]
 fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences() {
     let (_guard, mut client) = test_clients();
     reset_schema(&mut client);
