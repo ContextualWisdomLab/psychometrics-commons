@@ -78,6 +78,23 @@ fn fixture_serialization_is_visible_to_other_postgresql_sessions() {
 }
 
 #[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut fixture = test_client();
+    let timeout_ms: i64 = fixture
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("due-retry fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "due-retry fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
 fn due_retry_is_claimed_with_next_fence_before_newer_queued_work() {
     let mut client = test_client();
     persist_queued(
