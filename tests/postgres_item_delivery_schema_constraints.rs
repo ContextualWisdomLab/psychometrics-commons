@@ -1,20 +1,31 @@
 //! Real `PostgreSQL` bounds for durable item-delivery rows.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
-use std::sync::{Mutex, MutexGuard};
 
-static ITEM_DELIVERY_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
+const ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY: i64 = 0x4954_454D_5343_484D;
 
-fn schema_test_guard() -> MutexGuard<'static, ()> {
-    ITEM_DELIVERY_SCHEMA_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
 }
 
-fn test_client() -> Client {
+fn test_clients() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    acquire_database_lock(&mut guard, ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY, "60s")
+        .expect("PostgreSQL fixture advisory lock should be acquired within sixty seconds");
+
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
@@ -23,7 +34,7 @@ fn test_client() -> Client {
              SET search_path TO item_delivery_schema_test;",
         )
         .unwrap();
-    client
+    (guard, client)
 }
 
 fn reset_schema(client: &mut Client) {
@@ -44,9 +55,65 @@ fn constraint_name(error: &postgres::Error) -> String {
 }
 
 #[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let (_guard, _owner) = test_clients();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
+    );
+}
+
+#[test]
+fn fixture_lock_wait_is_bounded_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended advisory-lock acquisition must stop at the configured timeout");
+
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should release its advisory lock")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
+}
+
+#[test]
 fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences() {
-    let _guard = schema_test_guard();
-    let mut client = test_client();
+    let (_guard, mut client) = test_clients();
     reset_schema(&mut client);
     apply_item_delivery_migration(&mut client).unwrap();
 
