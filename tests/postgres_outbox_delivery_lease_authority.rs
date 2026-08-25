@@ -98,6 +98,24 @@ fn claim(
 }
 
 #[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut client = ready_client();
+    let timeout_ms: i64 = client
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("outbox authority fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "outbox authority fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+    cleanup(&mut client);
+}
+
+#[test]
 fn future_caller_timestamp_cannot_expire_a_live_database_lease() {
     let mut client = ready_client();
     let now = database_now_unix_ms(&mut client);
