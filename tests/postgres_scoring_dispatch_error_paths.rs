@@ -19,6 +19,7 @@ use psychometrics_commons_runtime::session::SessionState;
 use std::error::Error;
 use std::sync::{Mutex, MutexGuard};
 
+const ERROR_PATH_TEST_LOCK_KEY: i64 = 0x5343_4453_4552_5250;
 const PAYLOAD_DIGEST: &str =
     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
@@ -108,6 +109,24 @@ fn dispatch_event() -> IntegrationEvent {
         PAYLOAD_DIGEST,
     )
     .unwrap()
+}
+
+#[test]
+fn error_path_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = error_path_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ERROR_PATH_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
