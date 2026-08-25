@@ -219,3 +219,58 @@ fn migration_reapplication_replaces_a_weakened_reference_constraint() {
     .expect_err("migration reapplication must repair a weaker same-named reference constraint");
     assert_check(&error, "scoring_request_scoring_request_ref_format_check");
 }
+
+#[test]
+fn migration_reapplication_fails_closed_before_rewriting_legacy_invalid_identity() {
+    let _guard = guard();
+    let mut client = client();
+
+    client
+        .batch_execute(
+            "ALTER TABLE scoring_request \
+                 DROP CONSTRAINT scoring_request_scoring_request_ref_format_check; \
+             ALTER TABLE scoring_request \
+                 ADD CONSTRAINT scoring_request_scoring_request_ref_format_check CHECK (\
+                     scoring_request_ref = btrim(scoring_request_ref) \
+                     AND scoring_request_ref <> '' \
+                     AND NOT (\
+                         scoring_request_ref ~ '[[:digit:]]' \
+                         AND scoring_request_ref ~ '^[[:digit:]+,.eE-]+$'\
+                     )\
+                 );",
+        )
+        .unwrap();
+
+    insert_request(
+        &mut client,
+        "½",
+        "session_legacy_guard",
+        "response_snapshot_legacy_guard",
+        "assessment_spec_legacy_guard",
+        "instrument_version_legacy_guard",
+        "scoring_version_legacy_guard",
+        "calibration_legacy_guard",
+        None,
+    )
+    .expect("the deliberately weakened historical constraint must admit the legacy alias");
+
+    let error = apply_scoring_request_migration(&mut client)
+        .expect_err("legacy-invalid immutable identity must block migration reapplication");
+    let database_error = error
+        .as_db_error()
+        .expect("upgrade rejection must be a PostgreSQL data-integrity error");
+    assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
+    assert_eq!(
+        database_error.message(),
+        "scoring_request contains legacy reference identities incompatible with the Rust opaque-reference contract"
+    );
+
+    let preserved_count: i64 = client
+        .query_one(
+            "SELECT count(*) FROM scoring_request WHERE scoring_request_ref = '½'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(preserved_count, 1, "migration must never silently rewrite immutable scoring identity");
+}
