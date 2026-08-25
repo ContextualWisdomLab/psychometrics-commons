@@ -2,7 +2,7 @@
 //! Two concurrent claim transactions race on one retry-scheduled job; exactly one receives
 //! the next lease and fencing token while the other is rejected without duplicate ownership.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, persist_scoring_job,
     record_retryable_scoring_failure, ScoringJobPersistenceError,
@@ -15,28 +15,30 @@ const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4F52_5254_5259;
 
 type ClaimEvidence = (String, String, u64);
 
-fn retry_concurrency_test_guard() -> Client {
+fn configured_client(lock_timeout: &str) -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
-        .batch_execute("SET lock_timeout = '60s'")
-        .expect("shared PostgreSQL scoring retry lock wait must be bounded");
+        .query_one(
+            "SELECT set_config('lock_timeout', $1, false)",
+            &[&lock_timeout],
+        )
+        .expect("PostgreSQL scoring retry lock timeout must be configurable");
+    client
+}
+
+fn retry_concurrency_test_guard() -> Client {
+    let mut client = configured_client("60s");
     client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL scoring retry lock should be acquired");
     client
 }
 
-fn test_client() -> Client {
-    let connection = std::env::var("TEST_DATABASE_URL")
-        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
-    client
-        .batch_execute("SET lock_timeout = '60s'")
-        .expect("scoring retry worker row-lock waits must be bounded");
+fn test_client_with_lock_timeout(lock_timeout: &str) -> Client {
+    let mut client = configured_client(lock_timeout);
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_retry_concurrency_test;\
@@ -44,6 +46,10 @@ fn test_client() -> Client {
         )
         .unwrap();
     client
+}
+
+fn test_client() -> Client {
+    test_client_with_lock_timeout("60s")
 }
 
 fn reset_scoring_job_table(client: &mut Client) {
@@ -136,6 +142,62 @@ fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
         !acquired,
         "a process-local mutex cannot serialize a fixed PostgreSQL schema across CI processes"
     );
+}
+
+#[test]
+fn fixture_and_worker_lock_timeouts_are_enforced_by_postgresql() {
+    let mut guard = retry_concurrency_test_guard();
+    let guard_timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("fixture guard lock timeout should be queryable from PostgreSQL")
+        .get(0);
+    assert_eq!(guard_timeout_ms, 60_000);
+
+    let mut advisory_contender = configured_client("100ms");
+    let advisory_error = advisory_contender
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect_err("contended fixture advisory lock must stop at its configured timeout");
+    assert_eq!(advisory_error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let mut setup_client = test_client();
+    reset_scoring_job_table(&mut setup_client);
+    apply_scoring_job_migration(&mut setup_client).unwrap();
+    persist_due_retry(&mut setup_client);
+
+    let worker_timeout_ms: i64 = setup_client
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("worker lock timeout should be queryable from PostgreSQL")
+        .get(0);
+    assert_eq!(worker_timeout_ms, 60_000);
+
+    let mut holder = test_client();
+    let mut holder_transaction = holder.transaction().unwrap();
+    holder_transaction
+        .query_one(
+            "SELECT scoring_job_ref FROM scoring_job_state \
+             WHERE scoring_job_ref = 'scoring_job_retry_race' FOR UPDATE",
+            &[],
+        )
+        .expect("holder should acquire the scoring-job row lock");
+
+    let mut row_contender = test_client_with_lock_timeout("100ms");
+    let mut contender_transaction = row_contender.transaction().unwrap();
+    let row_error = contender_transaction
+        .query_one(
+            "SELECT scoring_job_ref FROM scoring_job_state \
+             WHERE scoring_job_ref = 'scoring_job_retry_race' FOR UPDATE",
+            &[],
+        )
+        .expect_err("contended scoring-job row lock must stop at its configured timeout");
+    assert_eq!(row_error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+    contender_transaction.rollback().unwrap();
+    holder_transaction.rollback().unwrap();
 }
 
 #[test]
