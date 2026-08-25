@@ -4,8 +4,6 @@
 //! or retired, but only when the caller presents the exact originally-issued
 //! session, participant, and release references. Padded aliases must never reopen it.
 
-use std::sync::{Mutex, MutexGuard};
-
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -27,14 +25,19 @@ const EVIDENCE_DIGEST: &str =
 const PARTICIPANT_REF: &str = "ptc_exact_replay_eb1b318917d24ca0ac5153c37ff696c7";
 const RELEASE_REF: &str = "release_big_five_exact_replay_v1";
 const SCHEMA: &str = "assessment_session_exact_replay_test";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn test_client() -> (MutexGuard<'static, ()>, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn test_client() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("fixture must acquire the database-visible advisory lock");
+
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
