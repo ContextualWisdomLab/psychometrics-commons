@@ -1,4 +1,4 @@
-//! Regression contract for the scoring classification PostgreSQL fixture lock.
+//! Regression contract for the scoring classification `PostgreSQL` fixture lock.
 
 const FIXTURE_SOURCE: &str = include_str!("postgres_scoring_job_classification_locking.rs");
 
