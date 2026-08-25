@@ -16,6 +16,7 @@ use psychometrics_commons_runtime::postgres_instrument_release::{
 use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "session_replay_exact_reference_test";
+const DATABASE_TEST_LOCK_KEY: i64 = 7_702_093_076_572_906_642;
 const PARTICIPANT_REF: &str = "participant_replay_exact_alpha";
 const RELEASE_REF: &str = "release_replay_exact_alpha";
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -177,6 +178,34 @@ fn assert_padded_stored_replays_fail(client: &mut Client, session_ref: &str) {
         ));
         transaction.rollback().unwrap();
     }
+}
+
+#[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let (_guard, _client) = client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&DATABASE_TEST_LOCK_KEY],
+            )
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible across PostgreSQL sessions"
+    );
 }
 
 #[test]
