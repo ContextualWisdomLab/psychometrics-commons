@@ -6,16 +6,21 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobState};
-use std::sync::{Mutex, MutexGuard};
 
 const SCORING_JOB_EXPIRY_TEST_LOCK_KEY: i64 = 0x5343_4C45_5850_5259;
 
-static SCORING_JOB_EXPIRY_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn scoring_job_expiry_test_guard() -> MutexGuard<'static, ()> {
-    SCORING_JOB_EXPIRY_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn scoring_job_expiry_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&SCORING_JOB_EXPIRY_TEST_LOCK_KEY],
+        )
+        .expect("shared scoring-job lease-expiry test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
