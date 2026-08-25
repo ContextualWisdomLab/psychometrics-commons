@@ -18,6 +18,9 @@ fn test_client() -> (Client, Client) {
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     guard
+        .batch_execute("SET lock_timeout = '60s'")
+        .expect("shared PostgreSQL scoring cancellation lock wait must be bounded");
+    guard
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL scoring cancellation lock should be acquired");
     let mut client = Client::connect(&connection, NoTls)

@@ -1,4 +1,4 @@
-//! Fail-first regressions for scoring provenance binding and reference normalization.
+//! Fail-first regressions for scoring provenance binding and exact reference identity.
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{
@@ -31,13 +31,13 @@ fn ledger_with_one_response() -> ResponseLedger {
 
 fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
     ScoringRequestInput {
-        scoring_request_ref: "  scoring_request_ref  ",
+        scoring_request_ref: "scoring_request_ref",
         response_snapshot_ref,
-        assessment_spec_ref: "  assessment_spec_ref  ",
-        instrument_version_ref: "  instrument_version_ref  ",
-        scoring_version_ref: "  scoring_version_ref  ",
-        calibration_reference: "  calibration_reference  ",
-        norm_version_ref: Some("  norm_version_ref  "),
+        assessment_spec_ref: "assessment_spec_ref",
+        instrument_version_ref: "instrument_version_ref",
+        scoring_version_ref: "scoring_version_ref",
+        calibration_reference: "calibration_reference",
+        norm_version_ref: Some("norm_version_ref"),
         requested_output_schema_version: 1,
     }
 }
@@ -73,7 +73,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
 #[test]
 fn scoring_dispatch_rejects_snapshot_reference_substitution() {
     let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "  response_snapshot_ref  ")
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
 
     assert_eq!(snapshot.snapshot_ref(), Some("response_snapshot_ref"));
@@ -90,34 +90,28 @@ fn scoring_dispatch_rejects_snapshot_reference_substitution() {
 }
 
 #[test]
-fn accepted_scoring_references_are_trimmed_before_identity_comparison_or_storage() {
+fn scoring_dispatch_rejects_a_padded_snapshot_alias_before_identity_comparison() {
     let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "  response_snapshot_ref  ")
+        .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
-    let request =
-        ScoringRequest::from_snapshot(&snapshot, scoring_input(" response_snapshot_ref ")).unwrap();
+    let error = ScoringRequest::from_snapshot(&snapshot, scoring_input(" response_snapshot_ref "))
+        .unwrap_err();
 
-    assert_eq!(request.scoring_request_ref(), "scoring_request_ref");
-    assert_eq!(request.response_snapshot_ref(), "response_snapshot_ref");
-    assert_eq!(request.assessment_spec_ref(), "assessment_spec_ref");
-    assert_eq!(request.instrument_version_ref(), "instrument_version_ref");
-    assert_eq!(request.scoring_version_ref(), "scoring_version_ref");
-    assert_eq!(request.calibration_reference(), "calibration_reference");
-    assert_eq!(request.norm_version_ref(), Some("norm_version_ref"));
+    assert_eq!(error, ScoringContractError::EmptyReference);
 }
 
 #[test]
-fn result_identity_and_consent_comparisons_use_normalized_references() {
+fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract() {
     let snapshot = ledger_with_one_response()
         .freeze_as(SessionState::Completed, "response_snapshot_ref")
         .unwrap();
     let request =
         ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
     let result = ScoringResult::new(
-        " scoring_result_ref ",
+        "scoring_result_ref",
         &request,
         ENGINE_DIGEST,
-        vec![ScoreObservation::scored(" construct_ref ", 1.0, None).unwrap()],
+        vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
     )
     .unwrap();
 

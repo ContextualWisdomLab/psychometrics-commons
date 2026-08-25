@@ -322,23 +322,33 @@ fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
         &mut client,
         &published_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
     );
-    client
-        .execute(
-            "UPDATE instrument_release SET item_version_refs = ARRAY[\
-                 'item_version_001', 'item_version_001'\
-             ] WHERE release_ref = 'release_big_five_ko_v1'",
-            &[],
-        )
-        .unwrap();
+    // Protected-main hardening now enforces exact opaque item-reference spelling in the
+    // schema itself, so duplicated item references cannot be persisted at all. Fail-closed
+    // behavior therefore lives at the deepest available layer: the corrupting UPDATE must
+    // be rejected by the storage constraint before any catalog query can observe it.
+    let corrupt = client.execute(
+        "UPDATE instrument_release SET item_version_refs = ARRAY[\
+             'item_version_001', 'item_version_001'\
+         ] WHERE release_ref = 'release_big_five_ko_v1'",
+        &[],
+    );
+    assert!(
+        corrupt.is_err(),
+        "duplicate item references must violate the storage format constraint"
+    );
 
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        list_startable_instrument_releases(&mut transaction),
-        Err(StartableInstrumentCatalogError::Query(
-            InstrumentReleaseQueryError::InvalidStoredValue
-        ))
-    ));
-    transaction.rollback().unwrap();
+    let startable = list_startable_instrument_releases(&mut transaction).unwrap();
+    let mut stored_refs: Vec<&str> = startable
+        .iter()
+        .map(|release| release.manifest().release_ref())
+        .collect();
+    stored_refs.sort_unstable();
+    assert_eq!(
+        stored_refs,
+        vec!["release_alpha_en_v1", "release_big_five_ko_v1"]
+    );
+    transaction.commit().unwrap();
 }
 
 #[test]

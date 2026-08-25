@@ -115,11 +115,7 @@ fn published_release(release_ref: &str) -> InstrumentRelease {
     let mut release = InstrumentRelease::new(manifest(release_ref), 40_000).unwrap();
     let submit_event_ref = format!("publication_submit_review_{release_ref}");
     release
-        .apply_command(
-            &submit_event_ref,
-            PublicationCommand::SubmitReview,
-            40_100,
-        )
+        .apply_command(&submit_event_ref, PublicationCommand::SubmitReview, 40_100)
         .unwrap();
     release
         .bind_publication_evidence(approved_evidence(release_ref))
@@ -202,7 +198,10 @@ fn startable_catalog_query_error_preserves_database_source() {
         error,
         StartableInstrumentCatalogError::Query(InstrumentReleaseQueryError::Database(_))
     ));
-    assert_eq!(error.to_string(), "startable instrument catalog query failed");
+    assert_eq!(
+        error.to_string(),
+        "startable instrument catalog query failed"
+    );
     assert!(error.source().is_some());
     transaction.rollback().unwrap();
 }

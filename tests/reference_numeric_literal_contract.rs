@@ -1,9 +1,8 @@
-//! Contract coverage for opaque public-reference numeric-literal rejection.
+//! Public-reference tests for numeric-looking identifiers.
 //!
-//! Public references may contain digits when they are part of an opaque identifier, but a
-//! spelling made only from Unicode numeric code points plus numeric-literal punctuation/signs
-//! must fail closed. This exercises every separator/sign branch in the shared reference boundary
-//! through a public product constructor rather than reaching into the private validator.
+//! References made only from numeric characters and their punctuation or signs are rejected.
+//! References that combine letters with numbers remain valid opaque identifiers and keep their
+//! original spelling.
 
 use psychometrics_commons_runtime::participant::{AccountLinkError, ParticipantRecord};
 
