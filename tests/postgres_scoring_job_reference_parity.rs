@@ -18,10 +18,7 @@ fn guard() -> Client {
     let url = database_url();
     let mut guard = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     guard
-        .query_one(
-            "SELECT set_config('lock_timeout', $1, false)",
-            &[&"60s"],
-        )
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"60s"])
         .expect("PostgreSQL lock timeout must be configurable for the scoring-job fixture");
     guard
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
@@ -135,10 +132,7 @@ fn fixture_lock_is_database_visible_and_timeout_bounded() {
     let url = database_url();
     let mut contender = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     contender
-        .query_one(
-            "SELECT set_config('lock_timeout', $1, false)",
-            &[&"100ms"],
-        )
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"100ms"])
         .expect("lock timeout must be configurable for the fixture contention probe");
     let error = contender
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])

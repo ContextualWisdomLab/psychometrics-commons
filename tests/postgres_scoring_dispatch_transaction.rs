@@ -144,10 +144,7 @@ fn fixture_lock_is_database_visible_and_timeout_bounded() {
     let mut contender = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     contender
-        .query_one(
-            "SELECT set_config('lock_timeout', $1, false)",
-            &[&"100ms"],
-        )
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"100ms"])
         .expect("lock timeout must be configurable for the fixture contention probe");
     let error = contender
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
