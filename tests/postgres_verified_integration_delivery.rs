@@ -132,10 +132,7 @@ fn ready_client_lock_wait_is_bounded_by_live_postgresql_behavior() {
     let mut contender = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     contender
-        .query_one(
-            "SELECT set_config('lock_timeout', $1, false)",
-            &[&"100ms"],
-        )
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"100ms"])
         .expect("contender lock timeout should be configurable");
     let error = contender
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
