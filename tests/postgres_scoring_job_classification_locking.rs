@@ -6,17 +6,19 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     persist_scoring_job, record_successful_scoring_completion, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "scoring_job_classification_locking_test";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4C41_5353_4C4B;
 
-fn test_clients() -> (MutexGuard<'static, ()>, Client, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn test_clients() -> (Client, Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("PostgreSQL fixture advisory lock should be acquired");
+
     let mut owner = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     owner
@@ -87,6 +89,29 @@ fn assert_row_update_waits_for_lock(contender: &mut Client, job_ref: &str) {
     assert_eq!(
         error.code().map(postgres::error::SqlState::code),
         Some("55P03")
+    );
+}
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let (_guard, _owner, mut contender) = test_clients();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
     );
 }
 
