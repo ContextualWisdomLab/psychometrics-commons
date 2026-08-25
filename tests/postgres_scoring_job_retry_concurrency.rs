@@ -8,17 +8,22 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     record_retryable_scoring_failure, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobState};
-use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
-static RETRY_CONCURRENCY_TEST_LOCK: Mutex<()> = Mutex::new(());
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4F52_5254_5259;
 
 type ClaimEvidence = (String, String, u64);
 
-fn retry_concurrency_test_guard() -> MutexGuard<'static, ()> {
-    RETRY_CONCURRENCY_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn retry_concurrency_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL scoring retry lock should be acquired");
+    client
 }
 
 fn test_client() -> Client {
@@ -100,6 +105,31 @@ fn claim_due_retry(
         }
         Err(error) => panic!("unexpected concurrent retry claim error: {error:?}"),
     }
+}
+
+#[test]
+fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
+    let _guard = retry_concurrency_test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("cross-process fixture lock should be observable from PostgreSQL")
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .expect("RED fixture lock should be released after probing");
+    }
+    assert!(
+        !acquired,
+        "a process-local mutex cannot serialize a fixed PostgreSQL schema across CI processes"
+    );
 }
 
 #[test]
