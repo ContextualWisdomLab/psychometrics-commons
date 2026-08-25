@@ -21,6 +21,9 @@ fn retry_concurrency_test_guard() -> Client {
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
+        .batch_execute("SET lock_timeout = '60s'")
+        .expect("shared PostgreSQL scoring retry lock wait must be bounded");
+    client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL scoring retry lock should be acquired");
     client
