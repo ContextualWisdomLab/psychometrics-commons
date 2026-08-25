@@ -37,6 +37,22 @@ fn cleanup(client: &mut Client) {
 }
 
 #[test]
+fn fixture_lock_wait_is_bounded_before_blocking_acquisition() {
+    let source = include_str!("postgres_outbox_delivery_lease_fencing_integrity.rs");
+    let timeout_position = source
+        .find("SET lock_timeout = '60s'")
+        .expect("fixture guard must configure a finite lock timeout");
+    let lock_position = source
+        .find("SELECT pg_advisory_lock($1)")
+        .expect("fixture guard must acquire the PostgreSQL advisory lock");
+
+    assert!(
+        timeout_position < lock_position,
+        "lock_timeout must be configured before blocking advisory-lock acquisition"
+    );
+}
+
+#[test]
 fn current_lease_fencing_token_must_equal_persisted_generation() {
     let mut client = ready_client();
     client
