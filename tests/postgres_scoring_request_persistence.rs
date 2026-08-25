@@ -11,7 +11,7 @@ mod response_support;
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::session::SessionState;
-use response_support::{advance_to, active_session};
+use response_support::{active_session, advance_to};
 
 /// Freeze one session-bound completed snapshot through the authoritative ledger API.
 fn frozen_snapshot(

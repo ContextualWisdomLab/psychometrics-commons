@@ -10,7 +10,7 @@ mod response_support;
 
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
-use response_support::{advance_to, active_session};
+use response_support::{active_session, advance_to};
 
 const RESPONSE_SNAPSHOT_TEST_LOCK_KEY: i64 = 0x5253_5052_5354_4C4B;
 const PAYLOAD_DIGEST: &str =
