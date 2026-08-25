@@ -1,8 +1,9 @@
 //! Item-delivery persistence must match the Rust opaque-reference boundary.
 //!
-//! The domain trims Unicode whitespace and rejects embedded control characters and numeric-like
-//! spellings under Rust `char::is_numeric`. Direct SQL, array evidence, and migration upgrades
-//! must not preserve aliases the domain would reject or normalize.
+//! The domain trims Unicode whitespace and rejects embedded control characters,
+//! Unicode Default_Ignorable_Code_Point characters, and numeric-like spellings under
+//! Rust `char::is_numeric`. Direct SQL, array evidence, and migration upgrades must not
+//! preserve aliases the domain would reject or normalize.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
@@ -37,6 +38,38 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
         .expect("reference rejection must come from a PostgreSQL CHECK constraint");
     assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
     assert_eq!(database_error.constraint(), Some(constraint));
+}
+
+fn default_ignorable_aliases() -> Vec<String> {
+    const RANGES: &[(u32, u32)] = &[
+        (0x00AD, 0x00AD),
+        (0x034F, 0x034F),
+        (0x061C, 0x061C),
+        (0x115F, 0x1160),
+        (0x17B4, 0x17B5),
+        (0x180B, 0x180F),
+        (0x200B, 0x200F),
+        (0x202A, 0x202E),
+        (0x2060, 0x206F),
+        (0x3164, 0x3164),
+        (0xFE00, 0xFE0F),
+        (0xFEFF, 0xFEFF),
+        (0xFFA0, 0xFFA0),
+        (0xFFF0, 0xFFF8),
+        (0x1BCA0, 0x1BCA3),
+        (0x1D173, 0x1D17A),
+        (0xE0000, 0xE0FFF),
+    ];
+
+    RANGES
+        .iter()
+        .flat_map(|(start, end)| *start..=*end)
+        .map(|codepoint| {
+            let character = char::from_u32(codepoint)
+                .expect("all configured default-ignorable code points must be Unicode scalars");
+            format!("opaque_{character}_alpha")
+        })
+        .collect()
 }
 
 fn insert_ledger(
@@ -87,6 +120,29 @@ fn insert_event(
 }
 
 #[test]
+fn sql_predicate_rejects_every_rust_default_ignorable_code_point() {
+    let _guard = guard();
+    let mut client = client();
+    let aliases = default_ignorable_aliases();
+    let alias_refs = aliases.iter().map(String::as_str).collect::<Vec<_>>();
+
+    let first_accepted = client
+        .query_opt(
+            "SELECT unsafe_reference \
+             FROM unnest($1::text[]) AS candidate(unsafe_reference) \
+             WHERE item_delivery_reference_is_valid(unsafe_reference) \
+             LIMIT 1",
+            &[&alias_refs],
+        )
+        .unwrap();
+
+    assert!(
+        first_accepted.is_none(),
+        "PostgreSQL must reject every Unicode 17.0 default-ignorable alias rejected by Rust"
+    );
+}
+
+#[test]
 fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
@@ -97,6 +153,7 @@ fn ledger_scalar_and_array_references_reject_rust_invalid_aliases() {
         "12345",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{200b}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -177,6 +234,7 @@ fn delivery_event_references_reject_rust_invalid_aliases() {
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{200b}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
