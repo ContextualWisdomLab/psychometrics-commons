@@ -28,10 +28,7 @@ fn error_path_guard() -> Client {
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     guard
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&ERROR_PATH_TEST_LOCK_KEY],
-        )
+        .query_one("SELECT pg_advisory_lock($1)", &[&ERROR_PATH_TEST_LOCK_KEY])
         .expect("shared scoring-dispatch error-path test lock should be acquired");
     guard
 }
