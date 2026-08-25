@@ -10,18 +10,23 @@ use psychometrics_commons_runtime::item_delivery::ItemDeliveryLedger;
 use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger, ItemDeliveryPersistenceError,
 };
-use std::sync::{Mutex, MutexGuard};
 
 const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_903;
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-static EXACT_REFERENCE_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn test_guard() -> MutexGuard<'static, ()> {
-    EXACT_REFERENCE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .expect("fixture must acquire the database-visible advisory lock");
+    guard
 }
 
 fn test_client() -> Client {
