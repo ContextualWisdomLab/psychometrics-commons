@@ -1,4 +1,4 @@
-//! Regression contract for the scoring-cancellation PostgreSQL fixture lock.
+//! Regression contract for the scoring-cancellation `PostgreSQL` fixture lock.
 
 #[test]
 fn normal_fixture_guard_configures_finite_lock_timeout_before_advisory_wait() {
