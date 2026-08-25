@@ -49,6 +49,7 @@ pub mod result_authorization;
 pub mod result_export;
 pub mod result_export_authorization;
 pub mod scoring;
+pub mod scoring_dispatch;
 pub mod scoring_engine;
 pub mod scoring_job;
 pub mod session;
