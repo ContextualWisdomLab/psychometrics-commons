@@ -17,7 +17,8 @@ use std::fmt::{Display, Formatter};
 
 /// Maximum number of validated releases returned by one catalog query.
 pub const STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE: usize = 100;
-const STARTABLE_INSTRUMENT_RELEASE_FETCH_LIMIT: i64 = 101;
+const STARTABLE_INSTRUMENT_RELEASE_FETCH_LIMIT: i64 =
+    STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE as i64 + 1;
 
 /// Opaque continuation state for the durable startable-instrument catalog.
 ///
