@@ -7,20 +7,26 @@
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::apply_scoring_job_migration;
-use std::sync::{Mutex, MutexGuard};
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4a4f_4252_4546;
 
-static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn guard() -> MutexGuard<'static, ()> {
-    TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 fn database_url() -> String {
     std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required")
+}
+
+fn guard() -> Client {
+    let url = database_url();
+    let mut guard = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    guard
+        .query_one(
+            "SELECT set_config('lock_timeout', $1, false)",
+            &[&"60s"],
+        )
+        .expect("PostgreSQL lock timeout must be configurable for the scoring-job fixture");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("PostgreSQL scoring-job fixture advisory lock should be acquired");
+    guard
 }
 
 fn client(schema_name: &str) -> Client {
