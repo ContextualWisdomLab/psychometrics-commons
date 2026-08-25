@@ -15,10 +15,7 @@ fn guard() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut guard = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     guard
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&DATABASE_TEST_LOCK_KEY],
-        )
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("fixture must acquire the database-visible advisory lock");
     guard
 }
@@ -85,10 +82,7 @@ fn fixture_lock_is_visible_to_another_postgres_session() {
         .get(0);
     if acquired {
         contender
-            .query_one(
-                "SELECT pg_advisory_unlock($1)",
-                &[&DATABASE_TEST_LOCK_KEY],
-            )
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
             .unwrap();
     }
     assert!(
