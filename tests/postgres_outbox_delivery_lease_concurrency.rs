@@ -192,8 +192,9 @@ fn fixture_lock_wait_aborts_under_real_contention() {
         .expect("behavior-test holder should acquire its private advisory lock");
 
     let mut contender = connect_client();
-    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
-        .expect_err("contended outbox concurrency fixture lock must stop at the configured timeout");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms").expect_err(
+        "contended outbox concurrency fixture lock must stop at the configured timeout",
+    );
     assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 
     let released: bool = holder
