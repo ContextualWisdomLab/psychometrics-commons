@@ -3,10 +3,14 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::health::{CapabilityState, DataIntegrityHealth};
 use psychometrics_commons_runtime::postgres_health::{
-    classify_postgres_runtime, probe_postgres_relation_integrity, probe_postgres_runtime,
+    classify_postgres_runtime, classify_postgres_runtime_with_encoding,
+    probe_postgres_relation_integrity, probe_postgres_runtime, PostgresRuntimeHealth,
     PostgresRuntimeStatus, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_ENCODING,
     SUPPORTED_POSTGRES_MAJOR,
 };
+
+const LEGACY_RUNTIME_CLASSIFICATION: PostgresRuntimeHealth =
+    classify_postgres_runtime(180_002, false);
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -15,8 +19,17 @@ fn test_client() -> Client {
 }
 
 #[test]
+fn legacy_runtime_classifier_remains_const_and_source_compatible() {
+    assert_eq!(
+        LEGACY_RUNTIME_CLASSIFICATION.status(),
+        PostgresRuntimeStatus::Ready
+    );
+    assert!(LEGACY_RUNTIME_CLASSIFICATION.accepts_new_work());
+}
+
+#[test]
 fn supported_writable_postgres_is_ready_for_new_operational_work() {
-    let health = classify_postgres_runtime(180_002, "UTF8", false);
+    let health = classify_postgres_runtime_with_encoding(180_002, "UTF8", false);
 
     assert_eq!(SUPPORTED_POSTGRES_MAJOR, 18);
     assert_eq!(SUPPORTED_POSTGRES_ENCODING, "UTF8");
@@ -36,7 +49,7 @@ fn supported_writable_postgres_is_ready_for_new_operational_work() {
 
 #[test]
 fn supported_read_only_postgres_fails_state_changing_readiness_closed() {
-    let health = classify_postgres_runtime(180_000, "UTF8", true);
+    let health = classify_postgres_runtime_with_encoding(180_000, "UTF8", true);
 
     assert_eq!(health.server_major_version(), 18);
     assert_eq!(health.status(), PostgresRuntimeStatus::ReadOnly);
@@ -50,7 +63,7 @@ fn supported_read_only_postgres_fails_state_changing_readiness_closed() {
 
 #[test]
 fn unsupported_postgres_major_fails_readiness_closed_even_when_writable() {
-    let health = classify_postgres_runtime(170_009, "UTF8", false);
+    let health = classify_postgres_runtime_with_encoding(170_009, "UTF8", false);
 
     assert_eq!(health.server_major_version(), 17);
     assert_eq!(
@@ -67,7 +80,7 @@ fn unsupported_postgres_major_fails_readiness_closed_even_when_writable() {
 
 #[test]
 fn non_utf8_postgres_fails_readiness_closed_before_unicode_constraints_run() {
-    let health = classify_postgres_runtime(180_002, "LATIN1", false);
+    let health = classify_postgres_runtime_with_encoding(180_002, "LATIN1", false);
 
     assert_eq!(health.server_major_version(), 18);
     assert_eq!(health.status(), PostgresRuntimeStatus::UnsupportedEncoding);
