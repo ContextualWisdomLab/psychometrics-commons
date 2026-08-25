@@ -9,7 +9,9 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::postgres_instrument_catalog::list_startable_instrument_releases;
+use psychometrics_commons_runtime::postgres_instrument_catalog::{
+    list_startable_instrument_releases, StartableInstrumentCatalogError,
+};
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
 };
@@ -332,7 +334,9 @@ fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         list_startable_instrument_releases(&mut transaction),
-        Err(InstrumentReleaseQueryError::InvalidStoredValue)
+        Err(StartableInstrumentCatalogError::Query(
+            InstrumentReleaseQueryError::InvalidStoredValue
+        ))
     ));
     transaction.rollback().unwrap();
 }
@@ -346,7 +350,9 @@ fn startable_catalog_fails_closed_when_release_relation_is_missing() {
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         list_startable_instrument_releases(&mut transaction),
-        Err(InstrumentReleaseQueryError::Database(_))
+        Err(StartableInstrumentCatalogError::Query(
+            InstrumentReleaseQueryError::Database(_)
+        ))
     ));
     transaction.rollback().unwrap();
 }
