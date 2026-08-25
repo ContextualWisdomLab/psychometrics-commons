@@ -28,8 +28,9 @@ fn scoring_job_retry_test_guard() -> Client {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s")
-        .expect("shared PostgreSQL scoring retry persistence lock should be acquired within sixty seconds");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "shared PostgreSQL scoring retry persistence lock should be acquired within sixty seconds",
+    );
     client
 }
 
