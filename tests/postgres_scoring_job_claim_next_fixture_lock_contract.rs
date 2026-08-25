@@ -1,4 +1,4 @@
-//! Regression contract for the scoring claim-next PostgreSQL fixture lock.
+//! Regression contract for the scoring claim-next `PostgreSQL` fixture lock.
 
 const FIXTURE_SOURCE: &str = include_str!("postgres_scoring_job_claim_next.rs");
 
