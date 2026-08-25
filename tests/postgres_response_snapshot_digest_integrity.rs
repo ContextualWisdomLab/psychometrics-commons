@@ -8,6 +8,7 @@ use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_snapshot::apply_response_snapshot_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_901;
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -69,6 +70,32 @@ fn assert_digest_check(error: &postgres::Error) {
     assert_eq!(
         database_error.constraint(),
         Some("response_snapshot_entry_payload_digest_format_check")
+    );
+}
+
+#[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let _guard = guard();
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut contender = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&DATABASE_TEST_LOCK_KEY],
+            )
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible across PostgreSQL sessions"
     );
 }
 
