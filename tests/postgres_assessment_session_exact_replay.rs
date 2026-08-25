@@ -32,10 +32,7 @@ fn test_client() -> (Client, Client) {
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     guard
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&DATABASE_TEST_LOCK_KEY],
-        )
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("fixture must acquire the database-visible advisory lock");
 
     let mut client = Client::connect(&connection, NoTls)
@@ -150,10 +147,7 @@ fn fixture_lock_is_visible_to_another_postgres_session() {
         .get(0);
     if acquired {
         contender
-            .query_one(
-                "SELECT pg_advisory_unlock($1)",
-                &[&DATABASE_TEST_LOCK_KEY],
-            )
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
             .unwrap();
     }
     assert!(
