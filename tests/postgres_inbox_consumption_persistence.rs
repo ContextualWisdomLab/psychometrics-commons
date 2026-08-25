@@ -10,23 +10,24 @@ use psychometrics_commons_runtime::postgres_inbox_consumption::{
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
 };
-use std::sync::{Mutex, MutexGuard};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const INBOX_CONSUMPTION_TEST_LOCK_KEY: i64 = 0x494E_424F_5843_4F4E;
 
-static INBOX_CONSUMPTION_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn test_guard() -> MutexGuard<'static, ()> {
-    INBOX_CONSUMPTION_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn test_client() -> Client {
+fn connect_test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn test_guard() -> Client {
+    let mut client = connect_test_client();
+    client
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&INBOX_CONSUMPTION_TEST_LOCK_KEY],
+        )
+        .expect("shared PostgreSQL inbox-consumption fixture lock should be acquired");
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS inbox_consumption_persistence_test;\
@@ -34,6 +35,31 @@ fn test_client() -> Client {
         )
         .unwrap();
     client
+}
+
+fn test_client() -> Client {
+    let mut client = connect_test_client();
+    client
+        .batch_execute("SET search_path TO inbox_consumption_persistence_test;")
+        .unwrap();
+    client
+}
+
+#[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let _guard = test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&INBOX_CONSUMPTION_TEST_LOCK_KEY],
+        )
+        .expect("contender should be able to inspect the fixture advisory lock")
+        .get(0);
+    assert!(
+        !acquired,
+        "the fixed inbox-consumption schema must be serialized across PostgreSQL sessions"
+    );
 }
 
 fn reset_tables(client: &mut Client) {
