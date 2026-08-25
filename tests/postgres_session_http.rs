@@ -21,7 +21,7 @@ const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "session_http_persistence_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5345_5353_4854_5450;
 
-/// Acquires the cross-process PostgreSQL fixture lock and returns the lock-owning
+/// Acquires the cross-process `PostgreSQL` fixture lock and returns the lock-owning
 /// session together with a client scoped to the session HTTP test schema.
 fn test_client() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -140,7 +140,7 @@ fn create_request(session_ref: &str) -> String {
     )
 }
 
-/// Proves that fixture serialization is enforced by PostgreSQL across separate client sessions.
+/// Proves that fixture serialization is enforced by `PostgreSQL` across separate client sessions.
 #[test]
 fn fixture_lock_is_visible_across_database_sessions() {
     let (_guard, _owner) = test_client();
