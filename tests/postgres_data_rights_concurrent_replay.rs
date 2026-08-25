@@ -8,10 +8,60 @@ use psychometrics_commons_runtime::postgres_data_rights::{
     DataRightsPersistenceDisposition, DataRightsPropagationTarget,
 };
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+fn allocate_schema_name(client: &mut Client) -> String {
+    let transaction_id: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must allocate a durable transaction identity for the test schema")
+        .get(0);
+    format!("data_rights_concurrent_{transaction_id}")
+}
+
+struct TestDatabase {
+    client: Client,
+    schema_name: String,
+}
+
+impl TestDatabase {
+    fn new(url: &str) -> Self {
+        Self::new_with_initializer(url, |client, _| {
+            apply_integration_migration(client).unwrap();
+            apply_data_rights_migration(client).unwrap();
+        })
+    }
+
+    fn new_with_initializer<F>(url: &str, initializer: F) -> Self
+    where
+        F: FnOnce(&mut Client, &str),
+    {
+        let mut client = Client::connect(url, NoTls).unwrap();
+        let schema_name = allocate_schema_name(&mut client);
+        client
+            .batch_execute(&format!(
+                "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
+            ))
+            .unwrap();
+        let mut database = Self {
+            client,
+            schema_name,
+        };
+        initializer(&mut database.client, &database.schema_name);
+        database
+    }
+}
+
+impl Drop for TestDatabase {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
+}
 
 fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPersistenceDisposition {
     let mut db = Client::connect(url, NoTls).unwrap();
@@ -48,17 +98,55 @@ fn run_worker(url: &str, schema: &str, barrier: &Arc<Barrier>) -> DataRightsPers
 }
 
 #[test]
+fn fixture_schema_identity_is_restart_safe() {
+    let url = std::env::var("TEST_DATABASE_URL").unwrap();
+    let mut client = Client::connect(&url, NoTls).unwrap();
+    let first = allocate_schema_name(&mut client);
+    let second = allocate_schema_name(&mut client);
+    assert_ne!(
+        first, second,
+        "independent concurrent fixtures must use database-issued identities"
+    );
+}
+
+#[test]
+fn fixture_setup_panic_drops_the_owned_schema() {
+    let url = std::env::var("TEST_DATABASE_URL").unwrap();
+    let captured_schema = Arc::new(Mutex::new(None::<String>));
+    let captured_for_setup = Arc::clone(&captured_schema);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = TestDatabase::new_with_initializer(&url, |_, schema_name| {
+            *captured_for_setup.lock().unwrap() = Some(schema_name.to_owned());
+            panic!("injected fixture setup failure");
+        });
+    }));
+    assert!(panic.is_err(), "the injected setup failure must unwind");
+
+    let schema_name = captured_schema
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("the fixture must expose the created schema before setup fails");
+    let mut observer = Client::connect(&url, NoTls).unwrap();
+    let exists: bool = observer
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+            &[&schema_name],
+        )
+        .unwrap()
+        .get(0);
+    assert!(
+        !exists,
+        "panic unwinding during fixture setup must drop the owned schema"
+    );
+}
+
+#[test]
 fn concurrent_exact_first_write_is_idempotent() {
     let url = std::env::var("TEST_DATABASE_URL").unwrap();
-    let schema = format!("data_rights_concurrent_{}", std::process::id());
-    let mut setup = Client::connect(&url, NoTls).unwrap();
-    setup
-        .batch_execute(&format!(
-            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
-        ))
-        .unwrap();
-    apply_integration_migration(&mut setup).unwrap();
-    apply_data_rights_migration(&mut setup).unwrap();
+    let setup = TestDatabase::new(&url);
+    let schema = setup.schema_name.clone();
 
     let barrier = Arc::new(Barrier::new(3));
     let first = {
