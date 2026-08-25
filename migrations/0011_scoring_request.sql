@@ -92,9 +92,39 @@ CREATE TABLE IF NOT EXISTS scoring_request (
     CONSTRAINT scoring_request_pkey PRIMARY KEY (scoring_request_ref)
 );
 
+-- Immutable scoring identity is evidence, not cleanup input. An upgrade must never normalize,
+-- rewrite, delete, or silently exempt a historical row that the current Rust boundary rejects.
+-- Detect legacy-invalid evidence before touching owned CHECK constraints so an operator can make
+-- an explicit, separately governed remediation/quarantine decision with the original row intact.
+DO $scoring_request_reference_upgrade$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM scoring_request
+        WHERE NOT scoring_request_reference_is_valid(scoring_request_ref)
+           OR NOT scoring_request_reference_is_valid(session_ref)
+           OR NOT scoring_request_reference_is_valid(response_snapshot_ref)
+           OR NOT scoring_request_reference_is_valid(assessment_spec_ref)
+           OR NOT scoring_request_reference_is_valid(instrument_version_ref)
+           OR NOT scoring_request_reference_is_valid(scoring_version_ref)
+           OR NOT scoring_request_reference_is_valid(calibration_reference)
+           OR (
+               norm_version_ref IS NOT NULL
+               AND NOT scoring_request_reference_is_valid(norm_version_ref)
+           )
+    ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '23514',
+            MESSAGE = 'scoring_request contains legacy reference identities incompatible with the Rust opaque-reference contract',
+            CONSTRAINT = 'scoring_request_reference_upgrade_guard';
+    END IF;
+END
+$scoring_request_reference_upgrade$;
+
 -- CREATE TABLE IF NOT EXISTS leaves same-named constraints untouched. Replace the owned reference
 -- constraints on every apply so upgrading an existing product schema closes the direct-SQL alias
--- gap instead of fixing only fresh installations.
+-- gap instead of fixing only fresh installations. The preflight above guarantees this replacement
+-- cannot become an implicit historical-identity rewrite policy.
 ALTER TABLE scoring_request
     DROP CONSTRAINT IF EXISTS scoring_request_norm_version_ref_format_check;
 ALTER TABLE scoring_request
