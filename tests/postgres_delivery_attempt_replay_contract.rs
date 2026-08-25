@@ -31,8 +31,9 @@ fn acquire_database_lock(
 
 fn database_test_guard() -> Client {
     let mut client = test_client();
-    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s")
-        .expect("shared PostgreSQL integration-test advisory lock should be acquired within 60 seconds");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "shared PostgreSQL integration-test advisory lock should be acquired within 60 seconds",
+    );
     client
 }
 
