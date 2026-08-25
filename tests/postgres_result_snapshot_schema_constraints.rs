@@ -4,6 +4,8 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::apply_result_snapshot_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const RESULT_SNAPSHOT_SCHEMA_LOCK_KEY: i64 = 0x5253_5343_4845_4D41;
+
 static RESULT_SNAPSHOT_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
 
 fn schema_test_guard() -> MutexGuard<'static, ()> {
@@ -59,6 +61,24 @@ const VALID_SNAPSHOT_VALUES: &str = "'result_snapshot_valid', 'participant_resul
      'calibration_big_five_ko_v1', NULL, 1, 'narrative_version_big_five_v1', \
      ARRAY['consent_snapshot_service_v1'], \
      'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 70000";
+
+#[test]
+fn result_snapshot_schema_guard_is_visible_to_another_postgres_session() {
+    let _guard = schema_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&RESULT_SNAPSHOT_SCHEMA_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema result-snapshot fixture guard must serialize across PostgreSQL sessions"
+    );
+}
 
 #[test]
 fn schema_rejects_numeric_identity_empty_consent_and_self_supersession() {
