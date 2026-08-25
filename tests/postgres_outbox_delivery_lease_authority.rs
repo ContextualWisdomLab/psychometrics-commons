@@ -33,8 +33,9 @@ fn connect_client() -> Client {
 
 fn ready_client() -> Client {
     let mut client = connect_client();
-    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s")
-        .expect("shared PostgreSQL outbox authority test lock should be acquired within sixty seconds");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "shared PostgreSQL outbox authority test lock should be acquired within sixty seconds",
+    );
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
