@@ -97,7 +97,7 @@ impl ProductPermission {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AuthorizationError {
-    /// A required resource or identity reference was blank or numeric-only.
+    /// A required resource or identity reference was not a valid exact opaque reference.
     InvalidReference,
     /// The requested resource belongs to a different tenant.
     CrossTenantDenied,
@@ -148,14 +148,16 @@ pub struct AuthorizationContext {
 }
 
 impl AuthorizationContext {
-    /// Create a normalized authenticated product context.
+    /// Create an authenticated product context using exact opaque reference spellings.
     ///
-    /// Duplicate product roles are collapsed without changing role semantics.
+    /// References are validated but never trimmed or rewritten. Duplicate product roles
+    /// are collapsed without changing role semantics.
     ///
     /// # Errors
     ///
     /// Returns [`AuthorizationError::InvalidReference`] when tenant, subject, or
-    /// participant identity is blank or numeric-only.
+    /// participant identity is blank, numeric-only, unsafe, or contains surrounding
+    /// whitespace that would otherwise alias another authorization identity.
     pub fn new(
         tenant_ref: &str,
         subject_ref: &str,
@@ -229,11 +231,13 @@ impl ResourceScope {
     /// Only tenant-owned resource kinds are accepted. Participant-owned result,
     /// session, consent, and data-rights resources must be constructed with
     /// [`Self::participant_owned`] so ownership cannot be omitted accidentally.
+    /// References must use their exact opaque spelling; the constructor does not trim
+    /// or rewrite identifiers before authorization comparisons.
     ///
     /// # Errors
     ///
-    /// Returns [`AuthorizationError::InvalidReference`] for an invalid tenant or
-    /// resource reference and [`AuthorizationError::ResourceOwnershipMismatch`]
+    /// Returns [`AuthorizationError::InvalidReference`] for an invalid or non-exact
+    /// tenant or resource reference and [`AuthorizationError::ResourceOwnershipMismatch`]
     /// when `kind` requires an explicit participant owner.
     pub fn tenant_scoped(
         kind: ResourceKind,
@@ -257,12 +261,14 @@ impl ResourceScope {
     ///
     /// Only participant-owned result, assessment-session, consent, and data-rights
     /// kinds are accepted. Tenant-scoped instrument, research-release, and
-    /// configuration resources must use [`Self::tenant_scoped`].
+    /// configuration resources must use [`Self::tenant_scoped`]. References must use
+    /// their exact opaque spelling so surrounding whitespace cannot collapse two
+    /// authorization inputs onto the same stored identity.
     ///
     /// # Errors
     ///
-    /// Returns [`AuthorizationError::InvalidReference`] for an invalid tenant,
-    /// participant, or resource reference and
+    /// Returns [`AuthorizationError::InvalidReference`] for an invalid or non-exact
+    /// tenant, participant, or resource reference and
     /// [`AuthorizationError::ResourceOwnershipMismatch`] when `kind` is tenant-only.
     pub fn participant_owned(
         kind: ResourceKind,
@@ -369,5 +375,8 @@ fn require_role(actor: &AuthorizationContext, role: ProductRole) -> Result<(), A
 }
 
 fn required_reference(reference: &str) -> Result<&str, AuthorizationError> {
-    normalized_reference(reference).ok_or(AuthorizationError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(AuthorizationError::InvalidReference),
+    }
 }
