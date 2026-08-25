@@ -9,29 +9,67 @@ use psychometrics_commons_runtime::postgres_inbox_consumption::{
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::ops::{Deref, DerefMut};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn isolated_client() -> (Client, String) {
+struct SchemaClient {
+    client: Client,
+    schema_name: String,
+}
+
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
+impl Deref for SchemaClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for SchemaClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+impl Drop for SchemaClient {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "RESET search_path; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
+}
+
+fn isolated_client() -> SchemaClient {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after the Unix epoch")
-        .as_nanos();
-    let schema = format!("inbox_terminal_deadline_{}_{}", std::process::id(), nonce);
+    let database_nonce: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must allocate a durable transaction identity for test isolation")
+        .get(0);
+    let schema_name = format!("inbox_terminal_deadline_{database_nonce}");
     client
         .batch_execute(&format!(
-            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
+            "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
         ))
         .expect("isolated inbox terminal-deadline schema should be created");
-    apply_integration_migration(&mut client).expect("integration migration should apply");
-    apply_inbox_consumption_migration(&mut client)
+    let mut client = SchemaClient {
+        client,
+        schema_name,
+    };
+    apply_integration_migration(&mut *client).expect("integration migration should apply");
+    apply_inbox_consumption_migration(&mut *client)
         .expect("inbox-consumption migrations should apply atomically");
-    (client, schema)
+    client
 }
 
 fn source_event(event_ref: &str) -> IntegrationEvent {
@@ -95,8 +133,31 @@ fn assert_terminal_lease_evidence_cleared(
 }
 
 #[test]
+fn dropping_fixture_connection_must_remove_isolated_schema() {
+    let client = isolated_client();
+    let schema = client.schema_name().to_owned();
+    drop(client);
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut observer = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let schema_remains: bool = observer
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+            &[&schema],
+        )
+        .expect("fixture schema presence should be observable")
+        .get(0);
+    assert!(
+        !schema_remains,
+        "dropping the fixture connection must remove its isolated schema even when the test exits early"
+    );
+}
+
+#[test]
 fn successful_claimed_terminal_writes_clear_both_lease_deadlines() {
-    let (mut client, schema) = isolated_client();
+    let mut client = isolated_client();
 
     let completed = claimed_consumption(
         &mut client,
@@ -135,10 +196,4 @@ fn successful_claimed_terminal_writes_clear_both_lease_deadlines() {
         quarantined.consumption_ref(),
         "quarantined",
     );
-
-    client
-        .batch_execute(&format!(
-            "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
-        ))
-        .unwrap();
 }
