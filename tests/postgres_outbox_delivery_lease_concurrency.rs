@@ -4,7 +4,7 @@
 //! competing worker is actually blocked by `PostgreSQL`. Only after the winner commits may the
 //! loser classify the row as non-claimable. Recovery must then issue a strictly newer fence.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, claim_outbox_delivery, enqueue_outbox_event,
@@ -25,11 +25,24 @@ fn connect_client() -> Client {
     Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
 }
 
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
 fn database_test_guard() -> Client {
     let mut client = connect_client();
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("shared PostgreSQL concurrency test advisory lock should be acquired");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "shared PostgreSQL concurrency test advisory lock should be acquired within sixty seconds",
+    );
     client
 }
 
@@ -60,9 +73,7 @@ fn identity() -> OutboxPersistenceIdentity<'static> {
 fn reset_concurrency_schema(client: &mut Client) {
     client
         .batch_execute(&format!(
-            "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
-             CREATE SCHEMA {SCHEMA};
-             SET search_path TO {SCHEMA};"
+            "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;\n             CREATE SCHEMA {SCHEMA};\n             SET search_path TO {SCHEMA};"
         ))
         .expect("isolated concurrency schema should be reset");
     apply_integration_migration(client)
@@ -150,6 +161,46 @@ fn expire_and_reclaim(client: &mut Client) {
     reclaim_transaction
         .commit()
         .expect("recovered claim should commit");
+}
+
+#[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = database_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("outbox concurrency fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "outbox concurrency fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
+fn fixture_lock_wait_aborts_under_real_contention() {
+    let mut holder = connect_client();
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = connect_client();
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended outbox concurrency fixture lock must stop at the configured timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test advisory lock should be released")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]
