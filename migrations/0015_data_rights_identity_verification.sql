@@ -2,14 +2,7 @@ ALTER TABLE data_rights_request_state
     ADD COLUMN IF NOT EXISTS verification_evidence_ref TEXT
         CONSTRAINT data_rights_verification_evidence_format_check CHECK (
             verification_evidence_ref IS NULL
-            OR (
-                verification_evidence_ref = btrim(verification_evidence_ref)
-                AND verification_evidence_ref <> ''
-                AND NOT (
-                    verification_evidence_ref ~ '[[:digit:]]'
-                    AND verification_evidence_ref ~ '^[[:digit:]+,.eE-]+$'
-                )
-            )
+            OR data_rights_reference_is_valid(verification_evidence_ref)
         );
 
 ALTER TABLE data_rights_request_state
@@ -17,6 +10,16 @@ ALTER TABLE data_rights_request_state
         CONSTRAINT data_rights_verified_time_positive_check CHECK (
             verified_at_unix_ms IS NULL OR verified_at_unix_ms > 0
         );
+
+-- ADD COLUMN IF NOT EXISTS does not replace a historical inline CHECK. Recreate the owned
+-- evidence-reference constraint so upgrades also validate existing identity-verification rows.
+ALTER TABLE data_rights_request_state
+    DROP CONSTRAINT IF EXISTS data_rights_verification_evidence_format_check;
+ALTER TABLE data_rights_request_state
+    ADD CONSTRAINT data_rights_verification_evidence_format_check CHECK (
+        verification_evidence_ref IS NULL
+        OR data_rights_reference_is_valid(verification_evidence_ref)
+    );
 
 DO $$
 BEGIN
