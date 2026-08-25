@@ -1,6 +1,6 @@
 //! Physical integrity contract for durable outbox lease fencing evidence.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4649;
@@ -9,17 +9,26 @@ fn schema_name() -> String {
     format!("outbox_lease_fence_integrity_{}", std::process::id())
 }
 
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
 fn ready_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    client
-        .batch_execute("SET lock_timeout = '60s';")
-        .expect("outbox fencing fixture lock wait must be bounded");
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("shared PostgreSQL outbox fencing integrity lock should be acquired");
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s")
+        .expect("shared PostgreSQL outbox fencing integrity lock should be acquired within 60 seconds");
     let schema = schema_name();
     client
         .batch_execute(&format!(
@@ -40,19 +49,30 @@ fn cleanup(client: &mut Client) {
 }
 
 #[test]
-fn fixture_lock_wait_is_bounded_before_blocking_acquisition() {
-    let source = include_str!("postgres_outbox_delivery_lease_fencing_integrity.rs");
-    let timeout_position = source
-        .find("SET lock_timeout = '60s'")
-        .expect("fixture guard must configure a finite lock timeout");
-    let lock_position = source
-        .find("SELECT pg_advisory_lock($1)")
-        .expect("fixture guard must acquire the PostgreSQL advisory lock");
+fn fixture_lock_wait_is_bounded_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
 
-    assert!(
-        timeout_position < lock_position,
-        "lock_timeout must be configured before blocking advisory-lock acquisition"
-    );
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended advisory-lock acquisition must stop at the configured timeout");
+
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should release its advisory lock")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]
