@@ -16,6 +16,12 @@ fn test_clients() -> (Client, Client, Client) {
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     guard
+        .query_one(
+            "SELECT set_config('lock_timeout', $1, false)",
+            &[&"60s"],
+        )
+        .expect("PostgreSQL lock timeout must be configurable for the scoring classification fixture");
+    guard
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("PostgreSQL fixture advisory lock should be acquired");
 
