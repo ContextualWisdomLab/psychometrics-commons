@@ -9,6 +9,8 @@ use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::apply_scoring_job_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4a4f_4252_4546;
+
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn guard() -> MutexGuard<'static, ()> {
@@ -17,8 +19,12 @@ fn guard() -> MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+fn database_url() -> String {
+    std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required")
+}
+
 fn client(schema_name: &str) -> Client {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let url = database_url();
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     client
         .batch_execute(&format!(
@@ -115,6 +121,23 @@ fn reference_constraint_oids(client: &mut Client) -> Vec<(String, i64)> {
         .into_iter()
         .map(|row| (row.get(0), row.get(1)))
         .collect()
+}
+
+#[test]
+fn fixture_lock_is_database_visible_and_timeout_bounded() {
+    let _guard = guard();
+    let url = database_url();
+    let mut contender = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    contender
+        .query_one(
+            "SELECT set_config('lock_timeout', $1, false)",
+            &[&"100ms"],
+        )
+        .expect("lock timeout must be configurable for the fixture contention probe");
+    let error = contender
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect_err("a second PostgreSQL session must not acquire the scoring-job fixture lock");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
