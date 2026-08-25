@@ -9,11 +9,14 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::postgres_instrument_catalog::
-    list_startable_instrument_release_page;
-use psychometrics_commons_runtime::postgres_instrument_release::{
-    apply_instrument_release_migration, persist_instrument_release,
+use psychometrics_commons_runtime::postgres_instrument_catalog::{
+    list_startable_instrument_release_page, list_startable_instrument_releases,
+    StartableInstrumentCatalogError,
 };
+use psychometrics_commons_runtime::postgres_instrument_release::{
+    apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
+};
+use std::error::Error;
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -46,6 +49,14 @@ fn test_client() -> Client {
     client
 }
 
+fn reset_tables(client: &mut Client) {
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS instrument_startable_catalog_pagination_test.instrument_release;",
+        )
+        .unwrap();
+}
+
 fn manifest(release_ref: &str) -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
         release_ref,
@@ -68,8 +79,9 @@ fn manifest(release_ref: &str) -> InstrumentReleaseManifest {
 }
 
 fn approved_evidence(release_ref: &str) -> PublicationEvidenceRecord {
+    let evidence_ref = format!("publication_evidence_{release_ref}");
     PublicationEvidenceRecord::new(
-        format!("publication_evidence_{release_ref}"),
+        &evidence_ref,
         "evidence_policy_self_reflection_v1",
         release_ref,
         "instrument_version_big_five_v1",
@@ -101,9 +113,10 @@ fn approved_evidence(release_ref: &str) -> PublicationEvidenceRecord {
 
 fn published_release(release_ref: &str) -> InstrumentRelease {
     let mut release = InstrumentRelease::new(manifest(release_ref), 40_000).unwrap();
+    let submit_event_ref = format!("publication_submit_review_{release_ref}");
     release
         .apply_command(
-            format!("publication_submit_review_{release_ref}"),
+            &submit_event_ref,
             PublicationCommand::SubmitReview,
             40_100,
         )
@@ -111,12 +124,9 @@ fn published_release(release_ref: &str) -> InstrumentRelease {
     release
         .bind_publication_evidence(approved_evidence(release_ref))
         .unwrap();
+    let publish_event_ref = format!("publication_publish_{release_ref}");
     release
-        .apply_command(
-            format!("publication_publish_{release_ref}"),
-            PublicationCommand::Publish,
-            40_200,
-        )
+        .apply_command(&publish_event_ref, PublicationCommand::Publish, 40_200)
         .unwrap();
     release
 }
@@ -131,15 +141,26 @@ fn persist(client: &mut Client, release: &InstrumentRelease) {
 fn startable_catalog_paginates_without_duplicates_or_gaps() {
     let _guard = test_guard();
     let mut client = test_client();
-    client
-        .batch_execute("DROP TABLE IF EXISTS instrument_startable_catalog_pagination_test.instrument_release;")
-        .unwrap();
+    reset_tables(&mut client);
     apply_instrument_release_migration(&mut client).unwrap();
 
     for index in 0..101 {
         let release_ref = format!("release_big_five_en_{index:03}");
         persist(&mut client, &published_release(&release_ref));
     }
+
+    let mut transaction = client.transaction().unwrap();
+    let compatibility_error = list_startable_instrument_releases(&mut transaction).unwrap_err();
+    assert!(matches!(
+        compatibility_error,
+        StartableInstrumentCatalogError::PageRequired
+    ));
+    assert_eq!(
+        compatibility_error.to_string(),
+        "startable instrument catalog exceeds one bounded page; use paged discovery"
+    );
+    assert!(compatibility_error.source().is_none());
+    transaction.commit().unwrap();
 
     let mut transaction = client.transaction().unwrap();
     let first = list_startable_instrument_release_page(&mut transaction, None).unwrap();
@@ -167,4 +188,21 @@ fn startable_catalog_paginates_without_duplicates_or_gaps() {
     );
     assert!(second.next_cursor().is_none());
     transaction.commit().unwrap();
+}
+
+#[test]
+fn startable_catalog_query_error_preserves_database_source() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+
+    let mut transaction = client.transaction().unwrap();
+    let error = list_startable_instrument_release_page(&mut transaction, None).unwrap_err();
+    assert!(matches!(
+        error,
+        StartableInstrumentCatalogError::Query(InstrumentReleaseQueryError::Database(_))
+    ));
+    assert_eq!(error.to_string(), "startable instrument catalog query failed");
+    assert!(error.source().is_some());
+    transaction.rollback().unwrap();
 }
