@@ -20,7 +20,6 @@ use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use response_support::frozen_snapshot;
-use std::sync::{Mutex, MutexGuard};
 
 const PAYLOAD_DIGEST_A: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
