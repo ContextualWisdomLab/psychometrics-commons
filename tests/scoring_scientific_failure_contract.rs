@@ -126,3 +126,13 @@ fn adapter_preserves_typed_scientific_failure_without_inventing_a_result() {
         );
     }
 }
+
+#[test]
+fn scientific_failure_accessor_is_none_for_unclassified_execution_errors() {
+    let engine_error = ScoringEngineExecutionError::Engine(UpstreamScientificFailure);
+    assert_eq!(engine_error.scientific_failure(), None);
+
+    let request_mismatch: ScoringEngineExecutionError<UpstreamScientificFailure> =
+        ScoringEngineExecutionError::RequestMismatch;
+    assert_eq!(request_mismatch.scientific_failure(), None);
+}
