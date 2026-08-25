@@ -152,7 +152,7 @@ Deliverables:
 - deterministic Korean/English narratives;
 - standalone Public Assessment client;
 - Result Explorer;
-- JSON and human-readable report export (domain copy on Active PR #231; HTTP transport remains here);
+- JSON and human-readable report export (domain copy is protected main through merged #231; HTTP transport remains here);
 
 Exit criteria:
 

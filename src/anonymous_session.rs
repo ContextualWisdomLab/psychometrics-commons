@@ -55,12 +55,16 @@ pub struct AnonymousSessionContext {
 }
 
 impl AnonymousSessionContext {
-    /// Create a normalized anonymous-session authorization context.
+    /// Create an exact-spelling anonymous-session authorization context.
+    ///
+    /// References are opaque issued identifiers. Callers must supply the exact spelling that
+    /// will be stored; leading or trailing Unicode whitespace is rejected rather than silently
+    /// normalized into another resource identity.
     ///
     /// # Errors
     ///
     /// Returns [`AnonymousSessionContextError::InvalidReference`] when any reference
-    /// is not an opaque product reference, or
+    /// is not an exact opaque product reference, or
     /// [`AnonymousSessionContextError::InvalidValidityBoundary`] when
     /// `valid_until_unix_ms` is zero.
     pub fn new(
@@ -158,7 +162,13 @@ impl AnonymousSessionContext {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
-    normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
+    let normalized =
+        normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)?;
+    if normalized == reference {
+        Ok(reference)
+    } else {
+        Err(AnonymousSessionContextError::InvalidReference)
+    }
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {

@@ -6,17 +6,25 @@
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_snapshot::apply_response_snapshot_migration;
-use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_901;
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-static TEST_LOCK: Mutex<()> = Mutex::new(());
+fn acquire_fixture_lock(mut guard: Client, lock_timeout: &str) -> Result<Client, postgres::Error> {
+    guard.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    guard.query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])?;
+    Ok(guard)
+}
 
-fn guard() -> MutexGuard<'static, ()> {
-    TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn guard() -> Client {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let guard = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    acquire_fixture_lock(guard, "60s")
+        .expect("fixture must acquire the database-visible advisory lock within 60 seconds")
 }
 
 fn client() -> Client {
@@ -70,6 +78,40 @@ fn assert_digest_check(error: &postgres::Error) {
         database_error.constraint(),
         Some("response_snapshot_entry_payload_digest_format_check")
     );
+}
+
+#[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let _guard = guard();
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut contender = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible across PostgreSQL sessions"
+    );
+}
+
+#[test]
+fn fixture_lock_contention_has_a_finite_timeout() {
+    let _guard = guard();
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let contender = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let error = acquire_fixture_lock(contender, "100ms")
+        .err()
+        .expect("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
