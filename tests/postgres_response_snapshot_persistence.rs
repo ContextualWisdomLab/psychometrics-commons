@@ -9,6 +9,7 @@ use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{Mutex, MutexGuard};
 
+const RESPONSE_SNAPSHOT_TEST_LOCK_KEY: i64 = 0x5253_5052_5354_4C4B;
 const PAYLOAD_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_DIGEST: &str =
@@ -91,6 +92,24 @@ fn write<'a>(
         item_version_ref,
         payload_digest,
     }
+}
+
+#[test]
+fn response_snapshot_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = response_snapshot_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&RESPONSE_SNAPSHOT_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema response-snapshot fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
