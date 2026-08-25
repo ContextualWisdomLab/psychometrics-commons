@@ -11,10 +11,7 @@ const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_902;
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-fn acquire_fixture_lock(
-    mut guard: Client,
-    lock_timeout: &str,
-) -> Result<Client, postgres::Error> {
+fn acquire_fixture_lock(mut guard: Client, lock_timeout: &str) -> Result<Client, postgres::Error> {
     guard.query_one(
         "SELECT set_config('lock_timeout', $1, false)",
         &[&lock_timeout],
