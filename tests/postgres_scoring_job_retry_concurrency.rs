@@ -8,19 +8,25 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     record_retryable_scoring_failure, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobState};
-use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 const RETRY_CONCURRENCY_TEST_LOCK_KEY: i64 = 0x5343_5254_5259_4343;
 
-static RETRY_CONCURRENCY_TEST_LOCK: Mutex<()> = Mutex::new(());
-
 type ClaimEvidence = (String, String, u64);
 
-fn retry_concurrency_test_guard() -> MutexGuard<'static, ()> {
-    RETRY_CONCURRENCY_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn retry_concurrency_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&RETRY_CONCURRENCY_TEST_LOCK_KEY],
+        )
+        .expect("shared scoring retry-concurrency test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
