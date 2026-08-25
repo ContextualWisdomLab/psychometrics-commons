@@ -11,6 +11,9 @@ use postgres::GenericClient;
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
 
+/// Database encoding required by the initial product persistence contract.
+pub const SUPPORTED_POSTGRES_ENCODING: &str = "UTF8";
+
 /// Capability identity used by operation-scoped runtime readiness.
 pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operational_store";
 
@@ -18,10 +21,14 @@ pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operationa
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PostgresRuntimeStatus {
-    /// The supported `PostgreSQL` major is reachable and accepts writes.
+    /// The supported `PostgreSQL` major and encoding are reachable and accept writes.
     Ready,
     /// The `PostgreSQL` server major is outside the repository's validated support boundary.
     UnsupportedMajorVersion,
+    /// The caller did not provide evidence for the database encoding prerequisite.
+    UnverifiedServerEncoding,
+    /// The database encoding is outside the repository's validated UTF8 support boundary.
+    UnsupportedServerEncoding,
     /// The supported `PostgreSQL` server is currently read-only for this connection.
     ReadOnly,
 }
@@ -51,9 +58,10 @@ impl PostgresRuntimeHealth {
     pub const fn capability_state(self) -> CapabilityState {
         match self.status {
             PostgresRuntimeStatus::Ready => CapabilityState::Available,
-            PostgresRuntimeStatus::UnsupportedMajorVersion | PostgresRuntimeStatus::ReadOnly => {
-                CapabilityState::Unavailable
-            }
+            PostgresRuntimeStatus::UnsupportedMajorVersion
+            | PostgresRuntimeStatus::UnverifiedServerEncoding
+            | PostgresRuntimeStatus::UnsupportedServerEncoding
+            | PostgresRuntimeStatus::ReadOnly => CapabilityState::Unavailable,
         }
     }
 
@@ -80,6 +88,12 @@ impl PostgresRuntimeHealth {
 
 /// Classify server-version and transaction-read-only evidence without performing I/O.
 ///
+/// This helper does not receive the database encoding, so it cannot prove complete write
+/// readiness. It still reports an unsupported server major or read-only transaction when
+/// either condition is already known; otherwise it returns
+/// [`PostgresRuntimeStatus::UnverifiedServerEncoding`] and denies new work. Call
+/// [`classify_postgres_runtime_with_encoding`] when the canonical `server_encoding` value is
+/// already available, or use [`probe_postgres_runtime`] for real connection readiness.
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
 /// integer division yields the server major used by the repository support policy.
 #[must_use]
@@ -93,6 +107,34 @@ pub const fn classify_postgres_runtime(
     } else if transaction_read_only {
         PostgresRuntimeStatus::ReadOnly
     } else {
+        PostgresRuntimeStatus::UnverifiedServerEncoding
+    };
+    PostgresRuntimeHealth {
+        server_major_version,
+        status,
+    }
+}
+
+/// Classify complete server-version, write-mode, and database-encoding readiness evidence.
+///
+/// Upstream `PostgreSQL` reports the canonical database encoding name through
+/// `current_setting('server_encoding')`; the initial persistence contract accepts only
+/// `UTF8`. A non-UTF8 database fails closed even when the server major is supported and the
+/// connection is writable.
+#[must_use]
+pub fn classify_postgres_runtime_with_encoding(
+    server_version_num: i32,
+    transaction_read_only: bool,
+    server_encoding: &str,
+) -> PostgresRuntimeHealth {
+    let server_major_version = server_version_num / 10_000;
+    let status = if server_major_version != SUPPORTED_POSTGRES_MAJOR {
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    } else if server_encoding != SUPPORTED_POSTGRES_ENCODING {
+        PostgresRuntimeStatus::UnsupportedServerEncoding
+    } else if transaction_read_only {
+        PostgresRuntimeStatus::ReadOnly
+    } else {
         PostgresRuntimeStatus::Ready
     };
     PostgresRuntimeHealth {
@@ -101,12 +143,13 @@ pub const fn classify_postgres_runtime(
     }
 }
 
-/// Probe the caller-owned `PostgreSQL` connection for supported-major and write readiness.
+/// Probe the caller-owned `PostgreSQL` connection for supported-major, UTF8, and write readiness.
 ///
-/// The probe reads only `PostgreSQL` server settings and never returns credentials,
-/// assessment content, tenant identifiers, or restricted linkage data. Callers must map
-/// the returned database error to an operator-safe error class before exposing it across
-/// a public health endpoint.
+/// UTF8 is part of the persistence compatibility boundary because product migrations and
+/// reference-integrity contracts use `PostgreSQL`'s Unicode-aware behavior. The probe reads only
+/// `PostgreSQL` server settings and never returns credentials, assessment content, tenant
+/// identifiers, or restricted linkage data. Callers must map the returned database error to an
+/// operator-safe error class before exposing it across a public health endpoint.
 ///
 /// # Errors
 ///
@@ -117,14 +160,17 @@ pub fn probe_postgres_runtime(
 ) -> Result<PostgresRuntimeHealth, postgres::Error> {
     let row = client.query_one(
         "SELECT current_setting('server_version_num')::integer, \
-                current_setting('transaction_read_only')::boolean",
+                current_setting('transaction_read_only')::boolean, \
+                current_setting('server_encoding')",
         &[],
     )?;
     let server_version_num: i32 = row.get(0);
     let transaction_read_only: bool = row.get(1);
-    Ok(classify_postgres_runtime(
+    let server_encoding: String = row.get(2);
+    Ok(classify_postgres_runtime_with_encoding(
         server_version_num,
         transaction_read_only,
+        &server_encoding,
     ))
 }
 
@@ -208,12 +254,24 @@ mod tests {
 
     #[test]
     fn runtime_health_covers_supported_read_only_and_unsupported_states() {
-        let ready = classify_postgres_runtime(180_004, false);
-        assert_eq!(ready.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
-        assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
-        assert_eq!(ready.capability_state(), CapabilityState::Available);
-        assert!(ready.accepts_new_work());
-        assert!(ready.capability_health().unwrap().accepts_new_work());
+        let unverified_encoding = classify_postgres_runtime(180_004, false);
+        assert_eq!(
+            unverified_encoding.server_major_version(),
+            SUPPORTED_POSTGRES_MAJOR
+        );
+        assert_eq!(
+            unverified_encoding.status(),
+            PostgresRuntimeStatus::UnverifiedServerEncoding
+        );
+        assert_eq!(
+            unverified_encoding.capability_state(),
+            CapabilityState::Unavailable
+        );
+        assert!(!unverified_encoding.accepts_new_work());
+        assert!(!unverified_encoding
+            .capability_health()
+            .unwrap()
+            .accepts_new_work());
 
         let read_only = classify_postgres_runtime(180_004, true);
         assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
@@ -228,6 +286,18 @@ mod tests {
         );
         assert_eq!(unsupported.capability_state(), CapabilityState::Unavailable);
         assert!(!unsupported.accepts_new_work());
+
+        let unsupported_encoding =
+            classify_postgres_runtime_with_encoding(180_004, false, "LATIN1");
+        assert_eq!(
+            unsupported_encoding.status(),
+            PostgresRuntimeStatus::UnsupportedServerEncoding
+        );
+        assert_eq!(
+            unsupported_encoding.capability_state(),
+            CapabilityState::Unavailable
+        );
+        assert!(!unsupported_encoding.accepts_new_work());
     }
 
     #[test]

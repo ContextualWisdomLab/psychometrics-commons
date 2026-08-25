@@ -3,8 +3,9 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::health::{CapabilityState, DataIntegrityHealth};
 use psychometrics_commons_runtime::postgres_health::{
-    classify_postgres_runtime, probe_postgres_relation_integrity, probe_postgres_runtime,
-    PostgresRuntimeStatus, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_MAJOR,
+    classify_postgres_runtime, classify_postgres_runtime_with_encoding,
+    probe_postgres_relation_integrity, probe_postgres_runtime, PostgresRuntimeStatus,
+    POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_MAJOR,
 };
 
 fn test_client() -> Client {
@@ -14,22 +15,55 @@ fn test_client() -> Client {
 }
 
 #[test]
-fn supported_writable_postgres_is_ready_for_new_operational_work() {
+fn classifier_without_encoding_evidence_fails_write_readiness_closed() {
     let health = classify_postgres_runtime(180_002, false);
 
     assert_eq!(SUPPORTED_POSTGRES_MAJOR, 18);
     assert_eq!(health.server_major_version(), 18);
-    assert_eq!(health.status(), PostgresRuntimeStatus::Ready);
-    assert_eq!(health.capability_state(), CapabilityState::Available);
-    assert!(health.accepts_new_work());
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnverifiedServerEncoding
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
 
     let capability = health.capability_health().unwrap();
     assert_eq!(
         capability.capability_ref(),
         POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF
     );
-    assert_eq!(capability.state(), CapabilityState::Available);
-    assert!(capability.accepts_new_work());
+    assert_eq!(capability.state(), CapabilityState::Unavailable);
+    assert!(!capability.accepts_new_work());
+}
+
+#[test]
+fn supported_postgres_with_non_utf8_encoding_fails_readiness_closed() {
+    let health = classify_postgres_runtime_with_encoding(180_002, false, "LATIN1");
+
+    assert_eq!(health.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedServerEncoding
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
+
+    let capability = health.capability_health().unwrap();
+    assert_eq!(capability.state(), CapabilityState::Unavailable);
+    assert!(!capability.accepts_new_work());
+}
+
+#[test]
+fn encoding_aware_classifier_rejects_an_unsupported_major_before_encoding() {
+    let health = classify_postgres_runtime_with_encoding(170_009, false, "UTF8");
+
+    assert_eq!(health.server_major_version(), 17);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
 }
 
 #[test]

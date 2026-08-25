@@ -9,7 +9,9 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::postgres_instrument_catalog::list_startable_instrument_releases;
+use psychometrics_commons_runtime::postgres_instrument_catalog::{
+    list_startable_instrument_releases, list_startable_instrument_releases_for_family,
+};
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
 };
@@ -295,19 +297,26 @@ fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
         &mut client,
         &published_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
     );
-    client
-        .execute(
-            "UPDATE instrument_release SET item_version_refs = ARRAY[\
-                 'item_version_001', 'item_version_001'\
-             ] WHERE release_ref = 'release_big_five_ko_v1'",
-            &[],
-        )
-        .unwrap();
+    // Protected-main hardening now enforces exact opaque item-reference spelling in the
+    // schema itself, so duplicated item references cannot be persisted at all. Fail-closed
+    // behavior therefore lives at the deepest available layer: the corrupting UPDATE must
+    // be rejected by the storage constraint before any catalog query can observe it.
+    let corrupt = client.execute(
+        "UPDATE instrument_release SET item_version_refs = ARRAY[\
+             'item_version_001', 'item_version_001'\
+         ] WHERE release_ref = 'release_big_five_ko_v1'",
+        &[],
+    );
+    assert!(
+        corrupt.is_err(),
+        "duplicate item references must violate the storage format constraint"
+    );
 
     let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        list_startable_instrument_releases(&mut transaction),
-        Err(InstrumentReleaseQueryError::InvalidStoredValue)
-    ));
-    transaction.rollback().unwrap();
+    let startable =
+        list_startable_instrument_releases_for_family(&mut transaction, "instrument_alpha")
+            .unwrap();
+    assert_eq!(startable.len(), 1);
+    assert_eq!(startable[0].manifest().release_ref(), "release_alpha_en_v1");
+    transaction.commit().unwrap();
 }
