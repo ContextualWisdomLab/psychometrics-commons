@@ -1,24 +1,30 @@
 //! Real `PostgreSQL` bounds for durable item-delivery rows.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 
 const ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY: i64 = 0x4954_454D_5343_484D;
+
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
 
 fn test_clients() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    guard
-        .batch_execute("SET lock_timeout = '60s';")
-        .expect("fixture lock acquisition must have a finite wait budget");
-    guard
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
-        )
-        .expect("PostgreSQL fixture advisory lock should be acquired");
+    acquire_database_lock(&mut guard, ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY, "60s")
+        .expect("PostgreSQL fixture advisory lock should be acquired within sixty seconds");
 
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
@@ -79,20 +85,30 @@ fn fixture_lock_is_visible_across_database_sessions() {
 }
 
 #[test]
-fn fixture_lock_wait_is_bounded() {
-    let (mut guard, _owner) = test_clients();
-    let timeout_ms: i64 = guard
-        .query_one(
-            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
-            &[],
-        )
-        .expect("fixture lock wait budget should be queryable")
+fn fixture_lock_wait_is_bounded_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
         .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
 
-    assert_eq!(
-        timeout_ms, 60_000,
-        "item-delivery schema fixture lock acquisition must have a finite sixty-second timeout"
-    );
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended advisory-lock acquisition must stop at the configured timeout");
+
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should release its advisory lock")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]
