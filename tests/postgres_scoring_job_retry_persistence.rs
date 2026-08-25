@@ -93,6 +93,23 @@ fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
 }
 
 #[test]
+fn scoring_retry_fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = scoring_job_retry_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("scoring retry fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "scoring retry fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
 fn retryable_failure_persists_due_retry_and_reclaim_issues_next_fence() {
     let _guard = scoring_job_retry_test_guard();
     let mut client = test_client();
