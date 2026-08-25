@@ -1,4 +1,4 @@
-//! Regression contract for the assessment-session PostgreSQL fixture lock.
+//! Regression contract for the assessment-session `PostgreSQL` fixture lock.
 
 const FIXTURE_SOURCE: &str = include_str!("postgres_assessment_session_persistence.rs");
 
