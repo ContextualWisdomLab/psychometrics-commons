@@ -83,6 +83,23 @@ fn item_delivery_tenant_fixture_guard_is_visible_to_another_postgres_session() {
 }
 
 #[test]
+fn item_delivery_tenant_fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = tenant_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("item-delivery tenant fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "item-delivery tenant fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
 fn ledger_and_event_rows_require_explicit_tenant_scope() {
     let _guard = tenant_test_guard();
     let mut client = test_client();
