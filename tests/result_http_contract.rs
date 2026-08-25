@@ -81,7 +81,10 @@ fn result_snapshot_with_provenance(
             result_snapshot_ref: "result_snapshot_result_http",
             participant_ref,
             narrative_version_ref: "narrative_version_big_five_v1",
-            consent_snapshot_refs: &["service_consent_result_http"],
+            consent_snapshot_refs: &[
+                "service_consent_result_http",
+                "research_consent_result_http",
+            ],
             created_at_unix_ms: 1_786_240_000_000,
             supersedes_ref,
         },
@@ -130,9 +133,9 @@ fn authorized_owner_reads_the_exact_immutable_score_and_provenance() {
     assert!(response
         .body()
         .contains("\"norm_version_ref\":\"norm_big_five_ko_v1\""));
-    assert!(response
-        .body()
-        .contains("\"consent_snapshot_refs\":[\"service_consent_result_http\"]"));
+    assert!(response.body().contains(
+        "\"consent_snapshot_refs\":[\"service_consent_result_http\",\"research_consent_result_http\"]"
+    ));
     assert!(response.body().contains("\"supersedes_ref\":null"));
     assert!(response.body().contains("\"score\":0.42"));
     assert!(response.body().contains("\"standard_error\":0.18"));
