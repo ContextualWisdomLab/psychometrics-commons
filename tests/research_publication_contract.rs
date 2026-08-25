@@ -113,7 +113,7 @@ fn unresolved_release_blockers_prevent_approval() {
 #[test]
 fn release_approval_is_separated_from_ordinary_administration() {
     let mut value = candidate();
-    value.release_approver_ref = " research_release_approver_alpha ";
+    value.release_approver_ref = "research_release_approver_alpha";
     value.ordinary_admin_ref = "research_release_approver_alpha";
 
     assert_eq!(
@@ -144,7 +144,7 @@ fn release_gate_errors_have_stable_safe_operator_messages() {
     let cases = [
         (
             ResearchReleaseGateError::InvalidReference,
-            "research release references must be opaque non-numeric values",
+            "research release references must use the exact opaque non-numeric spelling",
         ),
         (
             ResearchReleaseGateError::InvalidManifestDigest,

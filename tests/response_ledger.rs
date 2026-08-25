@@ -313,7 +313,7 @@ fn write_errors_have_stable_human_readable_context() {
     );
     assert_eq!(
         WriteError::InvalidReference.to_string(),
-        "response identity references must be opaque non-numeric values"
+        "response identity references must use exact opaque spelling without surrounding whitespace"
     );
     assert_eq!(
         WriteError::EmptyReference.to_string(),
