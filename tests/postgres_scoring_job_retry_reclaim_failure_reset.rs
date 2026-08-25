@@ -61,6 +61,23 @@ fn fixture_serialization_is_visible_to_other_postgresql_sessions() {
 }
 
 #[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut fixture = test_client();
+    let timeout_ms: i64 = fixture
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("scoring retry-reclaim fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "scoring retry-reclaim fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
 fn retry_reclaim_clears_previous_attempt_failure_code() {
     let mut client = test_client();
     apply_scoring_job_migration(&mut client).unwrap();
