@@ -12,17 +12,25 @@ use std::mem::discriminant;
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_5254_5259_4552;
 
+fn fixture_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .batch_execute("SET lock_timeout = '60s';")
+        .expect("fixture lock acquisition must have a finite wait budget");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("shared PostgreSQL scoring retry-error fixture lock should be acquired");
+    guard
+}
+
 fn test_client(schema: &str) -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    client
-        .batch_execute("SET lock_timeout = '60s';")
-        .expect("fixture lock acquisition must have a finite wait budget");
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("shared PostgreSQL scoring retry-error fixture lock should be acquired");
     client
         .batch_execute(&format!(
             "CREATE SCHEMA IF NOT EXISTS {schema};\
@@ -53,7 +61,8 @@ fn persist_and_claim(client: &mut Client, job_ref: &str, max_attempts: u32) {
 
 #[test]
 fn fixed_schema_serialization_is_database_visible_and_bounded() {
-    let mut guard = test_client("scoring_job_retry_fixture_lock_contract_test");
+    let mut guard = fixture_guard();
+    let _owner = test_client("scoring_job_retry_fixture_lock_contract_test");
     let timeout_ms: i64 = guard
         .query_one(
             "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
@@ -91,6 +100,7 @@ fn fixed_schema_serialization_is_database_visible_and_bounded() {
 
 #[test]
 fn missing_job_and_oversized_fence_fail_closed() {
+    let _guard = fixture_guard();
     let mut client = test_client("scoring_job_retry_missing_paths_test");
 
     {
@@ -129,6 +139,7 @@ fn missing_job_and_oversized_fence_fail_closed() {
 
 #[test]
 fn already_transitioned_jobs_reject_stale_failure_and_new_claims() {
+    let _guard = fixture_guard();
     let mut retry_client = test_client("scoring_job_retry_not_leased_paths_test");
     persist_and_claim(&mut retry_client, "scoring_job_retry_not_leased", 3);
 
@@ -161,8 +172,6 @@ fn already_transitioned_jobs_reject_stale_failure_and_new_claims() {
         ));
         transaction.rollback().unwrap();
     }
-
-    drop(retry_client);
 
     let mut quarantined_client = test_client("scoring_job_retry_quarantine_paths_test");
     persist_and_claim(&mut quarantined_client, "scoring_job_quarantined", 1);
