@@ -8,16 +8,17 @@
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migration;
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
-use std::sync::{Mutex, MutexGuard};
 
 const DATABASE_TEST_LOCK_KEY: i64 = 8_139_518_222_897_414_905;
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-static TEST_LOCK: Mutex<()> = Mutex::new(());
 
-fn guard() -> MutexGuard<'static, ()> {
-    TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn guard() -> Client {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut guard = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("fixture must acquire the database-visible advisory lock");
+    guard
 }
 
 fn client() -> Client {
