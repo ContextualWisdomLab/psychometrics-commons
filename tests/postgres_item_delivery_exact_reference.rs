@@ -4,23 +4,33 @@
 //! a padded spelling to the canonical tenant. Database constraints cannot catch
 //! this defect after Rust has already normalized the value.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::ItemDeliveryLedger;
 use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger, ItemDeliveryPersistenceError,
 };
-use std::sync::{Mutex, MutexGuard};
 
+const DATABASE_TEST_LOCK_KEY: i64 = 0x4954_444C_4558_4C4B;
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-static EXACT_REFERENCE_TEST_LOCK: Mutex<()> = Mutex::new(());
+fn acquire_fixture_lock(mut guard: Client, lock_timeout: &str) -> Result<Client, postgres::Error> {
+    guard.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    guard.query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])?;
+    Ok(guard)
+}
 
-fn test_guard() -> MutexGuard<'static, ()> {
-    EXACT_REFERENCE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    acquire_fixture_lock(guard, "60s")
+        .expect("fixture must acquire the database-visible advisory lock within 60 seconds")
 }
 
 fn test_client() -> Client {
@@ -66,6 +76,44 @@ fn ledger() -> ItemDeliveryLedger {
     )
     .unwrap();
     ItemDeliveryLedger::from_manifest("session_item_delivery_exact_ref", &manifest).unwrap()
+}
+
+#[test]
+fn fixture_lock_is_visible_to_another_postgres_session() {
+    let _guard = test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "fixture serialization must be visible across PostgreSQL sessions"
+    );
+}
+
+#[test]
+fn fixture_lock_contention_has_a_finite_timeout() {
+    let _guard = test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_fixture_lock(contender, "100ms")
+        .err()
+        .expect("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
