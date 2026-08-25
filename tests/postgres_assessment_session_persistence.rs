@@ -1,7 +1,5 @@
 //! Real `PostgreSQL` contract for created assessment-session identity.
 
-use std::sync::{Mutex, MutexGuard};
-
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -26,12 +24,24 @@ const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "assessment_session_persistence_test";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+const ASSESSMENT_SESSION_PERSISTENCE_LOCK_KEY: i64 = 0x4153_5353_5045_5253;
 
-fn test_client() -> (MutexGuard<'static, ()>, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn assessment_session_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&ASSESSMENT_SESSION_PERSISTENCE_LOCK_KEY],
+        )
+        .expect("shared assessment-session persistence test lock should be acquired");
+    guard
+}
+
+fn test_client() -> (Client, Client) {
+    let guard = assessment_session_test_guard();
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
@@ -42,6 +52,27 @@ fn test_client() -> (MutexGuard<'static, ()>, Client) {
         ))
         .unwrap();
     (guard, client)
+}
+
+#[test]
+fn assessment_session_fixture_guard_is_visible_to_another_postgres_session() {
+    let (_guard, _client) = test_client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ASSESSMENT_SESSION_PERSISTENCE_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema assessment-session fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 fn reset_session_table(client: &mut Client) {
