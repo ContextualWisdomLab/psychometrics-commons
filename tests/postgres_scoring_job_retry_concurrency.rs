@@ -35,6 +35,9 @@ fn test_client() -> Client {
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
+        .batch_execute("SET lock_timeout = '60s'")
+        .expect("scoring retry worker row-lock waits must be bounded");
+    client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_retry_concurrency_test;\
              SET search_path TO scoring_job_retry_concurrency_test;",
