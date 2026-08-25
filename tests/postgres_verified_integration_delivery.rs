@@ -64,6 +64,9 @@ fn ready_client() -> Client {
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
+        .batch_execute("SET lock_timeout = '60s'")
+        .expect("verified handoff PostgreSQL test lock wait must be bounded");
+    client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("verified handoff PostgreSQL test lock should be acquired");
     let schema = schema_name();
