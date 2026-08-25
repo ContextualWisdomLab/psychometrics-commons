@@ -89,18 +89,79 @@ fn result_snapshot_rejects_blank_narrative_version() {
 }
 
 #[test]
-fn result_snapshot_normalizes_edge_whitespace_before_identity_becomes_durable() {
+fn result_snapshot_rejects_padded_product_identity_and_presentation_references() {
+    for padded in [
+        " result_snapshot_ref",
+        "result_snapshot_ref\u{00a0}",
+        "\u{2003}result_snapshot_ref",
+        "result_snapshot_ref\u{202f}",
+        "\u{3000}result_snapshot_ref",
+    ] {
+        let (request, result) = request_and_result();
+        let mut input = result_input();
+        input.result_snapshot_ref = padded;
+        assert_eq!(
+            ResultSnapshot::new(&request, &result, input).unwrap_err(),
+            ResultSnapshotError::InvalidReference,
+            "snapshot reference {padded:?}"
+        );
+    }
+
     let (request, result) = request_and_result();
     let mut input = result_input();
-    input.result_snapshot_ref = "  result_snapshot_ref  ";
-    input.participant_ref = "\u{00a0}participant_ref\u{00a0}";
-    input.narrative_version_ref = "\u{2003}narrative_version_ref\u{2003}";
-    input.consent_snapshot_refs = &["\u{00a0}service_consent_ref\u{00a0}"];
+    input.participant_ref = " participant_ref";
+    assert_eq!(
+        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshotError::InvalidReference
+    );
+
+    let (request, result) = request_and_result();
+    let mut input = result_input();
+    input.narrative_version_ref = "narrative_version_ref\u{00a0}";
+    assert_eq!(
+        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshotError::InvalidReference
+    );
+}
+
+#[test]
+fn result_snapshot_rejects_padded_consent_and_supersession_references() {
+    let (request, result) = request_and_result();
+    let mut input = result_input();
+    input.consent_snapshot_refs = &["\u{2003}service_consent_ref"];
+    assert_eq!(
+        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshotError::InvalidReference
+    );
+
+    let (request, result) = request_and_result();
+    let mut input = result_input();
+    input.supersedes_ref = Some("prior_result_ref\u{3000}");
+    assert_eq!(
+        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshotError::InvalidReference
+    );
+}
+
+#[test]
+fn result_snapshot_preserves_valid_multilingual_product_references_exactly() {
+    let (request, result) = request_and_result();
+    let input = ResultSnapshotInput {
+        result_snapshot_ref: "결과_스냅샷",
+        participant_ref: "참가자_가",
+        narrative_version_ref: "내러티브_버전_일",
+        consent_snapshot_refs: &["동의_서비스", "동의_연구"],
+        created_at_unix_ms: 1,
+        supersedes_ref: Some("이전_결과"),
+    };
 
     let snapshot = ResultSnapshot::new(&request, &result, input).unwrap();
-
-    assert_eq!(snapshot.result_snapshot_ref(), "result_snapshot_ref");
-    assert_eq!(snapshot.participant_ref(), "participant_ref");
-    assert_eq!(snapshot.narrative_version_ref(), "narrative_version_ref");
-    assert_eq!(snapshot.consent_snapshot_refs(), &["service_consent_ref"]);
+    assert_eq!(snapshot.result_snapshot_ref(), "결과_스냅샷");
+    assert_eq!(snapshot.participant_ref(), "참가자_가");
+    assert_eq!(snapshot.narrative_version_ref(), "내러티브_버전_일");
+    assert_eq!(
+        snapshot.consent_snapshot_refs(),
+        &["동의_서비스".to_owned(), "동의_연구".to_owned()]
+    );
+    assert_eq!(snapshot.supersedes_ref(), Some("이전_결과"));
 }
