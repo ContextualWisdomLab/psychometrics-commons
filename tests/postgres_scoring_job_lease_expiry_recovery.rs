@@ -78,6 +78,23 @@ fn lease_expiry_fixture_guard_is_visible_to_another_postgres_session() {
 }
 
 #[test]
+fn lease_expiry_fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = scoring_job_expiry_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("scoring lease-expiry fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "scoring lease-expiry fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
 fn expired_lease_recovers_to_due_retry_and_reclaim_issues_next_fence() {
     let _guard = scoring_job_expiry_test_guard();
     let mut client = test_client();
