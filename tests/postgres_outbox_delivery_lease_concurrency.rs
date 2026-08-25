@@ -153,6 +153,23 @@ fn expire_and_reclaim(client: &mut Client) {
 }
 
 #[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = database_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("outbox concurrency fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "outbox concurrency fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
 fn concurrent_claim_blocks_then_loses_and_reclaim_advances_the_fence() {
     let mut database_guard = database_test_guard();
     let mut primary = connect_client();
