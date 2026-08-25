@@ -510,7 +510,7 @@ For effects fully owned by the same PostgreSQL transaction, the domain side effe
 - External systems are accessed through versioned adapters; direct database joins across bounded contexts are forbidden.
 - Failure paths shown in the TRD remain normative even if omitted from a simplified happy-path diagram.
 - Target-only sequence actors/containers remain target architecture until `docs/TRACEABILITY.md` links protected-main implementation evidence.
-- `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land.
+- `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` are protected-main domain evidence; the API/persistence sequences around them remain target until their adapters land. Active PR #264 adds `src/integration_delivery.rs`, which verifies the publisher receipt against the exact source/tenant/event identity before a fresh transaction persists the fenced attempt; it does not yet prove a live external publisher worker.
 - Session start from a stored published release plus persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` exists on Active PR #232; command HTTP remains target.
 
 ## 14. Reference
