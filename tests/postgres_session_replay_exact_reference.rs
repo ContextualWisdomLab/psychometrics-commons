@@ -1,6 +1,6 @@
 //! Stored-release retries preserve exact session and participant reference spelling.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
@@ -22,14 +22,22 @@ const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef012
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
+fn acquire_fixture_lock(client: &mut Client, lock_timeout: &str) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])?;
+    Ok(())
+}
+
 fn client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("fixture must acquire the database-visible advisory lock");
+    acquire_fixture_lock(&mut client, "60s")
+        .expect("fixture must acquire the database-visible advisory lock within 60 seconds");
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE; \
@@ -201,6 +209,18 @@ fn fixture_lock_is_visible_to_another_postgres_session() {
         !acquired,
         "fixture serialization must be visible across PostgreSQL sessions"
     );
+}
+
+#[test]
+fn fixture_lock_contention_has_a_finite_timeout() {
+    let _client = client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_fixture_lock(&mut contender, "100ms")
+        .expect_err("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
