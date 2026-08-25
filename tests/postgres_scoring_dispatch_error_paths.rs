@@ -17,18 +17,23 @@ use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 use psychometrics_commons_runtime::session::SessionState;
 use std::error::Error;
-use std::sync::{Mutex, MutexGuard};
 
 const ERROR_PATH_TEST_LOCK_KEY: i64 = 0x5343_4453_4552_5250;
 const PAYLOAD_DIGEST: &str =
     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
-static ERROR_PATH_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn error_path_guard() -> MutexGuard<'static, ()> {
-    ERROR_PATH_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn error_path_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&ERROR_PATH_TEST_LOCK_KEY],
+        )
+        .expect("shared scoring-dispatch error-path test lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
