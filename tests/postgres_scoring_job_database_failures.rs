@@ -1,6 +1,6 @@
 //! Database-failure propagation coverage for the `PostgreSQL` scoring-job adapter.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     claim_next_scoring_job, claim_scoring_job, persist_scoring_job,
     record_retryable_scoring_failure, ScoringJobPersistenceError,
@@ -9,17 +9,30 @@ use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
 const SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY: i64 = 8_256_710_451_992_401;
 
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    client
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY],
-        )
-        .expect("scoring database-failure fixture advisory lock should be acquired");
+    acquire_database_lock(
+        &mut client,
+        SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY,
+        "60s",
+    )
+    .expect("scoring database-failure fixture advisory lock should be acquired within sixty seconds");
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_database_failure_test;\
@@ -73,6 +86,33 @@ fn fixture_lock_wait_has_finite_postgresql_budget() {
         timeout_ms, 60_000,
         "the database-failure fixture must not wait indefinitely for its advisory lock"
     );
+}
+
+#[test]
+fn fixture_lock_wait_aborts_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended fixture lock acquisition must stop at the configured timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should release its advisory lock")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]
