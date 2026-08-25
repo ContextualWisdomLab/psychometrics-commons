@@ -168,6 +168,24 @@ fn fixture_lock_is_visible_across_database_sessions() {
     );
 }
 
+/// Proves fixture acquisition cannot wait forever behind a stalled lock owner.
+#[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let (mut guard, _owner) = test_client();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("session HTTP fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "session HTTP fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
 /// Proves persisted session replay survives restart while new starts fail after release suspension.
 #[test]
 fn http_create_reloads_after_restart_and_replays_after_suspend() {
