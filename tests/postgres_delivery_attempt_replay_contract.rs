@@ -49,6 +49,23 @@ fn identity() -> OutboxPersistenceIdentity<'static> {
 }
 
 #[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = database_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("fixture lock wait budget should be queryable")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "delivery-attempt fixture lock acquisition must not wait indefinitely"
+    );
+}
+
+#[test]
 fn exact_replay_after_quarantine_remains_idempotent() {
     let _database_guard = database_test_guard();
     let mut client = test_client();
