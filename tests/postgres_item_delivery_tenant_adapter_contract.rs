@@ -173,3 +173,18 @@ fn adapter_requires_and_persists_explicit_tenant_scope() {
     ));
     transaction.rollback().unwrap();
 }
+
+#[test]
+fn numeric_tenant_reference_fails_closed_before_write() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    apply_item_delivery_migration(&mut client).unwrap();
+    let ledger = ItemDeliveryLedger::from_manifest("session_numeric_tenant", &manifest()).unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_item_delivery_ledger(&mut transaction, "123", &ledger),
+        Err(ItemDeliveryPersistenceError::InvalidReference)
+    ));
+    transaction.rollback().unwrap();
+}
