@@ -9,6 +9,7 @@ use psychometrics_commons_runtime::postgres_item_delivery::{
 };
 use std::sync::{Mutex, MutexGuard};
 
+const TENANT_ADAPTER_LOCK_KEY: i64 = 0x4954_4144_5054_4C4B;
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 static TENANT_ADAPTER_LOCK: Mutex<()> = Mutex::new(());
@@ -54,6 +55,21 @@ fn manifest() -> InstrumentReleaseManifest {
         RELEASE_DIGEST,
     )
     .unwrap()
+}
+
+#[test]
+fn item_delivery_tenant_adapter_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one("SELECT pg_try_advisory_lock($1)", &[&TENANT_ADAPTER_LOCK_KEY])
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema tenant-adapter fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
