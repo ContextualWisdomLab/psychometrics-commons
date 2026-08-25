@@ -56,7 +56,7 @@ fn test_client() -> (Client, Client) {
 
 #[test]
 fn assessment_session_fixture_guard_is_visible_to_another_postgres_session() {
-    let _guard = assessment_session_test_guard();
+    let (_guard, _client) = test_client();
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut contender = Client::connect(&connection, NoTls)
