@@ -2,19 +2,21 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
-use std::sync::{Mutex, MutexGuard};
 
-static ITEM_DELIVERY_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
+const ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY: i64 = 0x4954_454D_5343_484D;
 
-fn schema_test_guard() -> MutexGuard<'static, ()> {
-    ITEM_DELIVERY_SCHEMA_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn test_client() -> Client {
+fn test_clients() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+        )
+        .expect("PostgreSQL fixture advisory lock should be acquired");
+
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
@@ -23,7 +25,7 @@ fn test_client() -> Client {
              SET search_path TO item_delivery_schema_test;",
         )
         .unwrap();
-    client
+    (guard, client)
 }
 
 fn reset_schema(client: &mut Client) {
@@ -44,9 +46,38 @@ fn constraint_name(error: &postgres::Error) -> String {
 }
 
 #[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let (_guard, _owner) = test_clients();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&ITEM_DELIVERY_SCHEMA_DATABASE_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
+    );
+}
+
+#[test]
 fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences() {
-    let _guard = schema_test_guard();
-    let mut client = test_client();
+    let (_guard, mut client) = test_clients();
     reset_schema(&mut client);
     apply_item_delivery_migration(&mut client).unwrap();
 

@@ -9,43 +9,81 @@ use psychometrics_commons_runtime::postgres_inbox_consumption::{
 use psychometrics_commons_runtime::postgres_integration::{
     accept_inbox_event, apply_integration_migration,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::ops::{Deref, DerefMut};
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const LEGACY_INBOX_CONSUMPTION_MIGRATION: &str =
     include_str!("../migrations/0012_integration_consumption.sql");
 
-fn schema_client(prefix: &str) -> (Client, String) {
+struct SchemaClient {
+    client: Client,
+    schema_name: String,
+}
+
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
+impl Deref for SchemaClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for SchemaClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+impl Drop for SchemaClient {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "RESET search_path; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
+}
+
+fn schema_client(prefix: &str) -> SchemaClient {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock must be after the Unix epoch")
-        .as_nanos();
-    let schema_name = format!("{prefix}_{}_{}", std::process::id(), nonce);
+    let database_nonce: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must allocate a durable transaction identity for test isolation")
+        .get(0);
+    let schema_name = format!("{prefix}_{database_nonce}");
     client
         .batch_execute(&format!(
             "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
         ))
         .unwrap();
-    apply_integration_migration(&mut client).unwrap();
-    (client, schema_name)
+    let mut client = SchemaClient {
+        client,
+        schema_name,
+    };
+    apply_integration_migration(&mut *client).unwrap();
+    client
 }
 
-fn isolated_client() -> (Client, String) {
-    let (mut client, schema_name) = schema_client("inbox_claim_expiry");
-    apply_inbox_consumption_migration(&mut client).unwrap();
-    (client, schema_name)
+fn isolated_client() -> SchemaClient {
+    let mut client = schema_client("inbox_claim_expiry");
+    apply_inbox_consumption_migration(&mut *client).unwrap();
+    client
 }
 
-fn legacy_isolated_client() -> (Client, String) {
-    let (mut client, schema_name) = schema_client("inbox_claim_upgrade");
+fn legacy_isolated_client() -> SchemaClient {
+    let mut client = schema_client("inbox_claim_upgrade");
     client
         .batch_execute(LEGACY_INBOX_CONSUMPTION_MIGRATION)
         .unwrap();
-    (client, schema_name)
+    client
 }
 
 fn source_event(event_ref: &str) -> IntegrationEvent {
@@ -135,8 +173,20 @@ fn assert_processing(client: &mut Client, consumption_ref: &str) {
 }
 
 #[test]
+fn database_transaction_identity_prevents_schema_name_reuse() {
+    let first = schema_client("inbox_claim_schema_identity");
+    let second = schema_client("inbox_claim_schema_identity");
+
+    assert_ne!(
+        first.schema_name(),
+        second.schema_name(),
+        "schema isolation must not depend on a process-local counter or PID lifetime"
+    );
+}
+
+#[test]
 fn expired_claim_cannot_complete_at_or_after_expiry_with_current_fence() {
-    let (mut client, schema_name) = isolated_client();
+    let mut client = isolated_client();
     let consumption = prepare_claim(
         &mut client,
         "event_expired_complete",
@@ -159,15 +209,11 @@ fn expired_claim_cannot_complete_at_or_after_expiry_with_current_fence() {
         transaction.rollback().unwrap();
         assert_processing(&mut client, consumption.consumption_ref());
     }
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
 
 #[test]
 fn expired_claim_cannot_quarantine_at_or_after_expiry_with_current_fence() {
-    let (mut client, schema_name) = isolated_client();
+    let mut client = isolated_client();
     let consumption = prepare_claim(
         &mut client,
         "event_expired_quarantine",
@@ -190,15 +236,11 @@ fn expired_claim_cannot_quarantine_at_or_after_expiry_with_current_fence() {
         transaction.rollback().unwrap();
         assert_processing(&mut client, consumption.consumption_ref());
     }
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
 
 #[test]
 fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
-    let (mut client, schema_name) = isolated_client();
+    let mut client = isolated_client();
     let database_now = database_now_unix_ms(&mut client);
     let claimed_at = database_now
         .checked_sub(2_000)
@@ -259,15 +301,11 @@ fn database_clock_rejects_expired_claim_with_stale_pre_expiry_caller_time() {
         quarantine.consumption_ref(),
         i64::try_from(expired_at).unwrap(),
     );
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
 
 #[test]
 fn forward_migration_fails_closed_for_preexisting_processing_claim() {
-    let (mut client, schema_name) = legacy_isolated_client();
+    let mut client = legacy_isolated_client();
     let consumption = prepare_claim(
         &mut client,
         "event_preexisting_processing",
@@ -286,8 +324,8 @@ fn forward_migration_fails_closed_for_preexisting_processing_claim() {
         .get(0);
     assert_eq!(legacy_column_count, 0);
 
-    apply_inbox_consumption_migration(&mut client).unwrap();
-    apply_inbox_consumption_migration(&mut client).unwrap();
+    apply_inbox_consumption_migration(&mut *client).unwrap();
+    apply_inbox_consumption_migration(&mut *client).unwrap();
 
     let upgraded = client
         .query_one(
@@ -316,15 +354,11 @@ fn forward_migration_fails_closed_for_preexisting_processing_claim() {
     );
     transaction.rollback().unwrap();
     assert_processing(&mut client, consumption.consumption_ref());
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
 
 #[test]
 fn forward_migrations_roll_back_together_when_hardening_cannot_apply() {
-    let (mut client, schema_name) = schema_client("inbox_claim_atomic_upgrade");
+    let mut client = schema_client("inbox_claim_atomic_upgrade");
     client
         .batch_execute(
             "CREATE FUNCTION maintain_inbox_claim_deadline() RETURNS text \
@@ -332,7 +366,7 @@ fn forward_migrations_roll_back_together_when_hardening_cannot_apply() {
         )
         .unwrap();
 
-    let error = apply_inbox_consumption_migration(&mut client)
+    let error = apply_inbox_consumption_migration(&mut *client)
         .expect_err("a conflicting guard function signature must reject the migration batch");
     assert_eq!(
         error.code(),
@@ -351,8 +385,4 @@ fn forward_migrations_roll_back_together_when_hardening_cannot_apply() {
         !base_table_exists,
         "the shipped base migration must roll back when forward hardening fails"
     );
-
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema_name} CASCADE;"))
-        .unwrap();
 }
