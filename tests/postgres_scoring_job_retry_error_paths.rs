@@ -162,6 +162,8 @@ fn already_transitioned_jobs_reject_stale_failure_and_new_claims() {
         transaction.rollback().unwrap();
     }
 
+    drop(retry_client);
+
     let mut quarantined_client = test_client("scoring_job_retry_quarantine_paths_test");
     persist_and_claim(&mut quarantined_client, "scoring_job_quarantined", 1);
     {
