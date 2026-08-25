@@ -8,6 +8,8 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobState};
 use std::sync::{Mutex, MutexGuard};
 
+const SCORING_JOB_EXPIRY_TEST_LOCK_KEY: i64 = 0x5343_4C45_5850_5259;
+
 static SCORING_JOB_EXPIRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn scoring_job_expiry_test_guard() -> MutexGuard<'static, ()> {
@@ -50,6 +52,24 @@ fn persist_and_claim(client: &mut Client, job_ref: &str, max_attempts: u32, expi
     )
     .unwrap();
     transaction.commit().unwrap();
+}
+
+#[test]
+fn lease_expiry_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = scoring_job_expiry_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&SCORING_JOB_EXPIRY_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
