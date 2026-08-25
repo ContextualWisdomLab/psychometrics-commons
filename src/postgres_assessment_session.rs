@@ -476,6 +476,11 @@ fn replay_started_session_after_publication_block(
     request: &StartedSessionReplayRequest<'_>,
 ) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
 {
+    if normalized_reference(request.session_ref) != Some(request.session_ref)
+        || normalized_reference(request.participant_ref) != Some(request.participant_ref)
+    {
+        return Err(AssessmentSessionStartError::InvalidReference);
+    }
     let Some(stored) = load_assessment_session(transaction, request.session_ref)? else {
         return Err(AssessmentSessionStartError::InstrumentReleaseUnavailable);
     };
