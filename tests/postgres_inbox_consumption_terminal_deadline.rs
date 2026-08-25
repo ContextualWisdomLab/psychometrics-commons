@@ -18,6 +18,12 @@ struct SchemaClient {
     schema_name: String,
 }
 
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
 impl Deref for SchemaClient {
     type Target = Client;
 
@@ -124,6 +130,29 @@ fn assert_terminal_lease_evidence_cleared(
     assert_eq!(row.get::<_, String>(0), expected_state);
     assert!(row.get::<_, bool>(1));
     assert!(row.get::<_, bool>(2));
+}
+
+#[test]
+fn dropping_fixture_connection_must_remove_isolated_schema() {
+    let client = isolated_client();
+    let schema = client.schema_name().to_owned();
+    drop(client);
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut observer = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let schema_remains: bool = observer
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)",
+            &[&schema],
+        )
+        .expect("fixture schema presence should be observable")
+        .get(0);
+    assert!(
+        !schema_remains,
+        "dropping the fixture connection must remove its isolated schema even when the test exits early"
+    );
 }
 
 #[test]
