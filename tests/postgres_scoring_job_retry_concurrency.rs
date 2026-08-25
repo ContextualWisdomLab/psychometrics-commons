@@ -11,6 +11,8 @@ use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobState};
 use std::sync::{Arc, Barrier, Mutex, MutexGuard};
 use std::thread;
 
+const RETRY_CONCURRENCY_TEST_LOCK_KEY: i64 = 0x5343_5254_5259_4343;
+
 static RETRY_CONCURRENCY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 type ClaimEvidence = (String, String, u64);
@@ -100,6 +102,24 @@ fn claim_due_retry(
         }
         Err(error) => panic!("unexpected concurrent retry claim error: {error:?}"),
     }
+}
+
+#[test]
+fn retry_concurrency_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = retry_concurrency_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&RETRY_CONCURRENCY_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema retry-concurrency fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
