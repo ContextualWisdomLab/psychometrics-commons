@@ -86,6 +86,23 @@ fn result_snapshot_schema_guard_is_visible_to_another_postgres_session() {
 }
 
 #[test]
+fn result_snapshot_schema_guard_has_finite_postgresql_wait_budget() {
+    let mut guard = schema_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("result-snapshot schema lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "result-snapshot schema fixture must not wait indefinitely for its advisory lock"
+    );
+}
+
+#[test]
 fn schema_rejects_numeric_identity_empty_consent_and_self_supersession() {
     let _guard = schema_test_guard();
     let mut client = test_client();
