@@ -4,6 +4,8 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_instrument_release::apply_instrument_release_migration;
 use std::sync::{Mutex, MutexGuard};
 
+const INSTRUMENT_RELEASE_SCHEMA_LOCK_KEY: i64 = 0x4952_5343_4845_4D41;
+
 static INSTRUMENT_RELEASE_SCHEMA_LOCK: Mutex<()> = Mutex::new(());
 
 fn schema_test_guard() -> MutexGuard<'static, ()> {
@@ -55,6 +57,24 @@ const VALID_VALUES: &str = "'release_schema_ko_v1', 'instrument_big_five', \
      'limitations_nonclinical_v1', \
      'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
      'draft', 40000";
+
+#[test]
+fn instrument_release_schema_guard_is_visible_to_another_postgres_session() {
+    let _guard = schema_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&INSTRUMENT_RELEASE_SCHEMA_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema instrument-release fixture guard must serialize across PostgreSQL sessions"
+    );
+}
 
 #[test]
 fn schema_rejects_numeric_identity_empty_item_set_invalid_digest_and_unknown_state() {
