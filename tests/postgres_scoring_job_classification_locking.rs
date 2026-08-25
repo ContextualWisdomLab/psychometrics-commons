@@ -6,15 +6,26 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
     persist_scoring_job, record_successful_scoring_completion, ScoringJobPersistenceError,
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "scoring_job_classification_locking_test";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+const SCORING_JOB_CLASSIFICATION_LOCK_KEY: i64 = 0x5343_4A43_4C41_5353;
 
-fn test_clients() -> (MutexGuard<'static, ()>, Client, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+fn classification_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&SCORING_JOB_CLASSIFICATION_LOCK_KEY],
+        )
+        .expect("shared scoring classification test lock should be acquired");
+    guard
+}
+
+fn test_clients() -> (Client, Client, Client) {
+    let guard = classification_test_guard();
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut owner = Client::connect(&connection, NoTls)
@@ -30,6 +41,27 @@ fn test_clients() -> (MutexGuard<'static, ()>, Client, Client) {
         .batch_execute(&format!("SET search_path TO {SCHEMA};"))
         .unwrap();
     (guard, owner, contender)
+}
+
+#[test]
+fn scoring_classification_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = classification_test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&SCORING_JOB_CLASSIFICATION_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema scoring classification fixture guard must serialize across PostgreSQL sessions"
+    );
 }
 
 fn reset_scoring_job_table(client: &mut Client) {
