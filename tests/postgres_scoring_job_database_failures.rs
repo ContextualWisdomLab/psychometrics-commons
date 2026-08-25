@@ -7,11 +7,19 @@ use psychometrics_commons_runtime::postgres_scoring_job::{
 };
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
 
+const SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY: i64 = 8_256_710_451_992_401;
+
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY],
+        )
+        .expect("scoring database-failure fixture advisory lock should be acquired");
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_database_failure_test;\
@@ -20,6 +28,34 @@ fn test_client() -> Client {
         )
         .unwrap();
     client
+}
+
+#[test]
+fn fixture_serialization_is_visible_to_other_postgresql_sessions() {
+    let _fixture = test_client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+    if acquired {
+        contender
+            .execute(
+                "SELECT pg_advisory_unlock($1)",
+                &[&SCORING_JOB_DATABASE_FAILURE_TEST_LOCK_KEY],
+            )
+            .unwrap();
+    }
+    assert!(
+        !acquired,
+        "the fixed-schema fixture must serialize through a PostgreSQL-visible advisory lock"
+    );
 }
 
 #[test]

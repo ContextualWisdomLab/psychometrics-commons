@@ -1,7 +1,5 @@
 //! Persist-backed session HTTP uses the sealed stored-release start path.
 
-use std::sync::{Mutex, MutexGuard};
-
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -21,14 +19,18 @@ const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
 const SCHEMA: &str = "session_http_persistence_test";
-static DATABASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+const DATABASE_TEST_LOCK_KEY: i64 = 0x5345_5353_4854_5450;
 
-fn test_client() -> (MutexGuard<'static, ()>, Client) {
-    let guard = DATABASE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+/// Acquires the cross-process `PostgreSQL` fixture lock and returns the lock-owning
+/// session together with a client scoped to the session HTTP test schema.
+fn test_client() -> (Client, Client) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect("PostgreSQL session HTTP fixture advisory lock should be acquired");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
@@ -39,6 +41,7 @@ fn test_client() -> (MutexGuard<'static, ()>, Client) {
     (guard, client)
 }
 
+/// Clears only the repository-owned tables used by the persisted session HTTP fixture.
 fn reset_tables(client: &mut Client) {
     client
         .batch_execute(&format!(
@@ -49,6 +52,7 @@ fn reset_tables(client: &mut Client) {
         .unwrap();
 }
 
+/// Builds the immutable Korean Big Five release manifest used by this HTTP fixture.
 fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
     InstrumentReleaseManifest::new(
         release_ref,
@@ -70,6 +74,7 @@ fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
     .unwrap()
 }
 
+/// Builds approved publication evidence for the fixture's exact immutable release.
 fn approved_evidence(release_ref: &str, digest: &str) -> PublicationEvidenceRecord {
     PublicationEvidenceRecord::new(
         "publication_evidence_big_five_ko_v1",
@@ -102,6 +107,7 @@ fn approved_evidence(release_ref: &str, digest: &str) -> PublicationEvidenceReco
     .unwrap()
 }
 
+/// Publishes the fixture release through the same evidence-gated domain lifecycle used by runtime code.
 fn published_release(release_ref: &str, digest: &str) -> InstrumentRelease {
     let mut release = InstrumentRelease::new(manifest(release_ref, digest), 10_000).unwrap();
     release
@@ -124,6 +130,7 @@ fn published_release(release_ref: &str, digest: &str) -> InstrumentRelease {
     release
 }
 
+/// Creates the exact HTTP/1.1 request used to start an anonymous persisted session.
 fn create_request(session_ref: &str) -> String {
     format!(
         "POST {SESSION_COLLECTION_PATH} HTTP/1.1\r\n\
@@ -133,6 +140,35 @@ fn create_request(session_ref: &str) -> String {
     )
 }
 
+/// Proves that fixture serialization is enforced by `PostgreSQL` across separate client sessions.
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let (_guard, _owner) = test_client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&DATABASE_TEST_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one("SELECT pg_advisory_unlock($1)", &[&DATABASE_TEST_LOCK_KEY])
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "session HTTP fixture serialization must be visible to separate PostgreSQL sessions"
+    );
+}
+
+/// Proves persisted session replay survives restart while new starts fail after release suspension.
 #[test]
 fn http_create_reloads_after_restart_and_replays_after_suspend() {
     let (_guard, mut client) = test_client();
