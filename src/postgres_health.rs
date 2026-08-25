@@ -221,20 +221,20 @@ mod tests {
 
     #[test]
     fn runtime_health_covers_supported_read_only_and_unsupported_states() {
-        let ready = classify_postgres_runtime(180_004, false);
+        let ready = classify_postgres_runtime(180_004, "UTF8", false);
         assert_eq!(ready.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
         assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
         assert_eq!(ready.capability_state(), CapabilityState::Available);
         assert!(ready.accepts_new_work());
         assert!(ready.capability_health().unwrap().accepts_new_work());
 
-        let read_only = classify_postgres_runtime(180_004, true);
+        let read_only = classify_postgres_runtime(180_004, "UTF8", true);
         assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
         assert_eq!(read_only.capability_state(), CapabilityState::Unavailable);
         assert!(!read_only.accepts_new_work());
         assert!(!read_only.capability_health().unwrap().accepts_new_work());
 
-        let unsupported = classify_postgres_runtime(170_009, false);
+        let unsupported = classify_postgres_runtime(170_009, "UTF8", false);
         assert_eq!(
             unsupported.status(),
             PostgresRuntimeStatus::UnsupportedMajorVersion
