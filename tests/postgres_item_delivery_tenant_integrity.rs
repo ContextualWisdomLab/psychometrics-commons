@@ -23,8 +23,9 @@ fn tenant_test_guard() -> Client {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    acquire_tenant_fixture_lock(&mut guard, ITEM_DELIVERY_TENANT_LOCK_KEY, "60s")
-        .expect("shared item-delivery tenant integrity test lock should be acquired within sixty seconds");
+    acquire_tenant_fixture_lock(&mut guard, ITEM_DELIVERY_TENANT_LOCK_KEY, "60s").expect(
+        "shared item-delivery tenant integrity test lock should be acquired within sixty seconds",
+    );
     guard
 }
 
@@ -124,8 +125,9 @@ fn item_delivery_tenant_fixture_lock_wait_aborts_under_real_contention() {
 
     let mut contender = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let error = acquire_tenant_fixture_lock(&mut contender, behavior_lock_key, "100ms")
-        .expect_err("contended item-delivery tenant fixture lock must stop at the configured timeout");
+    let error = acquire_tenant_fixture_lock(&mut contender, behavior_lock_key, "100ms").expect_err(
+        "contended item-delivery tenant fixture lock must stop at the configured timeout",
+    );
     assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 
     let released: bool = holder
