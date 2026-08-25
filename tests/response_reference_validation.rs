@@ -50,7 +50,6 @@ fn response_identity_references_reject_numeric_like_values() {
 }
 
 #[test]
-#[test]
 fn response_identity_references_reject_surrounding_whitespace_aliases() {
     for session_ref in [
         " session_ref ",
