@@ -26,10 +26,7 @@ const PARTICIPANT_REF: &str = "ptc_exact_replay_eb1b318917d24ca0ac5153c37ff696c7
 const RELEASE_REF: &str = "release_big_five_exact_replay_v1";
 const SCHEMA: &str = "assessment_session_exact_replay_test";
 
-fn acquire_fixture_lock(
-    mut guard: Client,
-    lock_timeout: &str,
-) -> Result<Client, postgres::Error> {
+fn acquire_fixture_lock(mut guard: Client, lock_timeout: &str) -> Result<Client, postgres::Error> {
     guard.query_one(
         "SELECT set_config('lock_timeout', $1, false)",
         &[&lock_timeout],
