@@ -10,7 +10,9 @@ fn fixture_lock_wait_is_bounded_before_advisory_lock_acquisition() {
     let fixture_end = FIXTURE_SOURCE[fixture_start..]
         .find("fn test_client() -> (Client, Client)")
         .map(|offset| fixture_start + offset)
-        .expect("the assessment-session persistence fixture guard must end before test-client setup");
+        .expect(
+            "the assessment-session persistence fixture guard must end before test-client setup",
+        );
     let guard_setup = &FIXTURE_SOURCE[fixture_start..fixture_end];
 
     let timeout_index = guard_setup
