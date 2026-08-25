@@ -29,8 +29,9 @@ fn test_client() -> Client {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    acquire_database_lock(&mut client, SCORING_RETRY_RECLAIM_TEST_LOCK_KEY, "60s")
-        .expect("scoring retry-reclaim fixture advisory lock should be acquired within sixty seconds");
+    acquire_database_lock(&mut client, SCORING_RETRY_RECLAIM_TEST_LOCK_KEY, "60s").expect(
+        "scoring retry-reclaim fixture advisory lock should be acquired within sixty seconds",
+    );
     client
         .batch_execute(
             "CREATE SCHEMA IF NOT EXISTS scoring_job_retry_reclaim_failure_reset_test;\
