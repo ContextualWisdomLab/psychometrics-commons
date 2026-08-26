@@ -197,10 +197,7 @@ fn handle_post(
     session_ref: &str,
     runtime: &mut ResponseHttpRuntime,
 ) -> ResponseHttpResponse {
-    if session_ref.contains('%')
-        || session_ref.chars().any(char::is_whitespace)
-        || normalized_reference(session_ref).is_none()
-    {
+    if !response_session_ref_is_transport_safe(session_ref) {
         return ResponseHttpResponse::problem(
             400,
             "urn:psychometrics-commons:problem:bad-request",
@@ -435,6 +432,18 @@ fn response_collection_session_ref(path: &str) -> Option<&str> {
     (tail == "responses" && !session_ref.is_empty()).then_some(session_ref)
 }
 
+/// Return whether a path-extracted session reference survives transport hygiene.
+///
+/// Percent escapes and whitespace cannot survive a well-formed request target,
+/// yet the guard stays explicit so encoded or padded identities keep failing
+/// closed even if target parsing ever relaxes. Numeric-like identities are
+/// rejected by [`normalized_reference`].
+fn response_session_ref_is_transport_safe(session_ref: &str) -> bool {
+    !session_ref.contains('%')
+        && !session_ref.chars().any(char::is_whitespace)
+        && normalized_reference(session_ref).is_some()
+}
+
 fn valid_idempotency_key(value: &str) -> Option<&str> {
     let normalized = value.trim();
     if normalized.is_empty() || normalized.chars().any(char::is_whitespace) {
@@ -593,10 +602,15 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod unit_tests {
     use super::{
-        apply_request_read, json_string, reason_phrase, response_collection_session_ref,
-        split_target, valid_idempotency_key, RequestReadProgress, RESPONSE_HTTP_MAX_REQUEST_BYTES,
+        apply_request_read, json_string, read_http_request, reason_phrase,
+        response_collection_session_ref, response_session_ref_is_transport_safe, split_target,
+        valid_idempotency_key, write_problem, RequestReadProgress, RESPONSE_HTTP_MAX_REQUEST_BYTES,
     };
-    use std::io::{self, ErrorKind};
+    use crate::response::WriteError;
+    use crate::session::SessionState;
+    use std::io::{self, ErrorKind, Write};
+    use std::net::{Shutdown, SocketAddr, TcpStream};
+    use std::time::Duration;
 
     #[test]
     fn helpers_cover_paths_status_escapes_and_read_progress() {
@@ -625,7 +639,11 @@ mod unit_tests {
         );
         assert_eq!(valid_idempotency_key("idem_ok"), Some("idem_ok"));
         assert_eq!(valid_idempotency_key("42"), None);
+        // Internal whitespace fails closed even when the trimmed key keeps
+        // content, so padded or spaced client event references can never be
+        // recorded under a different identity than the client sent.
         assert_eq!(valid_idempotency_key("   "), None);
+        assert_eq!(valid_idempotency_key("idem spaced key"), None);
         let mut buffer = Vec::new();
         assert!(matches!(
             apply_request_read(&mut buffer, b"", Ok(0)).unwrap(),
@@ -659,5 +677,63 @@ mod unit_tests {
             RequestReadProgress::Complete
         ));
         assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
+    }
+
+    #[test]
+    fn session_ref_guard_rejects_escapes_whitespace_and_numeric_identity() {
+        assert!(response_session_ref_is_transport_safe(
+            "ses_opaque_identity"
+        ));
+        assert!(!response_session_ref_is_transport_safe("%20ses_padded"));
+        // A raw NBSP cannot survive request-line parsing, but the guard keeps
+        // rejecting padded identities if target parsing ever relaxes.
+        assert!(!response_session_ref_is_transport_safe("ses\u{00a0}padded"));
+        assert!(!response_session_ref_is_transport_safe("42"));
+    }
+
+    #[test]
+    fn snapshot_requires_completed_error_maps_to_stable_conflict_problem() {
+        // `ResponseLedger::record` cannot produce this error today; snapshot
+        // freeze paths share `WriteError`, so the HTTP mapping is pinned here
+        // to keep the problem contract stable for future producers.
+        let response = write_problem(WriteError::SnapshotRequiresCompleted(SessionState::Scoring));
+        assert_eq!(response.status(), 409);
+        assert_eq!(response.content_type(), "application/problem+json");
+        assert!(response
+            .body()
+            .contains("urn:psychometrics-commons:problem:snapshot-requires-completed"));
+        assert!(response.body().contains("Snapshot Requires Completed"));
+        assert!(response
+            .body()
+            .contains("response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete"));
+    }
+
+    /// Serve one payload over a real loopback connection for read-loop tests.
+    fn connected_stream(payload: &[u8]) -> (TcpStream, TcpStream) {
+        let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client.write_all(payload).unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn oversized_unframed_input_collapses_to_an_empty_request() {
+        let (_client, mut server) =
+            connected_stream(&[b'A'; RESPONSE_HTTP_MAX_REQUEST_BYTES + 808]);
+        assert_eq!(read_http_request(&mut server).unwrap(), "");
+    }
+
+    #[test]
+    fn input_without_header_terminator_collapses_to_an_empty_request() {
+        let (_client, mut server) = connected_stream(
+            b"POST /v1/sessions/ses_one/responses HTTP/1.1\r\nHost: localhost\r\n",
+        );
+        assert_eq!(read_http_request(&mut server).unwrap(), "");
     }
 }
