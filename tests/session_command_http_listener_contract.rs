@@ -1,18 +1,22 @@
 //! Listener contract for one-shot session-command HTTP.
 
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::session::AssessmentSession;
 use psychometrics_commons_runtime::session_command_http::{
-    accept_one_session_command_http, bind_session_command_http, SessionCommandHttpRuntime,
+    accept_one_authorized_session_command_http, accept_one_session_command_http,
+    bind_session_command_http, SessionCommandAuthority, SessionCommandHttpRuntime,
 };
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 
+const TENANT_REF: &str = "tenant_session_command_listener";
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
@@ -85,6 +89,23 @@ fn published_release() -> InstrumentRelease {
     release
 }
 
+fn serve_authorized(
+    listener: &TcpListener,
+    participant_ref: &str,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> io::Result<()> {
+    let participant = ParticipantRecord::new_anonymous(participant_ref, TENANT_REF, 19_000).unwrap();
+    let actor = AuthorizationContext::new(
+        TENANT_REF,
+        "subject_session_command_listener",
+        Some(participant_ref),
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let authority = SessionCommandAuthority::Authenticated(&actor);
+    accept_one_authorized_session_command_http(listener, &authority, &participant, runtime)
+}
+
 #[test]
 fn listener_activates_a_created_session_over_tcp() {
     let session = AssessmentSession::new(
@@ -98,7 +119,9 @@ fn listener_activates_a_created_session_over_tcp() {
     let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
     let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = thread::spawn(move || accept_one_session_command_http(&listener, &mut runtime));
+    let server = thread::spawn(move || {
+        serve_authorized(&listener, "ptc_listener_command_one", &mut runtime)
+    });
 
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
     stream
@@ -160,7 +183,9 @@ fn listener_activates_across_padded_multi_chunk_headers() {
     let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
     let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = thread::spawn(move || accept_one_session_command_http(&listener, &mut runtime));
+    let server = thread::spawn(move || {
+        serve_authorized(&listener, "ptc_listener_command_pad", &mut runtime)
+    });
 
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
     stream
@@ -195,7 +220,13 @@ fn listener_waits_for_a_declared_body_delivered_after_the_headers() {
     let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
     let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = thread::spawn(move || accept_one_session_command_http(&listener, &mut runtime));
+    let server = thread::spawn(move || {
+        serve_authorized(
+            &listener,
+            "ptc_listener_command_delayed_body",
+            &mut runtime,
+        )
+    });
 
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
     stream
