@@ -93,10 +93,7 @@ fn human_readable_report_keeps_internal_provenance_out_of_participant_copy() {
         report.result_snapshot_ref(),
         "result_snapshot_participant_copy_v1"
     );
-    assert_eq!(
-        report.participant_ref(),
-        "participant_participant_copy_v1"
-    );
+    assert_eq!(report.participant_ref(), "participant_participant_copy_v1");
 
     let text = report.text();
     for internal in [
@@ -121,9 +118,9 @@ fn human_readable_report_keeps_internal_provenance_out_of_participant_copy() {
             "participant copy leaked internal provenance {internal:?}: {text}"
         );
     }
-    assert!(text.contains(
-        "Technical provenance is available in the machine-readable result export."
-    ));
+    assert!(
+        text.contains("Technical provenance is available in the machine-readable result export.")
+    );
 }
 
 #[test]
