@@ -1,7 +1,11 @@
 //! Integration tests for response-event idempotency and immutable snapshots.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
 use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, advance_to, completed_session, session_in_state};
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_B: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -24,19 +28,14 @@ fn write<'a>(
 
 #[test]
 fn active_session_assigns_monotonic_server_sequences() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
 
     let first = ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
     let second = ledger
-        .record(
-            SessionState::Active,
-            write("event_b", "client_b", "item_v2", DIGEST_B),
-        )
+        .record(&session, write("event_b", "client_b", "item_v2", DIGEST_B))
         .unwrap();
 
     assert_eq!(first.server_event_ref(), "event_a");
@@ -47,20 +46,19 @@ fn active_session_assigns_monotonic_server_sequences() {
     assert_eq!(second.sequence(), 2);
     assert_eq!(ledger.len(), 2);
     assert!(!ledger.is_empty());
+    assert_eq!(ledger.session_ref(), "session_ref");
 }
 
 #[test]
 fn duplicate_client_event_is_idempotent_when_content_matches() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     let original = ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
     let replay = ledger
         .record(
-            SessionState::Active,
+            &session,
             write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_A),
         )
         .unwrap();
@@ -71,12 +69,10 @@ fn duplicate_client_event_is_idempotent_when_content_matches() {
 
 #[test]
 fn exact_response_replay_remains_idempotent_after_collection_closes() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     let original = ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
 
     for state in [
@@ -89,9 +85,10 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
         SessionState::Cancelled,
         SessionState::Invalidated,
     ] {
+        let closed = session_in_state("session_ref", state);
         let replay = ledger
             .record(
-                state,
+                &closed,
                 write("ignored_new_server_ref", "client_a", "item_v1", DIGEST_A),
             )
             .unwrap();
@@ -105,12 +102,10 @@ fn exact_response_replay_remains_idempotent_after_collection_closes() {
 
 #[test]
 fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
 
     for state in [
@@ -123,9 +118,10 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
         SessionState::Cancelled,
         SessionState::Invalidated,
     ] {
+        let closed = session_in_state("session_ref", state);
         let digest_error = ledger
             .record(
-                state,
+                &closed,
                 write(
                     "ignored_new_server_ref",
                     "client_a",
@@ -138,7 +134,7 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
 
         let item_error = ledger
             .record(
-                state,
+                &closed,
                 write("ignored_new_server_ref", "client_a", "item_v2", DIGEST_A),
             )
             .unwrap_err();
@@ -149,27 +145,22 @@ fn conflicting_response_replay_remains_fail_closed_after_collection_closes() {
 
 #[test]
 fn reused_client_event_with_different_content_fails_closed() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
 
     let digest_error = ledger
         .record(
-            SessionState::Active,
+            &session,
             write("event_b", "client_a", "item_v1", DIGEST_CHANGED),
         )
         .unwrap_err();
     assert_eq!(digest_error, WriteError::IdempotencyConflict);
 
     let item_error = ledger
-        .record(
-            SessionState::Active,
-            write("event_c", "client_a", "item_v2", DIGEST_A),
-        )
+        .record(&session, write("event_c", "client_a", "item_v2", DIGEST_A))
         .unwrap_err();
     assert_eq!(item_error, WriteError::IdempotencyConflict);
     assert_eq!(ledger.len(), 1);
@@ -177,19 +168,14 @@ fn reused_client_event_with_different_content_fails_closed() {
 
 #[test]
 fn server_event_reference_cannot_identify_two_different_events() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
 
     let error = ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_b", "item_v2", DIGEST_B),
-        )
+        .record(&session, write("event_a", "client_b", "item_v2", DIGEST_B))
         .unwrap_err();
 
     assert_eq!(error, WriteError::ServerReferenceConflict);
@@ -198,8 +184,6 @@ fn server_event_reference_cannot_identify_two_different_events() {
 
 #[test]
 fn non_active_session_cannot_accept_response_events() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
-
     for state in [
         SessionState::Created,
         SessionState::Paused,
@@ -211,17 +195,20 @@ fn non_active_session_cannot_accept_response_events() {
         SessionState::Cancelled,
         SessionState::Invalidated,
     ] {
+        let session = session_in_state("session_ref", state);
+        let mut ledger = ResponseLedger::from_session(&session).unwrap();
         let error = ledger
-            .record(state, write("event_a", "client_a", "item_v1", DIGEST_A))
+            .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
             .unwrap_err();
         assert_eq!(error, WriteError::SessionNotActive(state));
+        assert!(ledger.is_empty());
     }
-    assert!(ledger.is_empty());
 }
 
 #[test]
 fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
 
     for request in [
         write("", "client_a", "item_v1", DIGEST_A),
@@ -229,17 +216,14 @@ fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
         write("event_a", "client_a", "", DIGEST_A),
     ] {
         assert_eq!(
-            ledger.record(SessionState::Active, request).unwrap_err(),
+            ledger.record(&session, request).unwrap_err(),
             WriteError::InvalidReference
         );
     }
 
     assert_eq!(
         ledger
-            .record(
-                SessionState::Active,
-                write("event_a", "client_a", "item_v1", "   "),
-            )
+            .record(&session, write("event_a", "client_a", "item_v1", "   "))
             .unwrap_err(),
         WriteError::EmptyReference
     );
@@ -247,34 +231,28 @@ fn response_identity_references_and_payload_digest_fail_closed_when_blank() {
 
 #[test]
 fn completed_session_freezes_a_deterministic_immutable_snapshot() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
+    let mut session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
-        .record(
-            SessionState::Active,
-            write("event_a", "client_a", "item_v1", DIGEST_A),
-        )
+        .record(&session, write("event_a", "client_a", "item_v1", DIGEST_A))
         .unwrap();
     ledger
-        .record(
-            SessionState::Active,
-            write("event_b", "client_b", "item_v2", DIGEST_B),
-        )
+        .record(&session, write("event_b", "client_b", "item_v2", DIGEST_B))
         .unwrap();
+    advance_to(&mut session, SessionState::Completed);
 
-    let snapshot = ledger.freeze(SessionState::Completed).unwrap();
+    let snapshot = ledger.freeze(&session).unwrap();
     assert_eq!(snapshot.session_ref(), "session_ref");
     assert_eq!(snapshot.event_count(), 2);
     assert_eq!(snapshot.last_sequence(), Some(2));
     assert_eq!(snapshot.event_refs(), ["event_a", "event_b"]);
     assert_eq!(snapshot.item_version_refs(), ["item_v1", "item_v2"]);
     assert_eq!(snapshot.payload_digests(), [DIGEST_A, DIGEST_B]);
-    assert_eq!(ledger.freeze(SessionState::Completed).unwrap(), snapshot);
+    assert_eq!(ledger.freeze(&session).unwrap(), snapshot);
 }
 
 #[test]
 fn snapshot_freeze_requires_completed_session() {
-    let ledger = ResponseLedger::new("session_ref").unwrap();
-
     for state in [
         SessionState::Created,
         SessionState::Active,
@@ -286,8 +264,10 @@ fn snapshot_freeze_requires_completed_session() {
         SessionState::Cancelled,
         SessionState::Invalidated,
     ] {
+        let session = session_in_state("session_ref", state);
+        let ledger = ResponseLedger::from_session(&session).unwrap();
         assert_eq!(
-            ledger.freeze(state).unwrap_err(),
+            ledger.freeze(&session).unwrap_err(),
             WriteError::SnapshotRequiresCompleted(state)
         );
     }
@@ -295,8 +275,9 @@ fn snapshot_freeze_requires_completed_session() {
 
 #[test]
 fn empty_completed_session_has_an_explicit_empty_snapshot() {
-    let ledger = ResponseLedger::new("session_ref").unwrap();
-    let snapshot = ledger.freeze(SessionState::Completed).unwrap();
+    let session = completed_session("session_ref");
+    let ledger = ResponseLedger::from_session(&session).unwrap();
+    let snapshot = ledger.freeze(&session).unwrap();
 
     assert_eq!(snapshot.event_count(), 0);
     assert_eq!(snapshot.last_sequence(), None);
@@ -313,7 +294,7 @@ fn write_errors_have_stable_human_readable_context() {
     );
     assert_eq!(
         WriteError::InvalidReference.to_string(),
-        "response identity references must be opaque non-numeric values"
+        "response identity references must use exact opaque spelling without surrounding whitespace"
     );
     assert_eq!(
         WriteError::EmptyReference.to_string(),
@@ -338,5 +319,10 @@ fn write_errors_have_stable_human_readable_context() {
     assert_eq!(
         WriteError::InvalidSequence.to_string(),
         "persisted response events must use contiguous positive server sequences"
+    );
+
+    assert_eq!(
+        WriteError::SessionMismatch.to_string(),
+        "response ledger does not belong to the supplied assessment session"
     );
 }
