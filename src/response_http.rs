@@ -21,7 +21,7 @@ use crate::participant::ParticipantRecord;
 use crate::reference::normalized_reference;
 use crate::response::{ResponseEvent, ResponseLedger, ResponseWrite, WriteError};
 use crate::session::AssessmentSession;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::io;
 use std::net::{SocketAddr, TcpListener};
@@ -60,6 +60,7 @@ pub struct ResponseHttpRuntime {
     sessions: HashMap<String, AssessmentSession>,
     releases: HashMap<String, InstrumentRelease>,
     ledgers: HashMap<String, ResponseLedger>,
+    used_server_event_refs: HashSet<String>,
     next_server_event_ref: String,
 }
 
@@ -87,6 +88,7 @@ impl ResponseHttpRuntime {
             sessions,
             releases,
             ledgers: HashMap::new(),
+            used_server_event_refs: HashSet::new(),
             next_server_event_ref: next_server_event_ref.into(),
         }
     }
@@ -104,6 +106,18 @@ impl ResponseHttpRuntime {
 
     fn total_event_count(&self) -> usize {
         self.ledgers.values().map(ResponseLedger::len).sum()
+    }
+
+    fn advance_generated_server_event_ref(&mut self) {
+        let mut candidate_index = self.total_event_count() + 1;
+        loop {
+            let candidate = format!("evt_response_{candidate_index}");
+            if !self.used_server_event_refs.contains(&candidate) {
+                self.next_server_event_ref = candidate;
+                return;
+            }
+            candidate_index += 1;
+        }
     }
 }
 
@@ -363,8 +377,8 @@ fn record_response(
         Ok(event) => {
             let created = runtime.event_count(session_ref) > prior_len;
             if created {
-                runtime.next_server_event_ref =
-                    format!("evt_response_{}", runtime.total_event_count() + 1);
+                runtime.used_server_event_refs.insert(server_event_ref);
+                runtime.advance_generated_server_event_ref();
             }
             ResponseHttpResponse::json(
                 if created { 201 } else { 200 },
