@@ -1,38 +1,51 @@
 # Documentation Completeness Assessment
 
 - Status: Architecture baseline assessment
-- Date: 2026-08-21
-- Evaluated protected-main baseline: `4499d9c0889c082487ddbd7fd8d0d5d18257995d`
+- Date: 2026-08-27
+- Evaluated protected-main baseline: `09534ef52c9307ce0dc559e9d908ebd715c641a1`
 - Scope: product, architecture, psychometric, longitudinal, research, AI, privacy, integration, quality, risk, compliance-readiness, operations, and durable product decisions established throughout the Psychometrics Commons design discussion
 
 ## Executive assessment
 
-The repository is **sufficient as an implementation architecture baseline**. It is **not sufficient as GA operational/scientific release evidence**, and before this reconciliation it was not fully current with protected main.
+The repository is **sufficient as an implementation architecture baseline**. It is **not sufficient as GA operational/scientific release evidence**.
 
-The material defect was not absence of PRD/TRD/Architecture. Those artifacts are strong. The defect was **traceability and view drift after protected-main implementation advanced**: `src/item_delivery.rs`, `src/participant.rs`, `src/authorization.rs`, and `src/integration.rs` were merged while `docs/TRACEABILITY.md` still described those responsibilities as Target; the logical ERD did not yet model item-delivery evidence, append-only account-link history, or the Commons-owned longitudinal orchestration records; and UML did not make the Measurement Workbench publication-evidence flow or Gyeot→Commons→TEPP sequence explicit.
+The material risk is no longer absence of PRD/TRD/Architecture. Those artifacts are strong. The continuing documentation obligation is to keep protected-main implementation evidence, active-PR evidence, machine-readable contracts, diagrams, and release claims synchronized without promoting target or active work to shipped truth.
 
-This reconciliation closes those architecture-definition gaps without promoting active PR work or target diagrams to shipped truth. PostgreSQL evidence persistence from merged #24 is protected-main only for the migrations/adapters that are actually present; remaining aggregate persistence, OpenAPI families beyond sessions, deployed topology, measured SLO/RPO/RTO, certification, and instrument-release evidence remain implementation/evidence-gated and must not be fabricated.
+At the evaluated protected-main baseline, session/result HTTP contracts and multiple PostgreSQL persistence slices are real as-built evidence, including immutable longitudinal observation persistence through merged #248. Remaining aggregate persistence, HTTP families not represented by current protected-main contracts, durable external event transport, deployed topology, measured SLO/RPO/RTO, certification, live dependency integration, and instrument-release evidence remain implementation/evidence-gated and must not be fabricated.
+
+### Active response-transport impact — PR #415
+
+Active PR #415 adds `POST /v1/sessions/{session_ref}/responses`, but it is **not protected-main truth** until reviewed and merged. Its current architecture impact is bounded and already covered by existing normative views:
+
+- TRD §6 defines response-event identity/idempotency and TRD §10–11 defines identity, resource authorization, and tenant isolation; TRD §18 already names the response-write operation family.
+- C4 already routes the public API through `tenant_authorization` before session/response components and assigns validation/authorization to the Runtime API process.
+- UML already models participant response submission, Active-state validation, append-only response evidence, server sequence, and idempotent replay in the anonymous-assessment sequence.
+- ERD already models `assessment_session` → `response_event` cardinality and the response event's opaque identity, item, digest, and server sequence fields.
+- Security/Data already states that clients are untrusted, server-side authorization is authoritative, tenant/resource authorization is required, and opaque references are identifiers rather than capabilities.
+- Roadmap Phase 3 already requires the versioned public/admin HTTP API, RFC 9457 errors, OpenAPI validation, and an anonymous start→response→completion→score→result journey.
+
+Those mappings do not change their semantics for this slice and therefore do not need duplicate edits merely to restate the same rule. PR #415 does update the machine-readable response OpenAPI, ADR-0014/traceability lineage, changelog, and this assessment, while preserving its Active-PR maturity marker.
 
 ## Current artifact sufficiency
 
 | Artifact family | Current assessment | Reconciliation / remaining obligation |
 |---|---|---|
 | PRD | **Sufficient / current** | Canonical journey, consumer scope, Big Five first family, narrative separation, reflection, longitudinal, research contribution, boundaries, and acceptance criteria are present. Keep requirement-to-evidence mapping in Traceability rather than duplicate prose. |
-| TRD | **Sufficient with normal implementation follow-through** | Strong systems-of-record, lifecycle, security/tenancy, research, AI, API/event, persistence, accessibility, locale and degraded-mode contracts. New concrete domain modules are reconciled through Traceability/UML/ERD; future transport/migration work must update TRD if semantics change. |
+| TRD | **Sufficient with normal implementation follow-through** | Systems-of-record, lifecycle, security/tenancy, response, research, AI, API/event, persistence, accessibility, locale, and degraded-mode contracts cover current ownership. Future implementations must update it when semantics actually change. |
 | Root `ARCHITECTURE.md` + C4 | **Sufficient / current target architecture** | Bounded-context ownership and dependency direction are explicit. It is target/mixed architecture, not deployment proof. |
-| ADR set | **Sufficient after ADR-0020** | ADR-0001–0019 covered the major product/scientific/integration decisions; ADR-0020 now removes ambiguity around mutable Keyverse projection versus append-only persisted identity-link history. |
-| UML | **Sufficient after reconciliation** | Domain/state/sequence views now include item delivery, participant identity-link lifecycle, longitudinal orchestration, and Measurement Workbench publication evidence. |
-| Logical ERD | **Sufficient after reconciliation** | Adds `participant_identity_link`, `item_delivery_event`, `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` while retaining the no-fabricated-DDL rule. |
-| Security/privacy architecture | **Sufficient as design baseline** | Trust boundaries, research linkage, tenant fail-closed behavior, data classes, and prohibited flows are documented; E2E evidence remains required. |
+| ADR set | **Sufficient after ADR-0020** | ADR-0001–0020 cover the major product/scientific/integration decisions. A later implementation that contradicts an accepted decision requires a superseding ADR. |
+| UML | **Sufficient / current target behavior** | Domain/state/sequence views include item delivery, response submission, participant identity-link lifecycle, longitudinal orchestration, and Measurement Workbench publication evidence. |
+| Logical ERD | **Sufficient / current logical model** | Models response evidence, append-only identity-link history, item-delivery evidence, longitudinal orchestration, and research boundaries while retaining the no-fabricated-DDL rule. |
+| Security/privacy architecture | **Sufficient as design baseline** | Trust boundaries, tenant/resource authorization, research linkage, data classes, prohibited flows, and fail-closed authorization principles are documented; hosted E2E evidence remains required. |
 | Measurement governance | **Sufficient as product-side governance** | Covers relation-sensitive model selection, factor-retention separation, parameter recovery/coverage, scoreability, DIF/invariance/linking, multilevel/multiple-membership/time, judge-as-rater, and fast-mlsirm ownership. Numerical kernels remain upstream. |
 | AI governance | **Sufficient as design baseline** | AI is optional/bounded and cannot mutate scientific numeric truth. Provider/egress/model tests remain implementation evidence. |
 | Research governance | **Sufficient as design baseline** | Purpose-specific contribution, pseudonymization/linkage boundary, privacy/scientific review and immutable release semantics are present. End-to-end release evidence remains Target. |
 | Product experience | **Sufficient as design baseline** | Quick/Deep/Reflect/Longitudinal, continuous-score interpretation, narrative UX, research opt-in, accessibility/i18n and Workbench surfaces are described. |
 | Quality / risk / compliance readiness | **Sufficient as assurance baseline** | Evidence scenarios and risk state are explicit; readiness is not certification. |
-| Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `4499d9c…`, reconciles merged result/session/anonymous-authorization/scoring-adapter slices, and isolates still-open PRs from shipped truth. Must be updated after every material merge. |
-| Roadmap / agent guidance / changelog | **Sufficient for continued delivery** | Must remain code-current; documentation completion is not a terminal condition for the execution loop. |
-| Machine-readable OpenAPI / AsyncAPI | **Not yet applicable as as-built evidence** | Add and validate with the first implemented HTTP/event transport. Do not publish aspirational operations as deployed. |
-| Physical schema / as-built topology | **Partial / implementation-gated** | Logical ERD is authoritative target semantics. Actual migrations/topology/rollback/restore evidence must be compared to it as those artifacts land. |
+| Traceability | **Current on this reconciliation branch** | Names evaluated protected main `09534ef…`, records merged #248 longitudinal persistence, and isolates active #409/#284/#415 work from shipped truth. Must be updated after every material merge. |
+| Roadmap / agent guidance / changelog | **Sufficient for continued delivery** | Changelog is reconciled so merged #248/#287 are no longer mislabeled as Active PRs and #415 is explicitly Active PR evidence. Documentation completion is not a terminal condition for execution. |
+| Machine-readable OpenAPI / AsyncAPI | **Partial / family-specific as-built evidence** | Protected main ships `openapi/sessions.yaml` and `openapi/results.yaml` for implemented HTTP families. Active PR #415 adds `openapi/responses.yaml` but it is not protected-main evidence yet. AsyncAPI remains future evidence until durable external event transport exists. Never list unimplemented operations as deployed. |
+| Physical schema / as-built topology | **Partial / implementation-gated** | Real PostgreSQL migrations cover an increasing subset of the logical model, including longitudinal observation persistence through #248. The logical ERD remains target semantics; deployed topology/rollback/restore evidence remains separate. |
 | Instrument-release evidence bundles | **Target** | Every publishable consumer instrument needs immutable rights, locale/translation, scoring/calibration/norm, DIF/invariance/linking where claimed, scoreability, intended-use and narrative-rule evidence. |
 
 ## Whole-conversation architecture reconciliation
@@ -45,7 +58,7 @@ The user journey is:
 
 > **Measure → Understand → Reflect → Observe Over Time → Contribute to Science**
 
-The following decisions are now discoverable in canonical repository artifacts and must remain mutually consistent:
+The following decisions are discoverable in canonical repository artifacts and must remain mutually consistent:
 
 1. **Scientific source of truth.** Continuous/facet scores, uncertainty, calibration, norms, DIF/invariance/linking and scoreability are scientific artifacts. Personality Style is a separately versioned deterministic presentation mapping; it is not MBTI equivalence and optional AI cannot change the numeric source of truth.
 2. **Initial consumer scope.** IPIP Big Five is the first core family. Self-compassion and future reflection constructs are independently measured instruments, not inferences from Big Five.
@@ -62,24 +75,26 @@ Enterprise issue prioritization/causal expected-intervention-value logic is not 
 
 ## Protected-main implementation reconciliation
 
-At exact protected-main `4499d9c0889c082487ddbd7fd8d0d5d18257995d` the domain surface includes, among other existing modules:
+At exact protected main `09534ef52c9307ce0dc559e9d908ebd715c641a1`, representative implemented evidence includes:
 
 - `src/item_delivery.rs` — sequence-aware item delivery evidence;
 - `src/participant.rs` — stable participant identity and first optional Keyverse link primitive;
 - `src/authorization.rs` — fail-closed tenant/task authorization domain gates;
-- `src/integration.rs` — outbox/inbox/retry/quarantine domain contracts.
-- `src/scoring_engine.rs` — request-bound external scoring-engine adapter boundary.
+- `src/integration.rs` — outbox/inbox/retry/quarantine domain contracts;
+- `src/scoring_engine.rs` — request-bound external scoring-engine adapter boundary;
+- `src/session_http.rs` plus `openapi/sessions.yaml` — implemented session HTTP family and machine-readable contract;
+- `src/result_http.rs` / `src/result_export_http.rs` plus `openapi/results.yaml` — protected-main result read/export HTTP evidence;
+- `src/postgres_longitudinal_observation.rs` plus migration `0031_longitudinal_observation.sql` — immutable normalized longitudinal observation/membership persistence merged through #248.
 
-Those modules are now represented as protected-main evidence in `docs/TRACEABILITY.md`. Their HTTP/persistence/live-adapter layers are not inferred from the existence of the domain structs.
+Those modules are represented as protected-main evidence in `docs/TRACEABILITY.md`. Their existence never implies unimplemented live adapters, deployment profiles, enrollment persistence, reference clients, or external-service completion.
 
-PR #24 (`feat/postgres-integration-persistence`) and PR #251 (`feat(scoring): enforce request-bound engine adapter results`) are merged. Only the PostgreSQL migrations and adapters actually present on the named protected head are protected-main evidence; live `fast-mlsirm` execution, remaining aggregate persistence, transport, and recovery work remains implementation-gated.
+PR #24 and later persistence PRs have incrementally implemented product-owned PostgreSQL evidence. PR #248 is now merged on the evaluated baseline. Live `fast-mlsirm` execution, remaining aggregate persistence, complete hosted authorization/store loading, durable external transport, and recovery work remain implementation-gated.
 
 ## Remaining evidence before GA
 
 GA evidence remains incomplete until one exact integrated protected head/release architecture supplies all applicable evidence below:
 
-- machine-readable OpenAPI validated against implemented HTTP transport;
-- AsyncAPI validated against implemented durable event channels/messages;
+- machine-readable OpenAPI validation for every deployed HTTP family and AsyncAPI for any implemented durable external event transport;
 - reviewed physical migrations matching logical ERD, transaction, uniqueness, tenant, identity-link, longitudinal-time and rollback/recovery contracts;
 - deployed topology with environment-specific network, secret, encryption, residency, retention, backup, restore and observability evidence;
 - profile-specific SLO/RPO/RTO commitments derived from measured workload and recovery evidence;
