@@ -1,11 +1,12 @@
 //! Public in-process HTTP boundary for reading one immutable personal result.
 //!
-//! `GET /v1/results/{result_ref}` returns the score observations and immutable
-//! scoring provenance already stored in [`crate::result::ResultSnapshot`]. The
-//! handler never recomputes psychometric values. Authorization is evaluated from
-//! the server-owned participant and result records before the route reference is
-//! compared with the stored result, so an unauthorized caller cannot use a
-//! binding mismatch as an existence oracle.
+//! `GET` and `HEAD /v1/results/{result_ref}` expose the score observations and
+//! immutable scoring provenance already stored in [`crate::result::ResultSnapshot`].
+//! `HEAD` follows the same authorization and routing path as `GET` but emits no
+//! response content. The handler never recomputes psychometric values.
+//! Authorization is evaluated from the server-owned participant and result records
+//! before the route reference is compared with the stored result, so an unauthorized
+//! caller cannot use a binding mismatch as an existence oracle.
 
 use crate::authorization::AuthorizationContext;
 use crate::participant::ParticipantRecord;
@@ -54,7 +55,7 @@ impl ResultHttpResponse {
         Self {
             status: 405,
             content_type: "application/problem+json",
-            allow: Some("GET"),
+            allow: Some("GET, HEAD"),
             body: format!(
                 "{{\"type\":{},\"title\":{},\"status\":405,\"detail\":{}}}",
                 json_string(type_uri),
@@ -62,6 +63,13 @@ impl ResultHttpResponse {
                 json_string(detail)
             ),
         }
+    }
+
+    fn for_request_method(mut self, method: &str) -> Self {
+        if method == "HEAD" {
+            self.body.clear();
+        }
+        self
     }
 
     /// Return the HTTP status code.
@@ -82,7 +90,7 @@ impl ResultHttpResponse {
         self.allow
     }
 
-    /// Return the response body.
+    /// Return the response body. Successful and error `HEAD` responses are empty.
     #[must_use]
     pub fn body(&self) -> &str {
         &self.body
@@ -95,7 +103,8 @@ impl ResultHttpResponse {
 /// request. The actor never supplies resource ownership. Authorization is
 /// intentionally checked before comparing the route reference with the stored
 /// result identity. Query parameters are rejected until the repository defines
-/// their semantics instead of being silently ignored.
+/// their semantics instead of being silently ignored. `HEAD` performs the same
+/// checks as `GET` and suppresses response content as required by RFC 9110.
 #[must_use]
 pub fn handle_result_http_request(
     request: &str,
@@ -117,7 +126,8 @@ pub fn handle_result_http_request(
             "urn:psychometrics-commons:problem:unsupported-query",
             "Unsupported Query",
             "result reads do not define query parameters; request the exact result resource",
-        );
+        )
+        .for_request_method(method);
     }
     let Some(route_result_ref) = target
         .strip_prefix(RESULT_READ_PATH_PREFIX)
@@ -127,14 +137,15 @@ pub fn handle_result_http_request(
             404,
             "urn:psychometrics-commons:problem:not-found",
             "Not Found",
-            "result reads use GET /v1/results/{result_ref}",
-        );
+            "result reads use GET or HEAD /v1/results/{result_ref}",
+        )
+        .for_request_method(method);
     };
-    if method != "GET" {
+    if method != "GET" && method != "HEAD" {
         return ResultHttpResponse::method_not_allowed(
             "urn:psychometrics-commons:problem:method-not-allowed",
             "Method Not Allowed",
-            "result reads use GET /v1/results/{result_ref}",
+            "result reads use GET or HEAD /v1/results/{result_ref}",
         );
     }
     if !canonical_route_reference(route_result_ref) {
@@ -143,7 +154,8 @@ pub fn handle_result_http_request(
             "urn:psychometrics-commons:problem:invalid-reference",
             "Invalid Reference",
             "use an exact opaque non-numeric result reference without URL-encoded aliases",
-        );
+        )
+        .for_request_method(method);
     }
     if authorize_result_read(actor, participant, result).is_err() {
         return ResultHttpResponse::problem(
@@ -151,7 +163,8 @@ pub fn handle_result_http_request(
             "urn:psychometrics-commons:problem:result-access-denied",
             "Result Access Denied",
             "the authenticated context is not authorized to read this result",
-        );
+        )
+        .for_request_method(method);
     }
     if route_result_ref != result.result_snapshot_ref() {
         return ResultHttpResponse::problem(
@@ -159,10 +172,11 @@ pub fn handle_result_http_request(
             "urn:psychometrics-commons:problem:result-not-found",
             "Result Not Found",
             "no authorized immutable result matches the requested reference",
-        );
+        )
+        .for_request_method(method);
     }
 
-    ResultHttpResponse::json(result_body(result))
+    ResultHttpResponse::json(result_body(result)).for_request_method(method)
 }
 
 fn parse_request_line(request: &str) -> Option<(&str, &str)> {
