@@ -1,5 +1,8 @@
 //! Personal result exports preserve causal time ordering with their source result.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::result_export::{
@@ -16,10 +19,11 @@ const ENGINE_DIGEST: &str =
 
 /// Build one immutable scored result with a fixed server-authoritative creation time.
 fn snapshot() -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_export_time_order").unwrap();
+    let mut session = response_support::active_session("session_export_time_order");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &session,
             ResponseWrite {
                 server_event_ref: "event_export_time_order",
                 client_event_ref: "client_export_time_order",
@@ -29,11 +33,9 @@ fn snapshot() -> ResultSnapshot {
             },
         )
         .unwrap();
+    response_support::advance_to(&mut session, SessionState::Completed);
     let response_snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_export_time_order",
-        )
+        .freeze_as(&session, "response_snapshot_export_time_order")
         .unwrap();
     let request = ScoringRequest::from_snapshot(
         &response_snapshot,
