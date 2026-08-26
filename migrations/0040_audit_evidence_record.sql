@@ -121,6 +121,31 @@ $create_audit_evidence_record$;
             MESSAGE = 'audit_evidence_record column contract does not match migration 0040';
     END IF;
 
+    -- Constraint names alone are not evidence of invariant semantics. Rebuild every owned
+    -- constraint so migration reapplication repairs a weaker same-named historical definition;
+    -- incompatible existing rows fail closed while the constraint is revalidated.
+    ALTER TABLE audit_evidence_record
+        DROP CONSTRAINT IF EXISTS audit_evidence_event_ref_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_tenant_ref_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_actor_ref_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_resource_ref_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_purpose_code_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_action_code_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_outcome_allowed_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_digest_shape_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_occurrence_positive_check,
+        DROP CONSTRAINT IF EXISTS audit_evidence_record_pkey,
+        ADD CONSTRAINT audit_evidence_record_pkey PRIMARY KEY (audit_event_ref),
+        ADD CONSTRAINT audit_evidence_event_ref_shape_check CHECK (audit_evidence_reference_is_valid(audit_event_ref)),
+        ADD CONSTRAINT audit_evidence_tenant_ref_shape_check CHECK (audit_evidence_reference_is_valid(tenant_ref)),
+        ADD CONSTRAINT audit_evidence_actor_ref_shape_check CHECK (audit_evidence_reference_is_valid(actor_ref)),
+        ADD CONSTRAINT audit_evidence_resource_ref_shape_check CHECK (audit_evidence_reference_is_valid(resource_ref)),
+        ADD CONSTRAINT audit_evidence_purpose_code_shape_check CHECK (purpose_code ~ '^[a-z][a-z0-9_]*$'),
+        ADD CONSTRAINT audit_evidence_action_code_shape_check CHECK (action_code ~ '^[a-z][a-z0-9_]*$'),
+        ADD CONSTRAINT audit_evidence_outcome_allowed_check CHECK (outcome_code IN ('succeeded', 'denied', 'failed')),
+        ADD CONSTRAINT audit_evidence_digest_shape_check CHECK (evidence_digest ~ '^sha256:[0-9a-f]{64}$'),
+        ADD CONSTRAINT audit_evidence_occurrence_positive_check CHECK (occurred_at_unix_ms > 0);
+
     SELECT ARRAY(
         SELECT constraint_record.conname::TEXT
         FROM pg_constraint AS constraint_record
