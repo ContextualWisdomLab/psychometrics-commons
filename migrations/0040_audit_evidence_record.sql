@@ -210,16 +210,27 @@ BEGIN
 END
 $audit_evidence_index_contract$;
 
+-- Migration 0041 deliberately replaces this guard with the narrowly authorized retention-aware
+-- version. Reapplying 0040 must repair the base append-only guard only when the retention routine
+-- has not been installed; otherwise it would silently erase the later migration's capability.
+DO $audit_evidence_mutation_guard$
+BEGIN
+    IF to_regprocedure('expire_audit_evidence_before(text,bigint)') IS NULL THEN
+        EXECUTE $create_base_mutation_guard$
 CREATE OR REPLACE FUNCTION reject_audit_evidence_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog
-AS $$
+AS $mutation_guard_body$
 BEGIN
     RAISE EXCEPTION 'audit evidence is append-only'
         USING ERRCODE = '55000';
 END;
-$$;
+$mutation_guard_body$;
+$create_base_mutation_guard$;
+    END IF;
+END
+$audit_evidence_mutation_guard$;
 
 DROP TRIGGER IF EXISTS audit_evidence_reject_row_mutation ON audit_evidence_record;
 CREATE TRIGGER audit_evidence_reject_row_mutation
