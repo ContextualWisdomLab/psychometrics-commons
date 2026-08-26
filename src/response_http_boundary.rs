@@ -71,6 +71,11 @@ fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<St
         let headers = std::str::from_utf8(&buffer[..body_start])
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         reject_transfer_encoding(headers)?;
+        // The response event idempotency key is a single semantic identity, not
+        // a list-valued field. Reject duplicates at the same framing boundary as
+        // Content-Length so intermediaries and the application cannot select
+        // different replay identities.
+        let _ = single_header_value(headers, "idempotency-key")?;
         let expected = match single_header_value(headers, "content-length")? {
             Some(value) => declared_request_end(body_start, value)?,
             None => body_start,
