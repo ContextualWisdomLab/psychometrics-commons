@@ -151,29 +151,29 @@ fn interleaved_sessions_do_not_reuse_server_event_reference() {
     let mut runtime =
         ResponseHttpRuntime::new(vec![session_a, session_b], vec![release], "evt_response_1");
 
-    let first_a_request = post_request(
+    let session_alpha_request = post_request(
         "ses_response_multi_a",
         "idem_response_multi_a_1",
         "item_version_001",
         PAYLOAD_ONE,
     );
-    let first_a = authorized_response(&mut runtime, "ptc_response_multi_a", &first_a_request);
+    let first_a = authorized_response(&mut runtime, "ptc_response_multi_a", &session_alpha_request);
 
-    let first_b_request = post_request(
+    let session_beta_initial = post_request(
         "ses_response_multi_b",
         "idem_response_multi_b_1",
         "item_version_001",
         PAYLOAD_ONE,
     );
-    let first_b = authorized_response(&mut runtime, "ptc_response_multi_b", &first_b_request);
+    let first_b = authorized_response(&mut runtime, "ptc_response_multi_b", &session_beta_initial);
 
-    let second_b_request = post_request(
+    let session_beta_followup = post_request(
         "ses_response_multi_b",
         "idem_response_multi_b_2",
         "item_version_002",
         PAYLOAD_TWO,
     );
-    let second_b = authorized_response(&mut runtime, "ptc_response_multi_b", &second_b_request);
+    let second_b = authorized_response(&mut runtime, "ptc_response_multi_b", &session_beta_followup);
 
     assert_eq!(first_a.status(), 201);
     assert_eq!(first_b.status(), 201);
