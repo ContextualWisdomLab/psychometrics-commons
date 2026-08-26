@@ -6,9 +6,15 @@ use psychometrics_commons_runtime::postgres_response_event::{
     persist_response_event, ResponseEventPersistenceDisposition, ResponseEventPersistenceError,
     ResponseEventReceipt,
 };
-use psychometrics_commons_runtime::response::{ResponseEvent, ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
+
+use psychometrics_commons_runtime::response::{
+    ResponseEvent, ResponseLedger, ResponseWrite, WriteError,
+};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
-use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{Mutex, MutexGuard};
 
 const DIGEST_N1: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -62,8 +68,9 @@ fn recorded_event(
     session_ref: &str,
     request: ResponseWrite<'_>,
 ) -> (ResponseLedger, ResponseEvent) {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
-    let event = ledger.record(SessionState::Active, request).unwrap();
+    let session = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    let event = ledger.record(&session, request).unwrap();
     (ledger, event)
 }
 
@@ -187,10 +194,11 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
     reset_response_event_table(&mut client);
     apply_response_event_migration(&mut client).unwrap();
 
-    let mut control = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    let session_control = active_session("session_ipip_ko_quick");
+    let mut control = ResponseLedger::from_session(&session_control).unwrap();
     let control_first = control
         .record(
-            SessionState::Active,
+            &session_control,
             write(
                 "server_event_item_01",
                 "client_event_item_01",
@@ -201,7 +209,7 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
         .unwrap();
     control
         .record(
-            SessionState::Active,
+            &session_control,
             write(
                 "server_event_item_02",
                 "client_event_item_02",
@@ -211,15 +219,19 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
         )
         .unwrap();
     let expected_snapshot = control
-        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .freeze_as(
+            &completed_session("session_ipip_ko_quick"),
+            "response_snapshot_ipip_ko_quick",
+        )
         .unwrap();
     let expected_request =
         ScoringRequest::from_snapshot(&expected_snapshot, scoring_input()).unwrap();
 
-    let mut first_only = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    let session_first_only = active_session("session_ipip_ko_quick");
+    let mut first_only = ResponseLedger::from_session(&session_first_only).unwrap();
     let first = first_only
         .record(
-            SessionState::Active,
+            &session_first_only,
             write(
                 "server_event_item_01",
                 "client_event_item_01",
@@ -248,7 +260,7 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
 
     let second = after_restart
         .record(
-            SessionState::Active,
+            &session_control,
             write(
                 "server_event_item_02",
                 "client_event_item_02",
@@ -266,7 +278,10 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
     assert_eq!(rebuilt, after_restart);
     assert_eq!(rebuilt, control);
     let snapshot = rebuilt
-        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .freeze_as(
+            &completed_session("session_ipip_ko_quick"),
+            "response_snapshot_ipip_ko_quick",
+        )
         .unwrap();
     let request = ScoringRequest::from_snapshot(&snapshot, scoring_input()).unwrap();
     assert_eq!(snapshot, expected_snapshot);
@@ -276,20 +291,40 @@ fn two_item_korean_path_survives_restart_and_exact_replay() {
 }
 
 #[test]
-fn persisted_replay_uses_canonical_in_memory_references() {
+fn persisted_replay_rejects_padded_references_and_replays_exact_ones() {
     let _guard = response_event_test_guard();
     let mut client = test_client();
     reset_response_event_table(&mut client);
     apply_response_event_migration(&mut client).unwrap();
 
-    let mut ledger = ResponseLedger::new("session_ipip_ko_alias").unwrap();
+    let session_ledger = active_session("session_ipip_ko_alias");
+    let mut ledger = ResponseLedger::from_session(&session_ledger).unwrap();
+
+    // The exact-reference contract rejects padded aliases outright instead of
+    // silently canonicalizing them, so the padded first offer fails closed.
+    assert_eq!(
+        ledger
+            .record(
+                &session_ledger,
+                write(
+                    " server_event_item_01 ",
+                    " client_event_item_01 ",
+                    " item_version_n1_ko ",
+                    DIGEST_N1,
+                ),
+            )
+            .unwrap_err(),
+        WriteError::InvalidReference
+    );
+
+    // The exact spelling is accepted and persists as the inserted event.
     let event = ledger
         .record(
-            SessionState::Active,
+            &session_ledger,
             write(
-                " server_event_item_01 ",
-                " client_event_item_01 ",
-                " item_version_n1_ko ",
+                "server_event_item_01",
+                "client_event_item_01",
+                "item_version_n1_ko",
                 DIGEST_N1,
             ),
         )
@@ -301,13 +336,15 @@ fn persisted_replay_uses_canonical_in_memory_references() {
         ResponseEventPersistenceDisposition::Inserted
     );
 
+    // A replay that supplies a different server reference with otherwise exact
+    // content stays idempotent and persists as a duplicate.
     let replay = ledger
         .record(
-            SessionState::Active,
+            &session_ledger,
             write(
                 "ignored_server_event_ref",
-                " client_event_item_01 ",
-                " item_version_n1_ko ",
+                "client_event_item_01",
+                "item_version_n1_ko",
                 DIGEST_N1,
             ),
         )
@@ -590,10 +627,11 @@ fn unexpected_unique_constraint_and_negative_sequence_fail_closed() {
     reset_response_event_table(&mut client);
     apply_response_event_migration(&mut client).unwrap();
 
-    let mut ledger = ResponseLedger::new("session_ipip_ko_extra").unwrap();
+    let session_ledger = active_session("session_ipip_ko_extra");
+    let mut ledger = ResponseLedger::from_session(&session_ledger).unwrap();
     let first = ledger
         .record(
-            SessionState::Active,
+            &session_ledger,
             write(
                 "server_event_item_01",
                 "client_event_item_01",
@@ -610,7 +648,7 @@ fn unexpected_unique_constraint_and_negative_sequence_fail_closed() {
         .unwrap();
     let second = ledger
         .record(
-            SessionState::Active,
+            &session_ledger,
             write(
                 "server_event_item_02",
                 "client_event_item_02",

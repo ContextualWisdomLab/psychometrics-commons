@@ -284,12 +284,6 @@ impl ResponseLedger {
         self.events.is_empty()
     }
 
-    /// Return the opaque assessment-session reference.
-    #[must_use]
-    pub fn session_ref(&self) -> &str {
-        &self.session_ref
-    }
-
     /// Return accepted events in server-authoritative sequence order.
     #[must_use]
     pub fn events(&self) -> &[ResponseEvent] {

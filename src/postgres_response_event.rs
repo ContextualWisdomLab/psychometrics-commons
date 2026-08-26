@@ -354,7 +354,9 @@ fn require_contiguous_receipt_history(
 
 fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {
     match error {
-        WriteError::InvalidReference => ResponseEventPersistenceError::InvalidReference,
+        WriteError::InvalidReference | WriteError::SessionMismatch => {
+            ResponseEventPersistenceError::InvalidReference
+        }
         WriteError::InvalidSequence => ResponseEventPersistenceError::InvalidSequence,
         WriteError::EmptyReference
         | WriteError::InvalidPayloadDigest

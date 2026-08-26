@@ -4,9 +4,17 @@
 //! and still freeze the same scoring prefix after item 2. Persistence adapters
 //! must rebuild that ledger without inventing answers or scores.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
+
+fn frozen_session() -> psychometrics_commons_runtime::session::AssessmentSession {
+    completed_session("session_ipip_ko_quick")
+}
+
 use psychometrics_commons_runtime::response::{ResponseEvent, ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
-use psychometrics_commons_runtime::session::SessionState;
 
 const DIGEST_N1: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const DIGEST_N2: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -40,9 +48,10 @@ fn scoring_input<'a>() -> ScoringRequestInput<'a> {
 
 #[test]
 fn reconstructed_two_item_korean_path_pins_the_same_scoring_request() {
-    let mut live = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    let session_live = active_session("session_ipip_ko_quick");
+    let mut live = ResponseLedger::from_session(&session_live).unwrap();
     live.record(
-        SessionState::Active,
+        &session_live,
         write(
             "server_event_item_01",
             "client_event_item_01",
@@ -52,7 +61,7 @@ fn reconstructed_two_item_korean_path_pins_the_same_scoring_request() {
     )
     .unwrap();
     live.record(
-        SessionState::Active,
+        &session_live,
         write(
             "server_event_item_02",
             "client_event_item_02",
@@ -62,7 +71,7 @@ fn reconstructed_two_item_korean_path_pins_the_same_scoring_request() {
     )
     .unwrap();
     let expected_snapshot = live
-        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .freeze_as(&frozen_session(), "response_snapshot_ipip_ko_quick")
         .unwrap();
     let expected_request =
         ScoringRequest::from_snapshot(&expected_snapshot, scoring_input()).unwrap();
@@ -90,7 +99,7 @@ fn reconstructed_two_item_korean_path_pins_the_same_scoring_request() {
     )
     .unwrap();
     let rebuilt_snapshot = rebuilt
-        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .freeze_as(&frozen_session(), "response_snapshot_ipip_ko_quick")
         .unwrap();
     let rebuilt_request =
         ScoringRequest::from_snapshot(&rebuilt_snapshot, scoring_input()).unwrap();
@@ -107,10 +116,11 @@ fn reconstructed_two_item_korean_path_pins_the_same_scoring_request() {
 
 #[test]
 fn restarted_korean_path_records_item_two_and_keeps_the_scoring_prefix() {
-    let mut control = ResponseLedger::new("session_ipip_ko_quick").unwrap();
+    let session_control = active_session("session_ipip_ko_quick");
+    let mut control = ResponseLedger::from_session(&session_control).unwrap();
     control
         .record(
-            SessionState::Active,
+            &session_control,
             write(
                 "server_event_item_01",
                 "client_event_item_01",
@@ -121,7 +131,7 @@ fn restarted_korean_path_records_item_two_and_keeps_the_scoring_prefix() {
         .unwrap();
     control
         .record(
-            SessionState::Active,
+            &session_control,
             write(
                 "server_event_item_02",
                 "client_event_item_02",
@@ -131,7 +141,7 @@ fn restarted_korean_path_records_item_two_and_keeps_the_scoring_prefix() {
         )
         .unwrap();
     let expected_snapshot = control
-        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .freeze_as(&frozen_session(), "response_snapshot_ipip_ko_quick")
         .unwrap();
     let expected_request =
         ScoringRequest::from_snapshot(&expected_snapshot, scoring_input()).unwrap();
@@ -150,7 +160,7 @@ fn restarted_korean_path_records_item_two_and_keeps_the_scoring_prefix() {
     .unwrap();
     after_restart
         .record(
-            SessionState::Active,
+            &session_control,
             write(
                 "server_event_item_02",
                 "client_event_item_02",
@@ -160,7 +170,7 @@ fn restarted_korean_path_records_item_two_and_keeps_the_scoring_prefix() {
         )
         .unwrap();
     let rebuilt_snapshot = after_restart
-        .freeze_as(SessionState::Completed, "response_snapshot_ipip_ko_quick")
+        .freeze_as(&frozen_session(), "response_snapshot_ipip_ko_quick")
         .unwrap();
     let rebuilt_request =
         ScoringRequest::from_snapshot(&rebuilt_snapshot, scoring_input()).unwrap();
