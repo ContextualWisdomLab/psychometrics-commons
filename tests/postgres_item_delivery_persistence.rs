@@ -22,6 +22,9 @@ fn item_delivery_test_guard() -> Client {
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     guard
+        .batch_execute("SET lock_timeout TO '60s'")
+        .expect("database-lock waits should have a finite CI bound");
+    guard
         .query_one(
             "SELECT pg_advisory_lock($1)",
             &[&ITEM_DELIVERY_PERSISTENCE_DATABASE_LOCK_KEY],
