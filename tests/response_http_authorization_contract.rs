@@ -104,16 +104,14 @@ fn participant() -> ParticipantRecord {
 }
 
 fn active_session(release: &InstrumentRelease) -> AssessmentSession {
-    let mut session = AssessmentSession::new(
-        SESSION_REF,
-        PARTICIPANT_REF,
-        release,
-        "ko-KR",
-        10_400,
-    )
-    .unwrap();
+    let mut session =
+        AssessmentSession::new(SESSION_REF, PARTICIPANT_REF, release, "ko-KR", 10_400).unwrap();
     session
-        .apply_command("cmd_activate_response_authority", 1, SessionCommand::Activate)
+        .apply_command(
+            "cmd_activate_response_authority",
+            1,
+            SessionCommand::Activate,
+        )
         .unwrap();
     session
 }
@@ -128,9 +126,8 @@ fn runtime() -> ResponseHttpRuntime {
 }
 
 fn request(session_ref: &str) -> String {
-    let body = format!(
-        "{{\"item_version_ref\":\"{ITEM_REF}\",\"payload_digest\":\"{PAYLOAD_DIGEST}\"}}"
-    );
+    let body =
+        format!("{{\"item_version_ref\":\"{ITEM_REF}\",\"payload_digest\":\"{PAYLOAD_DIGEST}\"}}");
     format!(
         "POST /v1/sessions/{session_ref}/responses HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: idem_response_authority_001\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
