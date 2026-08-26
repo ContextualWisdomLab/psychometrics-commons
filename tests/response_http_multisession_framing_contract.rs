@@ -182,6 +182,51 @@ fn interleaved_sessions_do_not_reuse_server_event_reference() {
 }
 
 #[test]
+fn generated_server_event_cursor_skips_a_valid_seed_that_occupies_its_namespace() {
+    let release = published_release();
+    let session = active_session(
+        "ses_response_seed_collision",
+        "ptc_response_seed_collision",
+        &release,
+    );
+    let mut runtime = ResponseHttpRuntime::new(
+        vec![session],
+        vec![release],
+        "evt_response_2",
+    );
+
+    let first_request = post_request(
+        "ses_response_seed_collision",
+        "idem_response_seed_collision_1",
+        "item_version_001",
+        PAYLOAD_ONE,
+    );
+    let first = authorized_response(
+        &mut runtime,
+        "ptc_response_seed_collision",
+        &first_request,
+    );
+
+    let second_request = post_request(
+        "ses_response_seed_collision",
+        "idem_response_seed_collision_2",
+        "item_version_002",
+        PAYLOAD_TWO,
+    );
+    let second = authorized_response(
+        &mut runtime,
+        "ptc_response_seed_collision",
+        &second_request,
+    );
+
+    assert_eq!(first.status(), 201);
+    assert_eq!(second.status(), 201);
+    assert_eq!(runtime.event_count("ses_response_seed_collision"), 2);
+    assert!(first.body().contains("\"server_event_ref\":\"evt_response_2\""));
+    assert!(!second.body().contains("\"server_event_ref\":\"evt_response_2\""));
+}
+
+#[test]
 fn body_lines_cannot_supply_the_idempotency_header() {
     let release = published_release();
     let session = active_session(
