@@ -47,5 +47,8 @@ fn default_ignorable_references_match_the_rust_fail_closed_boundary() {
         )
         .unwrap()
         .get(0);
-    assert!(is_valid, "visible multilingual identity material must remain valid");
+    assert!(
+        is_valid,
+        "visible multilingual identity material must remain valid"
+    );
 }
