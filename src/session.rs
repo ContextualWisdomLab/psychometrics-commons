@@ -8,10 +8,16 @@
 //! instrument release, version, content digest, locale, and ordered item-version
 //! set before lifecycle transitions begin.
 
-use crate::instrument::InstrumentRelease;
+use crate::instrument::{
+    valid_locale, valid_sha256_digest, InstrumentRelease, InstrumentReleaseManifest,
+};
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+
+fn exact_reference(value: &str) -> Option<&str> {
+    normalized_reference(value).filter(|normalized| *normalized == value)
+}
 
 /// Server-authoritative lifecycle state for one assessment session.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,7 +66,7 @@ impl SessionState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum SessionCreationError {
-    /// A session or participant reference was blank or numeric-like.
+    /// A session or participant reference was blank, numeric-like, or not exact.
     InvalidReference,
     /// The server-authoritative session creation timestamp was zero.
     InvalidTimestamp,
@@ -74,7 +80,7 @@ impl Display for SessionCreationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "assessment session references must be opaque non-numeric values"
+                "assessment session references must use their exact opaque non-numeric spelling"
             }
             Self::InvalidTimestamp => "assessment session creation time must be greater than zero",
             Self::InstrumentReleaseUnavailable => {
@@ -89,12 +95,74 @@ impl Display for SessionCreationError {
 
 impl Error for SessionCreationError {}
 
+/// Fail-closed error returned while restoring a created session from stored identity.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum SessionReconstitutionError {
+    /// A session, participant, release, or version reference was blank or numeric-like.
+    InvalidReference,
+    /// The stored session creation timestamp was zero.
+    InvalidTimestamp,
+    /// The stored release content digest was not a canonical SHA-256 digest.
+    InvalidContentDigest,
+    /// The stored locale was not an exact whitespace-free BCP 47-style tag.
+    InvalidLocale,
+}
+
+impl Display for SessionReconstitutionError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidReference => {
+                "use an opaque non-numeric session, participant, release, or version reference"
+            }
+            Self::InvalidTimestamp => "use a stored creation time greater than zero",
+            Self::InvalidContentDigest => {
+                "use a sha256 digest with 64 lowercase hexadecimal digits"
+            }
+            Self::InvalidLocale => "use an exact whitespace-free BCP 47-style locale tag",
+        })
+    }
+}
+
+impl Error for SessionReconstitutionError {}
+
+/// One accepted server-authoritative session command.
+///
+/// Persist this history so a later load can replay Activate/Pause/Resume without
+/// inventing a new lifecycle path. Exact replay identity is the command reference
+/// plus sequence and command evidence.
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AcceptedSessionCommand {
+pub struct AcceptedSessionCommand {
     command_ref: String,
     sequence: u64,
     command: SessionCommand,
     resulting_state: SessionState,
+}
+
+impl AcceptedSessionCommand {
+    /// Return the opaque server command reference.
+    #[must_use]
+    pub fn command_ref(&self) -> &str {
+        &self.command_ref
+    }
+
+    /// Return the positive strictly increasing command sequence.
+    #[must_use]
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    /// Return the lifecycle command that was accepted.
+    #[must_use]
+    pub const fn command(&self) -> SessionCommand {
+        self.command
+    }
+
+    /// Return the state produced by this accepted command.
+    #[must_use]
+    pub const fn resulting_state(&self) -> SessionState {
+        self.resulting_state
+    }
 }
 
 /// Immutable creation identity and current lifecycle state for one assessment session.
@@ -121,17 +189,19 @@ pub struct AssessmentSession {
 impl AssessmentSession {
     /// Create a session from one exact published locale-specific instrument release.
     ///
-    /// `requested_locale` must exactly equal the locale stored on `release`. If they differ,
-    /// session creation fails with [`SessionCreationError::LocaleMismatch`]. This method never
-    /// substitutes another published locale or language.
+    /// Session and participant references must already use their exact accepted opaque spelling;
+    /// surrounding whitespace is rejected rather than silently removed. `requested_locale` must
+    /// exactly equal the locale stored on `release`. If they differ, session creation fails with
+    /// [`SessionCreationError::LocaleMismatch`]. This method never substitutes another published
+    /// locale or language.
     ///
     /// # Errors
     ///
-    /// Returns [`SessionCreationError::InvalidReference`] for malformed session/participant
-    /// references, [`SessionCreationError::InvalidTimestamp`] for a zero server timestamp,
-    /// [`SessionCreationError::InstrumentReleaseUnavailable`] unless the exact release can
-    /// currently accept new sessions, or [`SessionCreationError::LocaleMismatch`] when the
-    /// requested locale is not exactly the release locale.
+    /// Returns [`SessionCreationError::InvalidReference`] for malformed or non-exact
+    /// session/participant references, [`SessionCreationError::InvalidTimestamp`] for a zero
+    /// server timestamp, [`SessionCreationError::InstrumentReleaseUnavailable`] unless the exact
+    /// release can currently accept new sessions, or [`SessionCreationError::LocaleMismatch`]
+    /// when the requested locale is not exactly the release locale.
     pub fn new(
         session_ref: &str,
         participant_ref: &str,
@@ -140,27 +210,122 @@ impl AssessmentSession {
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
         let session_ref =
-            normalized_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+            exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
         let participant_ref =
-            normalized_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+            exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
             return Err(SessionCreationError::InvalidTimestamp);
         }
         if !release.accepts_new_sessions() {
             return Err(SessionCreationError::InstrumentReleaseUnavailable);
         }
-        if requested_locale != release.manifest().locale() {
+        Self::from_currently_published_manifest(
+            session_ref,
+            participant_ref,
+            release.manifest(),
+            requested_locale,
+            created_at_unix_ms,
+        )
+    }
+
+    /// Create a session from a manifest that a published-release load already accepted.
+    ///
+    /// Use this after
+    /// [`crate::postgres_instrument_release::load_published_instrument_release`].
+    /// It does not re-check publication lifecycle; the load boundary is the
+    /// eligibility gate. Call [`AssessmentSession::new`] when the caller still
+    /// holds a live [`InstrumentRelease`]. Session and participant references must
+    /// already use their exact accepted opaque spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionCreationError::InvalidReference`] for malformed or non-exact
+    /// session/participant references, [`SessionCreationError::InvalidTimestamp`]
+    /// for a zero server timestamp, or [`SessionCreationError::LocaleMismatch`]
+    /// when the requested locale is not exactly the manifest locale.
+    pub fn from_currently_published_manifest(
+        session_ref: &str,
+        participant_ref: &str,
+        manifest: &InstrumentReleaseManifest,
+        requested_locale: &str,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, SessionCreationError> {
+        let session_ref =
+            exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let participant_ref =
+            exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+        if created_at_unix_ms == 0 {
+            return Err(SessionCreationError::InvalidTimestamp);
+        }
+        if requested_locale != manifest.locale() {
             return Err(SessionCreationError::LocaleMismatch);
         }
 
         Ok(Self {
             session_ref: session_ref.to_owned(),
             participant_ref: participant_ref.to_owned(),
-            instrument_release_ref: release.manifest().release_ref().to_owned(),
-            instrument_version_ref: release.manifest().instrument_version_ref().to_owned(),
-            instrument_release_content_digest: release.manifest().content_digest().to_owned(),
-            locale: release.manifest().locale().to_owned(),
-            item_version_refs: release.manifest().item_version_refs().to_vec(),
+            instrument_release_ref: manifest.release_ref().to_owned(),
+            instrument_version_ref: manifest.instrument_version_ref().to_owned(),
+            instrument_release_content_digest: manifest.content_digest().to_owned(),
+            locale: manifest.locale().to_owned(),
+            item_version_refs: manifest.item_version_refs().to_vec(),
+            created_at_unix_ms,
+            state: SessionState::Created,
+            accepted_commands: Vec::new(),
+        })
+    }
+
+    /// Restore a created session from durable identity without a live published release.
+    ///
+    /// Use this after loading a stored created-session row. It does not re-check whether
+    /// the original release still accepts new sessions, so a later suspend or retire
+    /// cannot rewrite provenance. Command history starts empty here; load replays
+    /// stored commands after this reconstitution. Call [`AssessmentSession::new`]
+    /// when starting a new session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionReconstitutionError`] when a stored reference, digest, locale,
+    /// or creation timestamp is not a valid created-session identity.
+    pub fn from_persisted_created(
+        session_ref: &str,
+        participant_ref: &str,
+        instrument_release_ref: &str,
+        instrument_version_ref: &str,
+        instrument_release_content_digest: &str,
+        locale: &str,
+        created_at_unix_ms: u64,
+    ) -> Result<Self, SessionReconstitutionError> {
+        let session_ref = normalized_reference(session_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        let participant_ref = normalized_reference(participant_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        let instrument_release_ref = normalized_reference(instrument_release_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        let instrument_version_ref = normalized_reference(instrument_version_ref)
+            .ok_or(SessionReconstitutionError::InvalidReference)?;
+        if created_at_unix_ms == 0 {
+            return Err(SessionReconstitutionError::InvalidTimestamp);
+        }
+        if !valid_sha256_digest(instrument_release_content_digest) {
+            return Err(SessionReconstitutionError::InvalidContentDigest);
+        }
+        if !valid_locale(locale) {
+            return Err(SessionReconstitutionError::InvalidLocale);
+        }
+
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            participant_ref: participant_ref.to_owned(),
+            instrument_release_ref: instrument_release_ref.to_owned(),
+            instrument_version_ref: instrument_version_ref.to_owned(),
+            instrument_release_content_digest: instrument_release_content_digest.to_owned(),
+            locale: locale.to_owned(),
+            // Stored created-session rows do not persist the creation-pinned item
+            // set. The pin is enforced on start paths (`new` /
+            // `from_currently_published_manifest`); delivery-evidence reload
+            // validates against the ledger's own stored allowed set.
+            item_version_refs: Vec::new(),
             created_at_unix_ms,
             state: SessionState::Created,
             accepted_commands: Vec::new(),
@@ -222,6 +387,15 @@ impl AssessmentSession {
     #[must_use]
     pub const fn state(&self) -> SessionState {
         self.state
+    }
+
+    /// Return accepted command history in sequence order.
+    ///
+    /// Use this when persisting later lifecycle states. Load reconstitutes a
+    /// created session and replays these commands; it does not invent state.
+    #[must_use]
+    pub fn accepted_commands(&self) -> &[AcceptedSessionCommand] {
+        &self.accepted_commands
     }
 
     /// Apply one identified lifecycle command to this aggregate's server-authoritative state.
@@ -303,7 +477,7 @@ pub enum SessionCommand {
     BeginScoring,
     /// Record successful completion of the scoring operation.
     RecordScore,
-    /// Make a scored result available according to the result access policy.
+    /// Make a scored result available according to the product access policy.
     Release,
     /// Expire a pre-completion session according to its publication policy.
     Expire,
@@ -311,6 +485,80 @@ pub enum SessionCommand {
     Cancel,
     /// Invalidate a session whose evidence must not proceed to normal serving.
     Invalidate,
+}
+
+impl SessionCommand {
+    /// Return the stable persisted vocabulary for this command.
+    #[must_use]
+    pub const fn persist_name(self) -> &'static str {
+        match self {
+            Self::Activate => "activate",
+            Self::Pause => "pause",
+            Self::Resume => "resume",
+            Self::Complete => "complete",
+            Self::BeginScoring => "begin_scoring",
+            Self::RecordScore => "record_score",
+            Self::Release => "release",
+            Self::Expire => "expire",
+            Self::Cancel => "cancel",
+            Self::Invalidate => "invalidate",
+        }
+    }
+
+    /// Parse a persisted command name.
+    #[must_use]
+    pub fn from_persist_name(name: &str) -> Option<Self> {
+        match name {
+            "activate" => Some(Self::Activate),
+            "pause" => Some(Self::Pause),
+            "resume" => Some(Self::Resume),
+            "complete" => Some(Self::Complete),
+            "begin_scoring" => Some(Self::BeginScoring),
+            "record_score" => Some(Self::RecordScore),
+            "release" => Some(Self::Release),
+            "expire" => Some(Self::Expire),
+            "cancel" => Some(Self::Cancel),
+            "invalidate" => Some(Self::Invalidate),
+            _ => None,
+        }
+    }
+}
+
+impl SessionState {
+    /// Return the stable persisted vocabulary for this state.
+    #[must_use]
+    pub const fn persist_name(self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Scoring => "scoring",
+            Self::Scored => "scored",
+            Self::Released => "released",
+            Self::Expired => "expired",
+            Self::Cancelled => "cancelled",
+            Self::Invalidated => "invalidated",
+        }
+    }
+
+    /// Parse a persisted session-state name.
+    #[must_use]
+    pub fn from_persist_name(name: &str) -> Option<Self> {
+        match name {
+            "created" => Some(Self::Created),
+            "active" => Some(Self::Active),
+            "paused" => Some(Self::Paused),
+            "completed" => Some(Self::Completed),
+            "scoring" => Some(Self::Scoring),
+            "scored" => Some(Self::Scored),
+            "released" => Some(Self::Released),
+            "expired" => Some(Self::Expired),
+            "cancelled" => Some(Self::Cancelled),
+            "invalidated" => Some(Self::Invalidated),
+            _ => None,
+        }
+    }
 }
 
 /// Stable reason category for a rejected identified session command.

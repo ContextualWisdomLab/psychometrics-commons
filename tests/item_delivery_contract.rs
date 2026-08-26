@@ -6,7 +6,9 @@ use item_delivery_support::{published_release, session_in_state, RELEASE_DIGEST}
 use psychometrics_commons_runtime::item_delivery::{
     ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRequest,
 };
-use psychometrics_commons_runtime::session::{AssessmentSession, SessionState};
+use psychometrics_commons_runtime::session::{
+    AssessmentSession, SessionCreationError, SessionState,
+};
 
 fn ledger_for(state: SessionState) -> (AssessmentSession, ItemDeliveryLedger) {
     let release = published_release();
@@ -363,5 +365,28 @@ fn delivery_errors_have_stable_safe_text() {
 
     for (error, expected) in cases {
         assert_eq!(error.to_string(), expected);
+    }
+}
+
+#[test]
+fn session_creation_rejects_padded_session_aliases_before_delivery_binding() {
+    let release = published_release();
+
+    for padded in [
+        " session_big_five_001",
+        "session_big_five_001 ",
+        "\u{2003}session_big_five_001",
+    ] {
+        assert_eq!(
+            AssessmentSession::new(
+                padded,
+                "participant_big_five_001",
+                &release,
+                "ko-KR",
+                20_000,
+            ),
+            Err(SessionCreationError::InvalidReference),
+            "a padded session alias must fail closed before any delivery binding {padded:?}",
+        );
     }
 }

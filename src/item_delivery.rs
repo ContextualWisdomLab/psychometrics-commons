@@ -73,7 +73,7 @@ impl ItemDeliveryEvent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ItemDeliveryError {
-    /// A required delivery-evidence reference was blank or numeric-like instead of opaque.
+    /// A required reference was blank, numeric-like, unsafe, or not already canonical.
     InvalidReference,
     /// The supplied immutable release manifest does not match session creation provenance.
     SessionReleaseMismatch,
@@ -341,5 +341,9 @@ impl ItemDeliveryLedger {
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
-    normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)
+    let normalized = normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)?;
+    if normalized != reference {
+        return Err(ItemDeliveryError::InvalidReference);
+    }
+    Ok(normalized)
 }

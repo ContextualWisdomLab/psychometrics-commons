@@ -1,6 +1,9 @@
 //! Integration tests for scoring-dispatch and immutable result provenance.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
 };
@@ -8,28 +11,23 @@ use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringContractError, ScoringRequest,
     ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const ENGINE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnapshot {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "response_event_ref",
-                client_event_ref: "client_event_ref",
-                item_version_ref: "item_version_ref",
-                payload_digest:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            },
-        )
-        .unwrap();
-    ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap()
+    frozen_snapshot(
+        "session_ref",
+        "response_snapshot_ref",
+        &[ResponseWrite {
+            server_event_ref: "response_event_ref",
+            client_event_ref: "client_event_ref",
+            item_version_ref: "item_version_ref",
+            payload_digest:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }],
+    )
 }
 
 fn scoring_input<'a>() -> ScoringRequestInput<'a> {
@@ -97,7 +95,7 @@ fn scoring_request_accepts_absent_norm_but_rejects_invalid_references_or_schema(
     assert_eq!(empty_error, ScoringContractError::EmptyReference);
     assert_eq!(
         empty_error.to_string(),
-        "scoring contract references must not be empty"
+        "scoring contract references must use exact non-empty opaque spellings; numeric-like values, surrounding whitespace, and unsafe control characters are not allowed"
     );
 
     let mut blank_norm = scoring_input();
