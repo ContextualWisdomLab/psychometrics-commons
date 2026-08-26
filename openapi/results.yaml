@@ -4,10 +4,12 @@ info:
   version: 0.1.0
   description: >
     As-built in-process HTTP/1.1 contract for reading one already-stored immutable
-    personal result. The handler never recomputes psychometric values. Its host
-    must supply the authenticated AuthorizationContext and server-owned participant
-    and result records before invoking the operation; this document therefore does
-    not invent a network authentication scheme that is not implemented by this slice.
+    personal result. GET returns the stored representation; HEAD follows the same
+    authorization and resource checks without response content. The handler never
+    recomputes psychometric values. Its host must supply the authenticated
+    AuthorizationContext and server-owned participant and result records before
+    invoking the operation; this document therefore does not invent a network
+    authentication scheme that is not implemented by this slice.
 paths:
   /v1/results/{result_ref}:
     get:
@@ -70,19 +72,59 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "405":
-          description: The result-read resource only implements GET.
+          description: The result-read resource only implements GET and HEAD.
           headers:
             Allow:
               description: RFC 9110 method set accepted by this resource.
               schema:
                 type: string
-                const: GET
+                const: GET, HEAD
           x-problem-types:
             - urn:psychometrics-commons:problem:method-not-allowed
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+    head:
+      operationId: headImmutableResult
+      summary: Read immutable result metadata without response content
+      description: >
+        Performs the same route validation, authorization, immutable-result lookup,
+        and status selection as GET but emits no response content, including on
+        result-specific problem responses. No psychometric value is recomputed or
+        exposed in a response body.
+      x-authorization-contract: >
+        The embedding host supplies an authenticated AuthorizationContext plus the
+        server-owned ParticipantRecord and ResultSnapshot. The handler requires the
+        actor's tenant and participant authority to authorize ReadOwnResult before
+        route identity is disclosed. No caller-supplied ownership record is trusted.
+      parameters:
+        - name: result_ref
+          in: path
+          required: true
+          description: >
+            Exact opaque, non-numeric result reference. Whitespace-normalized,
+            URL-encoded, fragment-bearing, numeric-like, empty, and slash-containing
+            aliases are rejected rather than canonicalized.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authorized immutable result metadata with no response content.
+        "400":
+          description: Undefined query semantics or invalid result reference; no response content.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:unsupported-query
+            - urn:psychometrics-commons:problem:invalid-reference
+        "403":
+          description: Authenticated context is not authorized to read the server-owned result; no response content.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:result-access-denied
+        "404":
+          description: Route is not a result-read route or no authorized result matches the reference; no response content.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:not-found
+            - urn:psychometrics-commons:problem:result-not-found
 components:
   schemas:
     ImmutableResult:
