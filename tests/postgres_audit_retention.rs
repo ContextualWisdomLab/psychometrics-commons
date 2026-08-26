@@ -2,6 +2,7 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migration;
+use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -18,6 +19,11 @@ fn client() -> Client {
         )
         .unwrap();
     client
+}
+
+fn apply_audit_migrations(client: &mut Client) {
+    apply_audit_evidence_migration(client).unwrap();
+    apply_audit_evidence_retention_migration(client).unwrap();
 }
 
 fn insert_at(client: &mut Client, event_ref: &str, occurred_at_unix_ms: i64) {
@@ -45,7 +51,7 @@ fn insert_at(client: &mut Client, event_ref: &str, occurred_at_unix_ms: i64) {
 #[test]
 fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked() {
     let mut client = client();
-    apply_audit_evidence_migration(&mut client).unwrap();
+    apply_audit_migrations(&mut client);
 
     let public_execute: bool = client
         .query_one(
@@ -79,7 +85,7 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
 #[test]
 fn explicit_retention_execution_deletes_only_rows_strictly_before_the_cutoff() {
     let mut client = client();
-    apply_audit_evidence_migration(&mut client).unwrap();
+    apply_audit_migrations(&mut client);
 
     insert_at(&mut client, "audit_event_old_01", 1_000);
     insert_at(&mut client, "audit_event_boundary_01", 2_000);
@@ -119,7 +125,7 @@ fn explicit_retention_execution_deletes_only_rows_strictly_before_the_cutoff() {
 #[test]
 fn retention_rejects_zero_and_future_cutoffs_instead_of_inventing_policy() {
     let mut client = client();
-    apply_audit_evidence_migration(&mut client).unwrap();
+    apply_audit_migrations(&mut client);
 
     assert!(client
         .query_one("SELECT expire_audit_evidence_before(0)", &[])
