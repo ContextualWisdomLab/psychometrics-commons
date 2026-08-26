@@ -26,7 +26,12 @@ fn apply_audit_migrations(client: &mut Client) {
     apply_audit_evidence_retention_migration(client).unwrap();
 }
 
-fn insert_at(client: &mut Client, event_ref: &str, occurred_at_unix_ms: i64) {
+fn insert_at(
+    client: &mut Client,
+    tenant_ref: &str,
+    event_ref: &str,
+    occurred_at_unix_ms: i64,
+) {
     client
         .execute(
             "INSERT INTO audit_evidence_record (\
@@ -35,7 +40,7 @@ fn insert_at(client: &mut Client, event_ref: &str, occurred_at_unix_ms: i64) {
              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
             &[
                 &event_ref,
-                &"tenant_research_alpha",
+                &tenant_ref,
                 &"actor_publisher_alpha",
                 &"audit_retention",
                 &"retain_or_expire_audit_evidence",
@@ -71,7 +76,12 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
         "retention execution must require an explicit deployment grant"
     );
 
-    insert_at(&mut client, "audit_event_direct_delete_01", 1_000);
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_direct_delete_01",
+        1_000,
+    );
     let direct_delete = client.execute(
         "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_direct_delete_01'",
         &[],
@@ -83,37 +93,76 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
 }
 
 #[test]
-fn explicit_retention_execution_deletes_only_rows_strictly_before_the_cutoff() {
+fn explicit_retention_execution_is_tenant_scoped_and_exclusive_at_the_cutoff() {
     let mut client = client();
     apply_audit_migrations(&mut client);
 
-    insert_at(&mut client, "audit_event_old_01", 1_000);
-    insert_at(&mut client, "audit_event_boundary_01", 2_000);
-    insert_at(&mut client, "audit_event_new_01", 3_000);
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_alpha_old_01",
+        1_000,
+    );
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_alpha_boundary_01",
+        2_000,
+    );
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_alpha_new_01",
+        3_000,
+    );
+    insert_at(
+        &mut client,
+        "tenant_research_beta",
+        "audit_event_beta_old_01",
+        1_000,
+    );
 
     let deleted: i64 = client
-        .query_one("SELECT expire_audit_evidence_before($1)", &[&2_000_i64])
+        .query_one(
+            "SELECT expire_audit_evidence_before($1, $2)",
+            &[&"tenant_research_alpha", &2_000_i64],
+        )
         .unwrap()
         .get(0);
     assert_eq!(deleted, 1);
 
-    let remaining: Vec<String> = client
+    let remaining: Vec<(String, String)> = client
         .query(
-            "SELECT audit_event_ref FROM audit_evidence_record ORDER BY occurred_at_unix_ms",
+            "SELECT tenant_ref, audit_event_ref\
+             FROM audit_evidence_record\
+             ORDER BY tenant_ref, occurred_at_unix_ms, audit_event_ref",
             &[],
         )
         .unwrap()
         .into_iter()
-        .map(|row| row.get(0))
+        .map(|row| (row.get(0), row.get(1)))
         .collect();
     assert_eq!(
         remaining,
-        vec!["audit_event_boundary_01", "audit_event_new_01"],
-        "retention must use an explicit exclusive cutoff and preserve boundary/newer evidence"
+        vec![
+            (
+                "tenant_research_alpha".to_owned(),
+                "audit_event_alpha_boundary_01".to_owned(),
+            ),
+            (
+                "tenant_research_alpha".to_owned(),
+                "audit_event_alpha_new_01".to_owned(),
+            ),
+            (
+                "tenant_research_beta".to_owned(),
+                "audit_event_beta_old_01".to_owned(),
+            ),
+        ],
+        "retention must preserve cutoff-boundary/newer evidence and every other tenant"
     );
 
     let post_retention_direct_delete = client.execute(
-        "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_boundary_01'",
+        "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_alpha_boundary_01'",
         &[],
     );
     assert!(
@@ -123,17 +172,31 @@ fn explicit_retention_execution_deletes_only_rows_strictly_before_the_cutoff() {
 }
 
 #[test]
-fn retention_rejects_zero_and_future_cutoffs_instead_of_inventing_policy() {
+fn retention_rejects_invalid_tenant_zero_and_future_cutoffs_instead_of_inventing_policy() {
     let mut client = client();
     apply_audit_migrations(&mut client);
 
+    for invalid_tenant in ["", " tenant_research_alpha ", "123", "tenant\u{200b}_alpha"] {
+        assert!(client
+            .query_one(
+                "SELECT expire_audit_evidence_before($1, $2)",
+                &[&invalid_tenant, &2_000_i64],
+            )
+            .is_err());
+    }
     assert!(client
-        .query_one("SELECT expire_audit_evidence_before(0)", &[])
+        .query_one(
+            "SELECT expire_audit_evidence_before($1, 0)",
+            &[&"tenant_research_alpha"],
+        )
         .is_err());
     assert!(client
         .query_one(
-            "SELECT expire_audit_evidence_before((extract(epoch FROM transaction_timestamp()) * 1000)::bigint + 60000)",
-            &[],
+            "SELECT expire_audit_evidence_before(\
+                 $1,\
+                 (extract(epoch FROM transaction_timestamp()) * 1000)::bigint + 60000\
+             )",
+            &[&"tenant_research_alpha"],
         )
         .is_err());
 }
