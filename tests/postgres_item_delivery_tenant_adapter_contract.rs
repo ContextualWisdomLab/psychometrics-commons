@@ -7,7 +7,7 @@ use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger,
     ItemDeliveryPersistenceDisposition, ItemDeliveryPersistenceError,
 };
-use std::sync::{mpsc, Mutex, MutexGuard};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -195,8 +195,12 @@ fn concurrent_exact_header_replay_is_duplicate_after_winning_insert_commits() {
     let mut client = test_client();
     apply_item_delivery_migration(&mut client).unwrap();
     let mut peer = peer_client();
-    let peer_pid: i32 = peer.query_one("SELECT pg_backend_pid()", &[]).unwrap().get(0);
-    let ledger = ItemDeliveryLedger::from_manifest("session_concurrent_header", &manifest()).unwrap();
+    let peer_pid: i32 = peer
+        .query_one("SELECT pg_backend_pid()", &[])
+        .unwrap()
+        .get(0);
+    let ledger =
+        ItemDeliveryLedger::from_manifest("session_concurrent_header", &manifest()).unwrap();
 
     let mut winner = client.transaction().unwrap();
     assert_eq!(
@@ -222,10 +226,7 @@ fn concurrent_exact_header_replay_is_duplicate_after_winning_insert_commits() {
     let mut observed_block = false;
     for _ in 0..100 {
         observed_block = winner
-            .query_one(
-                "SELECT cardinality(pg_blocking_pids($1)) > 0",
-                &[&peer_pid],
-            )
+            .query_one("SELECT cardinality(pg_blocking_pids($1)) > 0", &[&peer_pid])
             .unwrap()
             .get(0);
         if observed_block {
@@ -233,7 +234,10 @@ fn concurrent_exact_header_replay_is_duplicate_after_winning_insert_commits() {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    assert!(observed_block, "the replay must reach the unique-key wait before the winner commits");
+    assert!(
+        observed_block,
+        "the replay must reach the unique-key wait before the winner commits"
+    );
     winner.commit().unwrap();
 
     assert_eq!(
