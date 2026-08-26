@@ -57,6 +57,12 @@ Protected-main result-export domain evidence is available through `ResultExport:
 - [CLAUDE.md](CLAUDE.md) — concise coding-agent entry point into the same normative contracts.
 - [Changelog](CHANGELOG.md) — unreleased and released product/architecture changes.
 
+## Public session commands (Active PR)
+
+`POST /v1/sessions/{session_ref}/commands` is the participant lifecycle write. Send `{"command":"activate"}` with an opaque `Idempotency-Key` to begin answering. Then `POST /v1/sessions/{session_ref}/responses` for each published item. After the last answer, `{"command":"complete"}`. Use `pause` / `resume` for a break, or `cancel` to stop. This process-memory family does not create sessions or survive restart.
+
+The as-built contract is [`openapi/session-commands.yaml`](openapi/session-commands.yaml). It is not protected-main truth until this head is reviewed, check-clean, and integrated.
+
 ## Architecture authority and implementation status
 
 An accepted ADR must define concrete ownership, interfaces, invariants, failure behavior, security/privacy/tenancy boundaries, migration and rollback, validation evidence, alternatives, and reversal conditions. Material implementation that contradicts an accepted ADR requires an explicit superseding decision rather than silent architectural drift.
