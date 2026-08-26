@@ -4,16 +4,16 @@ info:
   version: 0.1.0
   description: >
     As-built application contract for writing one response event on an Active
-    assessment session. A purchaser posts item_version_ref and payload_digest
-    for an item that belongs to the session's published release. Exact
-    Idempotency-Key replay returns the original event. State-changing dispatch
-    is not a standalone unauthenticated network operation: an embedding host
-    must first verify authenticated participant authority or a current
+    assessment session. A participant client posts item_version_ref and
+    payload_digest for an item that belongs to the session's published release.
+    Exact Idempotency-Key replay returns the original event. State-changing
+    dispatch is not a standalone unauthenticated network operation: an embedding
+    host must first verify authenticated participant authority or a current
     anonymous-session credential and supply the corresponding server-owned
     participant record. This repository slice deliberately does not specify an
     on-wire bearer, API-key, OAuth, or other authentication scheme, so none is
-    fabricated here. This family does not create sessions, list instruments, or
-    persist ledgers across restart.
+    fabricated here. Session creation and instrument catalog reads belong to
+    other API families.
 paths:
   /v1/sessions/{session_ref}/responses:
     post:
@@ -74,7 +74,18 @@ paths:
         "404":
           $ref: "#/components/responses/AuthorityOrSessionNotFoundProblem"
         "405":
-          $ref: "#/components/responses/Problem"
+          description: Only POST is accepted on this response collection.
+          headers:
+            Allow:
+              required: true
+              description: Method accepted by this collection.
+              schema:
+                type: string
+                const: POST
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "409":
           $ref: "#/components/responses/Problem"
 components:
