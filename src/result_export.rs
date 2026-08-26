@@ -17,9 +17,11 @@ use std::fmt::{Display, Formatter};
 pub struct ResultExportInput<'a> {
     /// Opaque export identity used as the idempotency key for a later HTTP slice.
     pub export_ref: &'a str,
-    /// Exact BCP 47-style locale of the participant-facing report text.
+    /// Exact BCP 47-style locale of the participant-facing report text, such as `ko-KR`.
     pub locale: &'a str,
-    /// Server-authoritative export time as Unix milliseconds.
+    /// Server-authoritative export time in milliseconds since the Unix epoch.
+    ///
+    /// The Unix epoch starts at 1970-01-01T00:00:00Z. A value of zero is invalid.
     pub exported_at_unix_ms: u64,
     /// Approved participant-facing limitations copied into both artifacts.
     pub limitations: &'a [&'a str],
@@ -48,7 +50,7 @@ pub enum ResultExportError {
     InvalidReference,
     /// The report locale is not an exact whitespace-free BCP 47-style tag.
     InvalidLocale,
-    /// The export timestamp was zero.
+    /// The export timestamp was zero or was before the result snapshot creation time.
     InvalidTimestamp,
     /// No participant-facing limitation text was supplied.
     MissingLimitations,
@@ -63,7 +65,9 @@ impl Display for ResultExportError {
             Self::InvalidLocale => {
                 "result export locale must be an exact whitespace-free BCP 47-style tag"
             }
-            Self::InvalidTimestamp => "result export timestamps must be greater than zero",
+            Self::InvalidTimestamp => {
+                "result export timestamp must be nonzero and not precede result creation"
+            }
             Self::MissingLimitations => {
                 "personal result export must include participant-facing limitations"
             }
@@ -85,11 +89,14 @@ impl ResultExport {
     /// abstained, failed, or excluded observation keeps its disposition and does
     /// not receive an invented number. The owner participant reference is copied
     /// so authorized personal work can continue. The snapshot is not mutated.
+    /// A report locale is a BCP 47-style tag such as `ko-KR`. Export timestamps
+    /// are milliseconds since the Unix epoch (1970-01-01T00:00:00Z).
     ///
     /// # Errors
     ///
     /// Returns [`ResultExportError`] when the export identity, locale, timestamp,
-    /// or limitation text is invalid.
+    /// or limitation text is invalid. Export time can equal the result snapshot
+    /// creation time. It must not be zero or before that creation time.
     pub fn from_snapshot(
         snapshot: &ResultSnapshot,
         input: ResultExportInput<'_>,
@@ -98,7 +105,9 @@ impl ResultExport {
         if input.locale.trim() != input.locale || !valid_locale(input.locale) {
             return Err(ResultExportError::InvalidLocale);
         }
-        if input.exported_at_unix_ms == 0 {
+        if input.exported_at_unix_ms == 0
+            || input.exported_at_unix_ms < snapshot.created_at_unix_ms()
+        {
             return Err(ResultExportError::InvalidTimestamp);
         }
         if input.limitations.is_empty() {

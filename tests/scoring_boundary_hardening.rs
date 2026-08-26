@@ -1,32 +1,27 @@
 //! Fail-first regressions for scoring provenance binding and exact reference identity.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
 };
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::{frozen_snapshot, unbound_frozen_snapshot};
 
 const ENGINE_DIGEST: &str =
     "sha256:4444444444444444444444444444444444444444444444444444444444444444";
 
-fn ledger_with_one_response() -> ResponseLedger {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "event_ref",
-                client_event_ref: "client_ref",
-                item_version_ref: "item_version_ref",
-                payload_digest:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            },
-        )
-        .unwrap();
-    ledger
+fn one_response() -> [ResponseWrite<'static>; 1] {
+    [ResponseWrite {
+        server_event_ref: "event_ref",
+        client_event_ref: "client_ref",
+        item_version_ref: "item_version_ref",
+        payload_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    }]
 }
 
 fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
@@ -44,9 +39,7 @@ fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
 
 #[test]
 fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
-    let unbound = ledger_with_one_response()
-        .freeze(SessionState::Completed)
-        .unwrap();
+    let unbound = unbound_frozen_snapshot("session_ref", &one_response());
     let unbound_error =
         ScoringRequest::from_snapshot(&unbound, scoring_input("response_snapshot_ref"))
             .unwrap_err();
@@ -56,10 +49,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
         "scoring requires a durable response snapshot reference"
     );
 
-    let empty_bound = ResponseLedger::new("session_ref")
-        .unwrap()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let empty_bound = frozen_snapshot("session_ref", "response_snapshot_ref", &[]);
     let empty_error =
         ScoringRequest::from_snapshot(&empty_bound, scoring_input("response_snapshot_ref"))
             .unwrap_err();
@@ -72,9 +62,7 @@ fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
 
 #[test]
 fn scoring_dispatch_rejects_snapshot_reference_substitution() {
-    let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let snapshot = frozen_snapshot("session_ref", "response_snapshot_ref", &one_response());
 
     assert_eq!(snapshot.snapshot_ref(), Some("response_snapshot_ref"));
     let mismatch_error =
@@ -91,9 +79,7 @@ fn scoring_dispatch_rejects_snapshot_reference_substitution() {
 
 #[test]
 fn scoring_dispatch_rejects_a_padded_snapshot_alias_before_identity_comparison() {
-    let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let snapshot = frozen_snapshot("session_ref", "response_snapshot_ref", &one_response());
     let error = ScoringRequest::from_snapshot(&snapshot, scoring_input(" response_snapshot_ref "))
         .unwrap_err();
 
@@ -102,9 +88,7 @@ fn scoring_dispatch_rejects_a_padded_snapshot_alias_before_identity_comparison()
 
 #[test]
 fn result_references_require_exact_spelling_after_scoring_normalization() {
-    let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let snapshot = frozen_snapshot("session_ref", "response_snapshot_ref", &one_response());
     let request =
         ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
     let result = ScoringResult::new(
