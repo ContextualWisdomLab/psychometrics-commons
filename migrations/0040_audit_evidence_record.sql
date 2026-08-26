@@ -176,6 +176,40 @@ $audit_evidence_schema$;
 CREATE INDEX IF NOT EXISTS audit_evidence_tenant_time_index
     ON audit_evidence_record (tenant_ref, occurred_at_unix_ms, audit_event_ref);
 
+DO $audit_evidence_index_contract$
+DECLARE
+    relation_ref REGCLASS;
+    index_ref REGCLASS;
+    index_matches BOOLEAN;
+BEGIN
+    relation_ref := to_regclass('audit_evidence_record');
+    index_ref := to_regclass('audit_evidence_tenant_time_index');
+
+    SELECT
+        index_record.indrelid = relation_ref
+        AND index_record.indnkeyatts = 3
+        AND index_record.indnatts = 3
+        AND NOT index_record.indisunique
+        AND index_record.indpred IS NULL
+        AND index_record.indexprs IS NULL
+        AND access_method.amname = 'btree'
+        AND pg_get_indexdef(index_ref, 1, TRUE) = 'tenant_ref'
+        AND pg_get_indexdef(index_ref, 2, TRUE) = 'occurred_at_unix_ms'
+        AND pg_get_indexdef(index_ref, 3, TRUE) = 'audit_event_ref'
+    INTO index_matches
+    FROM pg_index AS index_record
+    JOIN pg_class AS index_class ON index_class.oid = index_record.indexrelid
+    JOIN pg_am AS access_method ON access_method.oid = index_class.relam
+    WHERE index_record.indexrelid = index_ref;
+
+    IF index_ref IS NULL OR index_matches IS DISTINCT FROM TRUE THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'audit_evidence_tenant_time_index contract does not match migration 0040';
+    END IF;
+END
+$audit_evidence_index_contract$;
+
 CREATE OR REPLACE FUNCTION reject_audit_evidence_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
