@@ -1,9 +1,9 @@
 -- Deployment-authorized retention for otherwise append-only audit evidence.
 --
 -- This migration deliberately does not choose a retention duration. Deployments must decide the
--- cutoff under their approved retention/legal-hold policy and explicitly grant EXECUTE on the
--- bounded SECURITY DEFINER routine to the maintenance authority. Ordinary UPDATE/DELETE/TRUNCATE
--- remains blocked by the audit mutation trigger.
+-- tenant-scoped cutoff under their approved retention/legal-hold policy and explicitly grant
+-- EXECUTE on the bounded SECURITY DEFINER routine to the maintenance authority. Ordinary
+-- UPDATE/DELETE/TRUNCATE remains blocked by the audit mutation trigger.
 
 DO $audit_retention_migration$
 DECLARE
@@ -20,7 +20,10 @@ BEGIN
 
     EXECUTE format(
         $create_retention_function$
-CREATE OR REPLACE FUNCTION %1$I.expire_audit_evidence_before(retention_cutoff_unix_ms BIGINT)
+CREATE OR REPLACE FUNCTION %1$I.expire_audit_evidence_before(
+    retention_tenant_ref TEXT,
+    retention_cutoff_unix_ms BIGINT
+)
 RETURNS BIGINT
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -30,6 +33,12 @@ DECLARE
     deleted_count BIGINT;
     current_unix_ms BIGINT;
 BEGIN
+    IF NOT audit_evidence_reference_is_valid(retention_tenant_ref) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '22023',
+            MESSAGE = 'audit retention tenant reference must be exact canonical opaque identity';
+    END IF;
+
     IF retention_cutoff_unix_ms <= 0 THEN
         RAISE EXCEPTION USING
             ERRCODE = '22023',
@@ -46,7 +55,8 @@ BEGIN
     PERFORM set_config('psychometrics.audit_retention_execution', 'on', true);
     BEGIN
         DELETE FROM audit_evidence_record
-        WHERE occurred_at_unix_ms < retention_cutoff_unix_ms;
+        WHERE tenant_ref = retention_tenant_ref
+          AND occurred_at_unix_ms < retention_cutoff_unix_ms;
         GET DIAGNOSTICS deleted_count = ROW_COUNT;
     EXCEPTION WHEN OTHERS THEN
         PERFORM set_config('psychometrics.audit_retention_execution', 'off', true);
@@ -61,7 +71,7 @@ $create_retention_function$,
     );
 
     EXECUTE format(
-        'REVOKE ALL ON FUNCTION %I.expire_audit_evidence_before(BIGINT) FROM PUBLIC',
+        'REVOKE ALL ON FUNCTION %I.expire_audit_evidence_before(TEXT, BIGINT) FROM PUBLIC',
         migration_schema
     );
 
@@ -69,7 +79,7 @@ $create_retention_function$,
     INTO retention_owner
     FROM pg_proc AS procedure_record
     WHERE procedure_record.oid = to_regprocedure(
-        format('%I.expire_audit_evidence_before(bigint)', migration_schema)
+        format('%I.expire_audit_evidence_before(text,bigint)', migration_schema)
     );
 
     IF retention_owner IS NULL THEN
