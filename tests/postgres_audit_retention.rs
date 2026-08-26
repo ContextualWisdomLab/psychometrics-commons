@@ -5,6 +5,7 @@ use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migratio
 use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
 const AUDIT_RETENTION_TEST_LOCK_KEY: i64 = 0x4155_4454_5245_544e;
+const RETENTION_MAINTENANCE_ROLE: &str = "audit_retention_test_maintenance";
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn acquire_retention_fixture_guard(
@@ -42,6 +43,46 @@ fn client() -> Client {
 fn apply_audit_migrations(client: &mut Client) {
     apply_audit_evidence_migration(client).unwrap();
     apply_audit_evidence_retention_migration(client).unwrap();
+
+    let maintenance_role_exists: bool = client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)",
+            &[&RETENTION_MAINTENANCE_ROLE],
+        )
+        .unwrap()
+        .get(0);
+    if !maintenance_role_exists {
+        client
+            .batch_execute("CREATE ROLE audit_retention_test_maintenance NOLOGIN")
+            .expect("isolated CI PostgreSQL owner must be able to create the test maintenance role");
+    }
+    client
+        .batch_execute(
+            "GRANT USAGE ON SCHEMA audit_retention_test TO audit_retention_test_maintenance;\
+             GRANT EXECUTE ON FUNCTION audit_retention_test.expire_audit_evidence_before(TEXT, BIGINT)\
+                 TO audit_retention_test_maintenance;",
+        )
+        .expect("test maintenance role must receive only schema usage and bounded retention execute");
+}
+
+fn expire_as_maintenance(
+    tenant_ref: Option<&str>,
+    cutoff_unix_ms: Option<i64>,
+) -> Result<i64, postgres::Error> {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut caller = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    caller.batch_execute(
+        "SET SESSION AUTHORIZATION audit_retention_test_maintenance;\
+         SET search_path TO audit_retention_test;",
+    )?;
+    caller
+        .query_one(
+            "SELECT expire_audit_evidence_before($1, $2)",
+            &[&tenant_ref, &cutoff_unix_ms],
+        )
+        .map(|row| row.get(0))
 }
 
 fn insert_at(
@@ -143,6 +184,17 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
         "ordinary direct deletion must remain blocked even for a row eligible under some future policy"
     );
 
+    let owner_function_call = client.query_one(
+        "SELECT expire_audit_evidence_before($1, $2)",
+        &[&"tenant_research_alpha", &2_000_i64],
+    );
+    assert_eq!(
+        owner_function_call
+            .expect_err("the function owner must not double as an operational retention caller")
+            .code(),
+        Some(&SqlState::INSUFFICIENT_PRIVILEGE)
+    );
+
     let mut bypass = client
         .transaction()
         .expect("direct-GUC bypass probe must start a transaction");
@@ -182,13 +234,8 @@ fn reapplying_core_audit_migration_preserves_bounded_retention_execution() {
 
     apply_audit_evidence_migration(&mut client).unwrap();
 
-    let deleted: i64 = client
-        .query_one(
-            "SELECT expire_audit_evidence_before($1, $2)",
-            &[&"tenant_research_alpha", &2_000_i64],
-        )
-        .expect("reapplying migration 0040 must not erase the migration 0041 retention guard")
-        .get(0);
+    let deleted = expire_as_maintenance(Some("tenant_research_alpha"), Some(2_000))
+        .expect("reapplying migration 0040 must not erase the migration 0041 retention guard");
     assert_eq!(deleted, 1);
 
     let remaining: Vec<String> = client
@@ -233,13 +280,7 @@ fn explicit_retention_execution_is_tenant_scoped_and_exclusive_at_the_cutoff() {
         1_000,
     );
 
-    let deleted: i64 = client
-        .query_one(
-            "SELECT expire_audit_evidence_before($1, $2)",
-            &[&"tenant_research_alpha", &2_000_i64],
-        )
-        .unwrap()
-        .get(0);
+    let deleted = expire_as_maintenance(Some("tenant_research_alpha"), Some(2_000)).unwrap();
     assert_eq!(deleted, 1);
 
     let remaining: Vec<(String, String)> = client
@@ -288,38 +329,20 @@ fn retention_rejects_invalid_tenant_zero_and_future_cutoffs_instead_of_inventing
     apply_audit_migrations(&mut client);
 
     for invalid_tenant in ["", " tenant_research_alpha ", "123", "tenant\u{200b}_alpha"] {
-        assert!(client
-            .query_one(
-                "SELECT expire_audit_evidence_before($1, $2)",
-                &[&invalid_tenant, &2_000_i64],
-            )
-            .is_err());
+        assert!(expire_as_maintenance(Some(invalid_tenant), Some(2_000)).is_err());
     }
-    assert!(client
+    assert!(expire_as_maintenance(None, Some(2_000)).is_err());
+    assert!(expire_as_maintenance(Some("tenant_research_alpha"), None).is_err());
+    assert!(expire_as_maintenance(Some("tenant_research_alpha"), Some(0)).is_err());
+
+    let future_cutoff: i64 = client
         .query_one(
-            "SELECT expire_audit_evidence_before(NULL::text, 2000::bigint)",
+            "SELECT (extract(epoch FROM transaction_timestamp()) * 1000)::bigint + 60000",
             &[],
         )
-        .is_err());
-    assert!(client
-        .query_one(
-            "SELECT expire_audit_evidence_before('tenant_research_alpha', NULL::bigint)",
-            &[],
-        )
-        .is_err());
-    assert!(client
-        .query_one(
-            "SELECT expire_audit_evidence_before($1, 0)",
-            &[&"tenant_research_alpha"],
-        )
-        .is_err());
-    assert!(client
-        .query_one(
-            "SELECT expire_audit_evidence_before(\
-                 $1,\
-                 (extract(epoch FROM transaction_timestamp()) * 1000)::bigint + 60000\
-             )",
-            &[&"tenant_research_alpha"],
-        )
-        .is_err());
+        .unwrap()
+        .get(0);
+    assert!(
+        expire_as_maintenance(Some("tenant_research_alpha"), Some(future_cutoff)).is_err()
+    );
 }
