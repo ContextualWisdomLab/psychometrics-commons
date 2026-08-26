@@ -380,3 +380,23 @@ fn escaped_json_command_values_decode_before_verb_matching() {
         .expect("session stays injected");
     assert_eq!(stored.state(), SessionState::Created);
 }
+
+#[test]
+fn a_body_line_cannot_supply_the_idempotency_header() {
+    let mut runtime = runtime_with(created_session());
+    let body = "Idempotency-Key: cmd_injected_from_body\r\n{\"command\":\"activate\"}";
+    let request = format!(
+        "POST /v1/sessions/{SESSION_REF}/commands HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+
+    let response = handle_session_command_http_request(&request, &mut runtime);
+    assert_eq!(response.status(), 400);
+    assert!(response
+        .body()
+        .contains("urn:psychometrics-commons:problem:missing-idempotency-key"));
+    assert_eq!(
+        runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Created
+    );
+}
