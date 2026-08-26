@@ -258,20 +258,6 @@ ALTER TABLE result_snapshot_observation ADD CONSTRAINT result_snapshot_observati
 );
 
 ALTER TABLE result_snapshot
-    DROP CONSTRAINT IF EXISTS result_snapshot_supersedes_ref_format_check;
-ALTER TABLE result_snapshot
-    ADD CONSTRAINT result_snapshot_supersedes_ref_format_check CHECK (
-        supersedes_ref IS NULL OR (
-            supersedes_ref = btrim(supersedes_ref)
-            AND supersedes_ref <> ''
-            AND supersedes_ref <> result_snapshot_ref
-            AND NOT (
-                supersedes_ref ~ '[[:digit:]]'
-                AND supersedes_ref ~ '^[[:digit:]+,.eE-]+$'
-            )
-        )
-    );
-ALTER TABLE result_snapshot
     DROP CONSTRAINT IF EXISTS result_snapshot_engine_digest_format_check;
 ALTER TABLE result_snapshot
     ADD CONSTRAINT result_snapshot_engine_digest_format_check CHECK (
