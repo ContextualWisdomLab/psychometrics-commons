@@ -141,5 +141,8 @@ fn migration_reapplication_rejects_historical_default_ignorable_identity_without
         )
         .unwrap()
         .get(0);
-    assert_eq!(preserved, 1, "migration must not rewrite immutable consent identity");
+    assert_eq!(
+        preserved, 1,
+        "migration must not rewrite immutable consent identity"
+    );
 }
