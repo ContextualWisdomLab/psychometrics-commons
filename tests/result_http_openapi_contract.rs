@@ -30,6 +30,21 @@ fn result_read_openapi_is_pinned_to_the_implemented_operation() {
 }
 
 #[test]
+fn result_read_openapi_declares_the_method_not_allowed_allow_header() {
+    for required_fragment in [
+        "        \"405\":\n",
+        "          headers:\n",
+        "            Allow:\n",
+        "                const: GET\n",
+    ] {
+        assert!(
+            RESULT_OPENAPI.contains(required_fragment),
+            "missing RFC 9110 method response contract fragment: {required_fragment:?}"
+        );
+    }
+}
+
+#[test]
 fn result_read_openapi_preserves_immutable_scoring_provenance() {
     for required_property in [
         "        result_ref:\n",
