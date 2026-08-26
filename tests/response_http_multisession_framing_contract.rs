@@ -13,10 +13,8 @@ const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
-const PAYLOAD_ONE: &str =
-    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const PAYLOAD_TWO: &str =
-    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const PAYLOAD_ONE: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const PAYLOAD_TWO: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn published_release() -> InstrumentRelease {
     let manifest = InstrumentReleaseManifest::new(
@@ -126,21 +124,10 @@ fn post_request(
 #[test]
 fn interleaved_sessions_do_not_reuse_server_event_reference() {
     let release = published_release();
-    let session_a = active_session(
-        "ses_response_multi_a",
-        "ptc_response_multi_a",
-        &release,
-    );
-    let session_b = active_session(
-        "ses_response_multi_b",
-        "ptc_response_multi_b",
-        &release,
-    );
-    let mut runtime = ResponseHttpRuntime::new(
-        vec![session_a, session_b],
-        vec![release],
-        "evt_response_1",
-    );
+    let session_a = active_session("ses_response_multi_a", "ptc_response_multi_a", &release);
+    let session_b = active_session("ses_response_multi_b", "ptc_response_multi_b", &release);
+    let mut runtime =
+        ResponseHttpRuntime::new(vec![session_a, session_b], vec![release], "evt_response_1");
 
     let first_a = handle_response_http_request(
         &post_request(
@@ -185,11 +172,8 @@ fn body_lines_cannot_supply_the_idempotency_header() {
         "ptc_response_header_boundary",
         &release,
     );
-    let mut runtime = ResponseHttpRuntime::new(
-        vec![session],
-        vec![release],
-        "evt_response_header_boundary",
-    );
+    let mut runtime =
+        ResponseHttpRuntime::new(vec![session], vec![release], "evt_response_header_boundary");
     let body = "Idempotency-Key: idem_body_only";
     let request = format!(
         "POST /v1/sessions/ses_response_header_boundary/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
