@@ -318,6 +318,8 @@ const FORBIDDEN_CREDENTIAL_WORDS: &[&str] = &[
     "auth",
     "credential",
     "credentials",
+    "key",
+    "keys",
     "password",
     "passwords",
     "secret",
@@ -425,7 +427,9 @@ fn forbidden_public_release_column(column_name: &str) -> bool {
             return false;
         }
         return contains_forbidden_public_release_marker(prefix)
-            || contains_forbidden_research_namespace_prefix_marker(prefix);
+            || contains_forbidden_research_namespace_prefix_marker(prefix)
+            || contains_forbidden_credential_word(prefix, prefix)
+            || contains_forbidden_compound_identity_marker(prefix);
     }
 
     contains_forbidden_public_release_marker(&compact)
