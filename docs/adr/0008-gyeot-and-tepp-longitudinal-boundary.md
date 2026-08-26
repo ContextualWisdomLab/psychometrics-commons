@@ -57,7 +57,9 @@ Sync outages leave bounded local queues and clear user state. Clock anomalies ar
 
 ## Current implementation status
 
-Protected main still treats enrollment persistence, HTTP, Gyeot adapters, and TEPP dispatch as target work. An Active PR may add an in-memory observation ingest that preserves the four clocks and explicit membership shares without implementing DSEM or multiple-membership estimation. That Active PR is not protected-main truth and does not replace #226 enrollment gating.
+Protected main now includes the Commons in-memory observation ingest plus PostgreSQL 18 persistence for immutable normalized observation records and explicit membership shares through `src/longitudinal_observation.rs`, `src/postgres_longitudinal_observation.rs`, and `migrations/0031_longitudinal_observation.sql`. Gyeot still owns collection and TEPP still owns temporal, multilevel, cross-classified, and multiple-membership analysis. Enrollment persistence, participant-facing longitudinal HTTP, live Gyeot adapter execution, and TEPP dispatch/kernels remain target work.
+
+**Active PR #417 / IMPLEMENTED_ON_ACTIVE_PR** additionally requires each distinct source observation to use a unique Commons `observation_record_ref` while preserving exact source replay. That active-PR behavior is not protected-main truth until its unchanged exact head passes the live repository gates and merges.
 
 ## Alternatives rejected
 
