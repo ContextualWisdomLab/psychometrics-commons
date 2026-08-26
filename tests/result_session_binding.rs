@@ -13,6 +13,11 @@ use psychometrics_commons_runtime::scoring::{
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
+
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
@@ -131,10 +136,11 @@ fn publish_error(session: &AssessmentSession) -> ResultSnapshotError {
 }
 
 fn completed_snapshot(session_ref: &str) -> ResponseSnapshot {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
+    let active = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "response_event_result_binding",
                 client_event_ref: "client_event_result_binding",
@@ -144,8 +150,9 @@ fn completed_snapshot(session_ref: &str) -> ResponseSnapshot {
             },
         )
         .unwrap();
+    let completed = completed_session(session_ref);
     ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_result_binding")
+        .freeze_as(&completed, "response_snapshot_result_binding")
         .unwrap()
 }
 
