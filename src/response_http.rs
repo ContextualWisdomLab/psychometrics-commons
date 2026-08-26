@@ -598,7 +598,7 @@ fn request_body(request: &str) -> Option<&str> {
         .ok()??
         .parse::<usize>()
         .ok()?;
-    if body.len() < content_length || !body.is_char_boundary(content_length) {
+    if body.len() != content_length || !body.is_char_boundary(content_length) {
         return None;
     }
     Some(&body[..content_length])
