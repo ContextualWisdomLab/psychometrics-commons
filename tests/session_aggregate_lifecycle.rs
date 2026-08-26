@@ -4,7 +4,9 @@ use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
-use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
+use psychometrics_commons_runtime::session::{
+    AssessmentSession, SessionCommand, SessionCreationError, SessionState,
+};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -149,4 +151,52 @@ fn aggregate_applies_session_commands_and_preserves_release_provenance() {
     assert_eq!(commands[1].sequence(), 2);
     assert_eq!(commands[1].command(), SessionCommand::Pause);
     assert_eq!(commands[1].resulting_state(), SessionState::Paused);
+}
+
+#[test]
+fn session_creation_rejects_whitespace_padded_identity_aliases() {
+    let release = published_release();
+    let invalid_refs = [
+        " session_alpha",
+        "session_alpha ",
+        "\u{00A0}session_alpha",
+        "session_alpha\u{2003}",
+        "\u{202F}session_alpha",
+        "session_alpha\u{3000}",
+    ];
+
+    for invalid_ref in invalid_refs {
+        assert_eq!(
+            AssessmentSession::new(invalid_ref, "participant_alpha", &release, "ko-KR", 20_000),
+            Err(SessionCreationError::InvalidReference),
+            "padded session reference must fail closed: {invalid_ref:?}",
+        );
+        assert_eq!(
+            AssessmentSession::new("session_alpha", invalid_ref, &release, "ko-KR", 20_000),
+            Err(SessionCreationError::InvalidReference),
+            "padded participant reference must fail closed: {invalid_ref:?}",
+        );
+        assert_eq!(
+            AssessmentSession::from_currently_published_manifest(
+                invalid_ref,
+                "participant_alpha",
+                release.manifest(),
+                "ko-KR",
+                20_000,
+            ),
+            Err(SessionCreationError::InvalidReference),
+            "stored-release session start must reject a padded session reference: {invalid_ref:?}",
+        );
+        assert_eq!(
+            AssessmentSession::from_currently_published_manifest(
+                "session_alpha",
+                invalid_ref,
+                release.manifest(),
+                "ko-KR",
+                20_000,
+            ),
+            Err(SessionCreationError::InvalidReference),
+            "stored-release session start must reject a padded participant reference: {invalid_ref:?}",
+        );
+    }
 }
