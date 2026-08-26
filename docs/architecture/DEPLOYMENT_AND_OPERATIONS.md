@@ -85,6 +85,23 @@ Enterprise adds policy/configuration rather than a second domain model and may b
 - stable API/event contracts allow customer-owned clients and CI/CD;
 - responsibility for database operation, backup, recovery, networking, and observability is explicitly assigned rather than inferred from the profile name.
 
+### Audit-evidence database authority
+
+The audit-evidence migrations deliberately separate ownership from runtime access. `psychometrics_audit_evidence_owner` is a dedicated `NOLOGIN` owner and must not be granted to an application or maintenance identity. The repository cannot safely invent an environment-specific runtime role name, so each deployment that enables audit persistence must explicitly authorize its chosen runtime database role after the schema migration.
+
+For a deployment-owned schema and runtime role, the minimum product runtime grants are equivalent to:
+
+```sql
+GRANT USAGE ON SCHEMA <product_schema> TO <runtime_role>;
+GRANT SELECT, INSERT
+ON TABLE <product_schema>.audit_evidence_record
+TO <runtime_role>;
+```
+
+Do **not** grant the runtime role `UPDATE`, `DELETE`, `TRUNCATE`, table ownership, or membership/`SET ROLE` capability into `psychometrics_audit_evidence_owner`. Retention is a separate authority: when a deployment enables bounded expiry, its approved maintenance role receives schema `USAGE` and `EXECUTE` on `<product_schema>.expire_audit_evidence_before(TEXT, BIGINT)` only. Runtime write/read access and retention authority may be held by different identities and neither role becomes the table owner.
+
+The real-PostgreSQL migration contract tests exercise this explicit-grant path: a deployment-selected non-owner role can append and read audit evidence after the minimum grants while mutation privileges remain absent. A deployment that omits these grants must fail closed with PostgreSQL permission denial rather than silently falling back to a privileged connection.
+
 ## 2. Capability dependency matrix
 
 | Capability | Mandatory for Community | Mandatory for Hosted | Failure behavior |
