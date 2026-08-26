@@ -2,11 +2,14 @@
 --
 -- Migration execution is an administrative deployment concern, not a runtime authority. The
 -- durable audit table and its privileged helper functions are therefore owned by one cluster role
--- that cannot log in and must not be assumable by any non-superuser role. Runtime retention
--- authorities receive EXECUTE on the bounded SECURITY DEFINER routine only; they never receive
--- owner membership. This migration is idempotent and is applied after the core audit migration and
--- again after the optional retention migration so a retention-aware mutation guard is bound to the
--- same owner.
+-- that cannot log in and must not be assumable by any non-superuser role. Product runtime roles are
+-- deployment-selected rather than invented by this migration: a deployment that enables audit
+-- persistence must explicitly grant its runtime role schema USAGE plus SELECT and INSERT on
+-- audit_evidence_record, while withholding UPDATE, DELETE, TRUNCATE, and owner membership. Runtime
+-- retention authorities separately receive EXECUTE on the bounded SECURITY DEFINER routine only;
+-- they never receive owner membership. This migration is idempotent and is applied after the core
+-- audit migration and again after the optional retention migration so a retention-aware mutation
+-- guard is bound to the same owner.
 
 DO $audit_evidence_owner_hardening$
 DECLARE
