@@ -7,6 +7,10 @@
 //! and server time are never edited in place. Ending a link appends a second event and clears only
 //! that current projection; it does not delete the participant, prior link evidence, or results.
 //!
+//! Opaque participant, tenant, identity, event, and proof references use their exact caller-supplied
+//! spelling. Leading or trailing Unicode whitespace is not silently normalized into another valid
+//! identity because that would let two wire spellings name the same authorization or audit record.
+//!
 //! **Replay** means receiving a command whose event reference was already recorded. An exact
 //! replay is idempotent: the prior outcome is reused and the same logical event is not processed a
 //! second time. Reusing that reference with different evidence fails closed. A later relink is a
@@ -318,7 +322,7 @@ impl ParticipantRecord {
     ///
     /// Processing follows these steps:
     ///
-    /// 1. normalize the opaque references and reject zero time;
+    /// 1. require exact opaque-reference spelling and reject zero time;
     /// 2. look through the full history for `link_event_ref`; an exact historical replay is a
     ///    no-op, while the same reference with changed evidence fails closed;
     /// 3. reject a new event while another link is currently projected instead of silently
@@ -465,5 +469,8 @@ impl ParticipantRecord {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AccountLinkError> {
-    normalized_reference(reference).ok_or(AccountLinkError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        Some(_) | None => Err(AccountLinkError::InvalidReference),
+    }
 }
