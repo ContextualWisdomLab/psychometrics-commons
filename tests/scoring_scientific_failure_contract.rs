@@ -1,11 +1,14 @@
 //! Contract tests for typed scientific failures at the scoring-engine boundary.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput, ScoringResult};
 use psychometrics_commons_runtime::scoring_engine::{
     execute_scoring_request, ScientificScoringFailure, ScoringEngine, ScoringEngineExecutionError,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, completed_session};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -40,10 +43,11 @@ impl ScoringEngine for ScientificFailureEngine {
 }
 
 fn scoring_request() -> ScoringRequest {
-    let mut ledger = ResponseLedger::new("session_scientific_failure").unwrap();
+    let active = active_session("session_scientific_failure");
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "response_event_scientific_failure",
                 client_event_ref: "client_event_scientific_failure",
@@ -53,11 +57,9 @@ fn scoring_request() -> ScoringRequest {
             },
         )
         .unwrap();
+    let completed = completed_session("session_scientific_failure");
     let snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_scientific_failure",
-        )
+        .freeze_as(&completed, "response_snapshot_scientific_failure")
         .unwrap();
 
     ScoringRequest::from_snapshot(
