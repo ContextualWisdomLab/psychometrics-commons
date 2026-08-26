@@ -8,12 +8,14 @@
 const RESULT_OPENAPI: &str = include_str!("../openapi/results.yaml");
 
 #[test]
-fn result_read_openapi_is_pinned_to_the_implemented_operation() {
+fn result_read_openapi_is_pinned_to_the_implemented_operations() {
     assert!(RESULT_OPENAPI.starts_with("openapi: 3.2.0\n"));
     for required_fragment in [
         "  /v1/results/{result_ref}:\n",
         "    get:\n",
         "      operationId: getImmutableResult\n",
+        "    head:\n",
+        "      operationId: headImmutableResult\n",
         "        \"200\":\n",
         "        \"400\":\n",
         "        \"403\":\n",
@@ -35,7 +37,7 @@ fn result_read_openapi_declares_the_method_not_allowed_allow_header() {
         "        \"405\":\n",
         "          headers:\n",
         "            Allow:\n",
-        "                const: GET\n",
+        "                const: GET, HEAD\n",
     ] {
         assert!(
             RESULT_OPENAPI.contains(required_fragment),
