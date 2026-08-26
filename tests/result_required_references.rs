@@ -125,6 +125,20 @@ fn result_snapshot_rejects_padded_product_identity_and_presentation_references()
 }
 
 #[test]
+fn invalid_reference_error_reports_exact_spelling_contract_message() {
+    let (request, result) = request_and_result();
+    let mut input = result_input();
+    input.result_snapshot_ref = " result_snapshot_ref";
+
+    let error = ResultSnapshot::new(&request, &result, input).unwrap_err();
+    assert_eq!(error, ResultSnapshotError::InvalidReference);
+    assert_eq!(
+        error.to_string(),
+        "result snapshot references must use their exact accepted opaque spelling"
+    );
+}
+
+#[test]
 fn result_snapshot_rejects_padded_consent_and_supersession_references() {
     let (request, result) = request_and_result();
     let mut input = result_input();
