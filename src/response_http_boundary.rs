@@ -410,8 +410,11 @@ mod tests {
         );
 
         assert!(remaining_request_timeout(Instant::now() + Duration::from_secs(1)).is_ok());
+        let expired_deadline = Instant::now()
+            .checked_sub(Duration::from_millis(1))
+            .expect("one millisecond before the current instant must be representable");
         assert_eq!(
-            remaining_request_timeout(Instant::now() - Duration::from_millis(1))
+            remaining_request_timeout(expired_deadline)
                 .unwrap_err()
                 .kind(),
             io::ErrorKind::TimedOut
