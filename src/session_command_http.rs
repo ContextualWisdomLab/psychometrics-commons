@@ -14,8 +14,8 @@ use crate::session::{
 };
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::io::{self, Read};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::io;
+use std::net::{SocketAddr, TcpListener};
 use std::time::Duration;
 
 /// Bounded read/write timeout for one accepted session-command HTTP connection.
@@ -132,33 +132,14 @@ pub fn handle_session_command_http_request(
 /// Bind a blocking TCP listener for public session-command HTTP.
 ///
 /// Tests and local operators typically bind `127.0.0.1:0`. Hosted processes bind
-/// `0.0.0.0:$PORT`. This function does not start accepting connections.
+/// `0.0.0.0:$PORT`. This function does not start accepting connections. The
+/// hardened accept/read/write loop is owned by `session_command_http_boundary.rs`.
 ///
 /// # Errors
 ///
 /// Returns the I/O error if the operating system cannot bind the address.
 pub fn bind_session_command_http(addr: SocketAddr) -> io::Result<TcpListener> {
     TcpListener::bind(addr)
-}
-
-/// Accept one TCP connection and serve a single session-command HTTP request.
-///
-/// The connection is closed after the response. Keep-alive, TLS, and other
-/// public families are outside this slice.
-///
-/// # Errors
-///
-/// Returns the I/O error if accept, read, or write fails.
-pub fn accept_one_session_command_http(
-    listener: &TcpListener,
-    runtime: &mut SessionCommandHttpRuntime,
-) -> io::Result<()> {
-    let (mut stream, _) = listener.accept()?;
-    stream.set_read_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
-    stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream)?;
-    let response = handle_session_command_http_request(&request, runtime);
-    write_http_response(&mut stream, &response)
 }
 
 fn method_not_allowed() -> SessionCommandHttpResponse {
@@ -442,13 +423,14 @@ fn valid_idempotency_key(value: &str) -> Option<&str> {
 }
 
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
-    request.lines().skip(1).find_map(|line| {
-        if line.is_empty() {
-            return None;
-        }
-        let (header_name, value) = line.split_once(':')?;
-        header_name.eq_ignore_ascii_case(name).then(|| value.trim())
-    })
+    request
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (header_name, value) = line.split_once(':')?;
+            header_name.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
 }
 
 fn request_body(request: &str) -> Option<&str> {
@@ -456,95 +438,10 @@ fn request_body(request: &str) -> Option<&str> {
     let content_length = header_value(headers, "content-length")?
         .parse::<usize>()
         .ok()?;
-    if body.len() < content_length {
+    if body.len() < content_length || !body.is_char_boundary(content_length) {
         return None;
     }
     Some(&body[..content_length])
-}
-
-fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
-    let mut buffer = Vec::new();
-    let mut chunk = [0_u8; 512];
-    loop {
-        let read_result = stream.read(&mut chunk);
-        match apply_request_read(&mut buffer, &chunk, read_result)? {
-            RequestReadProgress::Continue => {}
-            RequestReadProgress::Complete => break,
-        }
-    }
-    if buffer.len() > SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES
-        || !buffer.windows(4).any(|window| window == b"\r\n\r\n")
-    {
-        return Ok(String::new());
-    }
-    Ok(String::from_utf8_lossy(&buffer).into_owned())
-}
-
-#[derive(Debug)]
-enum RequestReadProgress {
-    Continue,
-    Complete,
-}
-
-fn apply_request_read(
-    buffer: &mut Vec<u8>,
-    chunk: &[u8],
-    read_result: io::Result<usize>,
-) -> io::Result<RequestReadProgress> {
-    match read_result {
-        Ok(0) => Ok(RequestReadProgress::Complete),
-        Ok(read) => {
-            buffer.extend_from_slice(&chunk[..read]);
-            if buffer.windows(4).any(|window| window == b"\r\n\r\n")
-                || buffer.len() > SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES
-            {
-                Ok(RequestReadProgress::Complete)
-            } else {
-                Ok(RequestReadProgress::Continue)
-            }
-        }
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-            ) =>
-        {
-            Ok(RequestReadProgress::Complete)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn write_http_response(
-    stream: &mut TcpStream,
-    response: &SessionCommandHttpResponse,
-) -> io::Result<()> {
-    let body = response.body().as_bytes();
-    let allow = if response.status() == 405 {
-        "Allow: POST\r\n"
-    } else {
-        ""
-    };
-    let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{allow}Connection: close\r\n\r\n",
-        response.status(),
-        reason_phrase(response.status()),
-        response.content_type(),
-        body.len()
-    );
-    io::Write::write_all(stream, header.as_bytes())?;
-    io::Write::write_all(stream, body)
-}
-
-const fn reason_phrase(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        400 => "Bad Request",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        _ => "Error",
-    }
 }
 
 fn parse_request_line(request: &str) -> Option<(&str, &str)> {
@@ -585,19 +482,14 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod unit_tests {
     use super::{
-        apply_request_read, command_collection_session_ref, illegal_transition_next_action,
-        json_string, next_action, parse_public_command, read_http_request, reason_phrase,
-        session_command_session_ref_is_transport_safe, split_target, transition_problem,
-        valid_idempotency_key, CommandParse, RequestReadProgress,
-        SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES,
+        command_collection_session_ref, illegal_transition_next_action, json_string, next_action,
+        parse_public_command, session_command_session_ref_is_transport_safe, split_target,
+        transition_problem, valid_idempotency_key, CommandParse,
     };
     use crate::session::{SessionCommand, SessionState, TransitionError, TransitionErrorKind};
-    use std::io::{self, ErrorKind, Write};
-    use std::net::{Shutdown, SocketAddr, TcpStream};
-    use std::time::Duration;
 
     #[test]
-    fn helpers_cover_paths_status_and_escapes() {
+    fn helpers_cover_paths_and_escapes() {
         assert_eq!(
             command_collection_session_ref("/v1/sessions/ses_one/commands"),
             Some("ses_one")
@@ -607,12 +499,6 @@ mod unit_tests {
             None
         );
         assert_eq!(command_collection_session_ref("/v1/sessions"), None);
-        assert_eq!(reason_phrase(200), "OK");
-        assert_eq!(reason_phrase(400), "Bad Request");
-        assert_eq!(reason_phrase(404), "Not Found");
-        assert_eq!(reason_phrase(405), "Method Not Allowed");
-        assert_eq!(reason_phrase(409), "Conflict");
-        assert_eq!(reason_phrase(418), "Error");
         assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(json_string("a\n\r\t"), "\"a\\n\\r\\t\"");
         assert_eq!(json_string("\u{0001}"), "\"\\u0001\"");
@@ -622,9 +508,6 @@ mod unit_tests {
         );
         assert_eq!(valid_idempotency_key("idem_ok"), Some("idem_ok"));
         assert_eq!(valid_idempotency_key("42"), None);
-        // Internal whitespace fails closed even when the trimmed key keeps
-        // content, so a spaced client command reference can never be recorded
-        // under a different identity than the client sent.
         assert_eq!(valid_idempotency_key("   "), None);
         assert_eq!(valid_idempotency_key("idem spaced key"), None);
         assert_eq!(valid_idempotency_key("1,2"), None);
@@ -692,13 +575,10 @@ mod unit_tests {
             parse_public_command("{\"command\":\"activate\",}"),
             CommandParse::Invalid
         ));
-        // Escaped quote, backslash, carriage return, and tab decode before the
-        // verb match, so padded verbs stay unknown instead of crashing parse.
         assert!(matches!(
             parse_public_command("{\"command\":\"act\\\"ive\\\\x\\ry\\tt\"}"),
             CommandParse::Invalid
         ));
-        // A string that never terminates inside a braced object fails closed.
         assert!(matches!(
             parse_public_command("{\"first\":\"ok\",\"second\":\"unterminated }"),
             CommandParse::Invalid
@@ -794,40 +674,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn request_read_and_transition_problems_fail_closed() {
-        let mut buffer = Vec::new();
-        assert!(matches!(
-            apply_request_read(&mut buffer, b"", Ok(0)).unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(&mut Vec::new(), b"POST", Ok(4)).unwrap(),
-            RequestReadProgress::Continue
-        ));
-        let mut oversized = vec![b'x'; SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES];
-        assert!(matches!(
-            apply_request_read(&mut oversized, b"y", Ok(1)).unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::TimedOut, "timeout"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::WouldBlock, "block"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
+    fn transition_problems_fail_closed() {
         let invalid_ref = transition_problem(TransitionError::new(
             SessionState::Created,
             SessionCommand::Activate,
@@ -851,39 +698,9 @@ mod unit_tests {
         assert!(!session_command_session_ref_is_transport_safe(
             "%20ses_padded"
         ));
-        // A raw NBSP cannot survive request-line parsing, but the guard keeps
-        // rejecting padded identities if target parsing ever relaxes.
         assert!(!session_command_session_ref_is_transport_safe(
             "ses\u{00a0}padded"
         ));
         assert!(!session_command_session_ref_is_transport_safe("42"));
-    }
-
-    /// Serve one payload over a real loopback connection for read-loop tests.
-    fn connected_stream(payload: &[u8]) -> (TcpStream, TcpStream) {
-        let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address = listener.local_addr().unwrap();
-        let mut client = TcpStream::connect(address).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        server
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        client.write_all(payload).unwrap();
-        client.shutdown(Shutdown::Write).unwrap();
-        (client, server)
-    }
-
-    #[test]
-    fn oversized_unframed_input_collapses_to_an_empty_request() {
-        let (_client, mut server) =
-            connected_stream(&[b'A'; SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES + 808]);
-        assert_eq!(read_http_request(&mut server).unwrap(), "");
-    }
-
-    #[test]
-    fn input_without_header_terminator_collapses_to_an_empty_request() {
-        let (_client, mut server) =
-            connected_stream(b"POST /v1/sessions/ses_one/commands HTTP/1.1\r\nHost: localhost\r\n");
-        assert_eq!(read_http_request(&mut server).unwrap(), "");
     }
 }
