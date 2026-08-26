@@ -22,6 +22,7 @@ pub const RESULT_READ_PATH_PREFIX: &str = "/v1/results/";
 pub struct ResultHttpResponse {
     status: u16,
     content_type: &'static str,
+    allow: Option<&'static str>,
     body: String,
 }
 
@@ -30,6 +31,7 @@ impl ResultHttpResponse {
         Self {
             status: 200,
             content_type: "application/json",
+            allow: None,
             body,
         }
     }
@@ -38,8 +40,23 @@ impl ResultHttpResponse {
         Self {
             status,
             content_type: "application/problem+json",
+            allow: None,
             body: format!(
                 "{{\"type\":{},\"title\":{},\"status\":{status},\"detail\":{}}}",
+                json_string(type_uri),
+                json_string(title),
+                json_string(detail)
+            ),
+        }
+    }
+
+    fn method_not_allowed(type_uri: &str, title: &str, detail: &str) -> Self {
+        Self {
+            status: 405,
+            content_type: "application/problem+json",
+            allow: Some("GET"),
+            body: format!(
+                "{{\"type\":{},\"title\":{},\"status\":405,\"detail\":{}}}",
                 json_string(type_uri),
                 json_string(title),
                 json_string(detail)
@@ -57,6 +74,12 @@ impl ResultHttpResponse {
     #[must_use]
     pub const fn content_type(&self) -> &'static str {
         self.content_type
+    }
+
+    /// Return the RFC 9110 `Allow` field value when this is a method rejection.
+    #[must_use]
+    pub const fn allow(&self) -> Option<&'static str> {
+        self.allow
     }
 
     /// Return the response body.
@@ -108,8 +131,7 @@ pub fn handle_result_http_request(
         );
     };
     if method != "GET" {
-        return ResultHttpResponse::problem(
-            405,
+        return ResultHttpResponse::method_not_allowed(
             "urn:psychometrics-commons:problem:method-not-allowed",
             "Method Not Allowed",
             "result reads use GET /v1/results/{result_ref}",
