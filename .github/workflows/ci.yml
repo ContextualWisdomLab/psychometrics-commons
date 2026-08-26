@@ -5,11 +5,14 @@ on:
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "LICENSE*"
+      - "COPYING*"
       - "rust-toolchain.toml"
       - "src/**"
       - "migrations/**"
       - "tests/**"
       - "scripts/check_coverage.py"
+      - "scripts/check_release_legal_readiness.py"
       - "docs/**"
       - "README.md"
       - "ARCHITECTURE.md"
@@ -17,16 +20,20 @@ on:
       - "CLAUDE.md"
       - "CHANGELOG.md"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release-legal-readiness.yml"
   push:
     branches: [main]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
+      - "LICENSE*"
+      - "COPYING*"
       - "rust-toolchain.toml"
       - "src/**"
       - "migrations/**"
       - "tests/**"
       - "scripts/check_coverage.py"
+      - "scripts/check_release_legal_readiness.py"
       - "docs/**"
       - "README.md"
       - "ARCHITECTURE.md"
@@ -34,6 +41,7 @@ on:
       - "CLAUDE.md"
       - "CHANGELOG.md"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release-legal-readiness.yml"
   workflow_dispatch:
 
 permissions:
