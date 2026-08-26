@@ -59,6 +59,37 @@ fn core_migration_rejects_preexisting_relation_with_wrong_owned_schema() {
 }
 
 #[test]
+fn core_migration_rejects_same_named_wrong_tenant_time_index() {
+    let mut client = client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS audit_migration_index_shape_test CASCADE;\
+             CREATE SCHEMA audit_migration_index_shape_test;\
+             SET search_path TO audit_migration_index_shape_test;",
+        )
+        .unwrap();
+    apply_audit_evidence_migration(&mut client).unwrap();
+    client
+        .batch_execute(
+            "DROP INDEX audit_evidence_tenant_time_index;\
+             CREATE INDEX audit_evidence_tenant_time_index\
+             ON audit_evidence_record (audit_event_ref);",
+        )
+        .unwrap();
+
+    let error = apply_audit_evidence_migration(&mut client)
+        .expect_err("same-named wrong index must not satisfy tenant-time retention/read evidence");
+    let message = error.as_db_error().map_or_else(
+        || error.to_string(),
+        |database| database.message().to_owned(),
+    );
+    assert!(
+        message.contains("audit_evidence_tenant_time_index") && message.contains("contract"),
+        "migration must identify index-definition drift instead of trusting its name: {message}"
+    );
+}
+
+#[test]
 fn both_migrations_apply_inside_the_caller_transaction() {
     let mut client = client();
     client
