@@ -1,8 +1,9 @@
 //! PostgreSQL assessment-session identity must match the Rust opaque-reference boundary.
 //!
 //! Session headers and append-only command history are durable lifecycle provenance. Direct SQL
-//! must not persist Unicode-numeric aliases, surrounding Unicode whitespace, or embedded controls
-//! that `normalized_reference` rejects or would normalize in the Rust domain.
+//! must not persist Unicode-numeric aliases, surrounding Unicode whitespace, embedded controls,
+//! or default-ignorable code points that `normalized_reference` rejects or would normalize in the
+//! Rust domain.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_assessment_session::apply_assessment_session_migration;
@@ -89,7 +90,20 @@ fn assert_session_field_rejects_invalid_aliases(
     field: SessionReferenceField,
     constraint: &str,
 ) {
-    let invalid_references = ["½", "²", "Ⅳ", "\u{00a0}opaque_alpha", "opaque_\u{0001}_alpha"];
+    let invalid_references = [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}opaque_alpha",
+        "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
+    ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
         let suffix = format!("{}_{}", field as u8, index);
@@ -117,7 +131,7 @@ fn assert_session_field_rejects_invalid_aliases(
 }
 
 #[test]
-fn every_session_header_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
+fn every_session_header_reference_rejects_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
 
@@ -154,6 +168,13 @@ fn command_reference_uses_the_same_opaque_identity_boundary() {
         "Ⅳ",
         "\u{00a0}command_alpha",
         "command_\u{0001}_alpha",
+        "command_\u{00ad}_alpha",
+        "command_\u{200b}_alpha",
+        "command_\u{200d}_alpha",
+        "command_\u{2060}_alpha",
+        "command_\u{fe0f}_alpha",
+        "command_\u{feff}_alpha",
+        "command_\u{e0001}_alpha",
     ]
     .into_iter()
     .enumerate()
