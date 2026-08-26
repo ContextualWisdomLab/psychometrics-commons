@@ -16,11 +16,11 @@ fn durable_snapshot_reference_must_be_opaque() {
 }
 
 #[test]
-fn durable_snapshot_reference_is_trimmed_before_becoming_identity() {
+fn durable_snapshot_reference_rejects_padded_alias_before_identity() {
     let ledger = ResponseLedger::new("session_ref").unwrap();
-    let snapshot = ledger
+    let error = ledger
         .freeze_as(SessionState::Completed, " snapshot_ref_a ")
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(snapshot.snapshot_ref(), Some("snapshot_ref_a"));
+    assert_eq!(error, WriteError::InvalidReference);
 }
