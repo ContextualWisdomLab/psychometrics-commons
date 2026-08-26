@@ -227,6 +227,59 @@ fn generated_server_event_cursor_skips_a_valid_seed_that_occupies_its_namespace(
 }
 
 #[test]
+fn stale_server_event_cursor_cannot_reuse_identity_across_sessions() {
+    let release = published_release();
+    let session_a = active_session(
+        "ses_response_global_ref_a",
+        "ptc_response_global_ref_a",
+        &release,
+    );
+    let session_b = active_session(
+        "ses_response_global_ref_b",
+        "ptc_response_global_ref_b",
+        &release,
+    );
+    let mut runtime = ResponseHttpRuntime::new(
+        vec![session_a, session_b],
+        vec![release],
+        "evt_response_global_shared",
+    );
+
+    let first_request = post_request(
+        "ses_response_global_ref_a",
+        "idem_response_global_ref_a",
+        "item_version_001",
+        PAYLOAD_ONE,
+    );
+    let first = authorized_response(
+        &mut runtime,
+        "ptc_response_global_ref_a",
+        &first_request,
+    );
+    assert_eq!(first.status(), 201);
+
+    runtime.replace_next_server_event_ref("evt_response_global_shared");
+    let conflicting_request = post_request(
+        "ses_response_global_ref_b",
+        "idem_response_global_ref_b",
+        "item_version_002",
+        PAYLOAD_TWO,
+    );
+    let conflict = authorized_response(
+        &mut runtime,
+        "ptc_response_global_ref_b",
+        &conflicting_request,
+    );
+
+    assert_eq!(conflict.status(), 409);
+    assert!(conflict
+        .body()
+        .contains("urn:psychometrics-commons:problem:server-reference-conflict"));
+    assert_eq!(runtime.event_count("ses_response_global_ref_a"), 1);
+    assert_eq!(runtime.event_count("ses_response_global_ref_b"), 0);
+}
+
+#[test]
 fn body_lines_cannot_supply_the_idempotency_header() {
     let release = published_release();
     let session = active_session(
