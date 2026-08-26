@@ -45,6 +45,7 @@ pub mod postgres_scoring_request;
 mod reference;
 pub mod research_release;
 pub mod response;
+#[path = "response_http_boundary.rs"]
 pub mod response_http;
 pub mod result;
 pub mod result_authorization;
