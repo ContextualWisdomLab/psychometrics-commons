@@ -5,6 +5,7 @@ use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migratio
 use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
 const AUDIT_SCHEMA_MIGRATION: &str = include_str!("../migrations/0040_audit_evidence_record.sql");
+const AUDIT_EVIDENCE_OWNER_ROLE: &str = "psychometrics_audit_evidence_owner";
 
 fn client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -28,6 +29,70 @@ fn core_migration_serializes_creation_before_observing_relation_state() {
     assert!(
         first_relation_observation > lock,
         "owned relation state must be observed only after acquiring the migration lock"
+    );
+}
+
+#[test]
+fn core_migration_uses_dedicated_nologin_owner_without_runtime_set_paths() {
+    let mut client = client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS audit_owner_shape_test CASCADE;\
+             CREATE SCHEMA audit_owner_shape_test;\
+             SET search_path TO audit_owner_shape_test;",
+        )
+        .unwrap();
+    apply_audit_evidence_migration(&mut client).unwrap();
+
+    let owner = client
+        .query_opt(
+            "SELECT\
+                 owner_role.rolcanlogin,\
+                 owner_role.rolsuper,\
+                 owner_role.rolcreatedb,\
+                 owner_role.rolcreaterole,\
+                 owner_role.rolreplication,\
+                 owner_role.rolbypassrls,\
+                 pg_get_userbyid(table_record.relowner),\
+                 pg_get_userbyid(reference_function.proowner),\
+                 pg_get_userbyid(mutation_function.proowner),\
+                 EXISTS (\
+                     SELECT 1\
+                     FROM pg_roles AS login_role\
+                     WHERE login_role.rolcanlogin\
+                       AND NOT login_role.rolsuper\
+                       AND (\
+                           pg_has_role(login_role.oid, owner_role.oid, 'SET')\
+                           OR pg_has_role(login_role.oid, owner_role.oid, 'USAGE')\
+                       )\
+                 )\
+             FROM pg_roles AS owner_role\
+             JOIN pg_class AS table_record\
+               ON table_record.oid = 'audit_owner_shape_test.audit_evidence_record'::regclass\
+             JOIN pg_proc AS reference_function\
+               ON reference_function.oid =\
+                  'audit_owner_shape_test.audit_evidence_reference_is_valid(text)'::regprocedure\
+             JOIN pg_proc AS mutation_function\
+               ON mutation_function.oid =\
+                  'audit_owner_shape_test.reject_audit_evidence_mutation()'::regprocedure\
+             WHERE owner_role.rolname = $1",
+            &[&AUDIT_EVIDENCE_OWNER_ROLE],
+        )
+        .unwrap()
+        .expect("audit migration must provision its dedicated owner role");
+
+    for attribute_index in 0..6 {
+        assert!(
+            !owner.get::<_, bool>(attribute_index),
+            "audit owner must remain NOLOGIN and free of cluster-escalation attributes"
+        );
+    }
+    assert_eq!(owner.get::<_, String>(6), AUDIT_EVIDENCE_OWNER_ROLE);
+    assert_eq!(owner.get::<_, String>(7), AUDIT_EVIDENCE_OWNER_ROLE);
+    assert_eq!(owner.get::<_, String>(8), AUDIT_EVIDENCE_OWNER_ROLE);
+    assert!(
+        !owner.get::<_, bool>(9),
+        "no non-superuser login role may inherit or SET ROLE into the audit owner"
     );
 }
 
@@ -115,6 +180,8 @@ fn both_migrations_apply_inside_the_caller_transaction() {
                   WHERE routine_schema = 'audit_migration_transaction_test'\
                     AND routine_name = 'expire_audit_evidence_before'),\
                  (SELECT prosecdef FROM pg_proc\
+                  WHERE oid = 'audit_migration_transaction_test.expire_audit_evidence_before(text,bigint)'::regprocedure),\
+                 (SELECT pg_get_userbyid(proowner) FROM pg_proc\
                   WHERE oid = 'audit_migration_transaction_test.expire_audit_evidence_before(text,bigint)'::regprocedure)",
             &[],
         )
@@ -122,12 +189,11 @@ fn both_migrations_apply_inside_the_caller_transaction() {
     let table_count: i64 = row.get(0);
     let routine_count: i64 = row.get(1);
     let security_definer: bool = row.get(2);
+    let routine_owner: String = row.get(3);
     assert_eq!(table_count, 1);
     assert_eq!(routine_count, 1);
-    assert!(
-        security_definer,
-        "bounded retention must execute under its migration owner"
-    );
+    assert!(security_definer, "bounded retention must remain SECURITY DEFINER");
+    assert_eq!(routine_owner, AUDIT_EVIDENCE_OWNER_ROLE);
 }
 
 #[test]
