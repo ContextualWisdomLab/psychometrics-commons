@@ -69,6 +69,10 @@ impl ResponseHttpRuntime {
     pub fn event_count(&self, session_ref: &str) -> usize {
         self.ledgers.get(session_ref).map_or(0, ResponseLedger::len)
     }
+
+    fn total_event_count(&self) -> usize {
+        self.ledgers.values().map(ResponseLedger::len).sum()
+    }
 }
 
 /// HTTP response produced by a public response-event request.
@@ -276,7 +280,7 @@ fn record_response(
             let created = runtime.event_count(session_ref) > prior_len;
             if created {
                 runtime.next_server_event_ref =
-                    format!("evt_response_{}", runtime.event_count(session_ref) + 1);
+                    format!("evt_response_{}", runtime.total_event_count() + 1);
             }
             ResponseHttpResponse::json(
                 if created { 201 } else { 200 },
@@ -447,13 +451,14 @@ fn valid_idempotency_key(value: &str) -> Option<&str> {
 }
 
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
-    request.lines().skip(1).find_map(|line| {
-        if line.is_empty() {
-            return None;
-        }
-        let (header_name, value) = line.split_once(':')?;
-        header_name.eq_ignore_ascii_case(name).then(|| value.trim())
-    })
+    request
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.is_empty())
+        .find_map(|line| {
+            let (header_name, value) = line.split_once(':')?;
+            header_name.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
 }
 
 fn request_body(request: &str) -> Option<&str> {
