@@ -12,14 +12,18 @@ use psychometrics_commons_runtime::scoring::{
 use psychometrics_commons_runtime::session::SessionState;
 use std::error::Error;
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 const ENGINE_DIGEST: &str =
     "sha256:4444444444444444444444444444444444444444444444444444444444444444";
 
 fn result_snapshot() -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_big_five_locale_v1").unwrap();
+    let mut session = response_support::active_session("session_big_five_locale_v1");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &session,
             ResponseWrite {
                 server_event_ref: "event_locale_item_alpha",
                 client_event_ref: "client_locale_item_alpha",
@@ -29,8 +33,9 @@ fn result_snapshot() -> ResultSnapshot {
             },
         )
         .unwrap();
+    response_support::advance_to(&mut session, SessionState::Completed);
     let response_snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_locale_v1")
+        .freeze_as(&session, "response_snapshot_locale_v1")
         .unwrap();
     let request = ScoringRequest::from_snapshot(
         &response_snapshot,

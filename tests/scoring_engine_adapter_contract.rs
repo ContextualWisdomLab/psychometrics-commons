@@ -1,13 +1,16 @@
 //! Contract tests for the product-owned scoring-engine adapter boundary.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::scoring_engine::{
     execute_scoring_request, ScoringEngine, ScoringEngineExecutionError,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -22,22 +25,17 @@ const PRIMARY_CALIBRATION_REFERENCE: &str = "calibration_big_five_v1";
 fn completed_snapshot_with_ref(
     snapshot_ref: &str,
 ) -> psychometrics_commons_runtime::response::ResponseSnapshot {
-    let mut ledger = ResponseLedger::new("session_scoring_adapter").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "response_event_scoring_adapter",
-                client_event_ref: "client_event_scoring_adapter",
-                item_version_ref: "item_version_scoring_adapter",
-                payload_digest:
-                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            },
-        )
-        .unwrap();
-    ledger
-        .freeze_as(SessionState::Completed, snapshot_ref)
-        .unwrap()
+    frozen_snapshot(
+        "session_scoring_adapter",
+        snapshot_ref,
+        &[ResponseWrite {
+            server_event_ref: "response_event_scoring_adapter",
+            client_event_ref: "client_event_scoring_adapter",
+            item_version_ref: "item_version_scoring_adapter",
+            payload_digest:
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        }],
+    )
 }
 
 fn request_with_provenance(

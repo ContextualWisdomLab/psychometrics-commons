@@ -19,6 +19,9 @@ use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::session::SessionState;
+
+#[path = "response_support/mod.rs"]
+mod response_support;
 use std::error::Error;
 
 const ENGINE_DIGEST: &str =
@@ -33,10 +36,11 @@ fn result_snapshot(result_ref: &str, participant_ref: &str, suffix: &str) -> Res
     let scoring_request_ref = format!("scoring_request_{suffix}");
     let scoring_result_ref = format!("scoring_result_{suffix}");
 
-    let mut ledger = ResponseLedger::new(&session_ref).unwrap();
+    let mut session = response_support::active_session(&session_ref);
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &session,
             ResponseWrite {
                 server_event_ref: &event_ref,
                 client_event_ref: &client_event_ref,
@@ -46,9 +50,8 @@ fn result_snapshot(result_ref: &str, participant_ref: &str, suffix: &str) -> Res
             },
         )
         .unwrap();
-    let responses = ledger
-        .freeze_as(SessionState::Completed, &response_snapshot_ref)
-        .unwrap();
+    response_support::advance_to(&mut session, SessionState::Completed);
+    let responses = ledger.freeze_as(&session, &response_snapshot_ref).unwrap();
     let request = ScoringRequest::from_snapshot(
         &responses,
         ScoringRequestInput {
