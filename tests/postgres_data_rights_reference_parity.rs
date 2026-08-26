@@ -3,7 +3,7 @@
 //! Privacy/export/deletion evidence cannot safely retain an identifier that the application would
 //! reject or normalize differently. These tests exercise request, propagation, and identity-
 //! verification columns through direct SQL, including Unicode numeric aliases, Unicode outer
-//! whitespace, embedded controls, and upgrade revalidation.
+//! whitespace, embedded controls, Unicode default-ignorable aliases, and upgrade revalidation.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_data_rights::apply_data_rights_migration;
@@ -150,6 +150,13 @@ fn request_and_verification_references_reject_rust_invalid_aliases() {
         "12345",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -242,6 +249,13 @@ fn propagation_references_reject_rust_invalid_aliases() {
         "12345",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -318,7 +332,7 @@ fn migration_reapplication_revalidates_existing_request_rows() {
         .unwrap();
     insert_request(
         &mut client,
-        "½",
+        "opaque_\u{200b}_upgrade",
         "tenant_upgrade_guard",
         "participant_upgrade_guard",
         "scope_upgrade_guard",
