@@ -10,6 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 const MIGRATION: &str = include_str!("../migrations/0005_consent_lifecycle.sql");
+const REFERENCE_SOURCE: &str = include_str!("../src/reference.rs");
 
 fn guard() -> MutexGuard<'static, ()> {
     TEST_LOCK
@@ -95,6 +96,43 @@ fn migration_numeric_ranges() -> Vec<(u32, u32)> {
         .collect()
 }
 
+fn migration_default_ignorable_ranges() -> Vec<(u32, u32)> {
+    const RANGE_PREFIX: &str = "ascii(character_text) <@ '";
+    const RANGE_SUFFIX: &str = "'::int4multirange";
+
+    let after_prefix = MIGRATION
+        .split(RANGE_PREFIX)
+        .nth(2)
+        .expect("consent migration must declare the default-ignorable multirange");
+    let literal = after_prefix
+        .split_once(RANGE_SUFFIX)
+        .expect("consent migration default-ignorable multirange must use int4multirange")
+        .0;
+    let body = literal
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .expect("consent migration default-ignorable multirange must use canonical braces");
+
+    body.split("),")
+        .map(|range| {
+            let range = range.strip_prefix('[').expect(
+                "default-ignorable multirange entries must be inclusive-exclusive ranges",
+            );
+            let range = range.strip_suffix(')').unwrap_or(range);
+            let (start, end) = range
+                .split_once(',')
+                .expect("default-ignorable multirange entries must have start and end bounds");
+            (
+                start
+                    .parse()
+                    .expect("default-ignorable range start must be u32"),
+                end.parse()
+                    .expect("default-ignorable range end must be u32"),
+            )
+        })
+        .collect()
+}
+
 fn rust_numeric_ranges() -> Vec<(u32, u32)> {
     let mut ranges = Vec::new();
     let mut range_start = None;
@@ -115,19 +153,65 @@ fn rust_numeric_ranges() -> Vec<(u32, u32)> {
     ranges
 }
 
+fn codepoint_from_rust_unicode_literal(literal: &str) -> u32 {
+    let prefix = literal
+        .find("\\u{")
+        .expect("default-ignorable Rust entry must use a Unicode escape")
+        + 3;
+    let suffix = literal[prefix..]
+        .find('}')
+        .expect("default-ignorable Rust Unicode escape must close")
+        + prefix;
+    u32::from_str_radix(&literal[prefix..suffix], 16)
+        .expect("default-ignorable Rust Unicode escape must be hexadecimal")
+}
+
+fn rust_default_ignorable_ranges() -> Vec<(u32, u32)> {
+    let function = REFERENCE_SOURCE
+        .split_once("const fn is_default_ignorable_identifier_character")
+        .expect("reference boundary must declare the pinned default-ignorable helper")
+        .1;
+    let patterns = function
+        .split_once("#[cfg(test)]")
+        .expect("reference boundary helper must precede its unit tests")
+        .0;
+
+    patterns
+        .lines()
+        .filter(|line| line.contains("\\u{"))
+        .map(|line| {
+            let pattern = line.trim().trim_start_matches('|').trim();
+            if let Some((start, end)) = pattern.split_once("..=") {
+                (
+                    codepoint_from_rust_unicode_literal(start),
+                    codepoint_from_rust_unicode_literal(end) + 1,
+                )
+            } else {
+                let codepoint = codepoint_from_rust_unicode_literal(pattern);
+                (codepoint, codepoint + 1)
+            }
+        })
+        .collect()
+}
+
 #[test]
 fn migration_numeric_ranges_exactly_match_pinned_rust_unicode_tables() {
     assert_eq!(migration_numeric_ranges(), rust_numeric_ranges());
 }
 
 #[test]
+fn migration_default_ignorable_ranges_exactly_match_pinned_rust_boundary() {
+    assert_eq!(
+        migration_default_ignorable_ranges(),
+        rust_default_ignorable_ranges()
+    );
+}
+
+#[test]
 fn migration_declares_and_runs_under_the_required_utf8_database_encoding() {
     let _guard = guard();
     let mut client = client();
-    let encoding: String = client
-        .query_one("SHOW server_encoding", &[])
-        .unwrap()
-        .get(0);
+    let encoding: String = client.query_one("SHOW server_encoding", &[]).unwrap().get(0);
     assert_eq!(encoding, "UTF8");
 
     assert!(MIGRATION.contains("current_setting('server_encoding')"));
