@@ -5,11 +5,14 @@
 //! canonical lowercase SHA-256 identity for the engine artifact instead of allowing a placeholder
 //! or human-readable token to become immutable result provenance.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const CANONICAL_ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -17,24 +20,16 @@ const CANONICAL_RESPONSE_DIGEST: &str =
     "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 fn scoring_request() -> ScoringRequest {
-    let mut ledger = ResponseLedger::new("session_engine_digest_contract").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "response_event_engine_digest_contract",
-                client_event_ref: "client_event_engine_digest_contract",
-                item_version_ref: "item_version_engine_digest_contract",
-                payload_digest: CANONICAL_RESPONSE_DIGEST,
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_engine_digest_contract",
-        )
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_engine_digest_contract",
+        "response_snapshot_engine_digest_contract",
+        &[ResponseWrite {
+            server_event_ref: "response_event_engine_digest_contract",
+            client_event_ref: "client_event_engine_digest_contract",
+            item_version_ref: "item_version_engine_digest_contract",
+            payload_digest: CANONICAL_RESPONSE_DIGEST,
+        }],
+    );
 
     ScoringRequest::from_snapshot(
         &snapshot,
