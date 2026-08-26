@@ -1,17 +1,34 @@
 //! Deployment-policy retention contract for otherwise append-only audit evidence.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migration;
 use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
 const AUDIT_RETENTION_TEST_LOCK_KEY: i64 = 0x4155_4454_5245_544e;
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+fn acquire_retention_fixture_guard(
+    mut guard: Client,
+    lock_timeout: &str,
+) -> Result<Client, postgres::Error> {
+    guard.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    guard.query_one(
+        "SELECT pg_advisory_lock($1)",
+        &[&AUDIT_RETENTION_TEST_LOCK_KEY],
+    )?;
+    Ok(guard)
+}
+
 fn client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
+    let guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
+    let mut client = acquire_retention_fixture_guard(guard, "60s")
+        .expect("shared audit-retention fixture lock must be acquired within 60 seconds");
     client
         .batch_execute(
             "DROP SCHEMA IF EXISTS audit_retention_test CASCADE;\
@@ -73,6 +90,19 @@ fn retention_fixture_guard_is_visible_to_another_postgres_session() {
         !acquired,
         "fixed-schema retention fixtures must serialize across PostgreSQL sessions"
     );
+}
+
+#[test]
+fn retention_fixture_lock_contention_has_a_finite_timeout() {
+    let _guard = client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_retention_fixture_guard(contender, "100ms")
+        .err()
+        .expect("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
