@@ -13,7 +13,7 @@ use std::fmt::{Display, Formatter};
 
 const AUDIT_EVIDENCE_MIGRATION: &str = include_str!("../migrations/0040_audit_evidence_record.sql");
 const AUDIT_EVIDENCE_OWNER_HARDENING_MIGRATION: &str =
-    include_str!("../migrations/0040_audit_evidence_owner_hardening.sql");
+    include_str!("../migrations/0042_audit_evidence_owner_hardening.sql");
 
 /// Outcome of persisting one immutable audit record.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
