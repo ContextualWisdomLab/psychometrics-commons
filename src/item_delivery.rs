@@ -72,7 +72,7 @@ impl ItemDeliveryEvent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ItemDeliveryError {
-    /// A required reference was blank or numeric-like instead of opaque.
+    /// A required reference was blank, numeric-like, unsafe, or not already canonical.
     InvalidReference,
     /// A new logical delivery was attempted while the assessment session was not active.
     SessionNotActive(SessionState),
@@ -134,11 +134,13 @@ impl ItemDeliveryLedger {
     /// versions are copied from the validated manifest as one unit. This prevents
     /// callers from composing an apparently valid ledger from references that belong
     /// to different releases.
+    /// The session reference must already use its exact canonical spelling; this
+    /// boundary rejects padded aliases instead of silently trimming them.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::InvalidReference`] when `session_ref` is blank or
-    /// numeric-like instead of an opaque product identifier.
+    /// Returns [`ItemDeliveryError::InvalidReference`] when `session_ref` is blank,
+    /// numeric-like, unsafe, or not already in canonical spelling.
     pub fn from_manifest(
         session_ref: &str,
         manifest: &InstrumentReleaseManifest,
@@ -216,12 +218,14 @@ impl ItemDeliveryLedger {
     /// of that identity with different evidence fails closed. Every genuinely new
     /// logical delivery still requires an active session and an item version present
     /// in the exact bound release manifest. A different delivery identity cannot
-    /// re-administer an item version already delivered in the session.
+    /// re-administer an item version already delivered in the session. Request
+    /// references must already be canonical, so whitespace-padded aliases cannot be
+    /// rebound to an existing delivery, item, presentation, or selection identity.
     ///
     /// # Errors
     ///
-    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed evidence,
-    /// [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay,
+    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed or non-canonical
+    /// evidence, [`ItemDeliveryError::IdempotencyConflict`] for conflicting replay,
     /// [`ItemDeliveryError::SessionNotActive`] when a new logical delivery is offered
     /// outside an active session, [`ItemDeliveryError::ItemNotInRelease`] when the
     /// requested item is not present in the exact release manifest, or
@@ -288,5 +292,9 @@ impl ItemDeliveryLedger {
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
-    normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)
+    let normalized = normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)?;
+    if normalized != reference {
+        return Err(ItemDeliveryError::InvalidReference);
+    }
+    Ok(normalized)
 }

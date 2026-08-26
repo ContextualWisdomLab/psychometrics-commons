@@ -1,7 +1,10 @@
 //! Regression coverage for exact response-payload digest identity.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, completed_session};
 
 const DIGEST_A: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -16,14 +19,14 @@ fn write(payload_digest: &str) -> ResponseWrite<'_> {
 
 #[test]
 fn nonblank_payload_digest_whitespace_is_rejected_before_replay_classification() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
-    let original = ledger
-        .record(SessionState::Active, write(DIGEST_A))
-        .unwrap();
+    let session = active_session("session_ref");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    let original = ledger.record(&session, write(DIGEST_A)).unwrap();
+    let completed = completed_session("session_ref");
 
     assert_eq!(
         ledger.record(
-            SessionState::Completed,
+            &completed,
             write(" sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "),
         ),
         Err(WriteError::InvalidPayloadDigest)

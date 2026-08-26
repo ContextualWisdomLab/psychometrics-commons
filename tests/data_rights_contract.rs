@@ -24,10 +24,10 @@ fn new_request(
 #[test]
 fn export_request_requires_verified_identity_before_processing() {
     let mut request = new_request(
-        " export_request_ref ",
-        " participant_ref ",
+        "export_request_ref",
+        "participant_ref",
         DataRightsRequestKind::Export,
-        " account_data_scope ",
+        "account_data_scope",
         1_000,
     )
     .unwrap();
@@ -51,7 +51,7 @@ fn export_request_requires_verified_identity_before_processing() {
     );
 
     request
-        .verify_identity(" verification_evidence_ref ", 1_050)
+        .verify_identity("verification_evidence_ref", 1_050)
         .unwrap();
     assert_eq!(request.state(), DataRightsState::IdentityVerified);
     assert_eq!(
@@ -59,12 +59,12 @@ fn export_request_requires_verified_identity_before_processing() {
         Some("verification_evidence_ref")
     );
     assert_eq!(request.verified_at_unix_ms(), Some(1_050));
-    request.start_processing(" operation_ref ", 1_100).unwrap();
+    request.start_processing("operation_ref", 1_100).unwrap();
     assert_eq!(request.state(), DataRightsState::Processing);
     assert_eq!(request.operation_ref(), Some("operation_ref"));
     assert_eq!(request.processing_started_at_unix_ms(), Some(1_100));
     request
-        .complete(" completion_evidence_ref ", &[], 1_200)
+        .complete("completion_evidence_ref", &[], 1_200)
         .unwrap();
     assert_eq!(request.state(), DataRightsState::Completed);
     assert_eq!(
@@ -94,7 +94,7 @@ fn deletion_completion_preserves_legal_retention_exceptions() {
     request
         .complete(
             "deletion_completion_ref",
-            &[" tax_record_retention ", "audit_evidence_retention"],
+            &["tax_record_retention", "audit_evidence_retention"],
             2_200,
         )
         .unwrap();
@@ -202,9 +202,11 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     .unwrap();
 
     request.verify_identity("verification_ref", 6_100).unwrap();
-    request
-        .verify_identity(" verification_ref ", 6_100)
-        .unwrap();
+    assert_eq!(
+        request.verify_identity(" verification_ref ", 6_100),
+        Err(DataRightsError::InvalidReference)
+    );
+    request.verify_identity("verification_ref", 6_100).unwrap();
     assert_eq!(
         request.verify_identity("verification_ref", 6_101),
         Err(DataRightsError::ConflictingReplay)
@@ -215,7 +217,11 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     );
 
     request.start_processing("operation_ref", 6_200).unwrap();
-    request.start_processing(" operation_ref ", 6_200).unwrap();
+    assert_eq!(
+        request.start_processing(" operation_ref ", 6_200),
+        Err(DataRightsError::InvalidReference)
+    );
+    request.start_processing("operation_ref", 6_200).unwrap();
     assert_eq!(
         request.start_processing("operation_ref", 6_201),
         Err(DataRightsError::ConflictingReplay)
@@ -228,8 +234,16 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     request
         .complete("completion_ref", &["legal_retention_scope"], 6_300)
         .unwrap();
+    assert_eq!(
+        request.complete(" completion_ref ", &["legal_retention_scope"], 6_300),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request.complete("completion_ref", &[" legal_retention_scope "], 6_300),
+        Err(DataRightsError::InvalidReference)
+    );
     request
-        .complete(" completion_ref ", &[" legal_retention_scope "], 6_300)
+        .complete("completion_ref", &["legal_retention_scope"], 6_300)
         .unwrap();
     assert_eq!(
         request.complete("completion_ref", &["different_retention_scope"], 6_300,),
@@ -336,7 +350,7 @@ fn public_error_messages_are_stable() {
     let cases = [
         (
             DataRightsError::InvalidReference,
-            "data-rights references must be opaque non-numeric values",
+            "data-rights references must use exact opaque non-numeric spelling without surrounding whitespace or unsafe controls",
         ),
         (
             DataRightsError::InvalidTimestamp,

@@ -1,15 +1,32 @@
 //! Real `PostgreSQL` tenant and identity integrity for item-delivery persistence.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
-use std::sync::{Mutex, MutexGuard};
 
-static ITEM_DELIVERY_TENANT_LOCK: Mutex<()> = Mutex::new(());
+const ITEM_DELIVERY_TENANT_LOCK_KEY: i64 = 0x4954_544E_544C_4F43;
 
-fn tenant_test_guard() -> MutexGuard<'static, ()> {
-    ITEM_DELIVERY_TENANT_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn acquire_tenant_fixture_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
+fn tenant_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    acquire_tenant_fixture_lock(&mut guard, ITEM_DELIVERY_TENANT_LOCK_KEY, "60s").expect(
+        "shared item-delivery tenant integrity test lock should be acquired within sixty seconds",
+    );
+    guard
 }
 
 fn test_client() -> Client {
@@ -55,6 +72,69 @@ fn insert_ledger(client: &mut Client, tenant_ref: &str, session_ref: &str) {
             &[&tenant_ref, &session_ref],
         )
         .unwrap();
+}
+
+#[test]
+fn item_delivery_tenant_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = tenant_test_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ITEM_DELIVERY_TENANT_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema item-delivery tenant fixture guard must serialize across PostgreSQL sessions"
+    );
+}
+
+#[test]
+fn item_delivery_tenant_fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = tenant_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("item-delivery tenant fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "item-delivery tenant fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
+fn item_delivery_tenant_fixture_lock_wait_aborts_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_tenant_fixture_lock(&mut contender, behavior_lock_key, "100ms").expect_err(
+        "contended item-delivery tenant fixture lock must stop at the configured timeout",
+    );
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test advisory lock should be released")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]

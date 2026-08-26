@@ -8,20 +8,29 @@ use psychometrics_commons_runtime::postgres_item_delivery::{
     ItemDeliveryPersistenceDisposition, ItemDeliveryPersistenceError,
 };
 use psychometrics_commons_runtime::session::SessionState;
-use std::sync::{Mutex, MutexGuard};
 
 const TENANT_REF: &str = "tenant_item_delivery_alpha";
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const OTHER_DIGEST: &str =
     "sha256:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+const ITEM_DELIVERY_PERSISTENCE_DATABASE_LOCK_KEY: i64 = 0x4954_454D_4445_4C56;
 
-static ITEM_DELIVERY_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-fn item_delivery_test_guard() -> MutexGuard<'static, ()> {
-    ITEM_DELIVERY_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn item_delivery_test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .batch_execute("SET lock_timeout TO '60s'")
+        .expect("database-lock waits should have a finite CI bound");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&ITEM_DELIVERY_PERSISTENCE_DATABASE_LOCK_KEY],
+        )
+        .expect("PostgreSQL fixture advisory lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
@@ -152,6 +161,36 @@ fn persist(
     ledger: &ItemDeliveryLedger,
 ) -> Result<ItemDeliveryPersistenceDisposition, ItemDeliveryPersistenceError> {
     persist_item_delivery_ledger(transaction, TENANT_REF, ledger)
+}
+
+#[test]
+fn fixture_lock_is_visible_across_database_sessions() {
+    let _guard = item_delivery_test_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ITEM_DELIVERY_PERSISTENCE_DATABASE_LOCK_KEY],
+        )
+        .unwrap()
+        .get(0);
+
+    if acquired {
+        contender
+            .query_one(
+                "SELECT pg_advisory_unlock($1)",
+                &[&ITEM_DELIVERY_PERSISTENCE_DATABASE_LOCK_KEY],
+            )
+            .unwrap();
+    }
+
+    assert!(
+        !acquired,
+        "fixture serialization must be enforced by PostgreSQL, not only by a process-local mutex"
+    );
 }
 
 #[test]
