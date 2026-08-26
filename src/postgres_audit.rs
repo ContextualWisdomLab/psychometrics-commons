@@ -12,6 +12,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const AUDIT_EVIDENCE_MIGRATION: &str = include_str!("../migrations/0040_audit_evidence_record.sql");
+const AUDIT_EVIDENCE_OWNER_HARDENING_MIGRATION: &str =
+    include_str!("../migrations/0040_audit_evidence_owner_hardening.sql");
 
 /// Outcome of persisting one immutable audit record.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,16 +82,26 @@ impl From<postgres::Error> for AuditPersistenceError {
     }
 }
 
-/// Apply the idempotent append-only audit migration.
+/// Apply the idempotent append-only audit migration and its dedicated-owner boundary.
+///
+/// The migration path provisions a non-login owner role and rejects unsafe role membership before
+/// handing ownership of the audit table and guard functions to that role. Deployments therefore
+/// need migration-time authority to create/assign the owner role, but runtime identities never do.
 ///
 /// # Errors
 ///
-/// Returns the database error when the schema, constraints, index, or immutability triggers cannot
-/// be created.
+/// Returns the database error when the schema, constraints, index, owner boundary, or immutability
+/// triggers cannot be created.
 pub fn apply_audit_evidence_migration(
     client: &mut impl GenericClient,
 ) -> Result<(), postgres::Error> {
-    client.batch_execute(AUDIT_EVIDENCE_MIGRATION)
+    let migration = [
+        AUDIT_EVIDENCE_MIGRATION,
+        "\n",
+        AUDIT_EVIDENCE_OWNER_HARDENING_MIGRATION,
+    ]
+    .concat();
+    client.batch_execute(&migration)
 }
 
 /// Persist one exact audit record under `READ COMMITTED` isolation.
