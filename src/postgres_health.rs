@@ -14,6 +14,9 @@ use postgres::GenericClient;
 /// Initial supported `PostgreSQL` server major version from ADR-0015.
 pub const SUPPORTED_POSTGRES_MAJOR: i32 = 18;
 
+/// Database encoding required by the initial product persistence contract.
+pub const SUPPORTED_POSTGRES_ENCODING: &str = "UTF8";
+
 /// Capability identity used by operation-scoped runtime readiness.
 pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operational_store";
 
@@ -21,10 +24,14 @@ pub const POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF: &str = "postgres_operationa
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum PostgresRuntimeStatus {
-    /// The supported `PostgreSQL` major is reachable and accepts writes.
+    /// The supported `PostgreSQL` major and encoding are reachable and accept writes.
     Ready,
     /// The `PostgreSQL` server major is outside the repository's validated support boundary.
     UnsupportedMajorVersion,
+    /// The caller did not provide evidence for the database encoding prerequisite.
+    UnverifiedServerEncoding,
+    /// The database encoding is outside the repository's validated UTF8 support boundary.
+    UnsupportedServerEncoding,
     /// The supported `PostgreSQL` server is currently read-only for this connection.
     ReadOnly,
 }
@@ -54,9 +61,10 @@ impl PostgresRuntimeHealth {
     pub const fn capability_state(self) -> CapabilityState {
         match self.status {
             PostgresRuntimeStatus::Ready => CapabilityState::Available,
-            PostgresRuntimeStatus::UnsupportedMajorVersion | PostgresRuntimeStatus::ReadOnly => {
-                CapabilityState::Unavailable
-            }
+            PostgresRuntimeStatus::UnsupportedMajorVersion
+            | PostgresRuntimeStatus::UnverifiedServerEncoding
+            | PostgresRuntimeStatus::UnsupportedServerEncoding
+            | PostgresRuntimeStatus::ReadOnly => CapabilityState::Unavailable,
         }
     }
 
@@ -83,6 +91,12 @@ impl PostgresRuntimeHealth {
 
 /// Classify server-version and transaction-read-only evidence without performing I/O.
 ///
+/// This helper does not receive the database encoding, so it cannot prove complete write
+/// readiness. It still reports an unsupported server major or read-only transaction when
+/// either condition is already known; otherwise it returns
+/// [`PostgresRuntimeStatus::UnverifiedServerEncoding`] and denies new work. Call
+/// [`classify_postgres_runtime_with_encoding`] when the canonical `server_encoding` value is
+/// already available, or use [`probe_postgres_runtime`] for real connection readiness.
 /// `PostgreSQL` 10 and later encode `server_version_num` as `major * 10000 + minor`, so
 /// integer division yields the server major used by the repository support policy.
 #[must_use]
@@ -96,6 +110,34 @@ pub const fn classify_postgres_runtime(
     } else if transaction_read_only {
         PostgresRuntimeStatus::ReadOnly
     } else {
+        PostgresRuntimeStatus::UnverifiedServerEncoding
+    };
+    PostgresRuntimeHealth {
+        server_major_version,
+        status,
+    }
+}
+
+/// Classify complete server-version, write-mode, and database-encoding readiness evidence.
+///
+/// Upstream `PostgreSQL` reports the canonical database encoding name through
+/// `current_setting('server_encoding')`; the initial persistence contract accepts only
+/// `UTF8`. A non-UTF8 database fails closed even when the server major is supported and the
+/// connection is writable.
+#[must_use]
+pub fn classify_postgres_runtime_with_encoding(
+    server_version_num: i32,
+    transaction_read_only: bool,
+    server_encoding: &str,
+) -> PostgresRuntimeHealth {
+    let server_major_version = server_version_num / 10_000;
+    let status = if server_major_version != SUPPORTED_POSTGRES_MAJOR {
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    } else if server_encoding != SUPPORTED_POSTGRES_ENCODING {
+        PostgresRuntimeStatus::UnsupportedServerEncoding
+    } else if transaction_read_only {
+        PostgresRuntimeStatus::ReadOnly
+    } else {
         PostgresRuntimeStatus::Ready
     };
     PostgresRuntimeHealth {
@@ -104,12 +146,13 @@ pub const fn classify_postgres_runtime(
     }
 }
 
-/// Probe the caller-owned `PostgreSQL` connection for supported-major and write readiness.
+/// Probe the caller-owned `PostgreSQL` connection for supported-major, UTF8, and write readiness.
 ///
-/// The probe reads only `PostgreSQL` server settings and never returns credentials,
-/// assessment content, tenant identifiers, or restricted linkage data. Callers must map
-/// the returned database error to an operator-safe error class before exposing it across
-/// a public health endpoint.
+/// UTF8 is part of the persistence compatibility boundary because product migrations and
+/// reference-integrity contracts use `PostgreSQL`'s Unicode-aware behavior. The probe reads only
+/// `PostgreSQL` server settings and never returns credentials, assessment content, tenant
+/// identifiers, or restricted linkage data. Callers must map the returned database error to an
+/// operator-safe error class before exposing it across a public health endpoint.
 ///
 /// # Errors
 ///
@@ -120,24 +163,39 @@ pub fn probe_postgres_runtime(
 ) -> Result<PostgresRuntimeHealth, postgres::Error> {
     let row = client.query_one(
         "SELECT current_setting('server_version_num')::integer, \
-                current_setting('transaction_read_only')::boolean",
+                current_setting('transaction_read_only')::boolean, \
+                current_setting('server_encoding')",
         &[],
     )?;
     let server_version_num: i32 = row.get(0);
     let transaction_read_only: bool = row.get(1);
-    Ok(classify_postgres_runtime(
+    let server_encoding: String = row.get(2);
+    Ok(classify_postgres_runtime_with_encoding(
         server_version_num,
         transaction_read_only,
+        &server_encoding,
     ))
 }
 
 /// Probe whether every caller-declared relation required by this application build exists.
 ///
 /// The application or packaged deployment remains responsible for declaring the exact
-/// relation set that represents its compatible schema version. Relation names are passed
-/// as query parameters, never interpolated into SQL. A missing required relation is a
-/// known incompatibility and therefore fails state-changing readiness closed through
-/// [`DataIntegrityHealth::Incompatible`]. An empty requirement set is vacuously verified.
+/// relation set that represents its compatible schema version. Each relation identity must
+/// be an exact two-part `schema.relation` name using the repository's unquoted ASCII SQL
+/// identifier grammar: lowercase letters, digits, and underscores, with each component
+/// starting with a lowercase letter or underscore and no component exceeding `PostgreSQL`'s
+/// 63-byte identifier limit. `PostgreSQL`'s `search_path` is the ordered list of schemas
+/// used to resolve an unqualified name, so requiring the schema explicitly prevents the
+/// answer from changing with that setting. Restricting the input to this ASCII grammar also
+/// prevents case-folding, truncation, or Unicode-confusable aliases from resolving to an
+/// identity different from the declared one. Relation names are passed as query parameters,
+/// never interpolated into SQL.
+///
+/// Here, *integrity evidence* means the observed fact that every required relation exists.
+/// *State-changing readiness* means whether the product may accept new writes. The probe
+/// *fails closed*: malformed or missing evidence returns [`DataIntegrityHealth::Incompatible`]
+/// (or [`DataIntegrityHealth::Unknown`] when no requirement set was supplied), so callers
+/// deny write readiness instead of assuming the schema is safe.
 ///
 /// This probe deliberately does not claim that relation presence alone proves migration,
 /// column, constraint, digest, tenant, or provenance integrity. Those stronger invariants
@@ -152,7 +210,14 @@ pub fn probe_postgres_relation_integrity(
     client: &mut impl GenericClient,
     required_relations: &[&str],
 ) -> Result<DataIntegrityHealth, postgres::Error> {
+    if required_relations.is_empty() {
+        return Ok(DataIntegrityHealth::Unknown);
+    }
+
     for relation in required_relations {
+        if !is_exact_schema_qualified_relation(relation) {
+            return Ok(DataIntegrityHealth::Incompatible);
+        }
         let row = client.query_one("SELECT to_regclass($1) IS NOT NULL", &[relation])?;
         let exists: bool = row.get(0);
         if !exists {
@@ -207,4 +272,156 @@ fn unknown_postgres_snapshot(backlog_health: BacklogHealth) -> RuntimeHealthSnap
         vec![capability],
     )
     .expect("unknown postgres snapshot contains one unique capability")
+}
+
+fn is_exact_schema_qualified_relation(relation: &str) -> bool {
+    let Some((schema, name)) = relation.split_once('.') else {
+        return false;
+    };
+    is_exact_unquoted_identifier(schema) && is_exact_unquoted_identifier(name)
+}
+
+fn is_exact_unquoted_identifier(identifier: &str) -> bool {
+    if identifier.len() > 63 {
+        return false;
+    }
+    let mut bytes = identifier.bytes();
+    matches!(bytes.next(), Some(b'a'..=b'z' | b'_'))
+        && bytes.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use postgres::{Client, NoTls};
+
+    fn test_client() -> Client {
+        let connection = std::env::var("TEST_DATABASE_URL")
+            .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+        Client::connect(&connection, NoTls)
+            .expect("isolated CI PostgreSQL database must be reachable")
+    }
+
+    #[test]
+    fn runtime_health_covers_supported_read_only_and_unsupported_states() {
+        let unverified_encoding = classify_postgres_runtime(180_004, false);
+        assert_eq!(
+            unverified_encoding.server_major_version(),
+            SUPPORTED_POSTGRES_MAJOR
+        );
+        assert_eq!(
+            unverified_encoding.status(),
+            PostgresRuntimeStatus::UnverifiedServerEncoding
+        );
+        assert_eq!(
+            unverified_encoding.capability_state(),
+            CapabilityState::Unavailable
+        );
+        assert!(!unverified_encoding.accepts_new_work());
+        assert!(!unverified_encoding
+            .capability_health()
+            .unwrap()
+            .accepts_new_work());
+
+        let read_only = classify_postgres_runtime(180_004, true);
+        assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
+        assert_eq!(read_only.capability_state(), CapabilityState::Unavailable);
+        assert!(!read_only.accepts_new_work());
+        assert!(!read_only.capability_health().unwrap().accepts_new_work());
+
+        let unsupported = classify_postgres_runtime(170_009, false);
+        assert_eq!(
+            unsupported.status(),
+            PostgresRuntimeStatus::UnsupportedMajorVersion
+        );
+        assert_eq!(unsupported.capability_state(), CapabilityState::Unavailable);
+        assert!(!unsupported.accepts_new_work());
+
+        let unsupported_encoding =
+            classify_postgres_runtime_with_encoding(180_004, false, "LATIN1");
+        assert_eq!(
+            unsupported_encoding.status(),
+            PostgresRuntimeStatus::UnsupportedServerEncoding
+        );
+        assert_eq!(
+            unsupported_encoding.capability_state(),
+            CapabilityState::Unavailable
+        );
+        assert!(!unsupported_encoding.accepts_new_work());
+    }
+
+    #[test]
+    fn live_runtime_probe_covers_success_read_only_and_database_error() {
+        let mut client = test_client();
+        let ready = probe_postgres_runtime(&mut client).unwrap();
+        assert_eq!(ready.status(), PostgresRuntimeStatus::Ready);
+
+        let mut transaction = client.build_transaction().read_only(true).start().unwrap();
+        let read_only = probe_postgres_runtime(&mut transaction).unwrap();
+        assert_eq!(read_only.status(), PostgresRuntimeStatus::ReadOnly);
+        transaction.rollback().unwrap();
+
+        let mut transaction = client.transaction().unwrap();
+        assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+        assert!(probe_postgres_runtime(&mut transaction).is_err());
+    }
+
+    #[test]
+    fn relation_probe_covers_unknown_verified_incompatible_and_database_error() {
+        let mut client = test_client();
+        assert_eq!(
+            probe_postgres_relation_integrity(&mut client, &[]).unwrap(),
+            DataIntegrityHealth::Unknown
+        );
+        assert_eq!(
+            probe_postgres_relation_integrity(&mut client, &["pg_catalog.pg_class"]).unwrap(),
+            DataIntegrityHealth::Verified
+        );
+        assert_eq!(
+            probe_postgres_relation_integrity(&mut client, &["pg_class"]).unwrap(),
+            DataIntegrityHealth::Incompatible
+        );
+        assert_eq!(
+            probe_postgres_relation_integrity(
+                &mut client,
+                &["public.psychometrics_commons_missing_relation"]
+            )
+            .unwrap(),
+            DataIntegrityHealth::Incompatible
+        );
+
+        let mut transaction = client.transaction().unwrap();
+        assert!(transaction.batch_execute("SELECT 1 / 0").is_err());
+        assert!(
+            probe_postgres_relation_integrity(&mut transaction, &["pg_catalog.pg_class"]).is_err()
+        );
+    }
+
+    #[test]
+    fn exact_relation_identifier_contract_covers_component_boundaries() {
+        assert!(is_exact_schema_qualified_relation("pg_catalog.pg_class"));
+        assert!(is_exact_schema_qualified_relation("_private.table_2"));
+        assert!(is_exact_schema_qualified_relation(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.table"
+        ));
+
+        for relation in [
+            "pg_class",
+            ".pg_class",
+            "pg_catalog.",
+            "pg_catalog.pg_class.extra",
+            "PG_catalog.pg_class",
+            "pg_catalog.PG_class",
+            "pg_catalog. pg_class",
+            "pg_catalog.pg-class",
+            "pg_catalog.pg$class",
+            "pg_catalog.tablé",
+            "1schema.table",
+            "schema.1table",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.table",
+            "schema.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ] {
+            assert!(!is_exact_schema_qualified_relation(relation), "{relation}");
+        }
+    }
 }

@@ -1,6 +1,6 @@
 //! Database-authoritative lease expiry and fencing precedence for outbox delivery.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent};
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, claim_outbox_delivery, enqueue_outbox_event,
@@ -12,14 +12,30 @@ const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const SCHEMA: &str = "outbox_delivery_lease_authority_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4F55_5442_4F58_4155;
 
-fn ready_client() -> Client {
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
+fn connect_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    let mut client = Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable");
-    client
-        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
-        .expect("shared PostgreSQL outbox authority test lock should be acquired");
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
+}
+
+fn ready_client() -> Client {
+    let mut client = connect_client();
+    acquire_database_lock(&mut client, DATABASE_TEST_LOCK_KEY, "60s").expect(
+        "shared PostgreSQL outbox authority test lock should be acquired within sixty seconds",
+    );
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
@@ -95,6 +111,47 @@ fn claim(
     .unwrap();
     transaction.commit().unwrap();
     lease.fencing_token()
+}
+
+#[test]
+fn fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut client = ready_client();
+    let timeout_ms: i64 = client
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("outbox authority fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "outbox authority fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+    cleanup(&mut client);
+}
+
+#[test]
+fn fixture_lock_wait_aborts_under_real_contention() {
+    let mut holder = connect_client();
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = connect_client();
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms")
+        .expect_err("contended outbox authority fixture lock must stop at the configured timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test advisory lock should be released")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]

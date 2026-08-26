@@ -1,34 +1,32 @@
 //! Coverage and fail-closed regressions for required immutable result references.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{
     ResultSnapshot, ResultSnapshotError, ResultSnapshotInput,
 };
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const ENGINE_DIGEST: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 
 fn request_and_result() -> (ScoringRequest, ScoringResult) {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "event_ref",
-                client_event_ref: "client_ref",
-                item_version_ref: "item_version_ref",
-                payload_digest:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_ref",
+        "response_snapshot_ref",
+        &[ResponseWrite {
+            server_event_ref: "event_ref",
+            client_event_ref: "client_ref",
+            item_version_ref: "item_version_ref",
+            payload_digest:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
@@ -86,4 +84,21 @@ fn result_snapshot_rejects_blank_narrative_version() {
         ResultSnapshot::new(&request, &result, input).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
+}
+
+#[test]
+fn result_snapshot_normalizes_edge_whitespace_before_identity_becomes_durable() {
+    let (request, result) = request_and_result();
+    let mut input = result_input();
+    input.result_snapshot_ref = "  result_snapshot_ref  ";
+    input.participant_ref = "\u{00a0}participant_ref\u{00a0}";
+    input.narrative_version_ref = "\u{2003}narrative_version_ref\u{2003}";
+    input.consent_snapshot_refs = &["\u{00a0}service_consent_ref\u{00a0}"];
+
+    let snapshot = ResultSnapshot::new(&request, &result, input).unwrap();
+
+    assert_eq!(snapshot.result_snapshot_ref(), "result_snapshot_ref");
+    assert_eq!(snapshot.participant_ref(), "participant_ref");
+    assert_eq!(snapshot.narrative_version_ref(), "narrative_version_ref");
+    assert_eq!(snapshot.consent_snapshot_refs(), &["service_consent_ref"]);
 }

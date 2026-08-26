@@ -6,11 +6,17 @@ use psychometrics_commons_runtime::postgres_instrument_release::{
     InstrumentReleaseQueryError,
 };
 use std::error::Error;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-static SCHEMA_NONCE: AtomicU64 = AtomicU64::new(1);
+
+fn next_schema_name(client: &mut Client) -> String {
+    let transaction_identity: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must issue a transaction identity for the fixture schema")
+        .get(0);
+    format!("instrument_release_query_{transaction_identity}")
+}
 
 struct TestDatabase {
     client: Client,
@@ -23,11 +29,7 @@ impl TestDatabase {
             .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
         let mut client = Client::connect(&connection, NoTls)
             .expect("isolated CI PostgreSQL database must be reachable");
-        let schema_name = format!(
-            "instrument_release_query_{}_{}",
-            std::process::id(),
-            SCHEMA_NONCE.fetch_add(1, Ordering::Relaxed)
-        );
+        let schema_name = next_schema_name(&mut client);
         client
             .batch_execute(&format!(
                 "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
@@ -75,6 +77,25 @@ impl Drop for TestDatabase {
             self.schema_name
         ));
     }
+}
+
+#[test]
+fn fixture_schema_identity_is_database_issued_and_restart_safe() {
+    let first = TestDatabase::new();
+    let second = TestDatabase::new();
+
+    for schema_name in [&first.schema_name, &second.schema_name] {
+        let identity = schema_name
+            .strip_prefix("instrument_release_query_")
+            .expect("fixture schema must keep its descriptive prefix");
+        identity
+            .parse::<u64>()
+            .expect("fixture schema suffix must be one database-issued transaction identity");
+    }
+    assert_ne!(
+        first.schema_name, second.schema_name,
+        "separate fixture allocations must never reuse a schema identity"
+    );
 }
 
 #[test]
@@ -158,6 +179,7 @@ fn release_query_revalidates_stored_manifest_instead_of_trusting_rows() {
         .client
         .batch_execute(
             "ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_item_refs_not_empty_check;\
+             ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_item_refs_format_check;\
              UPDATE instrument_release SET item_version_refs = ARRAY[]::TEXT[]\
              WHERE release_ref = 'release_big_five_tampered_v1';",
         )

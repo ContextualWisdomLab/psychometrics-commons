@@ -3,8 +3,9 @@
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::health::{CapabilityState, DataIntegrityHealth};
 use psychometrics_commons_runtime::postgres_health::{
-    classify_postgres_runtime, probe_postgres_relation_integrity, probe_postgres_runtime,
-    PostgresRuntimeStatus, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_MAJOR,
+    classify_postgres_runtime, classify_postgres_runtime_with_encoding,
+    probe_postgres_relation_integrity, probe_postgres_runtime, PostgresRuntimeStatus,
+    POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF, SUPPORTED_POSTGRES_MAJOR,
 };
 
 fn test_client() -> Client {
@@ -14,22 +15,55 @@ fn test_client() -> Client {
 }
 
 #[test]
-fn supported_writable_postgres_is_ready_for_new_operational_work() {
+fn classifier_without_encoding_evidence_fails_write_readiness_closed() {
     let health = classify_postgres_runtime(180_002, false);
 
     assert_eq!(SUPPORTED_POSTGRES_MAJOR, 18);
     assert_eq!(health.server_major_version(), 18);
-    assert_eq!(health.status(), PostgresRuntimeStatus::Ready);
-    assert_eq!(health.capability_state(), CapabilityState::Available);
-    assert!(health.accepts_new_work());
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnverifiedServerEncoding
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
 
     let capability = health.capability_health().unwrap();
     assert_eq!(
         capability.capability_ref(),
         POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF
     );
-    assert_eq!(capability.state(), CapabilityState::Available);
-    assert!(capability.accepts_new_work());
+    assert_eq!(capability.state(), CapabilityState::Unavailable);
+    assert!(!capability.accepts_new_work());
+}
+
+#[test]
+fn supported_postgres_with_non_utf8_encoding_fails_readiness_closed() {
+    let health = classify_postgres_runtime_with_encoding(180_002, false, "LATIN1");
+
+    assert_eq!(health.server_major_version(), SUPPORTED_POSTGRES_MAJOR);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedServerEncoding
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
+
+    let capability = health.capability_health().unwrap();
+    assert_eq!(capability.state(), CapabilityState::Unavailable);
+    assert!(!capability.accepts_new_work());
+}
+
+#[test]
+fn encoding_aware_classifier_rejects_an_unsupported_major_before_encoding() {
+    let health = classify_postgres_runtime_with_encoding(170_009, false, "UTF8");
+
+    assert_eq!(health.server_major_version(), 17);
+    assert_eq!(
+        health.status(),
+        PostgresRuntimeStatus::UnsupportedMajorVersion
+    );
+    assert_eq!(health.capability_state(), CapabilityState::Unavailable);
+    assert!(!health.accepts_new_work());
 }
 
 #[test]
@@ -116,13 +150,57 @@ fn relation_integrity_probe_verifies_all_required_relations() {
 }
 
 #[test]
+fn relation_integrity_probe_rejects_search_path_relative_relation_names() {
+    let mut client = test_client();
+    let integrity = probe_postgres_relation_integrity(&mut client, &["pg_class"]).unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Incompatible);
+}
+
+#[test]
+fn relation_integrity_probe_rejects_case_folded_relation_aliases() {
+    let mut client = test_client();
+    let integrity =
+        probe_postgres_relation_integrity(&mut client, &["PG_CATALOG.PG_CLASS"]).unwrap();
+
+    assert_eq!(integrity, DataIntegrityHealth::Incompatible);
+}
+
+#[test]
+fn relation_integrity_probe_rejects_non_ascii_relation_aliases() {
+    let mut client = test_client();
+    for relation in ["public.tablé", "publıc.table", "public.таблица"] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
+fn relation_integrity_probe_rejects_whitespace_and_three_part_names() {
+    let mut client = test_client();
+    for relation in ["pg_catalog. pg_class", "pg_catalog.pg_class.extra"] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
+fn relation_integrity_probe_rejects_empty_schema_or_relation_components() {
+    let mut client = test_client();
+    for relation in [".pg_class", "pg_catalog."] {
+        let integrity = probe_postgres_relation_integrity(&mut client, &[relation]).unwrap();
+        assert_eq!(integrity, DataIntegrityHealth::Incompatible, "{relation}");
+    }
+}
+
+#[test]
 fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(
         &mut client,
         &[
             "pg_catalog.pg_class",
-            "psychometrics_commons_missing_relation",
+            "public.psychometrics_commons_missing_relation",
         ],
     )
     .unwrap();
@@ -131,11 +209,11 @@ fn relation_integrity_probe_fails_closed_when_a_required_relation_is_missing() {
 }
 
 #[test]
-fn empty_relation_requirement_is_vacuously_verified() {
+fn empty_relation_requirement_fails_closed_as_unknown_integrity() {
     let mut client = test_client();
     let integrity = probe_postgres_relation_integrity(&mut client, &[]).unwrap();
 
-    assert_eq!(integrity, DataIntegrityHealth::Verified);
+    assert_eq!(integrity, DataIntegrityHealth::Unknown);
 }
 
 #[test]
