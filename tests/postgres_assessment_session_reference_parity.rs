@@ -1,4 +1,4 @@
-//! PostgreSQL assessment-session identity must match the Rust opaque-reference boundary.
+//! `PostgreSQL` assessment-session identity must match the Rust opaque-reference boundary.
 //!
 //! Session headers and append-only command history are durable lifecycle provenance. Direct SQL
 //! must not persist Unicode-numeric aliases, surrounding Unicode whitespace, embedded controls,
@@ -112,10 +112,10 @@ fn assert_session_field_rejects_invalid_aliases(
         let mut release_ref = format!("release_{suffix}");
         let mut version_ref = format!("instrument_version_{suffix}");
         match field {
-            SessionReferenceField::Session => session_ref = invalid_ref.to_owned(),
-            SessionReferenceField::Participant => participant_ref = invalid_ref.to_owned(),
-            SessionReferenceField::InstrumentRelease => release_ref = invalid_ref.to_owned(),
-            SessionReferenceField::InstrumentVersion => version_ref = invalid_ref.to_owned(),
+            SessionReferenceField::Session => invalid_ref.clone_into(&mut session_ref),
+            SessionReferenceField::Participant => invalid_ref.clone_into(&mut participant_ref),
+            SessionReferenceField::InstrumentRelease => invalid_ref.clone_into(&mut release_ref),
+            SessionReferenceField::InstrumentVersion => invalid_ref.clone_into(&mut version_ref),
         }
 
         let error = insert_session(
