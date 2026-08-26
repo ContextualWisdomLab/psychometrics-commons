@@ -202,7 +202,7 @@ fn handle_post(
             400,
             "urn:psychometrics-commons:problem:bad-request",
             "Bad Request",
-            "session_ref must be an opaque non-numeric session identity",
+            "session_ref must be an exact opaque non-numeric session identity",
         );
     }
     let Some(idempotency_key) =
@@ -248,7 +248,6 @@ fn record_response(
             "Use GET /v1/sessions/{session_ref} to confirm the session exists in this process, then POST /v1/sessions/{session_ref}/responses",
         );
     };
-    let state = session.state();
     let release_ref = session.instrument_release_ref().to_owned();
     let Some(release) = runtime.releases.get(&release_ref) else {
         return ResponseHttpResponse::problem(
@@ -278,11 +277,11 @@ fn record_response(
             .ledgers
             .entry(session_ref.to_owned())
             .or_insert_with(|| {
-                ResponseLedger::new(session_ref)
-                    .expect("session_ref already passed identity checks")
+                ResponseLedger::from_session(session)
+                    .expect("stored session already passed product identity validation")
             });
         ledger.record(
-            state,
+            session,
             ResponseWrite {
                 server_event_ref: &server_event_ref,
                 client_event_ref,
@@ -319,7 +318,7 @@ fn write_problem(error: WriteError) -> ResponseHttpResponse {
             400,
             "urn:psychometrics-commons:problem:invalid-reference",
             "Invalid Reference",
-            "response identity references must be opaque non-numeric values",
+            "response identity references must use exact opaque non-numeric spelling",
         ),
         WriteError::EmptyReference | WriteError::InvalidPayloadDigest => {
             ResponseHttpResponse::problem(
@@ -346,6 +345,12 @@ fn write_problem(error: WriteError) -> ResponseHttpResponse {
             "urn:psychometrics-commons:problem:snapshot-requires-completed",
             "Snapshot Requires Completed",
             "response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete",
+        ),
+        WriteError::SessionMismatch => ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:session-response-binding-mismatch",
+            "Session Response Binding Mismatch",
+            "the response ledger is not bound to the requested assessment session",
         ),
     }
 }
@@ -441,7 +446,7 @@ fn response_collection_session_ref(path: &str) -> Option<&str> {
 fn response_session_ref_is_transport_safe(session_ref: &str) -> bool {
     !session_ref.contains('%')
         && !session_ref.chars().any(char::is_whitespace)
-        && normalized_reference(session_ref).is_some()
+        && normalized_reference(session_ref) == Some(session_ref)
 }
 
 fn valid_idempotency_key(value: &str) -> Option<&str> {
@@ -640,9 +645,6 @@ mod unit_tests {
         );
         assert_eq!(valid_idempotency_key("idem_ok"), Some("idem_ok"));
         assert_eq!(valid_idempotency_key("42"), None);
-        // Internal whitespace fails closed even when the trimmed key keeps
-        // content, so padded or spaced client event references can never be
-        // recorded under a different identity than the client sent.
         assert_eq!(valid_idempotency_key("   "), None);
         assert_eq!(valid_idempotency_key("idem spaced key"), None);
         let mut buffer = Vec::new();
@@ -681,22 +683,17 @@ mod unit_tests {
     }
 
     #[test]
-    fn session_ref_guard_rejects_escapes_whitespace_and_numeric_identity() {
+    fn session_ref_guard_rejects_escapes_whitespace_aliases_and_numeric_identity() {
         assert!(response_session_ref_is_transport_safe(
             "ses_opaque_identity"
         ));
         assert!(!response_session_ref_is_transport_safe("%20ses_padded"));
-        // A raw NBSP cannot survive request-line parsing, but the guard keeps
-        // rejecting padded identities if target parsing ever relaxes.
         assert!(!response_session_ref_is_transport_safe("ses\u{00a0}padded"));
         assert!(!response_session_ref_is_transport_safe("42"));
     }
 
     #[test]
     fn write_problem_maps_every_error_to_its_stable_problem() {
-        // `ResponseLedger::record` produces most of these arms; snapshot freeze
-        // paths share `WriteError`, so the unit pins the complete problem
-        // mapping in one place and keeps every RFC 9457 contract stable.
         let cases = [
             (
                 WriteError::SessionNotActive(SessionState::Scoring),
@@ -710,7 +707,7 @@ mod unit_tests {
                 400,
                 "urn:psychometrics-commons:problem:invalid-reference",
                 "Invalid Reference",
-                "response identity references must be opaque non-numeric values",
+                "response identity references must use exact opaque non-numeric spelling",
             ),
             (
                 WriteError::EmptyReference,
@@ -747,6 +744,13 @@ mod unit_tests {
                 "Snapshot Requires Completed",
                 "response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete",
             ),
+            (
+                WriteError::SessionMismatch,
+                409,
+                "urn:psychometrics-commons:problem:session-response-binding-mismatch",
+                "Session Response Binding Mismatch",
+                "the response ledger is not bound to the requested assessment session",
+            ),
         ];
         for (error, status, type_uri, title, detail) in cases {
             let response = write_problem(error);
@@ -760,10 +764,6 @@ mod unit_tests {
 
     #[test]
     fn empty_runtime_reports_zero_events_and_accepts_cursor_rebinding() {
-        // A runtime constructed without sessions or releases starts with an
-        // empty ledger index: every unknown session reports zero accepted
-        // events before and after the minted server-event cursor is rebound.
-        // Cursor rebinding alone must never fabricate ledger state.
         let mut runtime = ResponseHttpRuntime::new(Vec::new(), Vec::new(), "evt_seed");
         assert_eq!(runtime.event_count("ses_unknown"), 0);
         runtime.replace_next_server_event_ref(String::from("evt_rebound"));
@@ -772,10 +772,6 @@ mod unit_tests {
 
     #[test]
     fn read_http_request_returns_a_complete_framed_request_from_the_socket() {
-        // The read loop must keep pulling chunks until the blank-line
-        // terminator arrives, then hand back exactly the framed request text:
-        // headers, terminator, and Content-Length body bytes stay intact for
-        // the dispatcher even though the client keeps the socket open.
         let request = concat!(
             "POST /v1/sessions/ses_one/responses HTTP/1.1\r\n",
             "Host: localhost\r\n",
@@ -788,7 +784,6 @@ mod unit_tests {
         assert_eq!(read_http_request(&mut server).unwrap(), request);
     }
 
-    /// Serve one payload over a real loopback connection for read-loop tests.
     fn connected_stream(payload: &[u8]) -> (TcpStream, TcpStream) {
         let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
         let address = listener.local_addr().unwrap();
