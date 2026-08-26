@@ -5,12 +5,15 @@ use psychometrics_commons_runtime::postgres_result_snapshot::{
     apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
     ResultSnapshotPersistenceError,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -43,24 +46,16 @@ fn test_client() -> Client {
 }
 
 fn snapshot(result_snapshot_ref: &str, supersedes_ref: Option<&str>) -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_result_supersession").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_result_supersession",
-                client_event_ref: "client_event_result_supersession",
-                item_version_ref: "item_version_001",
-                payload_digest: ENGINE_DIGEST,
-            },
-        )
-        .unwrap();
-    let response = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_result_supersession",
-        )
-        .unwrap();
+    let response = frozen_snapshot(
+        "session_result_supersession",
+        "response_snapshot_result_supersession",
+        &[ResponseWrite {
+            server_event_ref: "server_event_result_supersession",
+            client_event_ref: "client_event_result_supersession",
+            item_version_ref: "item_version_001",
+            payload_digest: ENGINE_DIGEST,
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &response,
         ScoringRequestInput {

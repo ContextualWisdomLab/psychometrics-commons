@@ -9,12 +9,15 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_result_snapshot::{
     apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -40,24 +43,16 @@ fn connect_in_test_schema() -> Client {
 }
 
 fn snapshot() -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_result_concurrent_replay").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_result_concurrent_replay",
-                client_event_ref: "client_event_result_concurrent_replay",
-                item_version_ref: "item_version_001",
-                payload_digest: ENGINE_DIGEST,
-            },
-        )
-        .unwrap();
-    let response = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_result_concurrent_replay",
-        )
-        .unwrap();
+    let response = frozen_snapshot(
+        "session_result_concurrent_replay",
+        "response_snapshot_result_concurrent_replay",
+        &[ResponseWrite {
+            server_event_ref: "server_event_result_concurrent_replay",
+            client_event_ref: "client_event_result_concurrent_replay",
+            item_version_ref: "item_version_001",
+            payload_digest: ENGINE_DIGEST,
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &response,
         ScoringRequestInput {
