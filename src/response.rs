@@ -1,14 +1,15 @@
 //! Response-event ledger and immutable response-snapshot semantics.
 //!
-//! The hosted runtime accepts new logical response events only while a session is
-//! active. Exact client-event replays remain idempotent after the collection
-//! lifecycle advances, while client event references provide replay detection and
-//! server event references plus monotonic sequences preserve a stable audit order.
-//! Completing a session freezes the accepted response prefix into an immutable
-//! snapshot value.
+//! The hosted runtime accepts new logical response events only while the
+//! authoritative [`crate::session::AssessmentSession`] is active. Callers supply
+//! that aggregate rather than a detached lifecycle enum. Exact client-event
+//! replays remain idempotent after the collection lifecycle advances, while
+//! client event references provide replay detection and server event references
+//! plus monotonic sequences preserve a stable audit order. Completing a session
+//! freezes the accepted response prefix into an immutable snapshot value.
 
 use crate::reference::normalized_reference;
-use crate::session::SessionState;
+use crate::session::{AssessmentSession, SessionState};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -128,7 +129,7 @@ impl ResponseSnapshot {
 pub enum WriteError {
     /// A new logical response was offered while the session was not active.
     SessionNotActive(SessionState),
-    /// An identity-bearing response or snapshot reference was blank or numeric-like.
+    /// An identity-bearing response or snapshot reference was not an exact valid opaque reference.
     InvalidReference,
     /// A required response-payload digest was blank.
     EmptyReference,
@@ -140,6 +141,8 @@ pub enum WriteError {
     ServerReferenceConflict,
     /// A response snapshot was requested before the session reached completion.
     SnapshotRequiresCompleted(SessionState),
+    /// The supplied assessment session does not own this response ledger.
+    SessionMismatch,
 }
 
 impl Display for WriteError {
@@ -148,8 +151,9 @@ impl Display for WriteError {
             Self::SessionNotActive(state) => {
                 write!(formatter, "session {state:?} cannot accept response events")
             }
-            Self::InvalidReference => formatter
-                .write_str("response identity references must be opaque non-numeric values"),
+            Self::InvalidReference => formatter.write_str(
+                "response identity references must use exact opaque spelling without surrounding whitespace",
+            ),
             Self::EmptyReference => {
                 formatter.write_str("response payload digest must not be empty")
             }
@@ -164,6 +168,8 @@ impl Display for WriteError {
                 formatter,
                 "response snapshot requires Completed session state, found {state:?}"
             ),
+            Self::SessionMismatch => formatter
+                .write_str("response ledger does not belong to the supplied assessment session"),
         }
     }
 }
@@ -184,20 +190,40 @@ pub struct ResponseLedger {
 impl ResponseLedger {
     /// Create an empty response ledger for one assessment session.
     ///
-    /// Leading and trailing whitespace is removed before the session reference
-    /// becomes identity-bearing state.
+    /// The caller-supplied opaque session reference must already use its exact
+    /// accepted spelling; the domain never trims identity-bearing input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WriteError::InvalidReference`] when the session reference is blank,
+    /// numeric-like, unsafe, or would require normalization before becoming identity.
+    pub fn new(session_ref: impl AsRef<str>) -> Result<Self, WriteError> {
+        let session_ref = exact_reference(session_ref.as_ref())?;
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            events: Vec::new(),
+        })
+    }
+
+    /// Create an empty response ledger from an authoritative assessment session.
+    ///
+    /// The ledger copies only the opaque session reference. Later
+    /// [`Self::record`] and freeze operations consult the same session aggregate
+    /// for ownership and lifecycle state, so a caller cannot supply a detached
+    /// [`SessionState`].
     ///
     /// # Errors
     ///
     /// Returns [`WriteError::InvalidReference`] when the session reference is blank
     /// or numeric-like instead of an opaque product identifier.
-    pub fn new(session_ref: impl AsRef<str>) -> Result<Self, WriteError> {
-        let session_ref =
-            normalized_reference(session_ref.as_ref()).ok_or(WriteError::InvalidReference)?;
-        Ok(Self {
-            session_ref: session_ref.to_owned(),
-            events: Vec::new(),
-        })
+    pub fn from_session(session: &AssessmentSession) -> Result<Self, WriteError> {
+        Self::new(session.session_ref())
+    }
+
+    /// Return the opaque assessment-session reference bound to this ledger.
+    #[must_use]
+    pub fn session_ref(&self) -> &str {
+        &self.session_ref
     }
 
     /// Return the number of accepted response events.
@@ -214,19 +240,22 @@ impl ResponseLedger {
 
     /// Record one response event or replay an identical prior event.
     ///
+    /// `session` is authoritative for both ownership and current lifecycle state.
     /// Exact replay of an already accepted `client_event_ref` remains idempotent
     /// even after the session leaves [`SessionState::Active`]. The supplied
     /// server event reference is ignored for that replay because the original
     /// immutable event identity is returned. Every genuinely new logical response
-    /// still requires an active session. Identity-bearing references are normalized
-    /// before replay/conflict checks so surrounding whitespace cannot create aliases.
-    /// Response-payload identity must use exact `sha256:` plus 64 lowercase hexadecimal
-    /// characters, matching the durable `PostgreSQL` digest constraint.
+    /// still requires an active session. Identity-bearing references must already
+    /// use their exact accepted spelling before replay/conflict checks; the domain
+    /// never trims aliases into existing identities. Response-payload identity must
+    /// use exact `sha256:` plus 64 lowercase hexadecimal characters, matching the
+    /// durable `PostgreSQL` digest constraint.
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::InvalidReference`] for blank or numeric-like identity
-    /// references, [`WriteError::EmptyReference`] for a blank payload digest,
+    /// Returns [`WriteError::SessionMismatch`] when the supplied session does not
+    /// own this ledger, [`WriteError::InvalidReference`] for an invalid or non-exact
+    /// identity reference, [`WriteError::EmptyReference`] for a blank payload digest,
     /// [`WriteError::InvalidPayloadDigest`] for a noncanonical digest,
     /// [`WriteError::IdempotencyConflict`] when a client event reference is reused
     /// with different item or payload content, [`WriteError::SessionNotActive`]
@@ -235,15 +264,16 @@ impl ResponseLedger {
     /// already identifies another response event.
     pub fn record(
         &mut self,
-        state: SessionState,
+        session: &AssessmentSession,
         request: ResponseWrite<'_>,
     ) -> Result<ResponseEvent, WriteError> {
-        let server_event_ref =
-            normalized_reference(request.server_event_ref).ok_or(WriteError::InvalidReference)?;
-        let client_event_ref =
-            normalized_reference(request.client_event_ref).ok_or(WriteError::InvalidReference)?;
-        let item_version_ref =
-            normalized_reference(request.item_version_ref).ok_or(WriteError::InvalidReference)?;
+        if session.session_ref() != self.session_ref {
+            return Err(WriteError::SessionMismatch);
+        }
+
+        let server_event_ref = exact_reference(request.server_event_ref)?;
+        let client_event_ref = exact_reference(request.client_event_ref)?;
+        let item_version_ref = exact_reference(request.item_version_ref)?;
         let payload_digest = request.payload_digest;
         if payload_digest.trim().is_empty() {
             return Err(WriteError::EmptyReference);
@@ -265,8 +295,8 @@ impl ResponseLedger {
             return Err(WriteError::IdempotencyConflict);
         }
 
-        if !state.accepts_responses() {
-            return Err(WriteError::SessionNotActive(state));
+        if !session.state().accepts_responses() {
+            return Err(WriteError::SessionNotActive(session.state()));
         }
 
         if self
@@ -296,39 +326,46 @@ impl ResponseLedger {
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::SnapshotRequiresCompleted`] unless `state` is
-    /// exactly [`SessionState::Completed`].
-    pub fn freeze(&self, state: SessionState) -> Result<ResponseSnapshot, WriteError> {
-        self.freeze_internal(state, None)
+    /// Returns [`WriteError::SessionMismatch`] when the supplied session does not
+    /// own this ledger, or [`WriteError::SnapshotRequiresCompleted`] unless the
+    /// authoritative session is exactly [`SessionState::Completed`].
+    pub fn freeze(&self, session: &AssessmentSession) -> Result<ResponseSnapshot, WriteError> {
+        self.freeze_internal(session, None)
     }
 
     /// Freeze the accepted event prefix with its durable opaque snapshot identity.
     ///
-    /// Leading and trailing whitespace is removed before the reference becomes
-    /// identity-bearing state.
+    /// The snapshot reference must already use its exact accepted spelling; the
+    /// domain never trims identity-bearing input.
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError::InvalidReference`] for a blank or numeric-like snapshot
-    /// reference or [`WriteError::SnapshotRequiresCompleted`] unless `state` is
-    /// exactly [`SessionState::Completed`].
+    /// Returns [`WriteError::SessionMismatch`] when the supplied session does not
+    /// own this ledger, [`WriteError::InvalidReference`] for an invalid or non-exact
+    /// snapshot reference, or [`WriteError::SnapshotRequiresCompleted`] unless the
+    /// authoritative session state is exactly [`SessionState::Completed`].
     pub fn freeze_as(
         &self,
-        state: SessionState,
+        session: &AssessmentSession,
         snapshot_ref: &str,
     ) -> Result<ResponseSnapshot, WriteError> {
-        let snapshot_ref =
-            normalized_reference(snapshot_ref).ok_or(WriteError::InvalidReference)?;
-        self.freeze_internal(state, Some(snapshot_ref))
+        if session.session_ref() != self.session_ref {
+            return Err(WriteError::SessionMismatch);
+        }
+        let snapshot_ref = exact_reference(snapshot_ref)?;
+        self.freeze_internal(session, Some(snapshot_ref))
     }
 
     fn freeze_internal(
         &self,
-        state: SessionState,
+        session: &AssessmentSession,
         snapshot_ref: Option<&str>,
     ) -> Result<ResponseSnapshot, WriteError> {
-        if state != SessionState::Completed {
-            return Err(WriteError::SnapshotRequiresCompleted(state));
+        if session.session_ref() != self.session_ref {
+            return Err(WriteError::SessionMismatch);
+        }
+        if session.state() != SessionState::Completed {
+            return Err(WriteError::SnapshotRequiresCompleted(session.state()));
         }
 
         Ok(ResponseSnapshot {
@@ -352,6 +389,14 @@ impl ResponseLedger {
             last_sequence: self.events.last().map(ResponseEvent::sequence),
         })
     }
+}
+
+fn exact_reference(reference: &str) -> Result<&str, WriteError> {
+    let normalized = normalized_reference(reference).ok_or(WriteError::InvalidReference)?;
+    if normalized != reference {
+        return Err(WriteError::InvalidReference);
+    }
+    Ok(normalized)
 }
 
 fn is_canonical_sha256(digest: &str) -> bool {

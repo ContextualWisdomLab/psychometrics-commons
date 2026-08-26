@@ -179,6 +179,7 @@ fn release_query_revalidates_stored_manifest_instead_of_trusting_rows() {
         .client
         .batch_execute(
             "ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_item_refs_not_empty_check;\
+             ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_item_refs_format_check;\
              UPDATE instrument_release SET item_version_refs = ARRAY[]::TEXT[]\
              WHERE release_ref = 'release_big_five_tampered_v1';",
         )

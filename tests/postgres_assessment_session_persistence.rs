@@ -32,6 +32,9 @@ fn assessment_session_test_guard() -> Client {
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     guard
+        .batch_execute("SET lock_timeout TO '60s'")
+        .expect("database-lock waits should have a finite CI bound");
+    guard
         .query_one(
             "SELECT pg_advisory_lock($1)",
             &[&ASSESSMENT_SESSION_PERSISTENCE_LOCK_KEY],
