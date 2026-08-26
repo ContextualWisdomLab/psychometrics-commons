@@ -604,7 +604,8 @@ mod unit_tests {
     use super::{
         apply_request_read, json_string, read_http_request, reason_phrase,
         response_collection_session_ref, response_session_ref_is_transport_safe, split_target,
-        valid_idempotency_key, write_problem, RequestReadProgress, RESPONSE_HTTP_MAX_REQUEST_BYTES,
+        valid_idempotency_key, write_problem, RequestReadProgress, ResponseHttpRuntime,
+        RESPONSE_HTTP_MAX_REQUEST_BYTES,
     };
     use crate::response::WriteError;
     use crate::session::SessionState;
@@ -692,20 +693,99 @@ mod unit_tests {
     }
 
     #[test]
-    fn snapshot_requires_completed_error_maps_to_stable_conflict_problem() {
-        // `ResponseLedger::record` cannot produce this error today; snapshot
-        // freeze paths share `WriteError`, so the HTTP mapping is pinned here
-        // to keep the problem contract stable for future producers.
-        let response = write_problem(WriteError::SnapshotRequiresCompleted(SessionState::Scoring));
-        assert_eq!(response.status(), 409);
-        assert_eq!(response.content_type(), "application/problem+json");
-        assert!(response
-            .body()
-            .contains("urn:psychometrics-commons:problem:snapshot-requires-completed"));
-        assert!(response.body().contains("Snapshot Requires Completed"));
-        assert!(response
-            .body()
-            .contains("response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete"));
+    fn write_problem_maps_every_error_to_its_stable_problem() {
+        // `ResponseLedger::record` produces most of these arms; snapshot freeze
+        // paths share `WriteError`, so the unit pins the complete problem
+        // mapping in one place and keeps every RFC 9457 contract stable.
+        let cases = [
+            (
+                WriteError::SessionNotActive(SessionState::Scoring),
+                409,
+                "urn:psychometrics-commons:problem:session-not-active",
+                "Session Not Active",
+                "Activate the session before posting responses",
+            ),
+            (
+                WriteError::InvalidReference,
+                400,
+                "urn:psychometrics-commons:problem:invalid-reference",
+                "Invalid Reference",
+                "response identity references must be opaque non-numeric values",
+            ),
+            (
+                WriteError::EmptyReference,
+                400,
+                "urn:psychometrics-commons:problem:invalid-payload-digest",
+                "Invalid Payload Digest",
+                "payload_digest must be canonical lowercase sha256 evidence",
+            ),
+            (
+                WriteError::InvalidPayloadDigest,
+                400,
+                "urn:psychometrics-commons:problem:invalid-payload-digest",
+                "Invalid Payload Digest",
+                "payload_digest must be canonical lowercase sha256 evidence",
+            ),
+            (
+                WriteError::IdempotencyConflict,
+                409,
+                "urn:psychometrics-commons:problem:idempotency-conflict",
+                "Idempotency Conflict",
+                "Idempotency-Key was reused with a different item_version_ref or payload_digest",
+            ),
+            (
+                WriteError::ServerReferenceConflict,
+                409,
+                "urn:psychometrics-commons:problem:server-reference-conflict",
+                "Server Reference Conflict",
+                "server event reference was already used by another response event",
+            ),
+            (
+                WriteError::SnapshotRequiresCompleted(SessionState::Scoring),
+                409,
+                "urn:psychometrics-commons:problem:snapshot-requires-completed",
+                "Snapshot Requires Completed",
+                "response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete",
+            ),
+        ];
+        for (error, status, type_uri, title, detail) in cases {
+            let response = write_problem(error);
+            assert_eq!(response.status(), status, "{type_uri}");
+            assert_eq!(response.content_type(), "application/problem+json");
+            assert!(response.body().contains(type_uri), "{type_uri}");
+            assert!(response.body().contains(title), "{type_uri}");
+            assert!(response.body().contains(detail), "{type_uri}");
+        }
+    }
+
+    #[test]
+    fn empty_runtime_reports_zero_events_and_accepts_cursor_rebinding() {
+        // A runtime constructed without sessions or releases starts with an
+        // empty ledger index: every unknown session reports zero accepted
+        // events before and after the minted server-event cursor is rebound.
+        // Cursor rebinding alone must never fabricate ledger state.
+        let mut runtime = ResponseHttpRuntime::new(Vec::new(), Vec::new(), "evt_seed");
+        assert_eq!(runtime.event_count("ses_unknown"), 0);
+        runtime.replace_next_server_event_ref(String::from("evt_rebound"));
+        assert_eq!(runtime.event_count("ses_unknown"), 0);
+    }
+
+    #[test]
+    fn read_http_request_returns_a_complete_framed_request_from_the_socket() {
+        // The read loop must keep pulling chunks until the blank-line
+        // terminator arrives, then hand back exactly the framed request text:
+        // headers, terminator, and Content-Length body bytes stay intact for
+        // the dispatcher even though the client keeps the socket open.
+        let request = concat!(
+            "POST /v1/sessions/ses_one/responses HTTP/1.1\r\n",
+            "Host: localhost\r\n",
+            "Idempotency-Key: idem_read_loop_happy_path\r\n",
+            "Content-Length: 24\r\n",
+            "\r\n",
+            "{\"item_version_ref\":\"x\"}",
+        );
+        let (_client, mut server) = connected_stream(request.as_bytes());
+        assert_eq!(read_http_request(&mut server).unwrap(), request);
     }
 
     /// Serve one payload over a real loopback connection for read-loop tests.
