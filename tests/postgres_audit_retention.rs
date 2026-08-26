@@ -145,6 +145,47 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
 }
 
 #[test]
+fn reapplying_core_audit_migration_preserves_bounded_retention_execution() {
+    let mut client = client();
+    apply_audit_migrations(&mut client);
+
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_reapply_old_01",
+        1_000,
+    );
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_reapply_boundary_01",
+        2_000,
+    );
+
+    apply_audit_evidence_migration(&mut client).unwrap();
+
+    let deleted: i64 = client
+        .query_one(
+            "SELECT expire_audit_evidence_before($1, $2)",
+            &[&"tenant_research_alpha", &2_000_i64],
+        )
+        .expect("reapplying migration 0040 must not erase the migration 0041 retention guard")
+        .get(0);
+    assert_eq!(deleted, 1);
+
+    let remaining: Vec<String> = client
+        .query(
+            "SELECT audit_event_ref FROM audit_evidence_record ORDER BY audit_event_ref",
+            &[],
+        )
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get(0))
+        .collect();
+    assert_eq!(remaining, vec!["audit_event_reapply_boundary_01"]);
+}
+
+#[test]
 fn explicit_retention_execution_is_tenant_scoped_and_exclusive_at_the_cutoff() {
     let mut client = client();
     apply_audit_migrations(&mut client);
