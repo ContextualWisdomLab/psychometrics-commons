@@ -1,6 +1,6 @@
 //! `PostgreSQL` contract for the verified publisher-to-fenced-persistence handoff.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::integration::{DeliveryOutcome, IntegrationEvent, OutboxState};
 use psychometrics_commons_runtime::integration_delivery::{
     execute_verified_integration_publish, record_verified_leased_delivery_attempt,
@@ -64,6 +64,9 @@ fn ready_client() -> Client {
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     client
+        .batch_execute("SET lock_timeout = '60s'")
+        .expect("verified handoff PostgreSQL test lock wait must be bounded");
+    client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("verified handoff PostgreSQL test lock should be acquired");
     let schema = schema_name();
@@ -110,6 +113,33 @@ impl IntegrationPublisher for DeliveredPublisher {
             DeliveryOutcome::Delivered,
         ))
     }
+}
+
+#[test]
+fn ready_client_lock_wait_is_bounded_by_live_postgresql_behavior() {
+    let mut client = ready_client();
+    let timeout_ms: i64 = client
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("verified handoff lock timeout should be queryable from PostgreSQL")
+        .get(0);
+    assert_eq!(timeout_ms, 60_000);
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    contender
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"100ms"])
+        .expect("contender lock timeout should be configurable");
+    let error = contender
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect_err("contended verified handoff fixture lock must stop at its timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    cleanup(&mut client);
 }
 
 #[test]

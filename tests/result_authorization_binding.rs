@@ -1,5 +1,8 @@
 //! Regression tests for result reads bound to authoritative participant ownership.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::authorization::{
     AuthorizationContext, AuthorizationError, ProductRole,
 };
@@ -11,15 +14,17 @@ use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
 use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, advance_to};
 
 const ENGINE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
 
 fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_alpha").unwrap();
+    let mut session = active_session("session_alpha");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &session,
             ResponseWrite {
                 server_event_ref: "response_event_alpha",
                 client_event_ref: "client_event_alpha",
@@ -29,8 +34,9 @@ fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
             },
         )
         .unwrap();
+    advance_to(&mut session, SessionState::Completed);
     let response_snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_alpha")
+        .freeze_as(&session, "response_snapshot_alpha")
         .unwrap();
     let scoring_request = ScoringRequest::from_snapshot(
         &response_snapshot,

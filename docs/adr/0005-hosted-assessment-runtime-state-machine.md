@@ -44,6 +44,8 @@ Each response event contains:
 - locale and presentation context;
 - schema version.
 
+The response ledger is bound to one authoritative `AssessmentSession`. Recording and snapshot-freeze operations derive lifecycle state from that aggregate and reject a different `session_ref`; callers do not supply a detached `SessionState` as authority. Exact replay of an already accepted client event remains idempotent after collection closes, but a new event is accepted only while the bound aggregate is `active`, and a snapshot freezes only while it is `completed`.
+
 Duplicate client event references return the original outcome. Conflicting reuse of an idempotency key is rejected.
 
 ## Completion and scoring
@@ -65,6 +67,7 @@ A released result references exactly one response snapshot and one scoring resul
 9. A new session starts only from a currently published release through `created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`. Durable start locks stored `instrument_release.publication_state` in the same transaction. Reconstituting stored identity is load, not start.
 10. Exact replay of an already stored start after a later persist Suspend or Retire returns the original session. A new `session_ref` or rebound participant/release identity after that later persist fails closed.
 11. First insert through `persist_assessment_session` locks stored `instrument_release.publication_state` in the same transaction. A reconstituted Created aggregate cannot insert after later persist Suspend or Retire. When that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate so a concurrent retry cannot miss the committed first insert. Exact replay of an already stored Created row after that later persist stays legal.
+12. Response acceptance and snapshot freeze consult the bound `AssessmentSession`; a detached lifecycle enum or a different session aggregate cannot authorize either operation.
 
 ## Failure modes
 
@@ -82,6 +85,7 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 
 - property-based state-machine tests;
 - concurrent duplicate and out-of-order response tests;
+- response-session authority tests (`created_session_cannot_be_presented_as_active_by_the_caller`, `active_session_cannot_be_presented_as_completed_for_snapshot_freeze`, `only_the_bound_assessment_session_can_operate_the_ledger`);
 - crash testing between transaction and event publication;
 - pause/resume and offline replay tests;
 - stale shorter command-history persist fail-closed tests (`stale_shorter_command_history_cannot_rewind_paused_projection`);

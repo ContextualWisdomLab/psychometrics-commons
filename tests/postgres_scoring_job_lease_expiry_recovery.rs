@@ -1,6 +1,6 @@
 //! Expired leased scoring jobs recover to a due retry or quarantine.
 
-use postgres::{Client, IsolationLevel, NoTls};
+use postgres::{error::SqlState, Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_scoring_job, expire_scoring_lease, persist_scoring_job,
     ScoringJobPersistenceError,
@@ -9,17 +9,27 @@ use psychometrics_commons_runtime::scoring_job::{ScoringJob, ScoringJobState};
 
 const SCORING_JOB_EXPIRY_TEST_LOCK_KEY: i64 = 0x5343_4C45_5850_5259;
 
+fn acquire_database_lock(
+    client: &mut Client,
+    lock_key: i64,
+    lock_timeout: &str,
+) -> Result<(), postgres::Error> {
+    client.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    client.query_one("SELECT pg_advisory_lock($1)", &[&lock_key])?;
+    Ok(())
+}
+
 fn scoring_job_expiry_test_guard() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut guard = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    guard
-        .query_one(
-            "SELECT pg_advisory_lock($1)",
-            &[&SCORING_JOB_EXPIRY_TEST_LOCK_KEY],
-        )
-        .expect("shared scoring-job lease-expiry test lock should be acquired");
+    acquire_database_lock(&mut guard, SCORING_JOB_EXPIRY_TEST_LOCK_KEY, "60s").expect(
+        "shared scoring-job lease-expiry test lock should be acquired within sixty seconds",
+    );
     guard
 }
 
@@ -75,6 +85,51 @@ fn lease_expiry_fixture_guard_is_visible_to_another_postgres_session() {
         !acquired,
         "fixed-schema fixture guard must serialize across PostgreSQL sessions"
     );
+}
+
+#[test]
+fn lease_expiry_fixture_lock_wait_has_finite_postgresql_budget() {
+    let mut guard = scoring_job_expiry_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("scoring lease-expiry fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+
+    assert_eq!(
+        timeout_ms, 60_000,
+        "scoring lease-expiry fixture must not wait indefinitely for its PostgreSQL advisory lock"
+    );
+}
+
+#[test]
+fn lease_expiry_fixture_lock_wait_aborts_under_real_contention() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut holder = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let behavior_lock_key: i64 = holder
+        .query_one("SELECT pg_backend_pid()::bigint", &[])
+        .expect("holder backend identity should be queryable")
+        .get(0);
+    holder
+        .query_one("SELECT pg_advisory_lock($1)", &[&behavior_lock_key])
+        .expect("behavior-test holder should acquire its private advisory lock");
+
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_database_lock(&mut contender, behavior_lock_key, "100ms").expect_err(
+        "contended scoring lease-expiry fixture lock must stop at the configured timeout",
+    );
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
+
+    let released: bool = holder
+        .query_one("SELECT pg_advisory_unlock($1)", &[&behavior_lock_key])
+        .expect("behavior-test advisory lock should be released")
+        .get(0);
+    assert!(released, "behavior-test advisory lock should be released");
 }
 
 #[test]
