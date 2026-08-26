@@ -84,7 +84,7 @@ fn both_migrations_apply_inside_the_caller_transaction() {
                   WHERE routine_schema = 'audit_migration_transaction_test'\
                     AND routine_name = 'expire_audit_evidence_before'),\
                  (SELECT prosecdef FROM pg_proc\
-                  WHERE oid = 'audit_migration_transaction_test.expire_audit_evidence_before(bigint)'::regprocedure)",
+                  WHERE oid = 'audit_migration_transaction_test.expire_audit_evidence_before(text,bigint)'::regprocedure)",
             &[],
         )
         .unwrap();
