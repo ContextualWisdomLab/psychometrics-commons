@@ -368,6 +368,22 @@ fn authorization_context_and_resource_refs_require_exact_spelling() {
         ),
         Err(AuthorizationError::InvalidReference)
     );
+    assert_eq!(
+        ResourceScope::tenant_scoped(
+            ResourceKind::InstrumentRelease,
+            " tenant_alpha ",
+            "instrument_release_alpha",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
+    assert_eq!(
+        ResourceScope::tenant_scoped(
+            ResourceKind::InstrumentRelease,
+            "tenant_alpha",
+            " instrument_release_alpha ",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
 
     let actor = participant_context();
     let resource = ResourceScope::participant_owned(
