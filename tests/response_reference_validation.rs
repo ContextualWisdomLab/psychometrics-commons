@@ -1,7 +1,10 @@
 //! Regression coverage for opaque response-event reference validation.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, completed_session};
 
 const PAYLOAD_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -31,14 +34,15 @@ fn response_ledger_session_reference_must_be_opaque() {
 
 #[test]
 fn response_identity_references_reject_numeric_like_values() {
+    let session = active_session("session_ref");
     for request in [
         write("12345", "client_event_a", "item_version_a"),
         write("server_event_a", "1.25e3", "item_version_a"),
         write("server_event_a", "client_event_a", "１２３４５"),
     ] {
-        let mut ledger = ResponseLedger::new("session_ref").unwrap();
+        let mut ledger = ResponseLedger::from_session(&session).unwrap();
         assert_eq!(
-            ledger.record(SessionState::Active, request),
+            ledger.record(&session, request),
             Err(WriteError::InvalidReference)
         );
         assert!(ledger.is_empty());
@@ -60,6 +64,7 @@ fn response_identity_references_reject_surrounding_whitespace_aliases() {
         );
     }
 
+    let session = active_session("session_ref");
     for request in [
         write(" server_event_a ", "client_event_a", "item_version_a"),
         write(
@@ -73,22 +78,23 @@ fn response_identity_references_reject_surrounding_whitespace_aliases() {
             "\u{2003}item_version_a\u{2003}",
         ),
     ] {
-        let mut ledger = ResponseLedger::new("session_ref").unwrap();
+        let mut ledger = ResponseLedger::from_session(&session).unwrap();
         assert_eq!(
-            ledger.record(SessionState::Active, request),
+            ledger.record(&session, request),
             Err(WriteError::InvalidReference)
         );
         assert!(ledger.is_empty());
     }
 
-    let ledger = ResponseLedger::new("session_ref").unwrap();
+    let completed = completed_session("session_ref");
+    let ledger = ResponseLedger::from_session(&completed).unwrap();
     for snapshot_ref in [
         " snapshot_ref_a ",
         "\u{202f}snapshot_ref_a\u{202f}",
         "\u{3000}snapshot_ref_a\u{3000}",
     ] {
         assert_eq!(
-            ledger.freeze_as(SessionState::Completed, snapshot_ref),
+            ledger.freeze_as(&completed, snapshot_ref),
             Err(WriteError::InvalidReference)
         );
     }
@@ -101,10 +107,11 @@ fn response_identity_references_reject_surrounding_whitespace_aliases() {
 
 #[test]
 fn response_identity_references_preserve_exact_visible_spelling() {
-    let mut ledger = ResponseLedger::new("세션_가나다").unwrap();
+    let session = active_session("세션_가나다");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     let original = ledger
         .record(
-            SessionState::Active,
+            &session,
             write(
                 "서버_사건_가나다",
                 "클라이언트_사건_가나다",
@@ -117,9 +124,10 @@ fn response_identity_references_preserve_exact_visible_spelling() {
     assert_eq!(original.client_event_ref(), "클라이언트_사건_가나다");
     assert_eq!(original.item_version_ref(), "문항_버전_가나다");
 
+    let completed = completed_session("세션_가나다");
     let replay = ledger
         .record(
-            SessionState::Completed,
+            &completed,
             write(
                 "무시되는_서버_참조",
                 "클라이언트_사건_가나다",
@@ -130,9 +138,7 @@ fn response_identity_references_preserve_exact_visible_spelling() {
     assert_eq!(replay, original);
     assert_eq!(ledger.len(), 1);
 
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, "응답_스냅샷_가나다")
-        .unwrap();
+    let snapshot = ledger.freeze_as(&completed, "응답_스냅샷_가나다").unwrap();
     assert_eq!(snapshot.snapshot_ref(), Some("응답_스냅샷_가나다"));
     assert_eq!(snapshot.session_ref(), "세션_가나다");
 }
