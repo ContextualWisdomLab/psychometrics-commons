@@ -20,6 +20,7 @@ fn compound_credential_words_fail_closed() {
         "session_token",
         "sessionToken",
         "SESSIONTOKEN",
+        "tokenized_score",
         "user_password",
         "userPassword",
         "api_secret",
@@ -28,6 +29,8 @@ fn compound_credential_words_fail_closed() {
         "serviceCredential",
         "auth_header",
         "authentication_header",
+        "key_research_participant_ref",
+        "keyResearchParticipantRef",
     ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
