@@ -55,6 +55,8 @@ pub mod scoring;
 pub mod scoring_engine;
 pub mod scoring_job;
 pub mod session;
+#[path = "session_command_http_boundary.rs"]
+pub mod session_command_http;
 #[path = "session_http_boundary.rs"]
 pub mod session_http;
 pub mod style_mapping;
