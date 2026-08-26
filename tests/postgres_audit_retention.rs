@@ -4,6 +4,7 @@ use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migration;
 use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
+const AUDIT_RETENTION_TEST_LOCK_KEY: i64 = 0x4155_4454_5245_544e;
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn client() -> Client {
@@ -51,6 +52,27 @@ fn insert_at(
             ],
         )
         .unwrap();
+}
+
+#[test]
+fn retention_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = client();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&AUDIT_RETENTION_TEST_LOCK_KEY],
+        )
+        .expect("contender advisory-lock probe must execute")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema retention fixtures must serialize across PostgreSQL sessions"
+    );
 }
 
 #[test]
