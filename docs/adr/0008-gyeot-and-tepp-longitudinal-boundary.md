@@ -55,6 +55,10 @@ Sync outages leave bounded local queues and clear user state. Clock anomalies ar
 - within/between decomposition tests;
 - TEPP artifact provenance contract tests.
 
+## Current implementation status
+
+Protected main still treats enrollment persistence, HTTP, Gyeot adapters, and TEPP dispatch as target work. An Active PR may add an in-memory observation ingest that preserves the four clocks and explicit membership shares without implementing DSEM or multiple-membership estimation. That Active PR is not protected-main truth and does not replace #226 enrollment gating.
+
 ## Alternatives rejected
 
 - **Psychometrics Commons implements all temporal models:** duplicates TEPP and expands the runtime beyond product orchestration.

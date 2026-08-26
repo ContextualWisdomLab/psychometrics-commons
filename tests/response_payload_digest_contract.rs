@@ -1,7 +1,10 @@
 //! Fail-closed canonical digest coverage for response-event payload identity.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, completed_session};
 
 const VALID_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -17,19 +20,19 @@ fn request(payload_digest: &str) -> ResponseWrite<'_> {
 
 #[test]
 fn canonical_lowercase_sha256_payload_digest_is_accepted() {
-    let mut ledger = ResponseLedger::new("session_alpha").unwrap();
-    let event = ledger
-        .record(SessionState::Active, request(VALID_DIGEST))
-        .unwrap();
+    let session = active_session("session_alpha");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    let event = ledger.record(&session, request(VALID_DIGEST)).unwrap();
 
     assert_eq!(event.payload_digest(), VALID_DIGEST);
 }
 
 #[test]
 fn blank_payload_digest_preserves_the_existing_empty_reference_error() {
-    let mut ledger = ResponseLedger::new("session_alpha").unwrap();
+    let session = active_session("session_alpha");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
     assert_eq!(
-        ledger.record(SessionState::Active, request("")),
+        ledger.record(&session, request("")),
         Err(WriteError::EmptyReference)
     );
     assert!(ledger.is_empty());
@@ -37,6 +40,7 @@ fn blank_payload_digest_preserves_the_existing_empty_reference_error() {
 
 #[test]
 fn malformed_nonblank_payload_digests_fail_closed_before_response_mutation() {
+    let session = active_session("session_alpha");
     for invalid in [
         "response-alpha",
         "sha256:response-alpha",
@@ -46,9 +50,9 @@ fn malformed_nonblank_payload_digests_fail_closed_before_response_mutation() {
         "sha256:0123456789ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef",
         " sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef ",
     ] {
-        let mut ledger = ResponseLedger::new("session_alpha").unwrap();
+        let mut ledger = ResponseLedger::from_session(&session).unwrap();
         assert_eq!(
-            ledger.record(SessionState::Active, request(invalid)),
+            ledger.record(&session, request(invalid)),
             Err(WriteError::InvalidPayloadDigest),
             "expected malformed payload digest to fail closed: {invalid:?}"
         );
@@ -58,13 +62,11 @@ fn malformed_nonblank_payload_digests_fail_closed_before_response_mutation() {
 
 #[test]
 fn replay_identity_uses_the_exact_canonical_digest() {
-    let mut ledger = ResponseLedger::new("session_alpha").unwrap();
-    let first = ledger
-        .record(SessionState::Active, request(VALID_DIGEST))
-        .unwrap();
-    let replay = ledger
-        .record(SessionState::Completed, request(VALID_DIGEST))
-        .unwrap();
+    let session = active_session("session_alpha");
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    let first = ledger.record(&session, request(VALID_DIGEST)).unwrap();
+    let completed = completed_session("session_alpha");
+    let replay = ledger.record(&completed, request(VALID_DIGEST)).unwrap();
 
     assert_eq!(replay, first);
     assert_eq!(ledger.len(), 1);

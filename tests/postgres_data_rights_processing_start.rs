@@ -1,5 +1,7 @@
 //! Durable processing-start evidence for an identity-verified data-rights request.
 
+use std::ops::{Deref, DerefMut};
+
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::data_rights::{
     DataRightsRequest, DataRightsRequestKind, DataRightsState,
@@ -18,21 +20,66 @@ use psychometrics_commons_runtime::postgres_integration::apply_integration_migra
 
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-fn test_client(schema_prefix: &str) -> Client {
-    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
-    let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
-    let schema = format!("{schema_prefix}_{}", std::process::id());
-    client
-        .batch_execute(&format!(
-            "CREATE SCHEMA {schema}; SET search_path TO {schema};"
-        ))
-        .unwrap();
-    client
+fn next_schema_name(client: &mut Client, schema_prefix: &str) -> String {
+    let transaction_identity: String = client
+        .query_one("SELECT pg_current_xact_id()::text", &[])
+        .expect("PostgreSQL must issue a transaction identity for the fixture schema")
+        .get(0);
+    format!("{schema_prefix}_{transaction_identity}")
 }
 
-fn ready_client(schema_prefix: &str) -> Client {
+struct SchemaClient {
+    client: Client,
+    schema_name: String,
+}
+
+impl SchemaClient {
+    fn schema_name(&self) -> &str {
+        &self.schema_name
+    }
+}
+
+impl Deref for SchemaClient {
+    type Target = Client;
+
+    fn deref(&self) -> &Self::Target {
+        &self.client
+    }
+}
+
+impl DerefMut for SchemaClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.client
+    }
+}
+
+impl Drop for SchemaClient {
+    fn drop(&mut self) {
+        let _ = self.client.batch_execute(&format!(
+            "RESET search_path; DROP SCHEMA IF EXISTS {} CASCADE;",
+            self.schema_name
+        ));
+    }
+}
+
+fn test_client(schema_prefix: &str) -> SchemaClient {
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+    let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    let schema_name = next_schema_name(&mut client, schema_prefix);
+    client
+        .batch_execute(&format!(
+            "CREATE SCHEMA {schema_name}; SET search_path TO {schema_name};"
+        ))
+        .unwrap();
+    SchemaClient {
+        client,
+        schema_name,
+    }
+}
+
+fn ready_client(schema_prefix: &str) -> SchemaClient {
     let mut client = test_client(schema_prefix);
-    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut *client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     apply_data_rights_processing_migration(&mut client).unwrap();
@@ -88,6 +135,26 @@ fn persist_verified(client: &mut Client, request_ref: &str) -> DataRightsRequest
     persist_data_rights_identity_verification(&mut transaction, &request).unwrap();
     transaction.commit().unwrap();
     request
+}
+
+#[test]
+fn database_transaction_identity_is_unique_per_processing_fixture_allocation() {
+    let first = test_client("data_rights_process_fixture_identity");
+    let second = test_client("data_rights_process_fixture_identity");
+
+    for schema_name in [first.schema_name(), second.schema_name()] {
+        let identity = schema_name
+            .strip_prefix("data_rights_process_fixture_identity_")
+            .expect("fixture schema must keep its descriptive prefix");
+        identity
+            .parse::<u64>()
+            .expect("fixture schema suffix must be a database-issued transaction identity");
+    }
+    assert_ne!(
+        first.schema_name(),
+        second.schema_name(),
+        "separate fixture allocations must never reuse a schema identity"
+    );
 }
 
 #[test]
@@ -290,15 +357,10 @@ fn processing_start_classify_select_failure_is_a_database_failure() {
         .verify_identity("verification_evidence_alpha", 10_100)
         .unwrap();
     request.start_processing("operation_alpha", 10_200).unwrap();
-    let sink = format!(
-        "data_rights_processing_classify_sink_{}",
-        std::process::id()
-    );
+    let sink = "data_rights_processing_classify_sink_unavailable";
     client
         .batch_execute(&format!(
-            "DROP SCHEMA IF EXISTS {sink} CASCADE;
-             CREATE SCHEMA {sink};
-             CREATE OR REPLACE FUNCTION data_rights_processing_redirect_after_update()
+            "CREATE OR REPLACE FUNCTION data_rights_processing_redirect_after_update()
              RETURNS trigger LANGUAGE plpgsql AS $$
              BEGIN
                  PERFORM set_config('search_path', '{sink}', false);
@@ -471,7 +533,7 @@ fn processing_columns_enforce_pair_presence_reference_format_and_positive_time()
 #[test]
 fn processing_migration_repairs_constraints_when_columns_preexist() {
     let mut client = test_client("data_rights_process_repair_constraints");
-    apply_integration_migration(&mut client).unwrap();
+    apply_integration_migration(&mut *client).unwrap();
     apply_data_rights_migration(&mut client).unwrap();
     client
         .batch_execute(

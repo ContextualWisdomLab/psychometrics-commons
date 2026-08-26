@@ -93,6 +93,8 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
+A scoring worker that does not already know the next job identity claims the oldest due queued or retry-scheduled `scoring_job_state` row under `READ COMMITTED` with `FOR UPDATE SKIP LOCKED` (PostgreSQL Global Development Group, 2026a, 2026b). The claim returns the stored `scoring_request_ref` and fencing lease, or `None` when no job is due. Two concurrent pollers cannot both receive the same row. A retry-scheduled row is skipped until its persisted due time. The worker is still not invoked inside the session-completion transaction.
+
 ### Integration outbox enqueue
 
 The first physical integration slice inserts an immutable outbox row under the composite identity `(source_ref, tenant_ref, event_ref)`. `INSERT ... ON CONFLICT DO NOTHING` is followed by an exact immutable-evidence query only when the insert did not create a row. Because a caller may supply its own transaction, this algorithm explicitly requires `READ COMMITTED`, where each statement receives a fresh command snapshot after a conflicting transaction completes. Stronger isolation is rejected rather than converting an invisible concurrent duplicate into a false `ConflictingReplay` result.
@@ -310,3 +312,7 @@ The physical database technology or decomposition may change if scale, residency
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
 
 PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+
+PostgreSQL Global Development Group. (2026a). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+
+PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
