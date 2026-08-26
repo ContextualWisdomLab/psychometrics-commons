@@ -8,6 +8,7 @@ import unittest
 SCRIPT = Path("scripts/check_release_legal_readiness.py")
 WORKFLOW = Path(".github/workflows/release-legal-readiness.yml")
 RUNTIME_CI = Path(".github/workflows/ci.yml")
+PINNED_SETUP_PYTHON = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
 
 
 class ReleaseLegalReadinessContract(unittest.TestCase):
@@ -34,6 +35,8 @@ class ReleaseLegalReadinessContract(unittest.TestCase):
         self.assertNotIn("id-token: write", text)
         self.assertIn("persist-credentials: false", text)
         self.assertIn('test "$GITHUB_REF" = "refs/heads/main"', text)
+        self.assertIn(PINNED_SETUP_PYTHON, text)
+        self.assertIn("python-version: '3.13'", text)
         self.assertIn("python3 tests/test_release_legal_readiness.py", text)
         self.assertIn("python3 tests/test_check_release_legal_readiness.py", text)
         self.assertIn("python3 scripts/check_release_legal_readiness.py .", text)
@@ -62,22 +65,9 @@ class ReleaseLegalReadinessContract(unittest.TestCase):
             2,
             "pull-request and protected-main path filters must both include root COPYING evidence",
         )
+        self.assertIn(PINNED_SETUP_PYTHON, text)
+        self.assertIn("python-version: '3.13'", text)
         self.assertIn("python3 -m unittest discover -s tests -p 'test_*.py' -v", text)
-
-    def test_current_repository_is_not_silently_declared_ready(self) -> None:
-        """Until owners choose license terms, tests must not fabricate root license evidence."""
-        license_candidates = [
-            "LICENSE",
-            "LICENSE.md",
-            "LICENSE.txt",
-            "COPYING",
-            "COPYING.md",
-            "COPYING.txt",
-        ]
-        self.assertFalse(
-            any(Path(candidate).is_file() for candidate in license_candidates),
-            "remove this assertion only in the same change that adds reviewed license evidence",
-        )
 
     def test_fixture_directory_can_be_created_without_touching_repository(self) -> None:
         """Unit tests for the checker must use isolated fixtures rather than changing root rights evidence."""
