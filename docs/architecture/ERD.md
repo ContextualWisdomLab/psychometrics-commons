@@ -25,6 +25,7 @@ erDiagram
     assessment_participant ||--o{ participant_identity_link : links
     assessment_participant ||--o{ assessment_session : starts
     instrument_version ||--o{ assessment_session : administered_as
+    assessment_session ||--o{ assessment_session_command : accepts
     assessment_session ||--o{ item_delivery_event : delivers
     item_version ||--o{ item_delivery_event : delivered_as
     assessment_session ||--o{ response_event : records
@@ -57,6 +58,7 @@ erDiagram
 
     assessment_participant ||--o{ data_rights_request : requests
     data_rights_request ||--|{ data_rights_propagation_state : enqueues
+    data_rights_request ||--o{ data_rights_retained_scope_evidence : retains
     data_rights_propagation_state }o--|| integration_outbox : references
 
     tenant_account ||--o{ integration_outbox : scopes
@@ -154,6 +156,14 @@ erDiagram
       string locale
       timestamp created_at
       timestamp latest_event_at
+    }
+
+    assessment_session_command {
+      string session_ref PK, FK
+      string command_ref PK
+      int command_sequence
+      string command_name
+      string resulting_state
     }
 
     item_delivery_event {
@@ -368,8 +378,18 @@ erDiagram
       string verification_evidence_ref
       string operation_ref
       string completion_evidence_ref
+      int completed_at_unix_ms
       timestamp requested_at
       timestamp latest_event_at
+    }
+
+    data_rights_retained_scope_evidence {
+      string request_ref PK,FK
+      string retained_scope_ref PK
+      string tenant_ref FK
+      string request_kind
+      string completion_state
+      timestamp created_at
     }
 
     data_rights_propagation_state {
@@ -394,6 +414,11 @@ erDiagram
       string payload_digest
       timestamp occurred_at
       timestamp published_at
+      string lease_worker_ref
+      string lease_ref
+      int lease_fencing_token
+      timestamp lease_expires_at
+      int delivery_lease_generation
     }
 
     integration_delivery_attempt {
@@ -433,12 +458,13 @@ erDiagram
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
-- `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Physical `migrations/0003_data_rights_propagation.sql` stores requested-state identity plus one local outbox event per dependent system; verification, processing, completion, and dependent-system execution remain Target.
+- `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Protected main persists requested-state identity plus local propagation and processing evidence. Merged #77 adds protected-main terminal `completion_evidence_ref` / `completed_at_unix_ms` fields and immutable `data_rights_retained_scope_evidence` child rows for deletion scopes that must remain retained. Dependent-system execution remains Target.
+- Protected main persists physical `assessment_session` (merged #218; `migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path through protected-main `src/session_http.rs`.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
-- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
-- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth.
-- `longitudinal_enrollment`, `enrollment_membership_context`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. Membership contexts stay in a child table so work and home are not flattened onto the enrollment row. No TEPP analytical kernel is duplicated here.
-- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main; `integration_consumption` pending/processing/completed/quarantined persistence and expire-and-reclaim of a crashed processing claim exist only on this Active PR until merged.
+- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is protected-main truth (`migrations/0005_consent_lifecycle.sql`; merged #49); HTTP consent transport and derived snapshot tables remain Target.
+- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persistence remains a later slice; it is not protected-main truth until integrated. Do not name closed #158, #147, #133, #114, or #124 as the current persist landing.
+- `longitudinal_enrollment`, `enrollment_membership_context`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. Membership contexts stay in a child table so work and home are not flattened onto the enrollment row (**Active PR** #226); no TEPP analytical kernel is duplicated here.
+- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables, exclusive delivery-lease columns (`lease_worker_ref`, `lease_ref`, `lease_fencing_token`, `lease_expires_at`, `delivery_lease_generation`) with database-clock expiry recovery, and `integration_consumption` pending/processing/completed/quarantined persistence are all protected-main truth.
 
 This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
 
@@ -467,6 +493,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `result_snapshot`;
 - `consent_snapshot`;
 - `participant_identity_link` history;
+- terminal data-rights completion evidence and `data_rights_retained_scope_evidence` rows once recorded;
 - accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
 - published `research_release`.
@@ -490,7 +517,8 @@ A physical schema must enforce equivalents of the following constraints:
 | unique `(instrument_version_ref, item_version_ref)` when duplicates are not explicitly allowed by publication policy | publication integrity |
 | at most one current Active `participant_identity_link` per participant under the accepted single-account-link policy | unambiguous current account projection |
 | unique active `(tenant_ref, identity_issuer, identity_subject_ref)` unless an explicit account-merge ADR permits otherwise | prevent one external subject from silently owning multiple product participants |
-| unique `(enrollment_ref, source_system_ref, source_observation_ref)` | longitudinal ingestion replay safety |
+| unique `(request_ref, retained_scope_ref)` for retained data-rights completion evidence | prevent duplicate retained-scope evidence while preserving tenant/request binding |
+| unique `(tenant_ref, enrollment_ref, source_system_ref, source_observation_ref)` | tenant-scoped longitudinal ingestion replay safety |
 | unique analysis-submission idempotency identity per `(enrollment_ref, analysis_spec_ref, observation_set_digest)` | repeatable TEPP dispatch |
 | unique `(tenant_ref, source, outbox_event_ref)` or an equivalently stronger globally unique event identity with tenant binding | durable outbound event identity |
 | unique `(tenant_ref, consumer_name, source, source_event_ref)` | tenant-bound inbox deduplication |
