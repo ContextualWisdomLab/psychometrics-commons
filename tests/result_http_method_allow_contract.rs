@@ -72,8 +72,7 @@ fn result_snapshot() -> ResultSnapshot {
     .unwrap()
 }
 
-#[test]
-fn method_not_allowed_identifies_get_as_the_allowed_method() {
+fn authorized_context() -> (ParticipantRecord, AuthorizationContext, ResultSnapshot) {
     let participant = ParticipantRecord::new_anonymous(
         "participant_result_method_allow",
         "tenant_result_method_allow",
@@ -87,7 +86,12 @@ fn method_not_allowed_identifies_get_as_the_allowed_method() {
         &[ProductRole::Participant],
     )
     .unwrap();
-    let result = result_snapshot();
+    (participant, actor, result_snapshot())
+}
+
+#[test]
+fn method_not_allowed_advertises_get_and_head() {
+    let (participant, actor, result) = authorized_context();
 
     let response = handle_result_http_request(
         "POST /v1/results/result_snapshot_result_method_allow HTTP/1.1\r\n\r\n",
@@ -97,5 +101,30 @@ fn method_not_allowed_identifies_get_as_the_allowed_method() {
     );
 
     assert_eq!(response.status(), 405);
-    assert_eq!(response.allow(), Some("GET"));
+    assert_eq!(response.allow(), Some("GET, HEAD"));
+}
+
+#[test]
+fn head_matches_get_metadata_without_response_content() {
+    let (participant, actor, result) = authorized_context();
+
+    let get_response = handle_result_http_request(
+        "GET /v1/results/result_snapshot_result_method_allow HTTP/1.1\r\n\r\n",
+        &actor,
+        &participant,
+        &result,
+    );
+    let head_response = handle_result_http_request(
+        "HEAD /v1/results/result_snapshot_result_method_allow HTTP/1.1\r\n\r\n",
+        &actor,
+        &participant,
+        &result,
+    );
+
+    assert_eq!(get_response.status(), 200);
+    assert_eq!(head_response.status(), get_response.status());
+    assert_eq!(head_response.content_type(), get_response.content_type());
+    assert_eq!(head_response.allow(), get_response.allow());
+    assert!(!get_response.body().is_empty());
+    assert!(head_response.body().is_empty());
 }
