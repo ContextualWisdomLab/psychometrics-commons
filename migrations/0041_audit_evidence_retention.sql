@@ -8,7 +8,7 @@
 DO $audit_retention_migration$
 DECLARE
     migration_schema TEXT := current_schema();
-    retention_owner TEXT := current_user;
+    retention_owner TEXT;
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('psychometrics-commons:migration-0041'));
 
@@ -64,6 +64,19 @@ $create_retention_function$,
         'REVOKE ALL ON FUNCTION %I.expire_audit_evidence_before(BIGINT) FROM PUBLIC',
         migration_schema
     );
+
+    SELECT pg_get_userbyid(procedure_record.proowner)
+    INTO retention_owner
+    FROM pg_proc AS procedure_record
+    WHERE procedure_record.oid = to_regprocedure(
+        format('%I.expire_audit_evidence_before(bigint)', migration_schema)
+    );
+
+    IF retention_owner IS NULL THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '55000',
+            MESSAGE = 'audit retention routine owner could not be resolved';
+    END IF;
 
     EXECUTE format(
         $create_mutation_guard$
