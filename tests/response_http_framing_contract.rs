@@ -29,7 +29,7 @@ fn empty_runtime() -> ResponseHttpRuntime {
 }
 
 fn connect(listener: &std::net::TcpListener) -> TcpStream {
-    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     client
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
@@ -100,10 +100,8 @@ fn request_with_extra_headers(extra_headers: &str, suffix: &str) -> Vec<u8> {
 #[test]
 fn duplicate_content_length_is_rejected_before_dispatch() {
     let request_body = body();
-    let request = request_with_extra_headers(
-        &format!("Content-Length: {}\r\n", request_body.len()),
-        "",
-    );
+    let request =
+        request_with_extra_headers(&format!("Content-Length: {}\r\n", request_body.len()), "");
     let error = framing_result(&request).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
 }
