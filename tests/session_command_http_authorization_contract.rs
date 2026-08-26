@@ -129,6 +129,14 @@ fn activate_request() -> String {
     )
 }
 
+fn unsafe_idempotency_request() -> String {
+    let body = "{\"command\":\"activate\"}";
+    format!(
+        "POST /v1/sessions/{SESSION_REF}/commands HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: cmd\u{200b}_authorized_activate\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
 #[test]
 fn authority_free_handler_cannot_mutate_a_known_session() {
     let mut runtime = SessionCommandHttpRuntime::new(vec![created_session()]);
@@ -164,6 +172,39 @@ fn authenticated_owner_can_command_the_exact_server_owned_session() {
     assert_eq!(
         runtime.session(SESSION_REF).unwrap().state(),
         SessionState::Active
+    );
+}
+
+#[test]
+fn unsafe_idempotency_key_is_rejected_before_session_or_authority_lookup() {
+    let request = unsafe_idempotency_request();
+    let mut public_runtime = SessionCommandHttpRuntime::new(vec![created_session()]);
+    let public = handle_session_command_http_request(&request, &mut public_runtime);
+
+    let mut authorized_runtime = SessionCommandHttpRuntime::new(vec![created_session()]);
+    let participant = participant();
+    let actor = owner_actor();
+    let authority = SessionCommandAuthority::Authenticated(&actor);
+    let authorized = handle_authorized_session_command_http_request(
+        &request,
+        &authority,
+        &participant,
+        &mut authorized_runtime,
+    );
+
+    assert_eq!(public.status(), 400);
+    assert_eq!(authorized.status(), 400);
+    assert_eq!(public.body(), authorized.body());
+    assert!(public
+        .body()
+        .contains("urn:psychometrics-commons:problem:missing-idempotency-key"));
+    assert_eq!(
+        public_runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Created
+    );
+    assert_eq!(
+        authorized_runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Created
     );
 }
 
