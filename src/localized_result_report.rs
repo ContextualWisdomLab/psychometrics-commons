@@ -15,8 +15,8 @@
 //! every other locale. The human-readable text deliberately does not embed opaque
 //! participant, session, scoring, consent, engine, or other technical provenance
 //! identifiers. Exact provenance remains available through the immutable result
-//! export and the typed report identity fields. No scientific value or gate is
-//! recomputed here.
+//! export and the typed report identity and render-time fields. No scientific value
+//! or gate is recomputed here.
 
 use crate::result::ResultSnapshot;
 use crate::result_export::{ResultExport, ResultExportError, ResultExportInput};
@@ -44,6 +44,7 @@ pub struct LocalizedResultReport {
     result_snapshot_ref: String,
     participant_ref: String,
     locale: String,
+    rendered_at_unix_ms: u64,
     text: String,
 }
 
@@ -114,6 +115,7 @@ impl LocalizedResultReport {
             result_snapshot_ref: export.result_snapshot_ref().to_owned(),
             participant_ref: export.participant_ref().to_owned(),
             locale: export.locale().to_owned(),
+            rendered_at_unix_ms: export.exported_at_unix_ms(),
             text,
         })
     }
@@ -142,6 +144,12 @@ impl LocalizedResultReport {
         &self.locale
     }
 
+    /// Return the server-authoritative time retained for this rendered report.
+    #[must_use]
+    pub const fn rendered_at_unix_ms(&self) -> u64 {
+        self.rendered_at_unix_ms
+    }
+
     /// Return the localized human-readable report text.
     #[must_use]
     pub fn text(&self) -> &str {
@@ -164,7 +172,7 @@ struct ReportLabels {
 
 const EN_US: ReportLabels = ReportLabels {
     title: "Personal result report",
-    provenance_note: "Technical provenance is available in the machine-readable result export.",
+    provenance_note: "Your scores are copied from the saved assessment result. A separate data export keeps the exact versions, time, and scoring evidence needed to check how this result was produced. Internal identifiers are not shown here.",
     scores: "Scores",
     limitations: "Limitations",
     scored: "scored",
@@ -176,7 +184,7 @@ const EN_US: ReportLabels = ReportLabels {
 
 const KO_KR: ReportLabels = ReportLabels {
     title: "개인 결과 보고서",
-    provenance_note: "기술 계보는 기계 판독 가능한 결과 내보내기에서 확인할 수 있습니다.",
+    provenance_note: "이 점수는 저장된 검사 결과에서 그대로 가져왔습니다. 별도의 데이터 내보내기에는 결과가 어떻게 만들어졌는지 확인할 수 있도록 정확한 버전, 시점, 채점 근거가 보관됩니다. 내부 식별자는 여기에는 표시하지 않습니다.",
     scores: "점수",
     limitations: "제한사항",
     scored: "채점됨",
