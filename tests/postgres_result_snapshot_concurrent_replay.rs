@@ -204,7 +204,9 @@ fn concurrent_exact_insert_winner_is_reclassified_as_duplicate() {
     assert!(unlocked);
 
     assert_eq!(
-        worker.join().expect("worker should finish after the lock release"),
+        worker
+            .join()
+            .expect("worker should finish after the lock release"),
         ResultSnapshotPersistenceDisposition::Duplicate
     );
 
