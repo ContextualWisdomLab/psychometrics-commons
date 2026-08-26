@@ -130,7 +130,8 @@ fn authorized_response(
     participant_ref: &str,
     request: &str,
 ) -> ResponseHttpResponse {
-    let participant = ParticipantRecord::new_anonymous(participant_ref, TENANT_REF, 10_300).unwrap();
+    let participant =
+        ParticipantRecord::new_anonymous(participant_ref, TENANT_REF, 10_300).unwrap();
     let actor = AuthorizationContext::new(
         TENANT_REF,
         "subject_response_multi_owner",
@@ -189,11 +190,7 @@ fn generated_server_event_cursor_skips_a_valid_seed_that_occupies_its_namespace(
         "ptc_response_seed_collision",
         &release,
     );
-    let mut runtime = ResponseHttpRuntime::new(
-        vec![session],
-        vec![release],
-        "evt_response_2",
-    );
+    let mut runtime = ResponseHttpRuntime::new(vec![session], vec![release], "evt_response_2");
 
     let first_request = post_request(
         "ses_response_seed_collision",
@@ -201,11 +198,7 @@ fn generated_server_event_cursor_skips_a_valid_seed_that_occupies_its_namespace(
         "item_version_001",
         PAYLOAD_ONE,
     );
-    let first = authorized_response(
-        &mut runtime,
-        "ptc_response_seed_collision",
-        &first_request,
-    );
+    let first = authorized_response(&mut runtime, "ptc_response_seed_collision", &first_request);
 
     let second_request = post_request(
         "ses_response_seed_collision",
@@ -213,17 +206,17 @@ fn generated_server_event_cursor_skips_a_valid_seed_that_occupies_its_namespace(
         "item_version_002",
         PAYLOAD_TWO,
     );
-    let second = authorized_response(
-        &mut runtime,
-        "ptc_response_seed_collision",
-        &second_request,
-    );
+    let second = authorized_response(&mut runtime, "ptc_response_seed_collision", &second_request);
 
     assert_eq!(first.status(), 201);
     assert_eq!(second.status(), 201);
     assert_eq!(runtime.event_count("ses_response_seed_collision"), 2);
-    assert!(first.body().contains("\"server_event_ref\":\"evt_response_2\""));
-    assert!(!second.body().contains("\"server_event_ref\":\"evt_response_2\""));
+    assert!(first
+        .body()
+        .contains("\"server_event_ref\":\"evt_response_2\""));
+    assert!(!second
+        .body()
+        .contains("\"server_event_ref\":\"evt_response_2\""));
 }
 
 #[test]
@@ -251,11 +244,7 @@ fn stale_server_event_cursor_cannot_reuse_identity_across_sessions() {
         "item_version_001",
         PAYLOAD_ONE,
     );
-    let first = authorized_response(
-        &mut runtime,
-        "ptc_response_global_ref_a",
-        &first_request,
-    );
+    let first = authorized_response(&mut runtime, "ptc_response_global_ref_a", &first_request);
     assert_eq!(first.status(), 201);
 
     runtime.replace_next_server_event_ref("evt_response_global_shared");
@@ -287,11 +276,8 @@ fn exact_replay_survives_a_stale_cursor_that_names_its_original_server_event() {
         "ptc_response_stale_replay",
         &release,
     );
-    let mut runtime = ResponseHttpRuntime::new(
-        vec![session],
-        vec![release],
-        "evt_response_stale_replay",
-    );
+    let mut runtime =
+        ResponseHttpRuntime::new(vec![session], vec![release], "evt_response_stale_replay");
     let request = post_request(
         "ses_response_stale_replay",
         "idem_response_stale_replay",
