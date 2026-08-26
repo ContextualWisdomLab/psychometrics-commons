@@ -14,8 +14,8 @@ use crate::response::{ResponseEvent, ResponseLedger, ResponseWrite, WriteError};
 use crate::session::AssessmentSession;
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::io::{self, Read};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::io;
+use std::net::{SocketAddr, TcpListener};
 use std::time::Duration;
 
 /// Bounded read/write timeout for one accepted response HTTP connection.
@@ -154,33 +154,14 @@ pub fn handle_response_http_request(
 /// Bind a blocking TCP listener for public response HTTP.
 ///
 /// Tests and local operators typically bind `127.0.0.1:0`. Hosted processes bind
-/// `0.0.0.0:$PORT`. This function does not start accepting connections.
+/// `0.0.0.0:$PORT`. This function does not start accepting connections. The
+/// hardened accept/read/write loop is owned by `response_http_boundary.rs`.
 ///
 /// # Errors
 ///
 /// Returns the I/O error if the operating system cannot bind the address.
 pub fn bind_response_http(addr: SocketAddr) -> io::Result<TcpListener> {
     TcpListener::bind(addr)
-}
-
-/// Accept one TCP connection and serve a single response HTTP request.
-///
-/// The connection is closed after the response. Keep-alive, TLS, and other
-/// public families are outside this slice.
-///
-/// # Errors
-///
-/// Returns the I/O error if accept, read, or write fails.
-pub fn accept_one_response_http(
-    listener: &TcpListener,
-    runtime: &mut ResponseHttpRuntime,
-) -> io::Result<()> {
-    let (mut stream, _) = listener.accept()?;
-    stream.set_read_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
-    stream.set_write_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream)?;
-    let response = handle_response_http_request(&request, runtime);
-    write_http_response(&mut stream, &response)
 }
 
 fn method_not_allowed() -> ResponseHttpResponse {
@@ -480,93 +461,10 @@ fn request_body(request: &str) -> Option<&str> {
     let content_length = header_value(headers, "content-length")?
         .parse::<usize>()
         .ok()?;
-    if body.len() < content_length {
+    if body.len() < content_length || !body.is_char_boundary(content_length) {
         return None;
     }
     Some(&body[..content_length])
-}
-
-fn read_http_request(stream: &mut TcpStream) -> io::Result<String> {
-    let mut buffer = Vec::new();
-    let mut chunk = [0_u8; 512];
-    loop {
-        let read_result = stream.read(&mut chunk);
-        match apply_request_read(&mut buffer, &chunk, read_result)? {
-            RequestReadProgress::Continue => {}
-            RequestReadProgress::Complete => break,
-        }
-    }
-    if buffer.len() > RESPONSE_HTTP_MAX_REQUEST_BYTES
-        || !buffer.windows(4).any(|window| window == b"\r\n\r\n")
-    {
-        return Ok(String::new());
-    }
-    Ok(String::from_utf8_lossy(&buffer).into_owned())
-}
-
-#[derive(Debug)]
-enum RequestReadProgress {
-    Continue,
-    Complete,
-}
-
-fn apply_request_read(
-    buffer: &mut Vec<u8>,
-    chunk: &[u8],
-    read_result: io::Result<usize>,
-) -> io::Result<RequestReadProgress> {
-    match read_result {
-        Ok(0) => Ok(RequestReadProgress::Complete),
-        Ok(read) => {
-            buffer.extend_from_slice(&chunk[..read]);
-            if buffer.windows(4).any(|window| window == b"\r\n\r\n")
-                || buffer.len() > RESPONSE_HTTP_MAX_REQUEST_BYTES
-            {
-                Ok(RequestReadProgress::Complete)
-            } else {
-                Ok(RequestReadProgress::Continue)
-            }
-        }
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-            ) =>
-        {
-            Ok(RequestReadProgress::Complete)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn write_http_response(stream: &mut TcpStream, response: &ResponseHttpResponse) -> io::Result<()> {
-    let body = response.body().as_bytes();
-    let allow = if response.status() == 405 {
-        "Allow: POST\r\n"
-    } else {
-        ""
-    };
-    let header = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{allow}Connection: close\r\n\r\n",
-        response.status(),
-        reason_phrase(response.status()),
-        response.content_type(),
-        body.len()
-    );
-    io::Write::write_all(stream, header.as_bytes())?;
-    io::Write::write_all(stream, body)
-}
-
-const fn reason_phrase(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        201 => "Created",
-        400 => "Bad Request",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        409 => "Conflict",
-        _ => "Error",
-    }
 }
 
 fn parse_request_line(request: &str) -> Option<(&str, &str)> {
@@ -607,19 +505,14 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod unit_tests {
     use super::{
-        apply_request_read, json_string, read_http_request, reason_phrase,
-        response_collection_session_ref, response_session_ref_is_transport_safe, split_target,
-        valid_idempotency_key, write_problem, RequestReadProgress, ResponseHttpRuntime,
-        RESPONSE_HTTP_MAX_REQUEST_BYTES,
+        json_string, response_collection_session_ref, response_session_ref_is_transport_safe,
+        split_target, valid_idempotency_key, write_problem, ResponseHttpRuntime,
     };
     use crate::response::WriteError;
     use crate::session::SessionState;
-    use std::io::{self, ErrorKind, Write};
-    use std::net::{Shutdown, SocketAddr, TcpStream};
-    use std::time::Duration;
 
     #[test]
-    fn helpers_cover_paths_status_escapes_and_read_progress() {
+    fn helpers_cover_paths_escapes_and_identity_guards() {
         assert_eq!(
             response_collection_session_ref("/v1/sessions/ses_one/responses"),
             Some("ses_one")
@@ -629,13 +522,6 @@ mod unit_tests {
             None
         );
         assert_eq!(response_collection_session_ref("/v1/sessions"), None);
-        assert_eq!(reason_phrase(200), "OK");
-        assert_eq!(reason_phrase(201), "Created");
-        assert_eq!(reason_phrase(400), "Bad Request");
-        assert_eq!(reason_phrase(404), "Not Found");
-        assert_eq!(reason_phrase(405), "Method Not Allowed");
-        assert_eq!(reason_phrase(409), "Conflict");
-        assert_eq!(reason_phrase(418), "Error");
         assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(json_string("a\n\r\t"), "\"a\\n\\r\\t\"");
         assert_eq!(json_string("\u{0001}"), "\"\\u0001\"");
@@ -647,39 +533,6 @@ mod unit_tests {
         assert_eq!(valid_idempotency_key("42"), None);
         assert_eq!(valid_idempotency_key("   "), None);
         assert_eq!(valid_idempotency_key("idem spaced key"), None);
-        let mut buffer = Vec::new();
-        assert!(matches!(
-            apply_request_read(&mut buffer, b"", Ok(0)).unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(&mut Vec::new(), b"POST", Ok(4)).unwrap(),
-            RequestReadProgress::Continue
-        ));
-        let mut oversized = vec![b'x'; RESPONSE_HTTP_MAX_REQUEST_BYTES];
-        assert!(matches!(
-            apply_request_read(&mut oversized, b"y", Ok(1)).unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::TimedOut, "timeout"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::WouldBlock, "block"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
     }
 
     #[test]
@@ -768,47 +621,5 @@ mod unit_tests {
         assert_eq!(runtime.event_count("ses_unknown"), 0);
         runtime.replace_next_server_event_ref(String::from("evt_rebound"));
         assert_eq!(runtime.event_count("ses_unknown"), 0);
-    }
-
-    #[test]
-    fn read_http_request_returns_a_complete_framed_request_from_the_socket() {
-        let request = concat!(
-            "POST /v1/sessions/ses_one/responses HTTP/1.1\r\n",
-            "Host: localhost\r\n",
-            "Idempotency-Key: idem_read_loop_happy_path\r\n",
-            "Content-Length: 24\r\n",
-            "\r\n",
-            "{\"item_version_ref\":\"x\"}",
-        );
-        let (_client, mut server) = connected_stream(request.as_bytes());
-        assert_eq!(read_http_request(&mut server).unwrap(), request);
-    }
-
-    fn connected_stream(payload: &[u8]) -> (TcpStream, TcpStream) {
-        let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address = listener.local_addr().unwrap();
-        let mut client = TcpStream::connect(address).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        server
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        client.write_all(payload).unwrap();
-        client.shutdown(Shutdown::Write).unwrap();
-        (client, server)
-    }
-
-    #[test]
-    fn oversized_unframed_input_collapses_to_an_empty_request() {
-        let (_client, mut server) =
-            connected_stream(&[b'A'; RESPONSE_HTTP_MAX_REQUEST_BYTES + 808]);
-        assert_eq!(read_http_request(&mut server).unwrap(), "");
-    }
-
-    #[test]
-    fn input_without_header_terminator_collapses_to_an_empty_request() {
-        let (_client, mut server) = connected_stream(
-            b"POST /v1/sessions/ses_one/responses HTTP/1.1\r\nHost: localhost\r\n",
-        );
-        assert_eq!(read_http_request(&mut server).unwrap(), "");
     }
 }
