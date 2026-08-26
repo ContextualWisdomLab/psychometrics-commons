@@ -3,15 +3,21 @@
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_consent::apply_consent_migration;
 
-fn client() -> Client {
+fn client(schema: &str) -> Client {
+    assert!(
+        schema
+            .chars()
+            .all(|character| character.is_ascii_lowercase() || character == '_'),
+        "test schema names must remain fixed lowercase identifiers"
+    );
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     client
-        .batch_execute(
-            "DROP SCHEMA IF EXISTS consent_default_ignorable_parity_test CASCADE; \
-             CREATE SCHEMA consent_default_ignorable_parity_test; \
-             SET search_path TO consent_default_ignorable_parity_test;",
-        )
+        .batch_execute(&format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; \
+             CREATE SCHEMA {schema}; \
+             SET search_path TO {schema};"
+        ))
         .unwrap();
     apply_consent_migration(&mut client).unwrap();
     client
@@ -52,7 +58,7 @@ fn insert_event(
 
 #[test]
 fn every_consent_reference_field_rejects_default_ignorable_aliases() {
-    let mut client = client();
+    let mut client = client("consent_default_ignorable_fields_test");
     let invalid_references = [
         "opaque_\u{00ad}_alpha",
         "opaque_\u{200b}_alpha",
@@ -112,7 +118,7 @@ fn every_consent_reference_field_rejects_default_ignorable_aliases() {
 
 #[test]
 fn migration_reapplication_rejects_historical_default_ignorable_identity_without_rewriting_it() {
-    let mut client = client();
+    let mut client = client("consent_default_ignorable_migration_test");
     client
         .batch_execute(
             "ALTER TABLE consent_ledger \
