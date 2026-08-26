@@ -97,7 +97,7 @@ fn scoring_request_accepts_absent_norm_but_rejects_invalid_references_or_schema(
     assert_eq!(empty_error, ScoringContractError::EmptyReference);
     assert_eq!(
         empty_error.to_string(),
-        "scoring contract references must not be empty"
+        "scoring contract references must use exact non-empty opaque spellings; numeric-like values, surrounding whitespace, and unsafe control characters are not allowed"
     );
 
     let mut blank_norm = scoring_input();
