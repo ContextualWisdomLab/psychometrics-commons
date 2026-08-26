@@ -1,20 +1,28 @@
-//! Hardened HTTP/1.1 framing boundary for participant session commands.
+//! Hardened HTTP/1.1 framing and authorization boundary for participant session commands.
 //!
 //! The command implementation owns application semantics. This boundary waits
 //! for the declared body, rejects ambiguous framing and duplicate client-command
-//! identities, and only then dispatches the request. That keeps intermediaries
-//! and this process from disagreeing about request or idempotency boundaries.
+//! identities, verifies exact participant/session authority, and only then
+//! dispatches a state-changing request. Possession of an opaque session reference
+//! is never sufficient authorization.
 
 #[allow(dead_code)]
 #[path = "session_command_http.rs"]
 mod implementation;
 
 pub use implementation::{
-    bind_session_command_http, handle_session_command_http_request, SessionCommandHttpResponse,
-    SessionCommandHttpRuntime, SESSION_COMMAND_HTTP_IO_TIMEOUT,
-    SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES,
+    bind_session_command_http, SessionCommandHttpResponse, SessionCommandHttpRuntime,
+    SESSION_COMMAND_HTTP_IO_TIMEOUT, SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES,
 };
 
+use crate::anonymous_authorization::authorize_anonymous_session_command;
+use crate::anonymous_credential::AnonymousCredential;
+use crate::anonymous_session::AnonymousSessionContext;
+use crate::authorization::{
+    authorize, AuthorizationContext, ProductPermission, ResourceKind, ResourceScope,
+};
+use crate::participant::ParticipantRecord;
+use crate::session::AssessmentSession;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
@@ -22,7 +30,134 @@ use std::time::{Duration, Instant};
 const HTTP_FIELD_NAME_BYTES: &[u8] =
     b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
 
-/// Accept one TCP connection and serve one fully framed session-command request.
+/// Server-verified authority allowed to attempt one participant session command.
+///
+/// The embedding host verifies network authentication or an anonymous bearer
+/// proof before constructing one of these variants. This boundary then rechecks
+/// exact tenant, participant, session, expiry, and current anonymous credential
+/// evidence against server-owned records before lifecycle mutation. Raw bearer
+/// secrets never enter this type.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum SessionCommandAuthority<'a> {
+    /// Authenticated product context already verified by the host identity boundary.
+    Authenticated(&'a AuthorizationContext),
+    /// Verified anonymous-session snapshot plus its current credential record.
+    Anonymous {
+        /// Previously verified anonymous-session context.
+        context: &'a AnonymousSessionContext,
+        /// Current server-side credential evidence, including revocation state.
+        credential: &'a AnonymousCredential,
+        /// Positive current time from the trusted server clock.
+        now_unix_ms: u64,
+    },
+}
+
+/// Classify one raw HTTP/1.1 request without granting mutation authority.
+///
+/// Syntax, route, framing, and public-command errors retain their normal problem
+/// responses. A syntactically valid state-changing POST is evaluated against an
+/// empty runtime and therefore receives the same 404 response as an unknown
+/// session without touching the supplied runtime. Embedding hosts must call
+/// [`handle_authorized_session_command_http_request`] after verifying the caller.
+#[must_use]
+pub fn handle_session_command_http_request(
+    request: &str,
+    _runtime: &mut SessionCommandHttpRuntime,
+) -> SessionCommandHttpResponse {
+    classify_without_session_state(request)
+}
+
+/// Apply one raw HTTP/1.1 participant session command with verified authority.
+///
+/// `participant` must be the server-owned participant record corresponding to
+/// the request. Authenticated authority is checked with
+/// [`ProductPermission::ManageOwnSession`]. Anonymous authority must match the
+/// current credential and exact participant/session binding. Missing, foreign,
+/// expired, or revoked authority deliberately receives the same 404 response as
+/// an unknown session so this write route is not a session-existence oracle.
+#[must_use]
+pub fn handle_authorized_session_command_http_request(
+    request: &str,
+    authority: &SessionCommandAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> SessionCommandHttpResponse {
+    let classified = classify_without_session_state(request);
+    if classified.status() != 404 {
+        return classified;
+    }
+    let Some(session_ref) = authorized_command_session_ref(request) else {
+        return classified;
+    };
+    let Some(session) = runtime.session(session_ref) else {
+        return classified;
+    };
+    if !session_command_authorized(authority, participant, session) {
+        return classified;
+    }
+    implementation::handle_session_command_http_request(request, runtime)
+}
+
+fn classify_without_session_state(request: &str) -> SessionCommandHttpResponse {
+    let mut empty_runtime = SessionCommandHttpRuntime::new(Vec::new());
+    implementation::handle_session_command_http_request(request, &mut empty_runtime)
+}
+
+fn authorized_command_session_ref(request: &str) -> Option<&str> {
+    let line = request.lines().next()?;
+    let mut parts = line.split_whitespace();
+    if parts.next()? != "POST" {
+        return None;
+    }
+    let target = parts.next()?;
+    let version = parts.next()?;
+    if !version.starts_with("HTTP/") || parts.next().is_some() {
+        return None;
+    }
+    let path = target.split_once('?').map_or(target, |(path, _)| path);
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let (session_ref, tail) = rest.split_once('/')?;
+    (tail == "commands" && !session_ref.is_empty()).then_some(session_ref)
+}
+
+fn session_command_authorized(
+    authority: &SessionCommandAuthority<'_>,
+    participant: &ParticipantRecord,
+    session: &AssessmentSession,
+) -> bool {
+    if participant.participant_ref() != session.participant_ref() {
+        return false;
+    }
+    let Ok(resource) = ResourceScope::participant_owned(
+        ResourceKind::AssessmentSession,
+        participant.tenant_ref(),
+        participant.participant_ref(),
+        session.session_ref(),
+    ) else {
+        return false;
+    };
+
+    match authority {
+        SessionCommandAuthority::Authenticated(actor) => {
+            authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
+        }
+        SessionCommandAuthority::Anonymous {
+            context,
+            credential,
+            now_unix_ms,
+        } => {
+            credential.authorizes_session_context_at(context, *now_unix_ms)
+                && authorize_anonymous_session_command(context, participant, session, *now_unix_ms)
+                    .is_ok()
+        }
+    }
+}
+
+/// Accept one TCP connection and classify one fully framed request without mutation authority.
+///
+/// A valid participant command receives the same 404 response as an unknown
+/// session. Hosted writers should use [`accept_one_authorized_session_command_http`].
 ///
 /// # Errors
 ///
@@ -38,6 +173,35 @@ pub fn accept_one_session_command_http(
     stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
     let request = read_http_request(&mut stream, deadline)?;
     let response = handle_session_command_http_request(&request, runtime);
+    write_http_response(&mut stream, &response)
+}
+
+/// Accept one TCP connection and serve one authorized participant session command.
+///
+/// The supplied authority and participant record are server-owned values from the
+/// embedding host. The request is framed before authorization and mutation.
+///
+/// # Errors
+///
+/// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, oversized,
+/// incomplete, or multi-request framing; [`io::ErrorKind::TimedOut`] when the
+/// overall request deadline expires; or the underlying accept/read/write error.
+pub fn accept_one_authorized_session_command_http(
+    listener: &TcpListener,
+    authority: &SessionCommandAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> io::Result<()> {
+    let (mut stream, _) = listener.accept()?;
+    let deadline = Instant::now() + SESSION_COMMAND_HTTP_IO_TIMEOUT;
+    stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
+    let request = read_http_request(&mut stream, deadline)?;
+    let response = handle_authorized_session_command_http_request(
+        &request,
+        authority,
+        participant,
+        runtime,
+    );
     write_http_response(&mut stream, &response)
 }
 
@@ -274,12 +438,42 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        declared_request_end, normalize_read_error, reason_phrase, reject_full_request_buffer,
-        reject_invalid_header_name, reject_non_crlf_header_lines, reject_oversized_request,
-        reject_transfer_encoding, remaining_request_timeout, single_header_value,
+        authorized_command_session_ref, declared_request_end, normalize_read_error, reason_phrase,
+        reject_full_request_buffer, reject_invalid_header_name, reject_non_crlf_header_lines,
+        reject_oversized_request, reject_transfer_encoding, remaining_request_timeout,
+        single_header_value,
     };
     use std::io;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn authorization_target_parser_accepts_only_exact_post_command_routes() {
+        assert_eq!(
+            authorized_command_session_ref(
+                "POST /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"
+            ),
+            Some("ses_one")
+        );
+        assert_eq!(
+            authorized_command_session_ref(
+                "POST /v1/sessions/ses_one/commands?trace=1 HTTP/1.1\r\n\r\n"
+            ),
+            Some("ses_one")
+        );
+        assert_eq!(
+            authorized_command_session_ref(
+                "GET /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"
+            ),
+            None
+        );
+        assert_eq!(
+            authorized_command_session_ref(
+                "POST /v1/sessions/ses_one/responses HTTP/1.1\r\n\r\n"
+            ),
+            None
+        );
+        assert_eq!(authorized_command_session_ref("GARBAGE\r\n"), None);
+    }
 
     #[test]
     fn singleton_and_header_syntax_helpers_fail_closed() {
