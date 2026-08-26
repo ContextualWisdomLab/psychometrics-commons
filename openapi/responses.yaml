@@ -3,21 +3,40 @@ info:
   title: Psychometrics Commons public response-event API
   version: 0.1.0
   description: >
-    As-built public write of one response event on an Active assessment
-    session. A purchaser posts item_version_ref and payload_digest for an
-    item that belongs to the session's published release. Exact
-    Idempotency-Key replay returns the original event. This family does not
-    create sessions, list instruments, or persist ledgers across restart.
+    As-built application contract for writing one response event on an Active
+    assessment session. A purchaser posts item_version_ref and payload_digest
+    for an item that belongs to the session's published release. Exact
+    Idempotency-Key replay returns the original event. State-changing dispatch
+    is not a standalone unauthenticated network operation: an embedding host
+    must first verify authenticated participant authority or a current
+    anonymous-session credential and supply the corresponding server-owned
+    participant record. This repository slice deliberately does not specify an
+    on-wire bearer, API-key, OAuth, or other authentication scheme, so none is
+    fabricated here. This family does not create sessions, list instruments, or
+    persist ledgers across restart.
 paths:
   /v1/sessions/{session_ref}/responses:
     post:
       operationId: recordSessionResponse
       summary: Record one answer on an active session
+      x-deployment-status: embedding-host-authorization-required
+      x-authorization-boundary: >
+        The embedding host verifies network authentication or anonymous proof
+        before constructing ResponseWriteAuthority. The application then
+        rechecks exact tenant, participant, session, expiry/revocation, and
+        resource ownership before mutation. A concrete on-wire security scheme
+        is outside this slice and must be specified by the deploying host.
       description: >
         Accepts one response event while the session is Active and the item
-        belongs to the bound published release. Send the same Idempotency-Key
-        to replay the original event. After every item is recorded, use
-        POST /v1/sessions/{session_ref}/commands to Complete the session.
+        belongs to the bound published release, but only after the embedding
+        host supplies server-verified response authority and the corresponding
+        server-owned participant record. Missing, foreign, expired, or revoked
+        authority is intentionally indistinguishable from an unknown session
+        and returns the same 404 problem to avoid a session-existence oracle.
+        Send the same Idempotency-Key to replay the original event. After every
+        item is recorded, use POST /v1/sessions/{session_ref}/commands to
+        Complete the session. This operation must not be deployed directly
+        without an embedding-host authorization adapter.
       parameters:
         - name: session_ref
           in: path
@@ -53,7 +72,7 @@ paths:
         "400":
           $ref: "#/components/responses/Problem"
         "404":
-          $ref: "#/components/responses/Problem"
+          $ref: "#/components/responses/AuthorityOrSessionNotFoundProblem"
         "405":
           $ref: "#/components/responses/Problem"
         "409":
@@ -111,6 +130,15 @@ components:
   responses:
     Problem:
       description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    AuthorityOrSessionNotFoundProblem:
+      description: >
+        Safe RFC 9457 not-found problem. Missing, foreign, expired, or revoked
+        response authority intentionally uses the same 404 shape as an unknown
+        session so callers cannot probe session existence.
       content:
         application/problem+json:
           schema:
