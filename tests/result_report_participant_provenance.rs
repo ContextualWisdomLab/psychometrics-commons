@@ -7,6 +7,7 @@ use psychometrics_commons_runtime::localized_result_report::{
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
+use psychometrics_commons_runtime::result_export::{ResultExport, ResultExportInput};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
@@ -17,6 +18,8 @@ mod response_support;
 
 const ENGINE_DIGEST: &str =
     "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+const EN_PROVENANCE_NOTE: &str = "Your scores are copied from the saved assessment result. A separate data export keeps the exact versions, time, and scoring evidence needed to check how this result was produced. Internal identifiers are not shown here.";
+const KO_PROVENANCE_NOTE: &str = "이 점수는 저장된 검사 결과에서 그대로 가져왔습니다. 별도의 데이터 내보내기에는 결과가 어떻게 만들어졌는지 확인할 수 있도록 정확한 버전, 시점, 채점 근거가 보관됩니다. 내부 식별자는 여기에는 표시하지 않습니다.";
 
 fn result_snapshot() -> ResultSnapshot {
     let mut session = response_support::active_session("session_participant_copy_v1");
@@ -74,7 +77,7 @@ fn result_snapshot() -> ResultSnapshot {
 }
 
 #[test]
-fn human_readable_report_keeps_internal_provenance_out_of_participant_copy() {
+fn localized_report_keeps_internal_provenance_out_of_participant_copy() {
     let snapshot = result_snapshot();
     let report = LocalizedResultReport::from_snapshot(
         &snapshot,
@@ -87,13 +90,14 @@ fn human_readable_report_keeps_internal_provenance_out_of_participant_copy() {
     )
     .unwrap();
 
-    // Audit/reference identities remain available through typed fields and the
-    // machine-readable export boundary, but they are not participant copy.
+    // Audit/reference identities and render time remain available through typed
+    // fields and the machine-readable export boundary, but they are not copy.
     assert_eq!(
         report.result_snapshot_ref(),
         "result_snapshot_participant_copy_v1"
     );
     assert_eq!(report.participant_ref(), "participant_participant_copy_v1");
+    assert_eq!(report.rendered_at_unix_ms(), 1_700_000_100_000);
 
     let text = report.text();
     for internal in [
@@ -118,13 +122,52 @@ fn human_readable_report_keeps_internal_provenance_out_of_participant_copy() {
             "participant copy leaked internal provenance {internal:?}: {text}"
         );
     }
-    assert!(
-        text.contains("Technical provenance is available in the machine-readable result export.")
-    );
+    assert!(text.contains(EN_PROVENANCE_NOTE));
 }
 
 #[test]
-fn korean_report_explains_where_to_find_provenance_without_internal_ids() {
+fn shared_human_readable_export_is_also_minimized_but_keeps_typed_provenance() {
+    let snapshot = result_snapshot();
+    let export = ResultExport::from_snapshot(
+        &snapshot,
+        ResultExportInput {
+            export_ref: "result_export_participant_copy_v1",
+            locale: "en-US",
+            exported_at_unix_ms: 1_700_000_100_010,
+            limitations: &["This result is not a diagnosis."],
+        },
+    )
+    .unwrap();
+
+    assert_eq!(export.participant_ref(), "participant_participant_copy_v1");
+    assert_eq!(export.exported_at_unix_ms(), 1_700_000_100_010);
+    assert!(export
+        .json_document()
+        .contains("\"participant_ref\":\"participant_participant_copy_v1\""));
+    assert!(export.json_document().contains(ENGINE_DIGEST));
+
+    let text = export.human_readable_report();
+    for internal in [
+        "result_export_participant_copy_v1",
+        "result_snapshot_participant_copy_v1",
+        "participant_participant_copy_v1",
+        "instrument_version_participant_copy_v1",
+        "scoring_version_participant_copy_v1",
+        ENGINE_DIGEST,
+        "export_ref:",
+        "participant_ref:",
+        "engine_artifact_digest:",
+    ] {
+        assert!(
+            !text.contains(internal),
+            "shared human-readable export leaked internal provenance {internal:?}: {text}"
+        );
+    }
+    assert!(text.contains("Exact versions, time, ownership, and scoring evidence are retained in the machine-readable data export. Internal identifiers are omitted from this human-readable copy."));
+}
+
+#[test]
+fn korean_report_explains_provenance_without_internal_ids() {
     let snapshot = result_snapshot();
     let report = LocalizedResultReport::from_snapshot(
         &snapshot,
@@ -137,9 +180,8 @@ fn korean_report_explains_where_to_find_provenance_without_internal_ids() {
     )
     .unwrap();
 
-    assert!(report
-        .text()
-        .contains("기술 계보는 기계 판독 가능한 결과 내보내기에서 확인할 수 있습니다."));
+    assert_eq!(report.rendered_at_unix_ms(), 1_700_000_100_001);
+    assert!(report.text().contains(KO_PROVENANCE_NOTE));
     assert!(!report.text().contains("참조값:"));
     assert!(!report.text().contains(ENGINE_DIGEST));
 }
