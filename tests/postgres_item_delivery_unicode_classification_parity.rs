@@ -1,6 +1,6 @@
-//! Exhaustive boundary evidence for PostgreSQL whitespace/control classification.
+//! Exhaustive boundary evidence for `PostgreSQL` whitespace/control classification.
 //!
-//! Item-delivery persistence relies on PostgreSQL 18 `pg_unicode_fast` character
+//! Item-delivery persistence relies on `PostgreSQL` 18 `pg_unicode_fast` character
 //! classes while the product boundary relies on Rust `str::trim` / `char::is_control`.
 //! These contracts pin the load-bearing Unicode classes so direct SQL cannot admit
 //! opaque references the Rust domain rejects.
@@ -52,7 +52,10 @@ fn sql_predicate_rejects_every_c1_control_rejected_by_rust() {
     let aliases = (0x80_u32..=0x9f)
         .map(|codepoint| {
             let character = char::from_u32(codepoint).expect("C1 value must be a Unicode scalar");
-            assert!(character.is_control(), "fixture must match Rust char::is_control");
+            assert!(
+                character.is_control(),
+                "fixture must match Rust char::is_control"
+            );
             format!("opaque_{character}_alpha")
         })
         .collect::<Vec<_>>();
@@ -75,7 +78,10 @@ fn sql_predicate_rejects_every_outer_unicode_whitespace_trimmed_by_rust() {
     ];
     let mut aliases = Vec::with_capacity(whitespace.len() * 2);
     for character in whitespace {
-        assert!(character.is_whitespace(), "fixture must match Rust Unicode whitespace");
+        assert!(
+            character.is_whitespace(),
+            "fixture must match Rust Unicode whitespace"
+        );
         let leading = format!("{character}opaque_alpha");
         let trailing = format!("opaque_alpha{character}");
         assert_eq!(leading.trim(), "opaque_alpha");
@@ -94,14 +100,20 @@ fn sql_predicate_rejects_every_outer_unicode_whitespace_trimmed_by_rust() {
 fn sql_predicate_preserves_visible_mixed_opaque_references() {
     let _guard = guard();
     let mut client = client();
-    for reference in ["item_2", "opaque alpha 2", "release_3.1", "v1-2", "측정_버전_2"] {
+    for reference in [
+        "item_2",
+        "opaque alpha 2",
+        "release_3.1",
+        "v1-2",
+        "측정_버전_2",
+    ] {
         let accepted: bool = client
-            .query_one(
-                "SELECT item_delivery_reference_is_valid($1)",
-                &[&reference],
-            )
+            .query_one("SELECT item_delivery_reference_is_valid($1)", &[&reference])
             .unwrap()
             .get(0);
-        assert!(accepted, "visible mixed opaque reference must remain valid: {reference:?}");
+        assert!(
+            accepted,
+            "visible mixed opaque reference must remain valid: {reference:?}"
+        );
     }
 }
