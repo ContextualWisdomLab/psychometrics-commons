@@ -440,10 +440,11 @@ mod tests {
         let mut output = Vec::new();
         write_http_response(&mut output, &not_found).unwrap();
         let text = String::from_utf8(output).unwrap();
-        assert!(
-            text.starts_with("HTTP/1.1 400 Bad Request")
-                || text.starts_with("HTTP/1.1 404 Not Found")
-        );
+        assert_eq!(not_found.status(), 404);
+        assert!(text.starts_with("HTTP/1.1 404 Not Found"));
+        assert!(not_found
+            .body()
+            .contains("urn:psychometrics-commons:problem:session-not-found"));
         assert!(text.contains("Cache-Control: no-store\r\n"));
         assert!(text.contains("Content-Length:"));
 
