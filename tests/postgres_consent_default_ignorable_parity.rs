@@ -41,7 +41,12 @@ fn insert_event(
              participant_ref, event_ref, consent_purpose, consent_decision, \
              consent_form_version_ref, research_scope_ref, occurred_at_unix_ms\
          ) VALUES ('participant_default_ignorable_parity',$1,$2,'granted',$3,$4,1000)",
-        &[&event_ref, &purpose, &consent_form_version_ref, &research_scope_ref],
+        &[
+            &event_ref,
+            &purpose,
+            &consent_form_version_ref,
+            &research_scope_ref,
+        ],
     )
 }
 
