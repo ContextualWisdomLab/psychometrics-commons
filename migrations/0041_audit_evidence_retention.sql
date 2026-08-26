@@ -33,13 +33,15 @@ DECLARE
     deleted_count BIGINT;
     current_unix_ms BIGINT;
 BEGIN
-    IF NOT audit_evidence_reference_is_valid(retention_tenant_ref) THEN
+    IF retention_tenant_ref IS NULL
+       OR NOT audit_evidence_reference_is_valid(retention_tenant_ref)
+    THEN
         RAISE EXCEPTION USING
             ERRCODE = '22023',
             MESSAGE = 'audit retention tenant reference must be exact canonical opaque identity';
     END IF;
 
-    IF retention_cutoff_unix_ms <= 0 THEN
+    IF retention_cutoff_unix_ms IS NULL OR retention_cutoff_unix_ms <= 0 THEN
         RAISE EXCEPTION USING
             ERRCODE = '22023',
             MESSAGE = 'audit retention cutoff must be positive';
