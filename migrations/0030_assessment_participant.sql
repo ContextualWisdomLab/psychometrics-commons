@@ -4,10 +4,11 @@
 -- pg_unicode_fast is a PostgreSQL 18 built-in collation available for UTF8 databases.
 -- This table stores only the stable Psychometrics Commons participant base record.
 -- Optional Keyverse link history remains a separate append-only identity-link concern.
--- pg_unicode_fast gives the whitespace guards stable Unicode classification instead of
+-- pg_unicode_fast gives the whitespace/control guards stable Unicode classification instead of
 -- inheriting host LC_CTYPE behavior. The numeric-like helper uses the exact rustc 1.97
 -- Unicode 17 `char::is_numeric` code-point set (Nd/Nl/No), not PostgreSQL `[[:digit:]]`,
--- so a direct SQL write cannot store a reference the Rust domain would reject as numeric.
+-- and the default-ignorable helper uses the Unicode 17 Default_Ignorable_Code_Point set.
+-- Together they prevent direct SQL from storing a reference the Rust domain would reject.
 -- Once inserted, the participant base evidence is immutable. Account-link changes belong in
 -- separate append-only history rather than rewriting or deleting the stable participant row.
 
@@ -64,6 +65,27 @@ AS $function$
     FROM reference_classification;
 $function$;
 
+-- Rust's opaque-reference boundary also rejects Unicode Default_Ignorable_Code_Point values.
+-- They are invisible or formatting-affecting aliases that PostgreSQL's control-character class
+-- does not cover. Keep the generated Unicode 17 range explicit and migration-owned so historical
+-- schemas are revalidated rather than silently retaining such identities.
+CREATE OR REPLACE FUNCTION opaque_reference_contains_default_ignorable(reference_text TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+IMMUTABLE
+STRICT
+PARALLEL SAFE
+SET search_path = pg_catalog
+AS $function$
+    SELECT COALESCE(
+        bool_or(
+            ascii(substr(reference_text, character_index, 1)) <@ '{[173,174),[847,848),[1564,1565),[4447,4449),[6068,6070),[6155,6160),[8203,8208),[8234,8239),[8288,8304),[12644,12645),[65024,65040),[65279,65280),[65440,65441),[65520,65529),[113824,113828),[119155,119163),[917504,921600)}'::int4multirange
+        ),
+        FALSE
+    )
+    FROM generate_series(1, character_length(reference_text)) AS character_index;
+$function$;
+
 -- CREATE TABLE IF NOT EXISTS does not reconcile constraints from an earlier revision of this
 -- not-yet-released migration. Reapplication therefore replaces the owned checks with the exact
 -- current definitions. Existing rows are validated while each stricter constraint is added, so
@@ -74,6 +96,8 @@ ALTER TABLE assessment_participant
     ADD CONSTRAINT assessment_participant_ref_format_check CHECK (
         participant_ref <> ''
         AND participant_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND participant_ref COLLATE "pg_unicode_fast" !~ '[[:cntrl:]]'
+        AND NOT opaque_reference_contains_default_ignorable(participant_ref)
         AND NOT opaque_reference_numeric_like(participant_ref)
     );
 
@@ -83,6 +107,8 @@ ALTER TABLE assessment_participant
     ADD CONSTRAINT assessment_participant_tenant_ref_format_check CHECK (
         tenant_ref <> ''
         AND tenant_ref COLLATE "pg_unicode_fast" !~ '(^[[:space:]])|([[:space:]]$)'
+        AND tenant_ref COLLATE "pg_unicode_fast" !~ '[[:cntrl:]]'
+        AND NOT opaque_reference_contains_default_ignorable(tenant_ref)
         AND NOT opaque_reference_numeric_like(tenant_ref)
     );
 
