@@ -105,6 +105,21 @@ fn method_not_allowed_advertises_get_and_head() {
 }
 
 #[test]
+fn method_not_allowed_precedes_get_head_query_validation() {
+    let (participant, actor, result) = authorized_context();
+
+    let response = handle_result_http_request(
+        "POST /v1/results/result_snapshot_result_method_allow?format=json HTTP/1.1\r\n\r\n",
+        &actor,
+        &participant,
+        &result,
+    );
+
+    assert_eq!(response.status(), 405);
+    assert_eq!(response.allow(), Some("GET, HEAD"));
+}
+
+#[test]
 fn head_matches_get_metadata_without_response_content() {
     let (participant, actor, result) = authorized_context();
 
