@@ -433,7 +433,8 @@ impl Display for ScoringContractError {
 impl Error for ScoringContractError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
-    let validated = canonical_opaque_reference(reference).ok_or(ScoringContractError::EmptyReference)?;
+    let validated =
+        canonical_opaque_reference(reference).ok_or(ScoringContractError::EmptyReference)?;
     if validated == reference {
         Ok(validated)
     } else {

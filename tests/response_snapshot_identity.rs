@@ -37,8 +37,6 @@ fn durable_snapshot_reference_rejects_whitespace_aliases() {
         );
     }
 
-    let snapshot = ledger
-        .freeze_as(&session, "snapshot_ref_a")
-        .unwrap();
+    let snapshot = ledger.freeze_as(&session, "snapshot_ref_a").unwrap();
     assert_eq!(snapshot.snapshot_ref(), Some("snapshot_ref_a"));
 }

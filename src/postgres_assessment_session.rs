@@ -504,7 +504,8 @@ fn stored_start_identity_matches(
     let Some(participant_ref) = canonical_opaque_reference(request.participant_ref) else {
         return false;
     };
-    let Some(instrument_release_ref) = canonical_opaque_reference(request.instrument_release_ref) else {
+    let Some(instrument_release_ref) = canonical_opaque_reference(request.instrument_release_ref)
+    else {
         return false;
     };
     stored.session_ref() == session_ref

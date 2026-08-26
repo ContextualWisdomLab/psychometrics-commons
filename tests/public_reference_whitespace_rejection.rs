@@ -8,7 +8,11 @@ use psychometrics_commons_runtime::data_rights::{
     DataRightsError, DataRightsRequest, DataRightsRequestKind,
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite, WriteError};
-use psychometrics_commons_runtime::session::SessionState;
+
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
 
 const VALID_PAYLOAD_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -82,13 +86,14 @@ fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() 
             "response session reference must reject non-canonical spelling {invalid_reference:?}",
         );
 
-        let mut response_ledger = ResponseLedger::new("session_ref").unwrap();
+        let session = active_session("session_ref");
+        let mut response_ledger = ResponseLedger::from_session(&session).unwrap();
         for field_index in 0..3 {
             let mut references = ["server_event_ref", "client_event_ref", "item_version_ref"];
             references[field_index] = invalid_reference;
             assert_eq!(
                 response_ledger.record(
-                    SessionState::Active,
+                    &session,
                     ResponseWrite {
                         server_event_ref: references[0],
                         client_event_ref: references[1],
@@ -100,8 +105,9 @@ fn whitespace_padded_public_references_are_rejected_at_every_constructor_slot() 
                 "response event field {field_index} must reject non-canonical spelling {invalid_reference:?}",
             );
         }
+        let completed = completed_session("session_ref");
         assert_eq!(
-            response_ledger.freeze_as(SessionState::Completed, invalid_reference),
+            response_ledger.freeze_as(&completed, invalid_reference),
             Err(WriteError::InvalidReference),
             "response snapshot reference must reject non-canonical spelling {invalid_reference:?}",
         );
@@ -248,10 +254,11 @@ fn canonical_opaque_public_references_remain_accepted() {
     assert_eq!(authorization.subject_ref(), "subject_ref");
     assert_eq!(authorization.participant_ref(), Some("participant_ref"));
 
-    let mut response_ledger = ResponseLedger::new("session_ref").unwrap();
+    let session = active_session("session_ref");
+    let mut response_ledger = ResponseLedger::from_session(&session).unwrap();
     let response = response_ledger
         .record(
-            SessionState::Active,
+            &session,
             ResponseWrite {
                 server_event_ref: "server_event_ref",
                 client_event_ref: "client_event_ref",
@@ -261,8 +268,9 @@ fn canonical_opaque_public_references_remain_accepted() {
         )
         .unwrap();
     assert_eq!(response.server_event_ref(), "server_event_ref");
+    let completed = completed_session("session_ref");
     let snapshot = response_ledger
-        .freeze_as(SessionState::Completed, "snapshot_ref")
+        .freeze_as(&completed, "snapshot_ref")
         .unwrap();
     assert_eq!(snapshot.snapshot_ref(), Some("snapshot_ref"));
 }

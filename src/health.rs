@@ -129,7 +129,7 @@ impl CapabilityHealth {
             return Err(HealthContractError::InconsistentCapabilityReadiness);
         }
         Ok(Self {
-            capability_ref: normalized.to_owned(),
+            capability_ref: capability_ref.to_owned(),
             state,
             accepts_new_work,
         })

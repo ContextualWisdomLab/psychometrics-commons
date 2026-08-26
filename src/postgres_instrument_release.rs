@@ -347,8 +347,8 @@ pub fn load_published_instrument_release(
     release_ref: &str,
     locale: &str,
 ) -> Result<PublishedInstrumentReleaseSnapshot, InstrumentReleaseQueryError> {
-    let canonical_release_ref =
-        canonical_opaque_reference(release_ref).ok_or(InstrumentReleaseQueryError::InvalidReference)?;
+    let canonical_release_ref = canonical_opaque_reference(release_ref)
+        .ok_or(InstrumentReleaseQueryError::InvalidReference)?;
     if canonical_release_ref != release_ref {
         return Err(InstrumentReleaseQueryError::InvalidReference);
     }

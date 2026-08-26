@@ -80,12 +80,18 @@ mod tests {
 
     #[test]
     fn opaque_references_reject_embedded_control_characters() {
-        assert_eq!(canonical_opaque_reference("participant_\u{0001}_account"), None);
+        assert_eq!(
+            canonical_opaque_reference("participant_\u{0001}_account"),
+            None
+        );
         assert_eq!(
             canonical_opaque_reference("construct_\u{001f}_extraversion"),
             None
         );
-        assert_eq!(canonical_opaque_reference("  construct_extraversion  "), None);
+        assert_eq!(
+            canonical_opaque_reference("  construct_extraversion  "),
+            None
+        );
     }
 
     #[test]

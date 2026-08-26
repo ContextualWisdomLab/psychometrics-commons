@@ -38,9 +38,7 @@ fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
 }
 
 fn scoring_result_fixture() -> (ScoringRequest, ScoringResult) {
-    let snapshot = ledger_with_one_response()
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let snapshot = frozen_snapshot("session_ref", "response_snapshot_ref", &one_response());
     let request =
         ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
     let result = ScoringResult::new(

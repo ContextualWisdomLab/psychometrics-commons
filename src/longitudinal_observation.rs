@@ -427,8 +427,8 @@ fn unique_memberships(
 }
 
 fn required_reference(reference: &str) -> Result<&str, LongitudinalObservationError> {
-    let canonical =
-        canonical_opaque_reference(reference).ok_or(LongitudinalObservationError::InvalidReference)?;
+    let canonical = canonical_opaque_reference(reference)
+        .ok_or(LongitudinalObservationError::InvalidReference)?;
     if canonical != reference {
         return Err(LongitudinalObservationError::InvalidReference);
     }
