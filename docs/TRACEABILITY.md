@@ -1,8 +1,8 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-26
-- Evaluated protected-main implementation baseline: `5f0a5346d60602d4bdfbca526d125f9504d594d3`
+- Date: 2026-08-27
+- Evaluated protected-main implementation baseline: `09534ef52c9307ce0dc559e9d908ebd715c641a1`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -46,7 +46,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4 | ADR-0011, ADR-0017 | **Implemented** domain health/readiness and PostgreSQL major/write-readiness/relation probes; HTTP probes, measured thresholds, and deployment evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28 | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; protected main ships exact `ko-KR`/`en-US` participant report labels; real instrument content, rights, translation, linking/invariance evidence, and accessible client serving remain Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no supported reference client implementation/evidence on evaluated main |
-| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence | ADR-0008 | External Gyeot/TEPP dependencies + Commons normalized observation primitives; enrollment persistence/orchestration and live Gyeot/TEPP adapters remain Target |
+| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence | ADR-0008 | **Partially implemented**: Commons normalized observation primitives plus PostgreSQL 18 immutable observation/membership persistence are on protected main through merged #248; longitudinal enrollment persistence/orchestration and live Gyeot/TEPP adapters remain Target, while Gyeot/TEPP stay External dependencies |
 | Measurement Workbench | PRD §6 | C4/component view; Measurement Governance | ADR-0001, ADR-0002, ADR-0004, ADR-0019 | Target; fast-mlsirm/Inkspan/RankWeave are External dependencies |
 | Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Protected main has several headless HTTP families; supported replaceable reference-client delivery remains Target |
 | Community/Hosted/Enterprise profiles | PRD §7, §13 | TRD deployment sections | ADR-0011, ADR-0017 | Target deployment packaging/evidence |
@@ -78,7 +78,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Export/deletion requires request-specific identity verification | TRD §13 | data-rights domain and PostgreSQL operation persistence | Keyverse/account/anonymous transport integration |
 | Legal retention represented explicitly | TRD §13 | protected-main completion/retained-scope evidence through merged #77 | dependent-system execution/restore evidence |
 | No cross-service DB access | TRD §1–2; ADR-0015 | architecture policy + repository-owned adapters only | deployment credential/fitness-function evidence |
-| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** across repository migrations/adapters and operational readiness checks | remaining aggregates and complete crash/restart acceptance |
+| Initial physical persistence target is upstream PostgreSQL 18.x | ADR-0015; Deployment/Operations | **Implemented subset** across repository migrations/adapters and operational readiness checks, including immutable longitudinal observation persistence through merged #248 | remaining aggregates and complete crash/restart acceptance |
 | No default tenant for writes | TRD §11; Security/Data | authorization primitives require explicit product context | complete persistence/API tenant-negative suite |
 | Tenant-bound transactional outbox/inbox | TRD §19–20; ADR-0014/0015 | `src/integration.rs` plus PostgreSQL tenant/source-scoped outbox/inbox, delivery-attempt, consumption and verified publisher handoff | external side-effect completion, poison-message recovery, aggregate transaction integration |
 | Inbox receipt is not side-effect completion | ADR-0014/0015 | pending/processing/completed consumption with reclaim semantics | live adapter crash/retry acceptance |
@@ -94,7 +94,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface is evaluated at `5f0a5346d60602d4bdfbca526d125f9504d594d3`. Representative product modules include:
+Current protected-main Rust module surface is evaluated at `09534ef52c9307ce0dc559e9d908ebd715c641a1`. Representative product modules include:
 
 ```text
 src/lib.rs
@@ -128,6 +128,7 @@ src/lib.rs
 ├── postgres_instrument_release.rs
 ├── postgres_integration.rs
 ├── postgres_item_delivery.rs
+├── postgres_longitudinal_observation.rs
 ├── postgres_response_snapshot.rs
 ├── postgres_result_snapshot.rs
 ├── postgres_scoring_job.rs
@@ -148,13 +149,13 @@ src/lib.rs
 └── session_http.rs
 ```
 
-The evaluated protected main also contains repository-owned PostgreSQL migrations for integration, scoring, consent, instrument release, result/response snapshots, assessment sessions/commands, data-rights processing/completion, and related integrity/recovery evidence. This list is an orientation map, not a substitute for exact source/migration inspection.
+The evaluated protected main also contains repository-owned PostgreSQL migrations for integration, scoring, consent, instrument release, result/response snapshots, assessment sessions/commands, data-rights processing/completion, immutable longitudinal observations/membership shares, and related integrity/recovery evidence. This list is an orientation map, not a substitute for exact source/migration inspection.
 
 Still-Target modules/adapters include remaining aggregate persistence/repositories, remaining public/admin transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research release staging/registration, longitudinal enrollment persistence, append-only participant identity-link history persistence, runtime health transports/metrics, supported reference clients, and Measurement Workbench orchestration. Persist/reload of `assessment_participant` remains Target.
 
 ### Active implementation work that is not protected-main truth
 
-**Active PR** #415 response-event write HTTP is not protected-main truth. It adds `POST /v1/sessions/{session_ref}/responses`, exact `Idempotency-Key` replay semantics, authoritative `AssessmentSession` binding, `openapi/responses.yaml`, one hardened socket-framing owner in `response_http_boundary.rs`, and direct-handler UTF-8 framing failure protection. Its exact head still requires current CI/security/supply-chain evidence and qualifying independent review before merge.
+**Active PR** #415 response-event write HTTP is not protected-main truth. It adds `POST /v1/sessions/{session_ref}/responses`, exact `Idempotency-Key` replay semantics, server-verified authenticated/anonymous write authority with exact participant/tenant/session rebinding, authoritative `AssessmentSession` binding, `openapi/responses.yaml`, one hardened socket-framing owner in `response_http_boundary.rs`, and equivalent fail-closed header/framing hygiene for the public direct handler. Its exact head still requires current CI/security/supply-chain evidence and qualifying independent review before merge.
 
 **Active PR** #409 public research-release privacy reconciliation is not protected-main truth. It provides the current-main landing vehicle for the fail-closed public-fixture identity/credential leakage scanner and required restricted-identity inventory boundary. It must not be confused with superseded historical #301.
 
@@ -162,7 +163,7 @@ Still-Target modules/adapters include remaining aggregate persistence/repositori
 
 Other open PRs remain governed by their exact current heads, live bases, reviews, dependencies and checks. This document intentionally does not copy transient check state or promote an open branch to protected-main maturity.
 
-Protected-main evidence relevant to these lanes includes merged #232 session create/reload HTTP, #256 result export HTTP, #257 authorized result read HTTP, #261 Quick/Deep assessment-path domain evidence, #287 deterministic narrative reference hardening, and #413 test repair for authoritative session-bound response-ledger signatures.
+Protected-main evidence relevant to these lanes includes merged #232 session create/reload HTTP, #248 immutable longitudinal observation persistence, #256 result export HTTP, #257 authorized result read HTTP, #261 Quick/Deep assessment-path domain evidence, #287 deterministic narrative reference hardening, and #413 test repair for authoritative session-bound response-ledger signatures.
 
 Merged #225 anonymous-session resource authorization compares the verified actor to supplied participant/session records and does not prove those records were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persistence and public anonymous authority transport remain later slices.
 
