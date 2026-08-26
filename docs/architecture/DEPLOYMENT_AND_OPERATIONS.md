@@ -17,7 +17,7 @@ Minimum deployable capability:
 flowchart LR
     client[Standalone client]
     runtime[Psychometrics Commons runtime]
-    db[(PostgreSQL 18.x operational store)]
+    db[(PostgreSQL 18.x UTF8 operational store)]
     fast[(fast-mlsirm local/co-located scoring)]
 
     client --> runtime
@@ -30,7 +30,7 @@ Properties:
 - anonymous core assessment available;
 - no mandatory g7, TEPP, semantic-data-portal, contextual-orchestrator, or external model provider;
 - scoring uses a contract-compatible fast-mlsirm path;
-- initial supported relational store is upstream PostgreSQL 18.x per ADR-0015; forks/managed compatibility layers are not implicitly supported;
+- initial supported relational store is upstream PostgreSQL 18.x with UTF8 server encoding per ADR-0015 and the compatibility procedure defined in §4; forks/managed compatibility layers are not implicitly supported;
 - local/self-managed operators remain responsible for their own backup and security posture unless a packaged distribution explicitly includes those services.
 
 ### Hosted profile
@@ -40,7 +40,7 @@ flowchart TB
     edge[Public edge / ingress]
     runtime[Runtime API]
     worker[Background worker]
-    db[(PostgreSQL 18.x operational database)]
+    db[(PostgreSQL 18.x UTF8 operational database)]
     artifacts[(Approved artifact store)]
     keyverse[(Keyverse)]
     fast[(fast-mlsirm)]
@@ -69,7 +69,7 @@ Properties:
 - CWL services remain independently observable and deployable;
 - optional dependency outage degrades only the capability it owns;
 - product-owned state remains in the Psychometrics Commons operational store;
-- the initial validated relational persistence target is upstream PostgreSQL 18.x; adding a managed/forked alternative requires the ADR-0015 capability/conformance evidence;
+- the initial validated relational persistence target is upstream PostgreSQL 18.x with UTF8 server encoding; adding a managed/forked alternative or another server encoding requires the ADR-0015 real-database capability/conformance procedure defined in §4;
 - artifact and database backups are independently recoverable and provenance-bound.
 
 ### Enterprise profile
@@ -90,7 +90,7 @@ Enterprise adds policy/configuration rather than a second domain model and may b
 | Capability | Mandatory for Community | Mandatory for Hosted | Failure behavior |
 |---|---:|---:|---|
 | Product runtime | yes | yes | product unavailable |
-| Upstream PostgreSQL 18.x operational database | yes | yes | fail state-changing commands; no partial success |
+| Upstream PostgreSQL 18.x UTF8 operational database | yes | yes | fail state-changing commands; no partial success |
 | fast-mlsirm-compatible scoring | yes for scoring | yes | completed response snapshot remains durable; result pending |
 | Keyverse | no | for authenticated/federated flow | anonymous and already-valid product session path remains where safe |
 | contextual-orchestrator | no | optional | deterministic narrative fallback |
@@ -128,6 +128,10 @@ Liveness answers only whether the process can continue executing. It must not fa
 Readiness is capability/profile-aware. A service may be ready for anonymous result reads while authenticated account linking or research-release registration is degraded.
 
 The health model must expose machine-readable capability state rather than one ambiguous global green/red flag.
+
+For the product-owned operational database, state-changing readiness fails closed unless the server is an explicitly supported PostgreSQL major, uses UTF8 server encoding, and is writable. UTF8 is an execution prerequisite for the integration schema's `pg_unicode_fast` Unicode-aware reference constraints rather than a locale preference.
+
+`pg_unicode_fast` is PostgreSQL 18's built-in Unicode collation used here so character-class checks have stable Unicode semantics on the supported server. The integration schema's Unicode reference constraints are database `CHECK` constraints that reject invalid opaque identifiers even when writes bypass the Rust API. PostgreSQL exposes `pg_unicode_fast` only for UTF8 databases, so a non-UTF8 database cannot provide the same validated reference boundary and therefore fails readiness closed. ADR-0015 compatibility/conformance evidence means running the repository's real-database suite against the candidate engine/major/encoding to verify runtime probing, Unicode-reference parity with Rust, migration application and reapplication, and revalidation of affected constraints before support is declared.
 
 Example capability states:
 
@@ -227,7 +231,7 @@ Until those values exist, the product may be labelled development, preview, beta
 - New required immutable references are deterministically backfilled or the migration fails closed.
 - Rollback is used only when the storage/operation semantics are genuinely reversible; otherwise a tested roll-forward/compensation procedure is documented.
 - Migration completion includes post-migration invariant/tenant/provenance verification.
-- PostgreSQL major-version expansion/upgrade requires the ADR-0015 real-database compatibility suite before support is declared.
+- PostgreSQL major-version or server-encoding expansion/upgrade requires the ADR-0015 real-database compatibility suite described in §4 before support is declared. Major-version changes that can alter immutable Unicode validation semantics also require reapplying and validating the affected `CHECK` constraints so existing rows are tested under the candidate server's rules before support is declared.
 
 ## 10. Release topology evidence
 
@@ -239,7 +243,7 @@ build provenance
 SBOM
 container/package digests
 schema migration version
-supported database engine/major versions
+supported database engine/major versions and server encoding
 supported contract versions
 runtime configuration schema version
 dependency capability versions
@@ -287,7 +291,7 @@ CI/release automation should eventually enforce:
 
 - no direct dependency database credentials;
 - no optional dependency required for core Community profile startup;
-- unsupported database engines/major versions fail readiness/installation rather than being silently accepted;
+- unsupported database engines, major versions, or server encodings fail readiness/installation rather than being silently accepted;
 - migration rollback/restore test suite presence when migrations change;
 - capability-scoped health schema compatibility;
 - log fixtures contain no raw secrets/responses/restricted linkage;
