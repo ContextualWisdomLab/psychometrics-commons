@@ -6,12 +6,16 @@
 //! unknown sessions, items outside the release, and conflicting replays fail
 //! closed. Session create, catalog list, and persistence stay other families.
 
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::response_http::{
-    accept_one_response_http, bind_response_http, handle_response_http_request, ResponseHttpRuntime,
+    accept_one_authorized_response_http, accept_one_response_http, bind_response_http,
+    handle_authorized_response_http_request, ResponseHttpResponse, ResponseHttpRuntime,
+    ResponseWriteAuthority,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand};
 use std::io::{Read, Write};
@@ -31,6 +35,7 @@ const UNCATALOGED_VALID_DIGEST: &str =
 const UNCATALOGED_EVIDENCE_DIGEST: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
 const PARTICIPANT_REF: &str = "ptc_eb1b318917d24ca0ac5153c37ff696c7";
+const TENANT_REF: &str = "tenant_response_http_contract";
 const SESSION_REF: &str = "ses_7c2f0a91d4b64e1f9a0c3e5d8b1a2468";
 const SERVER_EVENT_REF: &str = "evt_response_item_001";
 const IDEMPOTENCY_KEY: &str = "idem_response_item_001";
@@ -232,6 +237,30 @@ fn runtime_with(session: AssessmentSession, release: InstrumentRelease) -> Respo
     ResponseHttpRuntime::new(vec![session], vec![release], SERVER_EVENT_REF)
 }
 
+fn participant() -> ParticipantRecord {
+    ParticipantRecord::new_anonymous(PARTICIPANT_REF, TENANT_REF, 1_724_999_999_000).unwrap()
+}
+
+fn owner_actor() -> AuthorizationContext {
+    AuthorizationContext::new(
+        TENANT_REF,
+        "subject_response_http_contract_owner",
+        Some(PARTICIPANT_REF),
+        &[ProductRole::Participant],
+    )
+    .unwrap()
+}
+
+fn handle_owned_response_http_request(
+    request: &str,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    let participant = participant();
+    let actor = owner_actor();
+    let authority = ResponseWriteAuthority::Authenticated(&actor);
+    handle_authorized_response_http_request(request, &authority, &participant, runtime)
+}
+
 fn post_request(session_ref: &str, body: &str, idempotency_key: &str) -> String {
     format!(
         "POST /v1/sessions/{session_ref}/responses HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: {idempotency_key}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
@@ -249,7 +278,7 @@ fn valid_body() -> String {
 fn post_records_answer_for_active_korean_big_five_item() {
     let release = published_release();
     let mut runtime = runtime_with(active_session(&release), release);
-    let response = handle_response_http_request(
+    let response = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY),
         &mut runtime,
     );
@@ -279,12 +308,12 @@ fn post_records_answer_for_active_korean_big_five_item() {
 fn exact_idempotent_replay_returns_the_original_event() {
     let release = published_release();
     let mut runtime = runtime_with(active_session(&release), release);
-    let first = handle_response_http_request(
+    let first = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY),
         &mut runtime,
     );
     runtime.replace_next_server_event_ref("evt_should_not_be_minted");
-    let replay = handle_response_http_request(
+    let replay = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY),
         &mut runtime,
     );
@@ -299,7 +328,7 @@ fn exact_idempotent_replay_returns_the_original_event() {
 fn created_paused_unknown_and_foreign_item_fail_closed() {
     let release = published_release();
     let mut created = runtime_with(created_session(&release), release.clone());
-    let created_response = handle_response_http_request(
+    let created_response = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY),
         &mut created,
     );
@@ -314,7 +343,7 @@ fn created_paused_unknown_and_foreign_item_fail_closed() {
     assert_eq!(created.event_count(SESSION_REF), 0);
 
     let mut paused = runtime_with(paused_session(&release), release.clone());
-    let paused_response = handle_response_http_request(
+    let paused_response = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), "idem_paused"),
         &mut paused,
     );
@@ -325,7 +354,7 @@ fn created_paused_unknown_and_foreign_item_fail_closed() {
     assert_eq!(paused.event_count(SESSION_REF), 0);
 
     let mut missing = runtime_with(active_session(&release), release.clone());
-    let missing_response = handle_response_http_request(
+    let missing_response = handle_owned_response_http_request(
         &post_request("ses_missing_session", &valid_body(), "idem_missing"),
         &mut missing,
     );
@@ -340,7 +369,7 @@ fn created_paused_unknown_and_foreign_item_fail_closed() {
     let mut foreign = runtime_with(active_session(&release), release);
     let foreign_body =
         "{\"item_version_ref\":\"item_version_999\",\"payload_digest\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}";
-    let foreign_response = handle_response_http_request(
+    let foreign_response = handle_owned_response_http_request(
         &post_request(SESSION_REF, foreign_body, "idem_foreign"),
         &mut foreign,
     );
@@ -355,7 +384,7 @@ fn created_paused_unknown_and_foreign_item_fail_closed() {
 fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() {
     let release = published_release();
     let mut runtime = runtime_with(active_session(&release), release);
-    let first = handle_response_http_request(
+    let first = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY),
         &mut runtime,
     );
@@ -364,7 +393,7 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
     let conflict_body = format!(
         "{{\"item_version_ref\":\"{ITEM_VERSION_REF}\",\"payload_digest\":\"{OTHER_PAYLOAD_DIGEST}\"}}"
     );
-    let conflict = handle_response_http_request(
+    let conflict = handle_owned_response_http_request(
         &post_request(SESSION_REF, &conflict_body, IDEMPOTENCY_KEY),
         &mut runtime,
     );
@@ -375,7 +404,7 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
     assert!(!conflict.body().contains(OTHER_PAYLOAD_DIGEST));
     assert_eq!(runtime.event_count(SESSION_REF), 1);
 
-    let missing_key = handle_response_http_request(
+    let missing_key = handle_owned_response_http_request(
         &format!(
             "POST /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
             valid_body().len(),
@@ -388,7 +417,7 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
         .body()
         .contains("urn:psychometrics-commons:problem:missing-idempotency-key"));
 
-    let numeric = handle_response_http_request(
+    let numeric = handle_owned_response_http_request(
         &post_request("42", &valid_body(), "idem_numeric_session"),
         &mut runtime,
     );
@@ -397,13 +426,13 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
         .body()
         .contains("urn:psychometrics-commons:problem:bad-request"));
 
-    let encoded = handle_response_http_request(
+    let encoded = handle_owned_response_http_request(
         &post_request("%20ses_padded", &valid_body(), "idem_encoded"),
         &mut runtime,
     );
     assert_eq!(encoded.status(), 400);
 
-    let bad_digest = handle_response_http_request(
+    let bad_digest = handle_owned_response_http_request(
         &post_request(
             SESSION_REF,
             "{\"item_version_ref\":\"item_version_001\",\"payload_digest\":\"not-a-digest\"}",
@@ -416,7 +445,7 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
         .body()
         .contains("urn:psychometrics-commons:problem:invalid-payload-digest"));
 
-    let unknown_field = handle_response_http_request(
+    let unknown_field = handle_owned_response_http_request(
         &post_request(
             SESSION_REF,
             "{\"item_version_ref\":\"item_version_001\",\"payload_digest\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"score\":1}",
@@ -426,7 +455,7 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
     );
     assert_eq!(unknown_field.status(), 400);
 
-    let get = handle_response_http_request(
+    let get = handle_owned_response_http_request(
         &format!("GET /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nHost: localhost\r\n\r\n"),
         &mut runtime,
     );
@@ -435,7 +464,7 @@ fn conflicting_replay_and_invalid_inputs_fail_closed_without_leaking_payloads() 
         .body()
         .contains("urn:psychometrics-commons:problem:method-not-allowed"));
 
-    let other_family = handle_response_http_request(
+    let other_family = handle_owned_response_http_request(
         "POST /v1/sessions HTTP/1.1\r\nHost: localhost\r\n\r\n",
         &mut runtime,
     );
@@ -449,7 +478,12 @@ fn listener_serves_one_active_session_response() {
     let listener = bind_response_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let address = listener.local_addr().unwrap();
     let request = post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY);
-    let server = std::thread::spawn(move || accept_one_response_http(&listener, &mut runtime));
+    let server = std::thread::spawn(move || {
+        let participant = participant();
+        let actor = owner_actor();
+        let authority = ResponseWriteAuthority::Authenticated(&actor);
+        accept_one_authorized_response_http(&listener, &authority, &participant, &mut runtime)
+    });
 
     let mut client = TcpStream::connect(address).unwrap();
     client
@@ -496,7 +530,7 @@ fn unparseable_request_line_and_http_version_fail_closed() {
     let mut runtime = runtime_with(active_session(&release), release);
 
     let no_target =
-        handle_response_http_request("GARBAGE\r\nHost: localhost\r\n\r\n", &mut runtime);
+        handle_owned_response_http_request("GARBAGE\r\nHost: localhost\r\n\r\n", &mut runtime);
     assert_eq!(no_target.status(), 400);
     assert_eq!(no_target.content_type(), "application/problem+json");
     assert!(no_target
@@ -506,7 +540,7 @@ fn unparseable_request_line_and_http_version_fail_closed() {
         .body()
         .contains("response request must include an HTTP method and target"));
 
-    let wrong_scheme = handle_response_http_request(
+    let wrong_scheme = handle_owned_response_http_request(
         "POST /v1/sessions/ses_one/responses FTP/1.1\r\n\r\n",
         &mut runtime,
     );
@@ -515,7 +549,7 @@ fn unparseable_request_line_and_http_version_fail_closed() {
         .body()
         .contains("response request must include an HTTP method and target"));
 
-    let extra_token = handle_response_http_request(
+    let extra_token = handle_owned_response_http_request(
         "POST /v1/sessions/ses_one/responses HTTP/1.1 trailing\r\n\r\n",
         &mut runtime,
     );
@@ -527,7 +561,7 @@ fn framing_without_a_usable_body_fails_closed() {
     let release = published_release();
     let mut runtime = runtime_with(active_session(&release), release);
 
-    let unterminated_framing = handle_response_http_request(
+    let unterminated_framing = handle_owned_response_http_request(
         &format!(
             "POST /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: idem_no_blank_line\r\nContent-Length: {}\r\n",
             valid_body().len()
@@ -536,7 +570,7 @@ fn framing_without_a_usable_body_fails_closed() {
     );
     assert_eq!(unterminated_framing.status(), 400);
 
-    let missing_length = handle_response_http_request(
+    let missing_length = handle_owned_response_http_request(
         &format!(
             "POST /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nHost: localhost\r\nIdempotency-Key: idem_no_length\r\n\r\n{}",
             valid_body()
@@ -548,7 +582,7 @@ fn framing_without_a_usable_body_fails_closed() {
         .body()
         .contains("response write requires a JSON object body"));
 
-    let unparsable_length = handle_response_http_request(
+    let unparsable_length = handle_owned_response_http_request(
         &format!(
             "POST /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nIdempotency-Key: idem_bad_length\r\nContent-Length: many\r\n\r\n{}",
             valid_body()
@@ -560,7 +594,7 @@ fn framing_without_a_usable_body_fails_closed() {
         .body()
         .contains("response write requires a JSON object body"));
 
-    let short_body = handle_response_http_request(
+    let short_body = handle_owned_response_http_request(
         &format!(
             "POST /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nIdempotency-Key: idem_short_body\r\nContent-Length: 500\r\n\r\n{}",
             valid_body()
@@ -611,7 +645,7 @@ fn malformed_json_object_bodies_fail_closed() {
             "{\"item_version_ref\":\"item_version_001\",\"payload_digest\":\"\"}",
         ),
     ] {
-        let response = handle_response_http_request(
+        let response = handle_owned_response_http_request(
             &post_request(SESSION_REF, body, &format!("idem_{name}")),
             &mut runtime,
         );
@@ -637,7 +671,7 @@ fn escaped_json_values_decode_before_release_binding() {
     let escaped_body = format!(
         "{{\"item_version_ref\":\"it\\\"x\\\\y\\nz\\rw\\tv\",\"payload_digest\":\"{PAYLOAD_DIGEST}\"}}"
     );
-    let response = handle_response_http_request(
+    let response = handle_owned_response_http_request(
         &post_request(SESSION_REF, &escaped_body, "idem_escaped_item"),
         &mut runtime,
     );
@@ -661,7 +695,7 @@ fn session_release_missing_from_process_catalog_fails_closed() {
     let mut runtime =
         ResponseHttpRuntime::new(vec![session], vec![catalog_release], SERVER_EVENT_REF);
 
-    let response = handle_response_http_request(
+    let response = handle_owned_response_http_request(
         &post_request(
             "ses_uncataloged_release_binding",
             &valid_body(),
@@ -683,7 +717,7 @@ fn session_release_missing_from_process_catalog_fails_closed() {
 fn scientific_notation_idempotency_key_maps_to_invalid_reference() {
     let release = published_release();
     let mut runtime = runtime_with(active_session(&release), release);
-    let response = handle_response_http_request(
+    let response = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), "1e5"),
         &mut runtime,
     );
@@ -703,7 +737,7 @@ fn scientific_notation_idempotency_key_maps_to_invalid_reference() {
 fn stale_server_event_reference_conflicts_fail_closed() {
     let release = published_release();
     let mut runtime = runtime_with(active_session(&release), release);
-    let first = handle_response_http_request(
+    let first = handle_owned_response_http_request(
         &post_request(SESSION_REF, &valid_body(), IDEMPOTENCY_KEY),
         &mut runtime,
     );
@@ -716,7 +750,7 @@ fn stale_server_event_reference_conflicts_fail_closed() {
     let conflict_body = format!(
         "{{\"item_version_ref\":\"{ITEM_VERSION_REF}\",\"payload_digest\":\"{OTHER_PAYLOAD_DIGEST}\"}}"
     );
-    let conflict = handle_response_http_request(
+    let conflict = handle_owned_response_http_request(
         &post_request(SESSION_REF, &conflict_body, "idem_second_event"),
         &mut runtime,
     );
@@ -755,7 +789,7 @@ fn discarded_framing_yields_bad_request_problem() {
     // An oversized or header-less request collapses to an empty request text,
     // which must map to the same fail-closed bad-request problem.
     for discarded in ["", "\r\n"] {
-        let response = handle_response_http_request(discarded, &mut runtime);
+        let response = handle_owned_response_http_request(discarded, &mut runtime);
         assert_eq!(response.status(), 400);
         assert!(response
             .body()
