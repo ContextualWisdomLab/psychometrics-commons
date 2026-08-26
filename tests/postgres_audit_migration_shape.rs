@@ -74,7 +74,7 @@ fn both_migrations_apply_inside_the_caller_transaction() {
     apply_audit_evidence_retention_migration(&mut transaction).unwrap();
     transaction.commit().unwrap();
 
-    let (table_count, routine_count, security_definer): (i64, i64, bool) = client
+    let row = client
         .query_one(
             "SELECT\
                  (SELECT count(*)::bigint FROM information_schema.tables\
@@ -87,11 +87,16 @@ fn both_migrations_apply_inside_the_caller_transaction() {
                   WHERE oid = 'audit_migration_transaction_test.expire_audit_evidence_before(bigint)'::regprocedure)",
             &[],
         )
-        .unwrap()
-        .get::<_, (i64, i64, bool)>(0);
+        .unwrap();
+    let table_count: i64 = row.get(0);
+    let routine_count: i64 = row.get(1);
+    let security_definer: bool = row.get(2);
     assert_eq!(table_count, 1);
     assert_eq!(routine_count, 1);
-    assert!(security_definer, "bounded retention must execute under its migration owner");
+    assert!(
+        security_definer,
+        "bounded retention must execute under its migration owner"
+    );
 }
 
 #[test]
