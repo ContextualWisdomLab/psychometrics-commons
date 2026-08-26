@@ -3,12 +3,21 @@
 //! This slice exposes `POST /v1/sessions/{session_ref}/responses` over HTTP/1.1.
 //! The server accepts one answer only while the injected session is Active and
 //! the `item_version_ref` belongs to that session's published release. The
-//! `Idempotency-Key` header is the client event reference. Sessions are not
-//! created here; catalog list, session create, commands, and persistence remain
-//! other families. Errors use RFC 9457 problem details and never echo raw
-//! request bodies or payload bytes.
+//! `Idempotency-Key` header is the client event reference. State-changing writes
+//! additionally require server-verified authenticated or anonymous session
+//! authority supplied by the embedding host. Sessions are not created here;
+//! catalog list, session create, commands, and persistence remain other families.
+//! Errors use RFC 9457 problem details and never echo raw request bodies or
+//! payload bytes.
 
+use crate::anonymous_authorization::authorize_anonymous_session_command;
+use crate::anonymous_credential::AnonymousCredential;
+use crate::anonymous_session::AnonymousSessionContext;
+use crate::authorization::{
+    authorize, AuthorizationContext, ProductPermission, ResourceKind, ResourceScope,
+};
 use crate::instrument::InstrumentRelease;
+use crate::participant::ParticipantRecord;
 use crate::reference::normalized_reference;
 use crate::response::{ResponseEvent, ResponseLedger, ResponseWrite, WriteError};
 use crate::session::AssessmentSession;
@@ -22,6 +31,29 @@ use std::time::Duration;
 pub const RESPONSE_HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 /// Maximum accepted response HTTP request size, including headers and body.
 pub const RESPONSE_HTTP_MAX_REQUEST_BYTES: usize = 8_192;
+
+/// Server-verified authority allowed to attempt one response write.
+///
+/// The embedding host verifies network authentication or an anonymous bearer
+/// proof before constructing one of these variants. The HTTP application layer
+/// then rechecks exact tenant, participant, session, expiry, and current anonymous
+/// credential evidence against server-owned records before mutating the ledger.
+/// Raw bearer secrets never enter this type.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum ResponseWriteAuthority<'a> {
+    /// Authenticated product context already verified by the host identity boundary.
+    Authenticated(&'a AuthorizationContext),
+    /// Verified anonymous-session snapshot plus its current credential record.
+    Anonymous {
+        /// Previously verified anonymous-session context.
+        context: &'a AnonymousSessionContext,
+        /// Current server-side credential evidence, including revocation state.
+        credential: &'a AnonymousCredential,
+        /// Positive current time from the trusted server clock.
+        now_unix_ms: u64,
+    },
+}
 
 /// In-process sessions, bound releases, and response ledgers.
 pub struct ResponseHttpRuntime {
@@ -124,14 +156,43 @@ impl ResponseHttpResponse {
     }
 }
 
-/// Translate one raw HTTP/1.1 request into a response-event write.
+/// Translate one raw HTTP/1.1 request without verified authority.
 ///
-/// Unknown methods, encoded or numeric session references, missing idempotency
-/// keys, inactive sessions, items outside the bound release, and conflicting
-/// replays fail closed with RFC 9457 problem details.
+/// Syntax and route errors are still classified, but a syntactically valid POST
+/// can never mutate state through this function. It receives the same 404
+/// response as an unknown session. Embedding hosts must call
+/// [`handle_authorized_response_http_request`] after authenticating the caller or
+/// verifying a current anonymous-session proof.
 #[must_use]
 pub fn handle_response_http_request(
     request: &str,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    dispatch_response_http_request(request, None, runtime)
+}
+
+/// Translate one raw HTTP/1.1 request with server-verified response authority.
+///
+/// `participant` must be the server-owned participant record corresponding to
+/// the request. Authenticated authority is checked with
+/// [`ProductPermission::ManageOwnSession`]. Anonymous authority must match both
+/// its current credential record and the exact participant/session binding.
+/// Missing, foreign, expired, or revoked authority is deliberately mapped to the
+/// same 404 problem as an unknown session so the write route is not a session
+/// existence oracle.
+#[must_use]
+pub fn handle_authorized_response_http_request(
+    request: &str,
+    authority: &ResponseWriteAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    dispatch_response_http_request(request, Some((authority, participant)), runtime)
+}
+
+fn dispatch_response_http_request(
+    request: &str,
+    authority: Option<(&ResponseWriteAuthority<'_>, &ParticipantRecord)>,
     runtime: &mut ResponseHttpRuntime,
 ) -> ResponseHttpResponse {
     let Some((method, target)) = parse_request_line(request) else {
@@ -144,7 +205,7 @@ pub fn handle_response_http_request(
     };
     let path = split_target(target).0;
     match (method, response_collection_session_ref(path)) {
-        ("POST", Some(session_ref)) => handle_post(request, session_ref, runtime),
+        ("POST", Some(session_ref)) => handle_post(request, session_ref, authority, runtime),
         (_, Some(_)) => method_not_allowed(),
         _ => ResponseHttpResponse::problem(
             404,
@@ -180,6 +241,7 @@ fn method_not_allowed() -> ResponseHttpResponse {
 fn handle_post(
     request: &str,
     session_ref: &str,
+    authority: Option<(&ResponseWriteAuthority<'_>, &ParticipantRecord)>,
     runtime: &mut ResponseHttpRuntime,
 ) -> ResponseHttpResponse {
     if !response_session_ref_is_transport_safe(session_ref) {
@@ -235,7 +297,7 @@ fn handle_post(
             "response write requires item_version_ref and payload_digest strings only",
         );
     };
-    record_response(runtime, session_ref, idempotency_key, &write)
+    record_response(runtime, session_ref, idempotency_key, &write, authority)
 }
 
 fn record_response(
@@ -243,15 +305,18 @@ fn record_response(
     session_ref: &str,
     client_event_ref: &str,
     write: &ResponseWriteBody,
+    authority: Option<(&ResponseWriteAuthority<'_>, &ParticipantRecord)>,
 ) -> ResponseHttpResponse {
     let Some(session) = runtime.sessions.get(session_ref) else {
-        return ResponseHttpResponse::problem(
-            404,
-            "urn:psychometrics-commons:problem:session-not-found",
-            "Session Not Found",
-            "Use GET /v1/sessions/{session_ref} to confirm the session exists in this process, then POST /v1/sessions/{session_ref}/responses",
-        );
+        return session_not_found_problem();
     };
+    let Some((authority, participant)) = authority else {
+        return session_not_found_problem();
+    };
+    if !response_session_authorized(authority, participant, session) {
+        return session_not_found_problem();
+    }
+
     let release_ref = session.instrument_release_ref().to_owned();
     let Some(release) = runtime.releases.get(&release_ref) else {
         return ResponseHttpResponse::problem(
@@ -308,6 +373,48 @@ fn record_response(
         }
         Err(error) => write_problem(error),
     }
+}
+
+fn response_session_authorized(
+    authority: &ResponseWriteAuthority<'_>,
+    participant: &ParticipantRecord,
+    session: &AssessmentSession,
+) -> bool {
+    if participant.participant_ref() != session.participant_ref() {
+        return false;
+    }
+    let Ok(resource) = ResourceScope::participant_owned(
+        ResourceKind::AssessmentSession,
+        participant.tenant_ref(),
+        participant.participant_ref(),
+        session.session_ref(),
+    ) else {
+        return false;
+    };
+
+    match authority {
+        ResponseWriteAuthority::Authenticated(actor) => {
+            authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
+        }
+        ResponseWriteAuthority::Anonymous {
+            context,
+            credential,
+            now_unix_ms,
+        } => {
+            credential.authorizes_session_context_at(context, *now_unix_ms)
+                && authorize_anonymous_session_command(context, participant, session, *now_unix_ms)
+                    .is_ok()
+        }
+    }
+}
+
+fn session_not_found_problem() -> ResponseHttpResponse {
+    ResponseHttpResponse::problem(
+        404,
+        "urn:psychometrics-commons:problem:session-not-found",
+        "Session Not Found",
+        "Use GET /v1/sessions/{session_ref} to confirm the session exists in this process, then POST /v1/sessions/{session_ref}/responses",
+    )
 }
 
 fn write_problem(error: WriteError) -> ResponseHttpResponse {
