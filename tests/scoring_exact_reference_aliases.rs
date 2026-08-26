@@ -4,20 +4,24 @@
 //! references. Leading or trailing whitespace must not be silently removed,
 //! because that would accept a spelling the caller did not actually present.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, completed_session};
 
 const ENGINE_DIGEST: &str =
     "sha256:7777777777777777777777777777777777777777777777777777777777777777";
 
 fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnapshot {
-    let mut ledger = ResponseLedger::new("session_scoring_exact_ref").unwrap();
+    let active = active_session("session_scoring_exact_ref");
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "event_scoring_exact_ref",
                 client_event_ref: "client_scoring_exact_ref",
@@ -27,8 +31,9 @@ fn completed_snapshot() -> psychometrics_commons_runtime::response::ResponseSnap
             },
         )
         .unwrap();
+    let completed = completed_session("session_scoring_exact_ref");
     ledger
-        .freeze_as(SessionState::Completed, "snapshot_scoring_exact_ref")
+        .freeze_as(&completed, "snapshot_scoring_exact_ref")
         .unwrap()
 }
 

@@ -7,10 +7,13 @@ use psychometrics_commons_runtime::postgres_scoring_job::apply_scoring_job_migra
 use psychometrics_commons_runtime::postgres_scoring_request::{
     apply_scoring_request_migration, persist_scoring_dispatch, ScoringDispatchPersistenceError,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const SCHEMA: &str = "scoring_dispatch_envelope_test";
 const DATABASE_TEST_LOCK_KEY: i64 = 0x5343_4453_5045_4E56;
@@ -38,24 +41,16 @@ fn ready_client() -> Client {
 }
 
 fn request() -> ScoringRequest {
-    let mut ledger = ResponseLedger::new("session_dispatch_envelope_alpha").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_dispatch_envelope_alpha",
-                client_event_ref: "client_event_dispatch_envelope_alpha",
-                item_version_ref: "item_version_dispatch_envelope_alpha",
-                payload_digest: DIGEST,
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_dispatch_envelope_alpha",
-        )
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_dispatch_envelope_alpha",
+        "response_snapshot_dispatch_envelope_alpha",
+        &[ResponseWrite {
+            server_event_ref: "server_event_dispatch_envelope_alpha",
+            client_event_ref: "client_event_dispatch_envelope_alpha",
+            item_version_ref: "item_version_dispatch_envelope_alpha",
+            payload_digest: DIGEST,
+        }],
+    );
     ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
