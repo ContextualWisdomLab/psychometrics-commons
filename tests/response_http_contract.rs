@@ -1,6 +1,6 @@
 //! Public response HTTP contract for recording answers on an active session.
 //!
-//! A purchaser who already has an Active Korean Big Five session posts one
+//! A participant who already has an Active Korean Big Five session posts one
 //! answer for an item that belongs to that published release. Exact
 //! `Idempotency-Key` replay returns the original event. Created, paused, or
 //! unknown sessions, items outside the release, and conflicting replays fail
@@ -734,9 +734,9 @@ fn stale_server_event_reference_conflicts_fail_closed() {
 fn listener_reads_padded_headers_across_chunks_and_advertises_allow_post() {
     let runtime = runtime_with(active_session(&published_release()), published_release());
     let padding = "a".repeat(700);
-    // Padding pushes the header block past the 512-byte read-chunk size so
-    // the listener needs a second read before dispatch; the blank-line
-    // terminator ends the final chunk, keeping connection close orderly.
+    // Keep the padded header block below RESPONSE_HTTP_MAX_REQUEST_BYTES while
+    // exercising the real socket path; the contract here is the deterministic
+    // 405 response with an explicit `Allow: POST` header.
     let request = format!(
         "GET /v1/sessions/{SESSION_REF}/responses HTTP/1.1\r\nHost: localhost\r\nX-Pad: {padding}\r\n\r\n"
     );
