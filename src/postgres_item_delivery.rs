@@ -25,7 +25,7 @@ pub enum ItemDeliveryPersistenceDisposition {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ItemDeliveryPersistenceError {
-    /// A required identity was blank or numeric-like.
+    /// A required identity was blank, numeric-like, unsafe, or not already canonical.
     InvalidReference,
     /// An identity was replayed with different immutable evidence.
     ConflictingReplay,
@@ -89,7 +89,9 @@ pub fn apply_item_delivery_migration(
 /// Persist one tenant-bound item-delivery ledger and its accepted events.
 ///
 /// Exact replay under the same tenant is idempotent. Tenant, release, locale, digest,
-/// allowed-item, delivery, or event-evidence rebinding fails closed.
+/// allowed-item, delivery, or event-evidence rebinding fails closed. Caller-provided
+/// references must already have their canonical spelling; persistence never trims an
+/// alias and silently binds it to another resource identity.
 ///
 /// # Errors
 ///
@@ -260,7 +262,10 @@ fn classify_unique_violation(error: postgres::Error) -> ItemDeliveryPersistenceE
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceError> {
-    normalized_reference(reference).ok_or(ItemDeliveryPersistenceError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(normalized),
+        _ => Err(ItemDeliveryPersistenceError::InvalidReference),
+    }
 }
 
 fn require_read_committed(
