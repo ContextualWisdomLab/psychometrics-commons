@@ -21,6 +21,9 @@ fn glued_credential_markers_fail_closed_before_public_packaging() {
         "sessiontokenvalue",
         "accountpasswordhash",
         "servicecredentialblob",
+        "sessionkey",
+        "encryptionkey",
+        "signingkeys",
     ] {
         let columns = [PublicReleaseFixtureColumn {
             column_name,
