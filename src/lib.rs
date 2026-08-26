@@ -12,6 +12,7 @@ pub mod anonymous_authorization;
 pub mod anonymous_credential;
 pub mod anonymous_session;
 pub mod api_problem;
+pub mod audit;
 pub mod authorization;
 pub mod consent;
 pub mod data_rights;
