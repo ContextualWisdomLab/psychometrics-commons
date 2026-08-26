@@ -1,14 +1,18 @@
 //! Regression contracts for response HTTP server-event allocation and header framing.
 
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::response_http::{
-    handle_response_http_request, ResponseHttpRuntime,
+    handle_authorized_response_http_request, handle_response_http_request, ResponseHttpResponse,
+    ResponseHttpRuntime, ResponseWriteAuthority,
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand};
 
+const TENANT_REF: &str = "tenant_response_multi";
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
@@ -121,6 +125,23 @@ fn post_request(
     )
 }
 
+fn authorized_response(
+    runtime: &mut ResponseHttpRuntime,
+    participant_ref: &str,
+    request: &str,
+) -> ResponseHttpResponse {
+    let participant = ParticipantRecord::new_anonymous(participant_ref, TENANT_REF, 10_300).unwrap();
+    let actor = AuthorizationContext::new(
+        TENANT_REF,
+        "subject_response_multi_owner",
+        Some(participant_ref),
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let authority = ResponseWriteAuthority::Authenticated(&actor);
+    handle_authorized_response_http_request(request, &authority, &participant, runtime)
+}
+
 #[test]
 fn interleaved_sessions_do_not_reuse_server_event_reference() {
     let release = published_release();
@@ -129,33 +150,29 @@ fn interleaved_sessions_do_not_reuse_server_event_reference() {
     let mut runtime =
         ResponseHttpRuntime::new(vec![session_a, session_b], vec![release], "evt_response_1");
 
-    let first_a = handle_response_http_request(
-        &post_request(
-            "ses_response_multi_a",
-            "idem_response_multi_a_1",
-            "item_version_001",
-            PAYLOAD_ONE,
-        ),
-        &mut runtime,
+    let first_a_request = post_request(
+        "ses_response_multi_a",
+        "idem_response_multi_a_1",
+        "item_version_001",
+        PAYLOAD_ONE,
     );
-    let first_b = handle_response_http_request(
-        &post_request(
-            "ses_response_multi_b",
-            "idem_response_multi_b_1",
-            "item_version_001",
-            PAYLOAD_ONE,
-        ),
-        &mut runtime,
+    let first_a = authorized_response(&mut runtime, "ptc_response_multi_a", &first_a_request);
+
+    let first_b_request = post_request(
+        "ses_response_multi_b",
+        "idem_response_multi_b_1",
+        "item_version_001",
+        PAYLOAD_ONE,
     );
-    let second_b = handle_response_http_request(
-        &post_request(
-            "ses_response_multi_b",
-            "idem_response_multi_b_2",
-            "item_version_002",
-            PAYLOAD_TWO,
-        ),
-        &mut runtime,
+    let first_b = authorized_response(&mut runtime, "ptc_response_multi_b", &first_b_request);
+
+    let second_b_request = post_request(
+        "ses_response_multi_b",
+        "idem_response_multi_b_2",
+        "item_version_002",
+        PAYLOAD_TWO,
     );
+    let second_b = authorized_response(&mut runtime, "ptc_response_multi_b", &second_b_request);
 
     assert_eq!(first_a.status(), 201);
     assert_eq!(first_b.status(), 201);
