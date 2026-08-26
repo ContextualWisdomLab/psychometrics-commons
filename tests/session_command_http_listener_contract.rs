@@ -146,3 +146,38 @@ fn listener_rejects_get_with_allow_post() {
     assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"));
     assert!(response.contains("Allow: POST"));
 }
+
+#[test]
+fn listener_activates_across_padded_multi_chunk_headers() {
+    let session = AssessmentSession::new(
+        "ses_listener_command_pad",
+        "ptc_listener_command_pad",
+        &published_release(),
+        "en-US",
+        20_000,
+    )
+    .unwrap();
+    let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
+    let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = thread::spawn(move || accept_one_session_command_http(&listener, &mut runtime));
+
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    // Padding pushes the header block past the 512-byte read chunk so the
+    // listener must keep reading before it can dispatch the activate command.
+    let padding = "a".repeat(700);
+    let body = "{\"command\":\"activate\"}";
+    let request = format!(
+        "POST /v1/sessions/ses_listener_command_pad/commands HTTP/1.1\r\nIdempotency-Key: cmd_listener_padded_activate\r\nX-Pad: {padding}\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+    assert!(response.contains("\"state\":\"active\""));
+}

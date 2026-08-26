@@ -273,6 +273,28 @@ fn malformed_identity_method_and_missing_session_fail_closed() {
     let bad_line = handle_session_command_http_request("NOT-A-REQUEST", &mut runtime);
     assert_eq!(bad_line.status(), 400);
 
+    let wrong_scheme = handle_session_command_http_request(
+        &format!(
+            "POST /v1/sessions/{SESSION_REF}/commands FTP/1.1\r\nIdempotency-Key: cmd_ftp_version\r\nContent-Length: 22\r\n\r\n{{\"command\":\"activate\"}}"
+        ),
+        &mut runtime,
+    );
+    assert_eq!(wrong_scheme.status(), 400);
+    assert!(wrong_scheme
+        .body()
+        .contains("session command request must include an HTTP method and target"));
+
+    let trailing_token = handle_session_command_http_request(
+        &format!(
+            "POST /v1/sessions/{SESSION_REF}/commands HTTP/1.1 trailing\r\nIdempotency-Key: cmd_trailing_token\r\n\r\n"
+        ),
+        &mut runtime,
+    );
+    assert_eq!(trailing_token.status(), 400);
+    assert!(trailing_token
+        .body()
+        .contains("session command request must include an HTTP method and target"));
+
     let bad_body = handle_session_command_http_request(
         "POST /v1/sessions/ses_3d657ef743a54698868e4b6ee6c49af4/commands HTTP/1.1\r\nIdempotency-Key: cmd_bad_body\r\nContent-Length: 2\r\n\r\n[]",
         &mut runtime,
@@ -292,4 +314,69 @@ fn apply_client_command_rejects_a_blank_command_identity() {
     assert!(session
         .apply_client_command(" ", SessionCommand::Activate)
         .is_err());
+}
+
+#[test]
+fn framing_without_a_usable_body_fails_closed() {
+    let mut runtime = runtime_with(created_session());
+
+    // No Content-Length header: the framed body cannot be trusted, so the
+    // command must be rejected before any state transition.
+    let missing_length = handle_session_command_http_request(
+        &format!(
+            "POST /v1/sessions/{SESSION_REF}/commands HTTP/1.1\r\nIdempotency-Key: cmd_missing_length\r\nContent-Type: application/json\r\n\r\n{{\"command\":\"activate\"}}"
+        ),
+        &mut runtime,
+    );
+    assert_eq!(missing_length.status(), 400);
+    assert_eq!(missing_length.content_type(), "application/problem+json");
+    assert!(missing_length
+        .body()
+        .contains("urn:psychometrics-commons:problem:bad-request"));
+    assert!(missing_length
+        .body()
+        .contains("session command requires a JSON object body"));
+
+    // A declared length larger than the delivered body is truncated framing;
+    // fail closed rather than parsing a partial command.
+    let short_body = handle_session_command_http_request(
+        &format!(
+            "POST /v1/sessions/{SESSION_REF}/commands HTTP/1.1\r\nIdempotency-Key: cmd_short_body\r\nContent-Length: 500\r\n\r\n{{\"command\":\"activate\"}}"
+        ),
+        &mut runtime,
+    );
+    assert_eq!(short_body.status(), 400);
+    assert!(short_body
+        .body()
+        .contains("session command requires a JSON object body"));
+
+    // Neither rejected request may mutate the injected session.
+    let stored = runtime
+        .session(SESSION_REF)
+        .expect("session stays injected");
+    assert_eq!(stored.state(), SessionState::Created);
+}
+
+#[test]
+fn escaped_json_command_values_decode_before_verb_matching() {
+    let mut runtime = runtime_with(created_session());
+    let body = "{\"command\":\"pau\\\"se\\\\x\\ry\\tt\"}";
+    let escaped = handle_session_command_http_request(
+        &format!(
+            "POST /v1/sessions/{SESSION_REF}/commands HTTP/1.1\r\nIdempotency-Key: cmd_escaped_verb\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+        &mut runtime,
+    );
+
+    // The decoded verb is not a public participant command, so it must surface
+    // as the stable invalid problem rather than a parser crash or a transition.
+    assert_eq!(escaped.status(), 400);
+    assert!(escaped
+        .body()
+        .contains("urn:psychometrics-commons:problem:bad-request"));
+    let stored = runtime
+        .session(SESSION_REF)
+        .expect("session stays injected");
+    assert_eq!(stored.state(), SessionState::Created);
 }

@@ -175,10 +175,7 @@ fn handle_post(
     session_ref: &str,
     runtime: &mut SessionCommandHttpRuntime,
 ) -> SessionCommandHttpResponse {
-    if session_ref.contains('%')
-        || session_ref.chars().any(char::is_whitespace)
-        || normalized_reference(session_ref).is_none()
-    {
+    if !session_command_session_ref_is_transport_safe(session_ref) {
         return SessionCommandHttpResponse::problem(
             400,
             "urn:psychometrics-commons:problem:bad-request",
@@ -416,6 +413,18 @@ fn command_collection_session_ref(path: &str) -> Option<&str> {
     (tail == "commands" && !session_ref.is_empty()).then_some(session_ref)
 }
 
+/// Return whether a path-extracted session reference survives transport hygiene.
+///
+/// Percent escapes and whitespace cannot survive a well-formed request target,
+/// yet the guard stays explicit so encoded or padded identities keep failing
+/// closed even if target parsing ever relaxes. Numeric-like identities are
+/// rejected by [`normalized_reference`].
+fn session_command_session_ref_is_transport_safe(session_ref: &str) -> bool {
+    !session_ref.contains('%')
+        && !session_ref.chars().any(char::is_whitespace)
+        && normalized_reference(session_ref).is_some()
+}
+
 fn valid_idempotency_key(value: &str) -> Option<&str> {
     let normalized = value.trim();
     if normalized.is_empty() || normalized.chars().any(char::is_whitespace) {
@@ -577,12 +586,15 @@ fn json_string(value: &str) -> String {
 mod unit_tests {
     use super::{
         apply_request_read, command_collection_session_ref, illegal_transition_next_action,
-        json_string, next_action, parse_public_command, reason_phrase, split_target,
-        transition_problem, valid_idempotency_key, CommandParse, RequestReadProgress,
+        json_string, next_action, parse_public_command, read_http_request, reason_phrase,
+        session_command_session_ref_is_transport_safe, split_target, transition_problem,
+        valid_idempotency_key, CommandParse, RequestReadProgress,
         SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES,
     };
     use crate::session::{SessionCommand, SessionState, TransitionError, TransitionErrorKind};
-    use std::io::{self, ErrorKind};
+    use std::io::{self, ErrorKind, Write};
+    use std::net::{Shutdown, SocketAddr, TcpStream};
+    use std::time::Duration;
 
     #[test]
     fn helpers_cover_paths_status_and_escapes() {
@@ -610,7 +622,11 @@ mod unit_tests {
         );
         assert_eq!(valid_idempotency_key("idem_ok"), Some("idem_ok"));
         assert_eq!(valid_idempotency_key("42"), None);
+        // Internal whitespace fails closed even when the trimmed key keeps
+        // content, so a spaced client command reference can never be recorded
+        // under a different identity than the client sent.
         assert_eq!(valid_idempotency_key("   "), None);
+        assert_eq!(valid_idempotency_key("idem spaced key"), None);
         assert_eq!(valid_idempotency_key("1,2"), None);
         assert_eq!(valid_idempotency_key("+1"), None);
     }
@@ -674,6 +690,17 @@ mod unit_tests {
         ));
         assert!(matches!(
             parse_public_command("{\"command\":\"activate\",}"),
+            CommandParse::Invalid
+        ));
+        // Escaped quote, backslash, carriage return, and tab decode before the
+        // verb match, so padded verbs stay unknown instead of crashing parse.
+        assert!(matches!(
+            parse_public_command("{\"command\":\"act\\\"ive\\\\x\\ry\\tt\"}"),
+            CommandParse::Invalid
+        ));
+        // A string that never terminates inside a braced object fails closed.
+        assert!(matches!(
+            parse_public_command("{\"first\":\"ok\",\"second\":\"unterminated }"),
             CommandParse::Invalid
         ));
     }
@@ -814,5 +841,49 @@ mod unit_tests {
         ));
         assert_eq!(invalid_seq.status(), 409);
         assert!(invalid_seq.body().contains("next command sequence"));
+    }
+
+    #[test]
+    fn session_ref_guard_rejects_escapes_whitespace_and_numeric_identity() {
+        assert!(session_command_session_ref_is_transport_safe(
+            "ses_opaque_identity"
+        ));
+        assert!(!session_command_session_ref_is_transport_safe(
+            "%20ses_padded"
+        ));
+        // A raw NBSP cannot survive request-line parsing, but the guard keeps
+        // rejecting padded identities if target parsing ever relaxes.
+        assert!(!session_command_session_ref_is_transport_safe(
+            "ses\u{00a0}padded"
+        ));
+        assert!(!session_command_session_ref_is_transport_safe("42"));
+    }
+
+    /// Serve one payload over a real loopback connection for read-loop tests.
+    fn connected_stream(payload: &[u8]) -> (TcpStream, TcpStream) {
+        let listener = std::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(address).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client.write_all(payload).unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn oversized_unframed_input_collapses_to_an_empty_request() {
+        let (_client, mut server) =
+            connected_stream(&[b'A'; SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES + 808]);
+        assert_eq!(read_http_request(&mut server).unwrap(), "");
+    }
+
+    #[test]
+    fn input_without_header_terminator_collapses_to_an_empty_request() {
+        let (_client, mut server) =
+            connected_stream(b"POST /v1/sessions/ses_one/commands HTTP/1.1\r\nHost: localhost\r\n");
+        assert_eq!(read_http_request(&mut server).unwrap(), "");
     }
 }
