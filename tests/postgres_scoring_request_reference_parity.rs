@@ -1,8 +1,9 @@
 //! `PostgreSQL` scoring-request references must match the Rust opaque-reference boundary.
 //!
-//! The product domain trims Unicode whitespace and rejects embedded control characters and
-//! numeric-like spellings under Rust `char::is_numeric`. Direct SQL and migration reapplication
-//! must not leave durable scoring evidence that the Rust domain would reject or normalize.
+//! The product domain trims Unicode whitespace and rejects embedded control/default-ignorable
+//! characters and numeric-like spellings under Rust `char::is_numeric`. Direct SQL and migration
+//! reapplication must not leave durable scoring evidence that the Rust domain would reject or
+//! normalize.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_request::apply_scoring_request_migration;
@@ -92,6 +93,13 @@ fn assert_field_rejects_rust_invalid_aliases(
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -140,7 +148,7 @@ fn assert_field_rejects_rust_invalid_aliases(
 }
 
 #[test]
-fn every_scoring_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
+fn every_scoring_reference_rejects_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
 
@@ -272,5 +280,8 @@ fn migration_reapplication_fails_closed_before_rewriting_legacy_invalid_identity
         )
         .unwrap()
         .get(0);
-    assert_eq!(preserved_count, 1, "migration must never silently rewrite immutable scoring identity");
+    assert_eq!(
+        preserved_count, 1,
+        "migration must never silently rewrite immutable scoring identity"
+    );
 }
