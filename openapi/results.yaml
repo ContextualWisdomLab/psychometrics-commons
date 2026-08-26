@@ -71,6 +71,12 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "405":
           description: The result-read resource only implements GET.
+          headers:
+            Allow:
+              description: RFC 9110 method set accepted by this resource.
+              schema:
+                type: string
+                const: GET
           x-problem-types:
             - urn:psychometrics-commons:problem:method-not-allowed
           content:
