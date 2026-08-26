@@ -1,6 +1,6 @@
 //! Real `PostgreSQL` contract: a worker claims the next due scoring job.
 
-use postgres::{Client, IsolationLevel, NoTls};
+use postgres::{error::SqlState, Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::{
     apply_scoring_job_migration, claim_next_scoring_job, claim_scoring_job, persist_scoring_job,
     record_retryable_scoring_failure, ScoringJobPersistenceError,
@@ -16,6 +16,9 @@ fn claim_next_test_guard() -> Client {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"60s"])
+        .expect("PostgreSQL lock timeout must be configurable for the scoring claim-next fixture");
     client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
         .expect("shared PostgreSQL scoring claim-next lock should be acquired");
@@ -82,6 +85,31 @@ fn fixed_schema_serialization_must_be_visible_to_other_database_sessions() {
         !acquired,
         "a process-local mutex cannot serialize a fixed PostgreSQL schema across CI processes"
     );
+}
+
+#[test]
+fn claim_next_fixture_lock_wait_is_bounded_by_live_postgresql_behavior() {
+    let mut guard = claim_next_test_guard();
+    let timeout_ms: i64 = guard
+        .query_one(
+            "SELECT setting::bigint FROM pg_settings WHERE name = 'lock_timeout'",
+            &[],
+        )
+        .expect("claim-next fixture lock timeout should be queryable from PostgreSQL")
+        .get(0);
+    assert_eq!(timeout_ms, 60_000);
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    contender
+        .query_one("SELECT set_config('lock_timeout', $1, false)", &[&"100ms"])
+        .expect("claim-next contender lock timeout should be configurable");
+    let error = contender
+        .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
+        .expect_err("contended claim-next fixture lock must stop at its configured timeout");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]

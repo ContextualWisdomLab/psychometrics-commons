@@ -7,7 +7,10 @@
 //! paralyzed by blanket masking. It does not invent a type score. HTTP
 //! `POST /v1/results/{result_ref}/exports` stays a later slice.
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::result_export::{
     ResultExport, ResultExportError, ResultExportInput,
@@ -15,7 +18,7 @@ use psychometrics_commons_runtime::result_export::{
 use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const ENGINE_DIGEST: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
@@ -26,22 +29,17 @@ const NEUROTICISM: f64 = -0.31;
 const NEUROTICISM_SE: f64 = 0.21;
 
 fn published_big_five_snapshot() -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_big_five_ko_v1").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "event_item_001",
-                client_event_ref: "client_item_001",
-                item_version_ref: "item_version_001",
-                payload_digest:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_big_five_ko_v1")
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_big_five_ko_v1",
+        "response_snapshot_big_five_ko_v1",
+        &[ResponseWrite {
+            server_event_ref: "event_item_001",
+            client_event_ref: "client_item_001",
+            item_version_ref: "item_version_001",
+            payload_digest:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
@@ -265,22 +263,17 @@ fn personal_export_rejects_blank_identity_locale_time_and_limitations() {
 
 #[test]
 fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
-    let mut ledger = ResponseLedger::new("session_big_five_en_v1").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "event_item_002",
-                client_event_ref: "client_item_002",
-                item_version_ref: "item_version_002",
-                payload_digest:
-                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_big_five_en_v1")
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_big_five_en_v1",
+        "response_snapshot_big_five_en_v1",
+        &[ResponseWrite {
+            server_event_ref: "event_item_002",
+            client_event_ref: "client_item_002",
+            item_version_ref: "item_version_002",
+            payload_digest:
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
