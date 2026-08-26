@@ -5,9 +5,28 @@ use psychometrics_commons_runtime::postgres_scoring_request::{
     apply_scoring_request_migration, persist_scoring_request, ScoringRequestPersistenceDisposition,
     ScoringRequestPersistenceError,
 };
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::session::SessionState;
+use response_support::{active_session, advance_to};
+
+/// Freeze one session-bound completed snapshot through the authoritative ledger API.
+fn frozen_snapshot(
+    session_ref: &str,
+    snapshot_ref: &str,
+    writes: &[ResponseWrite<'_>],
+) -> psychometrics_commons_runtime::response::ResponseSnapshot {
+    let mut session = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    for request in writes {
+        ledger.record(&session, *request).unwrap();
+    }
+    advance_to(&mut session, SessionState::Completed);
+    ledger.freeze_as(&session, snapshot_ref).unwrap()
+}
 
 const PAYLOAD_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -68,21 +87,16 @@ fn request_named(
     scoring_version_ref: &str,
     norm_version_ref: Option<&str>,
 ) -> ScoringRequest {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_score_one",
-                client_event_ref: "client_event_score_one",
-                item_version_ref: "item_version_001",
-                payload_digest: PAYLOAD_DIGEST,
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, snapshot_ref)
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        session_ref,
+        snapshot_ref,
+        &[ResponseWrite {
+            server_event_ref: "server_event_score_one",
+            client_event_ref: "client_event_score_one",
+            item_version_ref: "item_version_001",
+            payload_digest: PAYLOAD_DIGEST,
+        }],
+    );
     ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {

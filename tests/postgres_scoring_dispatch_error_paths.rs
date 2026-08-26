@@ -12,10 +12,13 @@ use psychometrics_commons_runtime::postgres_scoring_request::{
     apply_scoring_request_migration, persist_scoring_dispatch, ScoringDispatchPersistenceError,
     ScoringRequestPersistenceError,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 use std::error::Error;
 
 const ERROR_PATH_TEST_LOCK_KEY: i64 = 0x5343_4453_4552_5250;
@@ -73,24 +76,16 @@ fn reset_and_migrate(client: &mut Client) {
 }
 
 fn request_named(scoring_request_ref: &str) -> ScoringRequest {
-    let mut ledger = ResponseLedger::new("session_dispatch_error_path").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_dispatch_error_path",
-                client_event_ref: "client_event_dispatch_error_path",
-                item_version_ref: "item_version_dispatch_error_path",
-                payload_digest: PAYLOAD_DIGEST,
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_dispatch_error_path",
-        )
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_dispatch_error_path",
+        "response_snapshot_dispatch_error_path",
+        &[ResponseWrite {
+            server_event_ref: "server_event_dispatch_error_path",
+            client_event_ref: "client_event_dispatch_error_path",
+            item_version_ref: "item_version_dispatch_error_path",
+            payload_digest: PAYLOAD_DIGEST,
+        }],
+    );
     ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
