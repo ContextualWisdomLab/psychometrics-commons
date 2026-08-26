@@ -142,6 +142,24 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
         direct_delete.is_err(),
         "ordinary direct deletion must remain blocked even for a row eligible under some future policy"
     );
+
+    let mut bypass = client
+        .transaction()
+        .expect("direct-GUC bypass probe must start a transaction");
+    bypass
+        .query_one(
+            "SELECT set_config('psychometrics.audit_retention_execution', 'on', true)",
+            &[],
+        )
+        .expect("owner-session bypass probe must be able to set the caller-settable GUC");
+    let guc_delete = bypass.execute(
+        "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_direct_delete_01'",
+        &[],
+    );
+    assert!(
+        guc_delete.is_err(),
+        "setting the retention GUC directly must not authorize deletion outside the bounded routine"
+    );
 }
 
 #[test]
