@@ -2,10 +2,11 @@
 //! human-readable report.
 //!
 //! A purchaser who finished a Korean Big Five form must see the same
-//! Extraversion estimate and standard error in both artifacts. The export
-//! keeps the owner `participant_ref` so authorized personal work is not
-//! paralyzed by blanket masking. It does not invent a type score. HTTP
-//! `POST /v1/results/{result_ref}/exports` stays a later slice.
+//! Extraversion estimate and standard error in both artifacts. Exact owner and
+//! version provenance stays available in typed fields and machine-readable JSON,
+//! while the participant-facing report omits internal identifiers. It does not
+//! invent a type score. HTTP `POST /v1/results/{result_ref}/exports` stays a
+//! later slice.
 
 #[path = "response_support/mod.rs"]
 mod response_support;
@@ -22,6 +23,7 @@ use response_support::frozen_snapshot;
 
 const ENGINE_DIGEST: &str =
     "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+const HUMAN_PROVENANCE_NOTE: &str = "Exact versions, time, ownership, and scoring evidence are retained in the machine-readable data export. Internal identifiers are omitted from this human-readable copy.";
 
 const EXTRAVERSION: f64 = 0.42;
 const EXTRAVERSION_SE: f64 = 0.18;
@@ -118,6 +120,7 @@ fn personal_export_repeats_true_big_five_scores_in_json_and_report() {
     );
     assert_eq!(export.participant_ref(), "participant_anonymous_ko_001");
     assert_eq!(export.locale(), "ko-KR");
+    assert_eq!(export.exported_at_unix_ms(), 1_700_000_100_000);
     assert_eq!(
         export.instrument_version_ref(),
         "instrument_version_big_five_ko_v1"
@@ -152,7 +155,11 @@ fn personal_export_repeats_true_big_five_scores_in_json_and_report() {
     assert!(!json.contains("MBTI"));
 
     let report = export.human_readable_report();
-    assert!(report.contains("participant_anonymous_ko_001"));
+    assert!(report.contains(HUMAN_PROVENANCE_NOTE));
+    assert!(!report.contains("participant_anonymous_ko_001"));
+    assert!(!report.contains("result_export_big_five_ko_v1"));
+    assert!(!report.contains("instrument_version_big_five_ko_v1"));
+    assert!(!report.contains(ENGINE_DIGEST));
     assert!(report.contains("construct_extraversion"));
     assert!(report.contains(&EXTRAVERSION.to_string()));
     assert!(report.contains(&EXTRAVERSION_SE.to_string()));
@@ -330,6 +337,7 @@ fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
     .unwrap();
 
     assert_eq!(export.scoring_version_ref(), "scoring_version_big_five_v1");
+    assert_eq!(export.exported_at_unix_ms(), 1_700_000_300_000);
     assert_eq!(export.score_observations()[0].score(), Some(0.67));
     assert_eq!(export.score_observations()[0].standard_error(), None);
     assert_eq!(
@@ -351,9 +359,11 @@ fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
         .contains("Do not treat this as \\\"employment fitness.\\\""));
     assert!(export.human_readable_report().contains("0.67"));
     assert!(export.human_readable_report().contains("failed"));
-    assert!(export
+    assert!(!export.human_readable_report().contains("norm_version_ref"));
+    assert!(!export
         .human_readable_report()
-        .contains("norm_version_ref: none"));
+        .contains("participant_account_en_001"));
+    assert!(export.human_readable_report().contains(HUMAN_PROVENANCE_NOTE));
     assert!(export
         .human_readable_report()
         .contains("Do not treat this as \"employment fitness.\""));
