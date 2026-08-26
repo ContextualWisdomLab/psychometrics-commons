@@ -19,6 +19,7 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | Implemented subset |
 | `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
+| `audit_evidence_record` | product audit/security evidence | **Active PR** #406 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
@@ -78,6 +79,16 @@ The protected-main slice persists:
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
+
+## Active PR audit-evidence physical schema
+
+PR #406 adds purpose-bound audit evidence as **Active PR** implementation only. `migrations/0040_audit_evidence_record.sql` and `src/postgres_audit.rs` define and own `audit_evidence_record`; `migrations/0041_audit_evidence_retention.sql` and `src/postgres_audit_retention.rs` add a deployment-authorized retention primitive without choosing a universal retention duration or granting execution to PUBLIC.
+
+The active slice persists only minimized audit metadata: opaque audit-event, tenant, actor, and resource references; stable purpose/action/outcome codes; a canonical lowercase SHA-256 digest binding separately retained supporting evidence; and the server-authoritative event time. Raw assessment responses, credentials, reflective text, and provider payloads are outside this table. Rows are append-only under ordinary `UPDATE`, `DELETE`, and `TRUNCATE`; exact replay is idempotent and conflicting replay fails closed. Caller reads require both tenant and audit-event identity so a cross-tenant miss does not become an existence oracle.
+
+The retention migration installs a tenant-scoped cutoff operation, rejects invalid tenants and non-positive/future cutoffs, revokes PUBLIC execution, and only opens the otherwise append-only delete trigger while the security-definer routine is executing. Deployments remain responsible for explicitly granting that routine to an approved maintenance authority and for choosing lawful retention/legal-hold policy. PR #406 also extends clean-schema binary-COPY recovery acceptance so restored audit provenance and append-only/retention boundaries are exercised. This is repository-level recovery evidence only: it is not a deployed backup service, measured SLO/RPO/RTO, or certification claim.
+
+The fixed-schema retention tests are serialized with a PostgreSQL session advisory lock on the active branch so concurrent Cargo/test processes sharing `TEST_DATABASE_URL` cannot destroy each other's schema. The lock has a bounded acquisition timeout and a second-session visibility regression. This test-fixture reliability hardening is evidence for the active slice, not a production locking requirement.
 
 ## Logical-to-physical mapping rule
 
