@@ -434,7 +434,7 @@ mod tests {
     fn response_writer_preserves_status_headers_allow_and_problem_body() {
         let mut runtime = ResponseHttpRuntime::new(Vec::new(), Vec::new(), "evt_seed");
         let not_found = super::handle_response_http_request(
-            "POST /v1/sessions/ses_missing/responses HTTP/1.1\r\nIdempotency-Key: idem_missing\r\nContent-Length: 2\r\n\r\n{}",
+            "POST /v1/sessions/ses_missing/responses HTTP/1.1\r\nIdempotency-Key: idem_missing\r\nContent-Length: 130\r\n\r\n{\"item_version_ref\":\"item_version_001\",\"payload_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
             &mut runtime,
         );
         let mut output = Vec::new();
