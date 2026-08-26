@@ -38,6 +38,7 @@ pub mod postgres_inbox_consumption;
 pub mod postgres_instrument_release;
 pub mod postgres_integration;
 pub mod postgres_item_delivery;
+pub mod postgres_longitudinal_observation;
 pub mod postgres_response_snapshot;
 pub mod postgres_result_snapshot;
 pub mod postgres_scoring_job;
@@ -54,8 +55,6 @@ pub mod scoring;
 pub mod scoring_engine;
 pub mod scoring_job;
 pub mod session;
-#[path = "session_command_http_boundary.rs"]
-pub mod session_command_http;
 #[path = "session_http_boundary.rs"]
 pub mod session_http;
 pub mod style_mapping;

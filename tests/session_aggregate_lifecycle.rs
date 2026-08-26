@@ -91,7 +91,6 @@ fn aggregate_applies_session_commands_and_preserves_release_provenance() {
         20_000,
     )
     .unwrap();
-    assert_eq!(session.next_command_sequence(), 1);
 
     assert_eq!(
         session
@@ -114,23 +113,6 @@ fn aggregate_applies_session_commands_and_preserves_release_provenance() {
         SessionState::Paused
     );
     assert_eq!(session.state(), SessionState::Paused);
-    assert_eq!(session.next_command_sequence(), 3);
-    assert_eq!(
-        session
-            .apply_client_command(
-                "cmd_7e39ee81534f40288d3154b149936170",
-                SessionCommand::Activate
-            )
-            .unwrap(),
-        (SessionState::Active, 1)
-    );
-    assert_eq!(session.state(), SessionState::Paused);
-    assert!(session
-        .apply_client_command(
-            "cmd_7e39ee81534f40288d3154b149936170",
-            SessionCommand::Pause
-        )
-        .is_err());
     assert_eq!(session.instrument_release_ref(), "release_big_five_ko_v1");
     assert_eq!(session.instrument_release_content_digest(), RELEASE_DIGEST);
     assert_eq!(session.locale(), "ko-KR");
