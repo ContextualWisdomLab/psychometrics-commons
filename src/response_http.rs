@@ -280,9 +280,9 @@ fn handle_post(
             None => {
                 return ResponseHttpResponse::problem(
                     400,
-                    "urn:psychometrics-commons:problem:missing-idempotency-key",
-                    "Missing Idempotency Key",
-                    "POST /v1/sessions/{session_ref}/responses requires an opaque Idempotency-Key header",
+                    "urn:psychometrics-commons:problem:invalid-reference",
+                    "Invalid Reference",
+                    "Idempotency-Key must be an exact opaque non-numeric response-event identity",
                 );
             }
         },
