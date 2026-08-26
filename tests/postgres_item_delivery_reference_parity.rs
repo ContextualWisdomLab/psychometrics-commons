@@ -1,7 +1,7 @@
 //! Item-delivery persistence must match the Rust opaque-reference boundary.
 //!
 //! The domain trims Unicode whitespace and rejects embedded control characters,
-//! Unicode Default_Ignorable_Code_Point characters, and numeric-like spellings under
+//! Unicode `Default_Ignorable_Code_Point` characters, and numeric-like spellings under
 //! Rust `char::is_numeric`. Direct SQL, array evidence, and migration upgrades must not
 //! preserve aliases the domain would reject or normalize.
 
