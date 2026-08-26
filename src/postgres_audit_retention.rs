@@ -10,7 +10,7 @@ use postgres::GenericClient;
 const AUDIT_EVIDENCE_RETENTION_MIGRATION: &str =
     include_str!("../migrations/0041_audit_evidence_retention.sql");
 const AUDIT_EVIDENCE_OWNER_HARDENING_MIGRATION: &str =
-    include_str!("../migrations/0040_audit_evidence_owner_hardening.sql");
+    include_str!("../migrations/0042_audit_evidence_owner_hardening.sql");
 
 /// Apply the idempotent deployment-retention capability after the core audit schema exists.
 ///
