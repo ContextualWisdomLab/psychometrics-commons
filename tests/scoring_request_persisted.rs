@@ -4,7 +4,11 @@ use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringContractError, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
 
 const ENGINE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -12,10 +16,11 @@ const PAYLOAD_DIGEST: &str =
     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 fn completed_two_item_request() -> ScoringRequest {
-    let mut ledger = ResponseLedger::new("session_reload_score").unwrap();
+    let active = active_session("session_reload_score");
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "server_event_zzz_first",
                 client_event_ref: "client_event_001",
@@ -26,7 +31,7 @@ fn completed_two_item_request() -> ScoringRequest {
         .unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "server_event_aaa_second",
                 client_event_ref: "client_event_002",
@@ -35,8 +40,9 @@ fn completed_two_item_request() -> ScoringRequest {
             },
         )
         .unwrap();
+    let completed = completed_session("session_reload_score");
     let snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_reload_score")
+        .freeze_as(&completed, "response_snapshot_reload_score")
         .unwrap();
     ScoringRequest::from_snapshot(
         &snapshot,

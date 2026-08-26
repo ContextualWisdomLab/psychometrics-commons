@@ -15,8 +15,12 @@ use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{Mutex, MutexGuard};
+
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
 
 const PAYLOAD_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -57,10 +61,11 @@ fn request_named(
     snapshot_ref: &str,
     norm_version_ref: Option<&str>,
 ) -> ScoringRequest {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
+    let active = active_session(session_ref);
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "server_event_zzz_first",
                 client_event_ref: "client_event_001",
@@ -71,7 +76,7 @@ fn request_named(
         .unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "server_event_aaa_second",
                 client_event_ref: "client_event_002",
@@ -80,9 +85,8 @@ fn request_named(
             },
         )
         .unwrap();
-    let snapshot = ledger
-        .freeze_as(SessionState::Completed, snapshot_ref)
-        .unwrap();
+    let completed = completed_session(session_ref);
+    let snapshot = ledger.freeze_as(&completed, snapshot_ref).unwrap();
     ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {

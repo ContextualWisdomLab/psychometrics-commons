@@ -11,8 +11,12 @@ use psychometrics_commons_runtime::postgres_scoring_request::{
 };
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
-use psychometrics_commons_runtime::session::SessionState;
 use std::sync::{Mutex, MutexGuard};
+
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use response_support::{active_session, completed_session};
 
 const SCHEMA: &str = "scoring_request_reload_locking_test";
 const PAYLOAD_DIGEST: &str =
@@ -49,10 +53,11 @@ fn reset_tables(client: &mut Client) {
 }
 
 fn persist_two_item_request(client: &mut Client, scoring_request_ref: &str) {
-    let mut ledger = ResponseLedger::new("session_reload_lock").unwrap();
+    let active = active_session("session_reload_lock");
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "server_event_zzz_first",
                 client_event_ref: "client_event_001",
@@ -63,7 +68,7 @@ fn persist_two_item_request(client: &mut Client, scoring_request_ref: &str) {
         .unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "server_event_aaa_second",
                 client_event_ref: "client_event_002",
@@ -72,8 +77,9 @@ fn persist_two_item_request(client: &mut Client, scoring_request_ref: &str) {
             },
         )
         .unwrap();
+    let completed = completed_session("session_reload_lock");
     let snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_reload_lock")
+        .freeze_as(&completed, "response_snapshot_reload_lock")
         .unwrap();
     let request = ScoringRequest::from_snapshot(
         &snapshot,
