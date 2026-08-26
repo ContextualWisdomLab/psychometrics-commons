@@ -1,5 +1,8 @@
 //! Contract tests for authorized immutable result retrieval over HTTP.
 
+#[path = "response_support/mod.rs"]
+mod response_support;
+
 use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
@@ -8,7 +11,8 @@ use psychometrics_commons_runtime::result_http::handle_result_http_request;
 use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+
+use response_support::{active_session, completed_session};
 
 const ENGINE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
@@ -29,10 +33,11 @@ fn result_snapshot_with_provenance(
     norm_version_ref: Option<&str>,
     supersedes_ref: Option<&str>,
 ) -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_result_http").unwrap();
+    let active = active_session("session_result_http");
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            SessionState::Active,
+            &active,
             ResponseWrite {
                 server_event_ref: "response_event_result_http",
                 client_event_ref: "client_event_result_http",
@@ -42,8 +47,9 @@ fn result_snapshot_with_provenance(
             },
         )
         .unwrap();
+    let completed = completed_session("session_result_http");
     let response_snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_result_http")
+        .freeze_as(&completed, "response_snapshot_result_http")
         .unwrap();
     let scoring_request = ScoringRequest::from_snapshot(
         &response_snapshot,
