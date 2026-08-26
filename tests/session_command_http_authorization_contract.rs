@@ -3,8 +3,10 @@
 //! Possession of an opaque session reference is not authorization. The public
 //! authority-free handler must fail closed without changing lifecycle state,
 //! while an embedding host may supply a server-owned participant record and an
-//! authenticated product context for that exact participant/session resource.
+//! authenticated product context or current anonymous-session credential for
+//! that exact participant/session resource.
 
+use psychometrics_commons_runtime::anonymous_credential::AnonymousCredential;
 use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -24,6 +26,8 @@ const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+const PROOF_DIGEST: &str =
+    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
 fn published_release() -> InstrumentRelease {
     let manifest = InstrumentReleaseManifest::new(
@@ -135,7 +139,10 @@ fn authority_free_handler_cannot_mutate_a_known_session() {
     assert!(response
         .body()
         .contains("urn:psychometrics-commons:problem:session-not-found"));
-    assert_eq!(runtime.session(SESSION_REF).unwrap().state(), SessionState::Created);
+    assert_eq!(
+        runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Created
+    );
 }
 
 #[test]
@@ -154,7 +161,10 @@ fn authenticated_owner_can_command_the_exact_server_owned_session() {
 
     assert_eq!(response.status(), 200);
     assert!(response.body().contains("\"state\":\"active\""));
-    assert_eq!(runtime.session(SESSION_REF).unwrap().state(), SessionState::Active);
+    assert_eq!(
+        runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Active
+    );
 }
 
 #[test]
@@ -181,5 +191,70 @@ fn foreign_authenticated_participant_cannot_probe_or_mutate_the_session() {
     assert!(response
         .body()
         .contains("urn:psychometrics-commons:problem:session-not-found"));
-    assert_eq!(runtime.session(SESSION_REF).unwrap().state(), SessionState::Created);
+    assert_eq!(
+        runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Created
+    );
+}
+
+#[test]
+fn current_anonymous_credential_can_command_but_revocation_fails_closed() {
+    let participant = participant();
+    let mut credential = AnonymousCredential::new(
+        "credential_session_command_authorization",
+        TENANT_REF,
+        PARTICIPANT_REF,
+        SESSION_REF,
+        PROOF_DIGEST,
+        19_000,
+        30_000,
+    )
+    .unwrap();
+    let context = credential
+        .session_context(
+            PROOF_DIGEST,
+            TENANT_REF,
+            PARTICIPANT_REF,
+            SESSION_REF,
+            20_100,
+        )
+        .unwrap();
+    let allowed_authority = SessionCommandAuthority::Anonymous {
+        context: &context,
+        credential: &credential,
+        now_unix_ms: 20_100,
+    };
+    let mut allowed_runtime = SessionCommandHttpRuntime::new(vec![created_session()]);
+
+    let allowed = handle_authorized_session_command_http_request(
+        &activate_request(),
+        &allowed_authority,
+        &participant,
+        &mut allowed_runtime,
+    );
+    assert_eq!(allowed.status(), 200);
+    assert_eq!(
+        allowed_runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Active
+    );
+
+    credential.revoke(20_200).unwrap();
+    let revoked_authority = SessionCommandAuthority::Anonymous {
+        context: &context,
+        credential: &credential,
+        now_unix_ms: 20_300,
+    };
+    let mut revoked_runtime = SessionCommandHttpRuntime::new(vec![created_session()]);
+    let revoked = handle_authorized_session_command_http_request(
+        &activate_request(),
+        &revoked_authority,
+        &participant,
+        &mut revoked_runtime,
+    );
+
+    assert_eq!(revoked.status(), 404);
+    assert_eq!(
+        revoked_runtime.session(SESSION_REF).unwrap().state(),
+        SessionState::Created
+    );
 }
