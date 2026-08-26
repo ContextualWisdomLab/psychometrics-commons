@@ -181,3 +181,71 @@ fn listener_activates_across_padded_multi_chunk_headers() {
     assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("\"state\":\"active\""));
 }
+
+#[test]
+fn listener_waits_for_a_declared_body_delivered_after_the_headers() {
+    let session = AssessmentSession::new(
+        "ses_listener_command_delayed_body",
+        "ptc_listener_command_delayed_body",
+        &published_release(),
+        "en-US",
+        20_000,
+    )
+    .unwrap();
+    let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
+    let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = thread::spawn(move || accept_one_session_command_http(&listener, &mut runtime));
+
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let body = "{\"command\":\"activate\"}";
+    let headers = format!(
+        "POST /v1/sessions/ses_listener_command_delayed_body/commands HTTP/1.1\r\nIdempotency-Key: cmd_listener_delayed_body\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(headers.as_bytes()).unwrap();
+    stream.flush().unwrap();
+    thread::sleep(Duration::from_millis(50));
+    stream.write_all(body.as_bytes()).unwrap();
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK"));
+    assert!(response.contains("\"state\":\"active\""));
+}
+
+#[test]
+fn listener_rejects_a_content_length_that_splits_a_utf8_code_point_without_panicking() {
+    let session = AssessmentSession::new(
+        "ses_listener_command_utf8_boundary",
+        "ptc_listener_command_utf8_boundary",
+        &published_release(),
+        "en-US",
+        20_000,
+    )
+    .unwrap();
+    let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
+    let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = thread::spawn(move || accept_one_session_command_http(&listener, &mut runtime));
+
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let body = "{\"command\":\"activaté\"}";
+    let split_inside_e_acute = body.find('é').unwrap() + 1;
+    let request = format!(
+        "POST /v1/sessions/ses_listener_command_utf8_boundary/commands HTTP/1.1\r\nIdempotency-Key: cmd_listener_utf8_boundary\r\nContent-Length: {split_inside_e_acute}\r\n\r\n{body}"
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap().unwrap();
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+}
