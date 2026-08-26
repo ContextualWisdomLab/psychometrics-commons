@@ -677,6 +677,12 @@ fn valid_http_field_name(header_name: &str) -> bool {
 
 fn request_body(request: &str) -> Option<&str> {
     let (headers, body) = request.split_once("\r\n\r\n")?;
+    if single_header_value(headers, "transfer-encoding")
+        .ok()?
+        .is_some()
+    {
+        return None;
+    }
     let content_length = single_header_value(headers, "content-length")
         .ok()??
         .parse::<usize>()
