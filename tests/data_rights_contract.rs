@@ -202,11 +202,11 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     .unwrap();
 
     request.verify_identity("verification_ref", 6_100).unwrap();
-    request.verify_identity("verification_ref", 6_100).unwrap();
     assert_eq!(
         request.verify_identity(" verification_ref ", 6_100),
         Err(DataRightsError::InvalidReference)
     );
+    request.verify_identity("verification_ref", 6_100).unwrap();
     assert_eq!(
         request.verify_identity("verification_ref", 6_101),
         Err(DataRightsError::ConflictingReplay)
@@ -217,11 +217,11 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     );
 
     request.start_processing("operation_ref", 6_200).unwrap();
-    request.start_processing("operation_ref", 6_200).unwrap();
     assert_eq!(
         request.start_processing(" operation_ref ", 6_200),
         Err(DataRightsError::InvalidReference)
     );
+    request.start_processing("operation_ref", 6_200).unwrap();
     assert_eq!(
         request.start_processing("operation_ref", 6_201),
         Err(DataRightsError::ConflictingReplay)
@@ -234,6 +234,14 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
     request
         .complete("completion_ref", &["legal_retention_scope"], 6_300)
         .unwrap();
+    assert_eq!(
+        request.complete(" completion_ref ", &["legal_retention_scope"], 6_300),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request.complete("completion_ref", &[" legal_retention_scope "], 6_300),
+        Err(DataRightsError::InvalidReference)
+    );
     request
         .complete("completion_ref", &["legal_retention_scope"], 6_300)
         .unwrap();
@@ -350,7 +358,7 @@ fn public_error_messages_are_stable() {
     let cases = [
         (
             DataRightsError::InvalidReference,
-            "data-rights references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
+            "data-rights references must use exact opaque non-numeric spelling without surrounding whitespace or unsafe controls",
         ),
         (
             DataRightsError::InvalidTimestamp,

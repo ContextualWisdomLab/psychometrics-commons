@@ -61,7 +61,7 @@ impl ScoringRequest {
     ///
     /// Returns [`ScoringContractError::EmptyReference`] when a required or
     /// supplied optional reference is blank, whitespace-padded, control-bearing,
-    /// default-ignorable, or numeric-like,
+    /// or numeric-like,
     /// [`ScoringContractError::UnboundResponseSnapshot`] when the snapshot has
     /// no durable identity, [`ScoringContractError::EmptyResponseSnapshot`] when
     /// the snapshot contains no response events,
@@ -190,7 +190,8 @@ impl ScoreObservation {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for a blank or noncanonical construct,
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or
+    /// non-exact construct reference,
     /// [`ScoringContractError::InvalidScore`] for a non-finite score, or
     /// [`ScoringContractError::InvalidStandardError`] for a supplied standard
     /// error that is negative or non-finite.
@@ -229,7 +230,8 @@ impl ScoreObservation {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for a blank or noncanonical construct or
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or
+    /// non-exact construct reference or
     /// [`ScoringContractError::ScoredDispositionRequiresScore`] if `Scored` is
     /// supplied without a numeric score.
     pub fn without_score(
@@ -292,7 +294,7 @@ impl ScoringResult {
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for a blank or noncanonical result identity,
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or non-exact result identity,
     /// [`ScoringContractError::InvalidEngineArtifactDigest`] when engine provenance is not a
     /// canonical SHA-256 digest, [`ScoringContractError::EmptyObservationSet`] when no construct
     /// observation exists, or [`ScoringContractError::DuplicateConstruct`] when a construct
@@ -368,7 +370,7 @@ impl ScoringResult {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ScoringContractError {
-    /// A required or supplied optional reference is blank, noncanonical, or numeric-like.
+    /// A required or supplied optional reference is blank, unsafe, numeric-like, or non-exact.
     EmptyReference,
     /// The response snapshot has not been assigned durable identity.
     UnboundResponseSnapshot,
@@ -395,9 +397,9 @@ pub enum ScoringContractError {
 impl Display for ScoringContractError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyReference => {
-                formatter.write_str("scoring contract references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters")
-            }
+            Self::EmptyReference => formatter.write_str(
+                "scoring contract references must use exact non-empty opaque spellings; numeric-like values, surrounding whitespace, and unsafe control characters are not allowed",
+            ),
             Self::UnboundResponseSnapshot => {
                 formatter.write_str("scoring requires a durable response snapshot reference")
             }
@@ -431,7 +433,12 @@ impl Display for ScoringContractError {
 impl Error for ScoringContractError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
-    canonical_opaque_reference(reference).ok_or(ScoringContractError::EmptyReference)
+    let validated = canonical_opaque_reference(reference).ok_or(ScoringContractError::EmptyReference)?;
+    if validated == reference {
+        Ok(validated)
+    } else {
+        Err(ScoringContractError::EmptyReference)
+    }
 }
 
 fn required_sha256_digest(digest: &str) -> Result<&str, ScoringContractError> {

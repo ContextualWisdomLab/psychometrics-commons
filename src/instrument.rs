@@ -916,7 +916,7 @@ fn required_reference(reference: &str) -> Result<&str, InstrumentReleaseError> {
     canonical_opaque_reference(reference).ok_or(InstrumentReleaseError::InvalidReference)
 }
 
-fn valid_sha256_digest(digest: &str) -> bool {
+pub(crate) fn valid_sha256_digest(digest: &str) -> bool {
     let Some(hex) = digest.strip_prefix("sha256:") else {
         return false;
     };
@@ -926,7 +926,7 @@ fn valid_sha256_digest(digest: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn valid_locale(locale: &str) -> bool {
+pub(crate) fn valid_locale(locale: &str) -> bool {
     let mut subtags = locale.split('-');
     let primary = subtags.next().unwrap_or_default();
     if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())

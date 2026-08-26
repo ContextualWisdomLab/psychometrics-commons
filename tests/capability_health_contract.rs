@@ -166,7 +166,7 @@ fn capability_identity_is_opaque_unique_and_queryable() {
 fn health_contract_errors_have_stable_safe_display_text() {
     assert_eq!(
         HealthContractError::InvalidReference.to_string(),
-        "health capability references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
+        "health capability references must use the exact opaque non-numeric spelling"
     );
     assert_eq!(
         HealthContractError::DuplicateCapabilityReference.to_string(),

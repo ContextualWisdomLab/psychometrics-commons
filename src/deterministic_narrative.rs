@@ -91,7 +91,7 @@ pub struct RenderedNarrative {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum NarrativeFallbackError {
-    /// An opaque product reference was blank or numeric-like.
+    /// An opaque product reference was blank, numeric-like, or not already in canonical spelling.
     InvalidReference,
     /// Participant-facing approved text was blank or noncanonical.
     InvalidText,
@@ -167,13 +167,13 @@ impl DeterministicNarrativeBundle<'_> {
             return Err(NarrativeFallbackError::IdentityMismatch);
         }
 
-        let primary_style_ref = required_reference(selection.primary_style_ref)?;
+        let primary_style_ref = required_canonical_reference(selection.primary_style_ref)?;
         validate_adjacent_styles(primary_style_ref, selection.adjacent_style_refs)?;
         validate_interpretation_selection(selection.interpretation_unit_refs)?;
 
         let mut sections = Vec::with_capacity(selection.interpretation_unit_refs.len());
         for selected_ref in selection.interpretation_unit_refs {
-            let selected_ref = required_reference(selected_ref)?;
+            let selected_ref = required_canonical_reference(selected_ref)?;
             let unit = self
                 .units
                 .iter()
@@ -196,7 +196,7 @@ impl DeterministicNarrativeBundle<'_> {
             adjacent_style_refs: selection
                 .adjacent_style_refs
                 .iter()
-                .map(|reference| required_reference(reference).map(str::to_owned))
+                .map(|reference| required_canonical_reference(reference).map(str::to_owned))
                 .collect::<Result<Vec<_>, _>>()?,
             sections,
             limitations: self
@@ -208,14 +208,14 @@ impl DeterministicNarrativeBundle<'_> {
     }
 
     fn validate(&self) -> Result<(), NarrativeFallbackError> {
-        required_reference(self.narrative_version_ref)?;
-        required_reference(self.style_mapping_version_ref)?;
+        required_canonical_reference(self.narrative_version_ref)?;
+        required_canonical_reference(self.style_mapping_version_ref)?;
         required_digest(self.interpretation_rule_bundle_digest)?;
         required_text(self.locale)?;
 
         let mut unit_refs: Vec<&str> = Vec::with_capacity(self.units.len());
         for unit in self.units {
-            let unit_ref = required_reference(unit.interpretation_unit_ref)?;
+            let unit_ref = required_canonical_reference(unit.interpretation_unit_ref)?;
             if unit_refs.contains(&unit_ref) {
                 return Err(NarrativeFallbackError::DuplicateReference);
             }
@@ -239,7 +239,7 @@ fn validate_adjacent_styles(
 ) -> Result<(), NarrativeFallbackError> {
     let mut seen = vec![primary_style_ref];
     for adjacent in adjacent_style_refs {
-        let adjacent = required_reference(adjacent)?;
+        let adjacent = required_canonical_reference(adjacent)?;
         if seen.contains(&adjacent) {
             return Err(NarrativeFallbackError::DuplicateReference);
         }
@@ -256,7 +256,7 @@ fn validate_interpretation_selection(
     }
     let mut seen = Vec::with_capacity(interpretation_unit_refs.len());
     for unit_ref in interpretation_unit_refs {
-        let unit_ref = required_reference(unit_ref)?;
+        let unit_ref = required_canonical_reference(unit_ref)?;
         if seen.contains(&unit_ref) {
             return Err(NarrativeFallbackError::DuplicateReference);
         }
@@ -267,6 +267,15 @@ fn validate_interpretation_selection(
 
 fn required_reference(reference: &str) -> Result<&str, NarrativeFallbackError> {
     canonical_opaque_reference(reference).ok_or(NarrativeFallbackError::InvalidReference)
+}
+
+fn required_canonical_reference(reference: &str) -> Result<&str, NarrativeFallbackError> {
+    let normalized = required_reference(reference)?;
+    if normalized == reference {
+        Ok(reference)
+    } else {
+        Err(NarrativeFallbackError::InvalidReference)
+    }
 }
 
 fn required_text(text: &str) -> Result<&str, NarrativeFallbackError> {

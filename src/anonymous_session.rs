@@ -6,7 +6,8 @@
 //! secret, or contact an identity provider. A product reference is an opaque identifier owned by
 //! Psychometrics Commons; a transport adapter is the HTTP or messaging boundary that turns an
 //! external request into a product command. The explicit expiry lets those adapters reject stale
-//! authority before forwarding a command to the participant's assessment-session resource.
+//! snapshot authority. If the evidence reference points to a revocable credential, the adapter
+//! must also load that current credential record before forwarding a protected command.
 
 use crate::reference::canonical_opaque_reference;
 use std::error::Error;
@@ -41,10 +42,13 @@ impl Error for AnonymousSessionContextError {}
 ///
 /// The context stores exact tenant, participant, and assessment-session references together
 /// with an opaque reference to the server-side evidence that authorized them and the time at
-/// which that authorization expires. The evidence reference names a server record; it is not a
-/// secret that can itself authenticate a caller. Code at an HTTP or messaging boundary must
-/// validate the caller's short-lived proof before constructing this context, then use the exact
-/// binding and expiry checks below before forwarding a participant-session command.
+/// which this immutable snapshot expires. The evidence reference names a server record; it is not
+/// a secret that can itself authenticate a caller. Code at an HTTP or messaging boundary must
+/// validate the caller's short-lived proof before constructing this context. The binding and
+/// expiry checks below validate the snapshot itself, but they cannot observe a revocation written
+/// after the snapshot was created. When the evidence record is revocable, the boundary must also
+/// resolve `authorization_evidence_ref` and consult that current record before forwarding a
+/// participant-session command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnonymousSessionContext {
     tenant_ref: String,
@@ -55,17 +59,16 @@ pub struct AnonymousSessionContext {
 }
 
 impl AnonymousSessionContext {
-    /// Create a canonical anonymous-session authorization context.
+    /// Create an exact-spelling anonymous-session authorization context.
     ///
-    /// Canonical spelling means each reference is supplied exactly as stored: it is non-empty,
-    /// is not numeric-only, has no leading or trailing whitespace, and contains no control or
-    /// Unicode default-ignorable characters. The constructor does not trim aliases into a match
-    /// because authorization and idempotency use exact reference bytes.
+    /// References are opaque issued identifiers. Callers must supply the exact spelling that
+    /// will be stored; leading or trailing Unicode whitespace is rejected rather than silently
+    /// normalized into another resource identity.
     ///
     /// # Errors
     ///
     /// Returns [`AnonymousSessionContextError::InvalidReference`] when any reference
-    /// is blank, numeric-only, whitespace-padded, or control/default-ignorable, or
+    /// is not an exact opaque product reference, or
     /// [`AnonymousSessionContextError::InvalidValidityBoundary`] when
     /// `valid_until_unix_ms` is zero.
     pub fn new(
@@ -118,10 +121,11 @@ impl AnonymousSessionContext {
         self.valid_until_unix_ms
     }
 
-    /// Return whether the context is still valid at `now_unix_ms`.
+    /// Return whether this immutable context snapshot is still within its stored lifetime.
     ///
     /// Zero time is treated as invalid/unknown and therefore fails closed. The validity
     /// boundary is exclusive: a context is expired when `now_unix_ms` equals the boundary.
+    /// This check does not by itself observe revocation recorded after the context was created.
     #[must_use]
     pub const fn is_valid_at(&self, now_unix_ms: u64) -> bool {
         now_unix_ms != 0 && now_unix_ms < self.valid_until_unix_ms
@@ -144,11 +148,12 @@ impl AnonymousSessionContext {
             && exact_reference_match(&self.session_ref, session_ref)
     }
 
-    /// Return whether the exact anonymous-session binding is valid at one server time.
+    /// Return whether this context snapshot has the exact binding and stored lifetime requested.
     ///
     /// Combining binding and lifetime in one predicate prevents callers from checking only
-    /// identity or only expiry when deciding whether already-validated anonymous-session
-    /// evidence may be forwarded to a participant-owned assessment-session operation.
+    /// identity or only the snapshot expiry. This is not a complete authorization decision when
+    /// `authorization_evidence_ref` names revocable evidence: the current evidence record must be
+    /// checked as well so a revocation written after context creation takes effect.
     #[must_use]
     pub fn is_valid_for_binding_at(
         &self,

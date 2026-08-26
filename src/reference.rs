@@ -74,3 +74,39 @@ const fn is_default_ignorable_identifier_character(character: char) -> bool {
             | '\u{E0000}'..='\u{E0FFF}'
     )
 }
+#[cfg(test)]
+mod tests {
+    use super::canonical_opaque_reference;
+
+    #[test]
+    fn opaque_references_reject_embedded_control_characters() {
+        assert_eq!(canonical_opaque_reference("participant_\u{0001}_account"), None);
+        assert_eq!(
+            canonical_opaque_reference("construct_\u{001f}_extraversion"),
+            None
+        );
+        assert_eq!(canonical_opaque_reference("  construct_extraversion  "), None);
+    }
+
+    #[test]
+    fn opaque_references_reject_default_ignorable_aliases() {
+        for reference in [
+            "participant\u{200b}_account",
+            "participant\u{200d}_account",
+            "participant\u{202e}_account",
+            "participant\u{2060}_account",
+            "participant\u{fe0f}_account",
+            "participant\u{e0001}_account",
+        ] {
+            assert_eq!(canonical_opaque_reference(reference), None, "{reference:?}");
+        }
+    }
+
+    #[test]
+    fn opaque_references_preserve_visible_multilingual_material() {
+        assert_eq!(
+            canonical_opaque_reference("participant_ref_가나다_東京_éclair"),
+            Some("participant_ref_가나다_東京_éclair")
+        );
+    }
+}

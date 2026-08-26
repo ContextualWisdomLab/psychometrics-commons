@@ -299,6 +299,55 @@ fn ledger_and_request_identity_fail_closed() {
 }
 
 #[test]
+fn item_delivery_identity_rejects_padded_aliases_before_recording() {
+    let manifest = manifest();
+    for padded_session_ref in [
+        " session_big_five_001",
+        "session_big_five_001 ",
+        "\u{2003}session_big_five_001",
+    ] {
+        assert_eq!(
+            ItemDeliveryLedger::from_manifest(padded_session_ref, &manifest),
+            Err(ItemDeliveryError::InvalidReference)
+        );
+    }
+
+    for padded_request in [
+        request(
+            " delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            None,
+        ),
+        request(
+            "delivery_event_001",
+            "item_version_001 ",
+            "presentation_standard_v1",
+            None,
+        ),
+        request(
+            "delivery_event_001",
+            "item_version_001",
+            "\u{2003}presentation_standard_v1",
+            None,
+        ),
+        request(
+            "delivery_event_001",
+            "item_version_001",
+            "presentation_standard_v1",
+            Some("selection_fixed_order_v1 "),
+        ),
+    ] {
+        let mut ledger = ledger();
+        assert_eq!(
+            ledger.deliver(SessionState::Active, padded_request),
+            Err(ItemDeliveryError::InvalidReference)
+        );
+        assert!(ledger.is_empty());
+    }
+}
+
+#[test]
 fn cloned_delivery_evidence_preserves_audit_identity() {
     let mut ledger = ledger();
     let event = ledger

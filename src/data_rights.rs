@@ -45,7 +45,7 @@ pub enum DataRightsState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum DataRightsError {
-    /// A reference was blank, numeric-only, or noncanonical instead of an opaque identifier.
+    /// A reference was blank, numeric-like, padded, or unsafe instead of an exact opaque identifier.
     InvalidReference,
     /// A timestamp was zero.
     InvalidTimestamp,
@@ -55,7 +55,7 @@ pub enum DataRightsError {
     IdentityVerificationRequired,
     /// A retention exception was supplied for a non-deletion request.
     RetentionExceptionNotAllowed,
-    /// The same normalized retention scope was supplied more than once.
+    /// The same retained scope was supplied more than once.
     DuplicateRetentionScope,
     /// A lifecycle reference was reused with evidence different from its first use.
     ConflictingReplay,
@@ -67,7 +67,7 @@ impl Display for DataRightsError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "data-rights references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
+                "data-rights references must use exact opaque non-numeric spelling without surrounding whitespace or unsafe controls"
             }
             Self::InvalidTimestamp => "data-rights timestamps must be greater than zero",
             Self::NonMonotonicTimestamp => "data-rights event time must not move backwards",
@@ -120,7 +120,7 @@ impl DataRightsRequest {
     /// # Errors
     ///
     /// Returns [`DataRightsError::InvalidReference`] when any reference is blank,
-    /// numeric-only, or not already in canonical spelling, and
+    /// numeric-like, unsafe, or differs from its exact issued spelling, and
     /// [`DataRightsError::InvalidTimestamp`] when `requested_at_unix_ms` is zero.
     pub fn new(
         request_ref: &str,

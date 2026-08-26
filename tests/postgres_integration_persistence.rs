@@ -356,6 +356,38 @@ fn verify_persistence_error_messages() {
         PersistenceError::UnsupportedIsolationLevel.to_string(),
         "PostgreSQL integration persistence requires read committed isolation"
     );
+    assert_eq!(
+        PersistenceError::InvalidLeaseWindow.to_string(),
+        "outbox lease expiry must be later than claim time"
+    );
+    assert_eq!(
+        PersistenceError::InvalidFencingToken.to_string(),
+        "outbox lease fencing tokens must be positive"
+    );
+    assert_eq!(
+        PersistenceError::OutboxLeaseHeld.to_string(),
+        "live outbox delivery lease rejects unfenced delivery attempts"
+    );
+    assert_eq!(
+        PersistenceError::NotLeaseable.to_string(),
+        "outbox is not currently available for an exclusive delivery lease"
+    );
+    assert_eq!(
+        PersistenceError::NotLeased.to_string(),
+        "outbox does not currently have a delivery lease"
+    );
+    assert_eq!(
+        PersistenceError::LeaseStillActive.to_string(),
+        "outbox delivery lease has not expired"
+    );
+    assert_eq!(
+        PersistenceError::StaleLease.to_string(),
+        "outbox delivery fencing token is stale"
+    );
+    assert_eq!(
+        PersistenceError::LeaseExpired.to_string(),
+        "outbox delivery lease has expired"
+    );
 }
 
 fn verify_database_failures_after_dropping_schema(

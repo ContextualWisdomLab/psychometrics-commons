@@ -7,7 +7,6 @@
 
 use crate::data_rights::{DataRightsRequest, DataRightsRequestKind, DataRightsState};
 use crate::postgres_data_rights::DataRightsPersistenceError;
-use crate::reference::canonical_opaque_reference;
 use postgres::{Client, Transaction};
 
 const DATA_RIGHTS_PROCESSING_MIGRATION: &str =
@@ -145,11 +144,9 @@ fn processing_evidence(
 ) -> Result<(&str, i64, &str, i64), DataRightsPersistenceError> {
     match (
         request.state(),
-        request.operation_ref().and_then(canonical_opaque_reference),
+        request.operation_ref(),
         request.processing_started_at_unix_ms(),
-        request
-            .verification_evidence_ref()
-            .and_then(canonical_opaque_reference),
+        request.verification_evidence_ref(),
         request.verified_at_unix_ms(),
     ) {
         (

@@ -63,7 +63,7 @@ pub enum CapabilityState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum HealthContractError {
-    /// A capability reference was blank or numeric-only instead of opaque.
+    /// A capability reference was blank, numeric-only, or not the exact issued spelling.
     InvalidReference,
     /// One snapshot repeated the same capability reference.
     DuplicateCapabilityReference,
@@ -75,7 +75,7 @@ impl Display for HealthContractError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "health capability references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
+                "health capability references must use the exact opaque non-numeric spelling"
             }
             Self::DuplicateCapabilityReference => {
                 "health capability references must be unique within one snapshot"
@@ -100,6 +100,8 @@ pub struct CapabilityHealth {
 impl CapabilityHealth {
     /// Create one capability-health observation.
     ///
+    /// `capability_ref` must already use its exact issued spelling. This boundary
+    /// rejects a padded alias instead of trimming and storing a different identity.
     /// `accepts_new_work` is kept separate from the descriptive state so an impaired
     /// capability can explicitly remain usable for a bounded operation without
     /// treating every `Degraded` state as globally ready. An `Unavailable` or
@@ -108,7 +110,7 @@ impl CapabilityHealth {
     /// # Errors
     ///
     /// Returns [`HealthContractError::InvalidReference`] when `capability_ref` is not
-    /// an opaque product reference, or
+    /// an exact opaque product reference, or
     /// [`HealthContractError::InconsistentCapabilityReadiness`] for contradictory
     /// unavailable/unknown readiness evidence.
     pub fn new(
@@ -127,7 +129,7 @@ impl CapabilityHealth {
             return Err(HealthContractError::InconsistentCapabilityReadiness);
         }
         Ok(Self {
-            capability_ref: capability_ref.to_owned(),
+            capability_ref: normalized.to_owned(),
             state,
             accepts_new_work,
         })

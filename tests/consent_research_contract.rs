@@ -415,6 +415,10 @@ fn public_error_messages_are_stable_and_readable() {
             "consent references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
+            ConsentWriteError::InvalidReference,
+            "consent references must use exact opaque spelling without surrounding whitespace",
+        ),
+        (
             ConsentWriteError::ResearchScopeRequired,
             "research consent requires a research scope",
         ),
@@ -443,6 +447,10 @@ fn public_error_messages_are_stable_and_readable() {
         (
             ResearchContributionError::EmptyReference,
             "research contribution references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
+        ),
+        (
+            ResearchContributionError::InvalidReference,
+            "research contribution references must use exact opaque spelling without surrounding whitespace",
         ),
         (
             ResearchContributionError::ResearchConsentRequired,
