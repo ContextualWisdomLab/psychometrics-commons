@@ -75,12 +75,8 @@ pub fn accept_one_authorized_response_http(
     let deadline = Instant::now() + RESPONSE_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
     let request = read_http_request(&mut stream, deadline)?;
-    let response = handle_authorized_response_http_request(
-        &request,
-        authority,
-        participant,
-        runtime,
-    );
+    let response =
+        handle_authorized_response_http_request(&request, authority, participant, runtime);
     write_http_response(&mut stream, &response)
 }
 
@@ -287,10 +283,7 @@ fn declared_request_end(body_start: usize, content_length: &str) -> io::Result<u
     })
 }
 
-fn write_http_response(
-    stream: &mut impl Write,
-    response: &ResponseHttpResponse,
-) -> io::Result<()> {
+fn write_http_response(stream: &mut impl Write, response: &ResponseHttpResponse) -> io::Result<()> {
     let allow = if response.status() == 405 {
         "Allow: POST\r\n"
     } else {
@@ -336,7 +329,8 @@ mod tests {
         assert_eq!(single_header_value(plain, "content-length").unwrap(), None);
         assert!(reject_transfer_encoding(plain).is_ok());
 
-        let one = "POST /v1/sessions/ses_one/responses HTTP/1.1\r\nContent-Length: \t2 \t\r\n\r\n{}";
+        let one =
+            "POST /v1/sessions/ses_one/responses HTTP/1.1\r\nContent-Length: \t2 \t\r\n\r\n{}";
         assert_eq!(
             single_header_value(one, "content-length").unwrap(),
             Some("2")
@@ -358,7 +352,8 @@ mod tests {
             io::ErrorKind::InvalidData
         );
 
-        let transfer = "POST /v1/sessions/ses_one/responses HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let transfer =
+            "POST /v1/sessions/ses_one/responses HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert_eq!(
             reject_transfer_encoding(transfer).unwrap_err().kind(),
             io::ErrorKind::InvalidData
@@ -383,9 +378,7 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         assert_eq!(
-            reject_non_crlf_header_lines(b"A: b\rX")
-                .unwrap_err()
-                .kind(),
+            reject_non_crlf_header_lines(b"A: b\rX").unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
     }
@@ -447,7 +440,10 @@ mod tests {
         let mut output = Vec::new();
         write_http_response(&mut output, &not_found).unwrap();
         let text = String::from_utf8(output).unwrap();
-        assert!(text.starts_with("HTTP/1.1 400 Bad Request") || text.starts_with("HTTP/1.1 404 Not Found"));
+        assert!(
+            text.starts_with("HTTP/1.1 400 Bad Request")
+                || text.starts_with("HTTP/1.1 404 Not Found")
+        );
         assert!(text.contains("Cache-Control: no-store\r\n"));
         assert!(text.contains("Content-Length:"));
 
