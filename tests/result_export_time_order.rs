@@ -11,7 +11,7 @@ use psychometrics_commons_runtime::result_export::{
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::completed_session;
 
 const RESULT_CREATED_AT_UNIX_MS: u64 = 1_700_000_000_000;
 const ENGINE_DIGEST: &str =
@@ -19,11 +19,11 @@ const ENGINE_DIGEST: &str =
 
 /// Build one immutable scored result with a fixed server-authoritative creation time.
 fn snapshot() -> ResultSnapshot {
-    let mut session = response_support::active_session("session_export_time_order");
-    let mut ledger = ResponseLedger::from_session(&session).unwrap();
+    let active = response_support::active_session("session_export_time_order");
+    let mut ledger = ResponseLedger::from_session(&active).unwrap();
     ledger
         .record(
-            &session,
+            &active,
             ResponseWrite {
                 server_event_ref: "event_export_time_order",
                 client_event_ref: "client_export_time_order",
@@ -33,9 +33,9 @@ fn snapshot() -> ResultSnapshot {
             },
         )
         .unwrap();
-    response_support::advance_to(&mut session, SessionState::Completed);
+    let completed = completed_session("session_export_time_order");
     let response_snapshot = ledger
-        .freeze_as(&session, "response_snapshot_export_time_order")
+        .freeze_as(&completed, "response_snapshot_export_time_order")
         .unwrap();
     let request = ScoringRequest::from_snapshot(
         &response_snapshot,
