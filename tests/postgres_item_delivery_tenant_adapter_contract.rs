@@ -4,16 +4,14 @@ mod item_delivery_support;
 
 use item_delivery_support::{published_release, session_with_ref_in_state};
 use postgres::{error::SqlState, Client, NoTls};
-use psychometrics_commons_runtime::session::SessionState;
 use psychometrics_commons_runtime::item_delivery::ItemDeliveryLedger;
 use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger,
     ItemDeliveryPersistenceDisposition, ItemDeliveryPersistenceError,
 };
+use psychometrics_commons_runtime::session::SessionState;
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4954_444C_5652_4C4B;
-const RELEASE_DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn acquire_database_lock(
     client: &mut Client,
