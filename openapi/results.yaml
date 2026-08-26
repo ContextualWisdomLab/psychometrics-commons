@@ -1,0 +1,189 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons immutable result-read API
+  version: 0.1.0
+  description: >
+    As-built in-process HTTP/1.1 contract for reading one already-stored immutable
+    personal result. The handler never recomputes psychometric values. Its host
+    must supply the authenticated AuthorizationContext and server-owned participant
+    and result records before invoking the operation; this document therefore does
+    not invent a network authentication scheme that is not implemented by this slice.
+paths:
+  /v1/results/{result_ref}:
+    get:
+      operationId: getImmutableResult
+      summary: Read one authorized immutable personal result
+      description: >
+        Returns the exact stored score observations, uncertainty, dispositions,
+        scoring provenance, narrative version, consent evidence, and supersession
+        reference. Authorization is evaluated from server-owned participant/result
+        records before comparing the requested result_ref with the stored identity,
+        preventing an unauthorized caller from using route mismatch as an existence
+        oracle. Query parameters are not defined and fail closed.
+      x-authorization-contract: >
+        The embedding host supplies an authenticated AuthorizationContext plus the
+        server-owned ParticipantRecord and ResultSnapshot. The handler requires the
+        actor's tenant and participant authority to authorize ReadOwnResult before
+        route identity is disclosed. No caller-supplied ownership record is trusted.
+      parameters:
+        - name: result_ref
+          in: path
+          required: true
+          description: >
+            Exact opaque, non-numeric result reference. Whitespace-normalized,
+            URL-encoded, fragment-bearing, numeric-like, empty, and slash-containing
+            aliases are rejected rather than canonicalized.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authorized immutable stored result; no psychometric recomputation occurs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImmutableResult"
+        "400":
+          description: Malformed request, undefined query semantics, or invalid result reference.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:bad-request
+            - urn:psychometrics-commons:problem:unsupported-query
+            - urn:psychometrics-commons:problem:invalid-reference
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Authenticated context is not authorized to read the server-owned result.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:result-access-denied
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Route is not a result-read route or no authorized result matches the reference.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:not-found
+            - urn:psychometrics-commons:problem:result-not-found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "405":
+          description: The result-read resource only implements GET.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:method-not-allowed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    ImmutableResult:
+      type: object
+      additionalProperties: false
+      required:
+        - result_ref
+        - participant_ref
+        - session_ref
+        - response_snapshot_ref
+        - assessment_spec_ref
+        - instrument_version_ref
+        - scoring_version_ref
+        - calibration_reference
+        - norm_version_ref
+        - narrative_version_ref
+        - consent_snapshot_refs
+        - engine_artifact_digest
+        - requested_output_schema_version
+        - created_at_unix_ms
+        - supersedes_ref
+        - score_observations
+      properties:
+        result_ref:
+          type: string
+        participant_ref:
+          type: string
+        session_ref:
+          type: string
+        response_snapshot_ref:
+          type: string
+        assessment_spec_ref:
+          type: string
+        instrument_version_ref:
+          type: string
+        scoring_version_ref:
+          type: string
+        calibration_reference:
+          type: string
+        norm_version_ref:
+          type:
+            - string
+            - "null"
+        narrative_version_ref:
+          type: string
+        consent_snapshot_refs:
+          type: array
+          items:
+            type: string
+        engine_artifact_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        requested_output_schema_version:
+          type: integer
+        created_at_unix_ms:
+          type: integer
+        supersedes_ref:
+          type:
+            - string
+            - "null"
+        score_observations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScoreObservation"
+    ScoreObservation:
+      type: object
+      additionalProperties: false
+      required:
+        - construct_ref
+        - disposition
+        - score
+        - standard_error
+      properties:
+        construct_ref:
+          type: string
+        disposition:
+          type: string
+          enum:
+          - scored
+          - abstained
+          - failed
+          - excluded
+        score:
+          type:
+            - number
+            - "null"
+          description: Present only when disposition is scored; otherwise null.
+        standard_error:
+          type:
+            - number
+            - "null"
+          minimum: 0
+          description: Optional non-negative finite uncertainty for a scored observation; otherwise null.
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
