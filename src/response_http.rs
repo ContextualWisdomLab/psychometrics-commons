@@ -27,6 +27,9 @@ use std::io;
 use std::net::{SocketAddr, TcpListener};
 use std::time::Duration;
 
+const HTTP_FIELD_NAME_BYTES: &[u8] =
+    b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
+
 /// Bounded read/write timeout for one accepted response HTTP connection.
 pub const RESPONSE_HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
 /// Maximum accepted response HTTP request size, including headers and body.
@@ -272,7 +275,7 @@ fn handle_post(
                 400,
                 "urn:psychometrics-commons:problem:bad-request",
                 "Bad Request",
-                "response write requires exactly one Idempotency-Key header",
+                "response request headers must be well formed and contain exactly one Idempotency-Key header",
             );
         }
         Ok(Some(value)) => match valid_idempotency_key(value) {
@@ -591,19 +594,57 @@ fn valid_idempotency_key(value: &str) -> Option<&str> {
 }
 
 fn single_header_value<'a>(request: &'a str, name: &str) -> Result<Option<&'a str>, ()> {
+    let headers = request
+        .split_once("\r\n\r\n")
+        .map_or(request, |(headers, _)| headers);
+    if !has_strict_crlf(headers) {
+        return Err(());
+    }
+
     let mut found = None;
-    for line in request.lines().skip(1).take_while(|line| !line.is_empty()) {
+    for line in headers.split("\r\n").skip(1) {
+        if line.is_empty() {
+            break;
+        }
         let Some((header_name, value)) = line.split_once(':') else {
-            continue;
+            return Err(());
         };
+        if !valid_http_field_name(header_name) {
+            return Err(());
+        }
         if header_name.eq_ignore_ascii_case(name) {
             if found.is_some() {
                 return Err(());
             }
-            found = Some(value.trim());
+            found = Some(value.trim_matches(&[' ', '\t'][..]));
         }
     }
     Ok(found)
+}
+
+fn has_strict_crlf(headers: &str) -> bool {
+    let bytes = headers.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                if bytes.get(index + 1) != Some(&b'\n') {
+                    return false;
+                }
+                index += 2;
+            }
+            b'\n' => return false,
+            _ => index += 1,
+        }
+    }
+    true
+}
+
+fn valid_http_field_name(header_name: &str) -> bool {
+    !header_name.is_empty()
+        && header_name
+            .bytes()
+            .all(|byte| HTTP_FIELD_NAME_BYTES.contains(&byte))
 }
 
 fn request_body(request: &str) -> Option<&str> {
