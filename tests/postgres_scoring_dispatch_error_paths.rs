@@ -1,6 +1,6 @@
 //! Failure-path coverage for atomic scoring-dispatch persistence.
 
-use postgres::{Client, IsolationLevel, NoTls};
+use postgres::{error::SqlState, Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::integration::IntegrationEvent;
 use psychometrics_commons_runtime::postgres_integration::{
     apply_integration_migration, PersistenceError,
@@ -12,22 +12,38 @@ use psychometrics_commons_runtime::postgres_scoring_request::{
     apply_scoring_request_migration, persist_scoring_dispatch, ScoringDispatchPersistenceError,
     ScoringRequestPersistenceError,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::scoring::{ScoringRequest, ScoringRequestInput};
 use psychometrics_commons_runtime::scoring_job::ScoringJob;
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 use std::error::Error;
-use std::sync::{Mutex, MutexGuard};
 
+const ERROR_PATH_TEST_LOCK_KEY: i64 = 0x5343_4453_4552_5250;
 const PAYLOAD_DIGEST: &str =
     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 
-static ERROR_PATH_TEST_LOCK: Mutex<()> = Mutex::new(());
+fn acquire_error_path_guard(
+    mut guard: Client,
+    lock_timeout: &str,
+) -> Result<Client, postgres::Error> {
+    guard.query_one(
+        "SELECT set_config('lock_timeout', $1, false)",
+        &[&lock_timeout],
+    )?;
+    guard.query_one("SELECT pg_advisory_lock($1)", &[&ERROR_PATH_TEST_LOCK_KEY])?;
+    Ok(guard)
+}
 
-fn error_path_guard() -> MutexGuard<'static, ()> {
-    ERROR_PATH_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn error_path_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    acquire_error_path_guard(guard, "60s")
+        .expect("shared scoring-dispatch error-path lock must be acquired within 60 seconds")
 }
 
 fn test_client() -> Client {
@@ -60,24 +76,16 @@ fn reset_and_migrate(client: &mut Client) {
 }
 
 fn request_named(scoring_request_ref: &str) -> ScoringRequest {
-    let mut ledger = ResponseLedger::new("session_dispatch_error_path").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_dispatch_error_path",
-                client_event_ref: "client_event_dispatch_error_path",
-                item_version_ref: "item_version_dispatch_error_path",
-                payload_digest: PAYLOAD_DIGEST,
-            },
-        )
-        .unwrap();
-    let snapshot = ledger
-        .freeze_as(
-            SessionState::Completed,
-            "response_snapshot_dispatch_error_path",
-        )
-        .unwrap();
+    let snapshot = frozen_snapshot(
+        "session_dispatch_error_path",
+        "response_snapshot_dispatch_error_path",
+        &[ResponseWrite {
+            server_event_ref: "server_event_dispatch_error_path",
+            client_event_ref: "client_event_dispatch_error_path",
+            item_version_ref: "item_version_dispatch_error_path",
+            payload_digest: PAYLOAD_DIGEST,
+        }],
+    );
     ScoringRequest::from_snapshot(
         &snapshot,
         ScoringRequestInput {
@@ -108,6 +116,37 @@ fn dispatch_event() -> IntegrationEvent {
         PAYLOAD_DIGEST,
     )
     .unwrap()
+}
+
+#[test]
+fn error_path_fixture_guard_is_visible_to_another_postgres_session() {
+    let _guard = error_path_guard();
+    let mut contender = test_client();
+    let acquired: bool = contender
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&ERROR_PATH_TEST_LOCK_KEY],
+        )
+        .expect("contender lock probe should succeed")
+        .get(0);
+
+    assert!(
+        !acquired,
+        "fixed-schema fixture guard must serialize across PostgreSQL sessions"
+    );
+}
+
+#[test]
+fn error_path_fixture_lock_contention_has_a_finite_timeout() {
+    let _guard = error_path_guard();
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let contender = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let error = acquire_error_path_guard(contender, "100ms")
+        .err()
+        .expect("contended fixture acquisition must time out instead of waiting indefinitely");
+    assert_eq!(error.code(), Some(&SqlState::LOCK_NOT_AVAILABLE));
 }
 
 #[test]
