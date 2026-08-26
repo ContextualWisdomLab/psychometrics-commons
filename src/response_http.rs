@@ -358,6 +358,34 @@ fn record_response(
     }
     let server_event_ref = runtime.next_server_event_ref.clone();
     let prior_len = runtime.event_count(session_ref);
+
+    if runtime.used_server_event_refs.contains(&server_event_ref) {
+        let mut candidate = runtime
+            .ledgers
+            .get(session_ref)
+            .cloned()
+            .unwrap_or_else(|| {
+                ResponseLedger::from_session(session)
+                    .expect("stored session already passed product identity validation")
+            });
+        let classified = candidate.record(
+            session,
+            ResponseWrite {
+                server_event_ref: &server_event_ref,
+                client_event_ref,
+                item_version_ref: &write.item_version_ref,
+                payload_digest: &write.payload_digest,
+            },
+        );
+        return match classified {
+            Ok(event) if candidate.len() == prior_len => {
+                ResponseHttpResponse::json(200, event_body(session_ref, &event))
+            }
+            Ok(_) => write_problem(WriteError::ServerReferenceConflict),
+            Err(error) => write_problem(error),
+        };
+    }
+
     let recorded = {
         let ledger = runtime
             .ledgers
