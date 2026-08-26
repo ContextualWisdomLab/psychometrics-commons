@@ -23,6 +23,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 - PostgreSQL scoring-job cancellation: queued, leased, or retry-scheduled work becomes cancelled without transferring a fence, exact replay is idempotent, and completed or quarantined evidence cannot be rewritten.
 - Assessment-session creation binds to one published locale-specific instrument release, copies immutable version/locale provenance, and fails closed on locale mismatch or unpublished eligibility.
 - PostgreSQL persistence for immutable version-pinned scoring-request identity, with exact replay and fail-closed rebinding of snapshot or measurement-version evidence.
+- Anonymous participant-base persistence in Active PR #250 stores only opaque `participant_ref`, exact `tenant_ref`, and server-authoritative creation time; exact concurrent replay, tenant/time rebinding rejection, immutable rows, and tenant-scoped reload remain separate from optional Keyverse identity-link history.
 
 - PostgreSQL 18 purpose-specific consent persistence for one participant-bound ledger plus append-only grant/revoke events, with exact replay, fail-closed conflicting event identity, independent research-scope shape, and `READ COMMITTED` replay classification.
 - PostgreSQL 18 inbox-consumption persistence so an accepted inbox receipt is not side-effect completion: pending identity, fenced processing claims that cannot be stolen, expire-and-reclaim of a crashed claim without transferring the fence, local or claimed completion, and poison quarantine, with exact replay and `READ COMMITTED` fail-closed classification.
@@ -80,3 +81,4 @@ All notable product and architecture changes are recorded here. Releases use imm
 - Documentation status drift that still described protected-main `item_delivery`, participant linking, authorization, and integration domain primitives as Target after their merge.
 - Architecture contracts now keep longitudinal validity, source-recorded, platform-received, and durable-ingestion timestamps distinct, with ISO 8601-1 and W3C PROV-DM doctoring references.
 - Release and operations handoff gates now require profile-specific ADR-0017 recovery evidence and evidence-backed closure or authorized acceptance for unresolved critical/high risks; traceability tests inspect the active PR entry rather than unrelated document text.
+- Active PR #250 keeps PostgreSQL numeric-like public-reference rejection aligned with Rust `char::is_numeric` and classifies a concurrent winner only after its uncommitted unique-key evidence is observed.
