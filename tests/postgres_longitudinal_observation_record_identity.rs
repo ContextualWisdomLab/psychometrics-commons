@@ -88,11 +88,8 @@ fn load(
     observation_record_ref: &str,
 ) -> Result<Option<LongitudinalObservationRecord>, LongitudinalObservationPersistenceError> {
     let mut transaction = client.transaction().unwrap();
-    let result = load_longitudinal_observation(
-        &mut transaction,
-        tenant_ref,
-        observation_record_ref,
-    );
+    let result =
+        load_longitudinal_observation(&mut transaction, tenant_ref, observation_record_ref);
     match result {
         Ok(record) => {
             transaction.commit().unwrap();
