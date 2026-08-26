@@ -105,6 +105,15 @@ fn explicit_retention_execution_deletes_only_rows_strictly_before_the_cutoff() {
         vec!["audit_event_boundary_01", "audit_event_new_01"],
         "retention must use an explicit exclusive cutoff and preserve boundary/newer evidence"
     );
+
+    let post_retention_direct_delete = client.execute(
+        "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_boundary_01'",
+        &[],
+    );
+    assert!(
+        post_retention_direct_delete.is_err(),
+        "retention authority must be transaction-local to the function and cleared before return"
+    );
 }
 
 #[test]
