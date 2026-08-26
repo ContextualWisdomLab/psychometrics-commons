@@ -4,19 +4,22 @@
 //! preserves that public API while validating request framing before application
 //! dispatch. The listener accepts at most one `Content-Length`, rejects every
 //! `Transfer-Encoding`, requires CRLF header lines, enforces one overall read
-//! deadline, and refuses bytes beyond the declared request. This fail-closed
+//! deadline, and refuses bytes beyond the declared request. State-changing
+//! dispatch additionally requires server-verified authority. This fail-closed
 //! boundary prevents intermediaries and this process from disagreeing about
-//! where one response-write request ends.
+//! either framing or response-session ownership.
 
 #[allow(dead_code)]
 #[path = "response_http.rs"]
 mod implementation;
 
 pub use implementation::{
-    bind_response_http, handle_response_http_request, ResponseHttpResponse, ResponseHttpRuntime,
-    RESPONSE_HTTP_IO_TIMEOUT, RESPONSE_HTTP_MAX_REQUEST_BYTES,
+    bind_response_http, handle_authorized_response_http_request, handle_response_http_request,
+    ResponseHttpResponse, ResponseHttpRuntime, ResponseWriteAuthority, RESPONSE_HTTP_IO_TIMEOUT,
+    RESPONSE_HTTP_MAX_REQUEST_BYTES,
 };
 
+use crate::participant::ParticipantRecord;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
@@ -24,9 +27,12 @@ use std::time::{Duration, Instant};
 const HTTP_FIELD_NAME_BYTES: &[u8] =
     b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
 
-/// Accept one TCP connection and serve one response-write request.
+/// Accept one TCP connection without verified response-write authority.
 ///
 /// Request framing is validated before [`handle_response_http_request`] runs.
+/// A well-formed POST cannot mutate state through this function; it receives the
+/// same not-found response as an unknown session. Production embedding hosts use
+/// [`accept_one_authorized_response_http`] after verifying caller authority.
 /// The connection is closed after one response; keep-alive and chunked transfer
 /// coding are intentionally unsupported by this bounded runtime surface.
 ///
@@ -44,6 +50,37 @@ pub fn accept_one_response_http(
     stream.set_write_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
     let request = read_http_request(&mut stream, deadline)?;
     let response = handle_response_http_request(&request, runtime);
+    write_http_response(&mut stream, &response)
+}
+
+/// Accept one TCP connection and serve one authorized response-write request.
+///
+/// `authority` must have been verified by the embedding host and `participant`
+/// must be the corresponding server-owned participant record. Framing is checked
+/// before application dispatch; the application then rechecks exact ownership,
+/// tenant scope, anonymous expiry/revocation, and session binding before mutation.
+///
+/// # Errors
+///
+/// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, oversized,
+/// incomplete, or multi-request framing; [`io::ErrorKind::TimedOut`] when the
+/// overall request deadline expires; or the underlying accept/read/write error.
+pub fn accept_one_authorized_response_http(
+    listener: &TcpListener,
+    authority: &ResponseWriteAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut ResponseHttpRuntime,
+) -> io::Result<()> {
+    let (mut stream, _) = listener.accept()?;
+    let deadline = Instant::now() + RESPONSE_HTTP_IO_TIMEOUT;
+    stream.set_write_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
+    let request = read_http_request(&mut stream, deadline)?;
+    let response = handle_authorized_response_http_request(
+        &request,
+        authority,
+        participant,
+        runtime,
+    );
     write_http_response(&mut stream, &response)
 }
 
