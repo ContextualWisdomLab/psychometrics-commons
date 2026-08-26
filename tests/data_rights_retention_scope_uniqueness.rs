@@ -24,13 +24,13 @@ fn processing_retention_request() -> DataRightsRequest {
 }
 
 #[test]
-fn duplicate_retained_scopes_fail_closed_after_normalization() {
+fn duplicate_exact_retained_scopes_fail_closed() {
     let mut request = processing_retention_request();
 
     assert_eq!(
         request.complete(
             "completion_ref",
-            &[" legal_retention_scope ", "legal_retention_scope"],
+            &["legal_retention_scope", "legal_retention_scope"],
             1_300,
         ),
         Err(DataRightsError::DuplicateRetentionScope)

@@ -13,6 +13,7 @@ The product's core scientific governance follows the *Standards for Educational 
 Product consequences:
 
 - an instrument release states intended score interpretations and prohibited/unsupported uses;
+- a personal result export repeats the same continuous scores, standard errors, dispositions, and version provenance as the immutable snapshot, keeps the owner participant reference, and requires approved limitation text so the report cannot imply diagnosis, employment fitness, or a type score;
 - scoring and norms are versioned and reproducible;
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;
@@ -120,6 +121,22 @@ Product consequences:
 - a retry-scheduled row stays unclaimed until its persisted due time;
 - an empty due set does not invent a score.
 
+## Public HTTP problem details
+
+Implemented public session HTTP uses RFC 9110 status semantics and RFC 9457
+problem details. OpenAPI 3.2.0 is the as-built contract vocabulary for that
+family. Problem details name the next buyer action and must not echo raw
+request bodies, SQL, or provider text.
+
+Product consequences:
+
+- `POST /v1/sessions` and `GET /v1/sessions/{session_ref}` are described by
+  `openapi/sessions.yaml` in the same change that implements them;
+- unpublished or mismatched catalog starts return 409 with publish-or-repair
+  guidance;
+- missing sessions return 404 that tells the buyer to POST the same
+  Idempotency-Key.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
@@ -162,3 +179,9 @@ Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 
 World Wide Web Consortium. (2013). *PROV-DM: The PROV data model* (W3C Recommendation, 30 April 2013). https://www.w3.org/TR/prov-dm/
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP semantics* (RFC 9110). RFC Editor. https://doi.org/10.17487/RFC9110
+
+Nottingham, M., Wilde, E., & Miller, S. (2023). *Problem details for HTTP APIs* (RFC 9457). RFC Editor. https://doi.org/10.17487/RFC9457
+
+OpenAPI Initiative. (2024). *OpenAPI specification v3.2.0*. Linux Foundation. https://spec.openapis.org/oas/v3.2.0.html
