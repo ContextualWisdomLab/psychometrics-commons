@@ -63,6 +63,13 @@ fn direct_sql_rejects_every_rust_invalid_response_reference_family() {
         "Ⅳ",
         "\u{00a0}response_event_alias\u{00a0}",
         "response\u{0007}event",
+        "response\u{00ad}event",
+        "response\u{200b}event",
+        "response\u{200d}event",
+        "response\u{2060}event",
+        "response\u{fe0f}event",
+        "response\u{feff}event",
+        "response\u{e0001}event",
     ];
 
     for invalid_reference in invalid_references {
