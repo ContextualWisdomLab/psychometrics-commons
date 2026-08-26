@@ -19,6 +19,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Install pinned Python line
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
       - name: Verify readiness checker contracts
         run: |
           python3 tests/test_release_legal_readiness.py
