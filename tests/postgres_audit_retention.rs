@@ -33,8 +33,8 @@ fn client() -> Client {
         .expect("shared audit-retention fixture lock must be acquired within 60 seconds");
     client
         .batch_execute(
-            "DROP SCHEMA IF EXISTS audit_retention_test CASCADE;\
-             CREATE SCHEMA audit_retention_test;\
+            "DROP SCHEMA IF EXISTS audit_retention_test CASCADE; \
+             CREATE SCHEMA audit_retention_test; \
              SET search_path TO audit_retention_test;",
         )
         .unwrap();
@@ -55,12 +55,14 @@ fn apply_audit_migrations(client: &mut Client) {
     if !maintenance_role_exists {
         client
             .batch_execute("CREATE ROLE audit_retention_test_maintenance NOLOGIN")
-            .expect("isolated CI PostgreSQL owner must be able to create the test maintenance role");
+            .expect(
+                "isolated CI PostgreSQL owner must be able to create the test maintenance role",
+            );
     }
     client
         .batch_execute(
-            "GRANT USAGE ON SCHEMA audit_retention_test TO audit_retention_test_maintenance;\
-             GRANT EXECUTE ON FUNCTION audit_retention_test.expire_audit_evidence_before(TEXT, BIGINT)\
+            "GRANT USAGE ON SCHEMA audit_retention_test TO audit_retention_test_maintenance; \
+             GRANT EXECUTE ON FUNCTION audit_retention_test.expire_audit_evidence_before(TEXT, BIGINT) \
                  TO audit_retention_test_maintenance;",
         )
         .expect("test maintenance role must receive only schema usage and bounded retention execute");
@@ -75,7 +77,7 @@ fn expire_as_maintenance(
     let mut caller = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
     caller.batch_execute(
-        "SET SESSION AUTHORIZATION audit_retention_test_maintenance;\
+        "SET SESSION AUTHORIZATION audit_retention_test_maintenance; \
          SET search_path TO audit_retention_test;",
     )?;
     caller
@@ -86,17 +88,12 @@ fn expire_as_maintenance(
         .map(|row| row.get(0))
 }
 
-fn insert_at(
-    client: &mut Client,
-    tenant_ref: &str,
-    event_ref: &str,
-    occurred_at_unix_ms: i64,
-) {
+fn insert_at(client: &mut Client, tenant_ref: &str, event_ref: &str, occurred_at_unix_ms: i64) {
     client
         .execute(
             "INSERT INTO audit_evidence_record (\
-                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,\
-                outcome_code, evidence_digest, occurred_at_unix_ms\
+                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref, \
+                outcome_code, evidence_digest, occurred_at_unix_ms \
              ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
             &[
                 &event_ref,
@@ -155,11 +152,11 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
     let public_execute: bool = client
         .query_one(
             "SELECT EXISTS (\
-                 SELECT 1 FROM information_schema.routine_privileges\
-                 WHERE routine_schema = current_schema()\
-                   AND routine_name = 'expire_audit_evidence_before'\
-                   AND grantee = 'PUBLIC'\
-                   AND privilege_type = 'EXECUTE'\
+                 SELECT 1 FROM information_schema.routine_privileges \
+                 WHERE routine_schema = current_schema() \
+                   AND routine_name = 'expire_audit_evidence_before' \
+                   AND grantee = 'PUBLIC' \
+                   AND privilege_type = 'EXECUTE' \
              )",
             &[],
         )
@@ -232,7 +229,7 @@ fn maintenance_cannot_set_role_to_owner_then_use_guc_for_direct_delete() {
         .expect("isolated CI PostgreSQL database must be reachable");
     attacker
         .batch_execute(
-            "SET SESSION AUTHORIZATION audit_retention_test_maintenance;\
+            "SET SESSION AUTHORIZATION audit_retention_test_maintenance; \
              SET search_path TO audit_retention_test;",
         )
         .unwrap();
@@ -260,8 +257,8 @@ fn maintenance_cannot_set_role_to_owner_then_use_guc_for_direct_delete() {
     let still_present: bool = client
         .query_one(
             "SELECT EXISTS (\
-                 SELECT 1 FROM audit_evidence_record\
-                 WHERE audit_event_ref = 'audit_event_set_role_bypass_01'\
+                 SELECT 1 FROM audit_evidence_record \
+                 WHERE audit_event_ref = 'audit_event_set_role_bypass_01' \
              )",
             &[],
         )
@@ -341,8 +338,8 @@ fn explicit_retention_execution_is_tenant_scoped_and_exclusive_at_the_cutoff() {
 
     let remaining: Vec<(String, String)> = client
         .query(
-            "SELECT tenant_ref, audit_event_ref\
-             FROM audit_evidence_record\
+            "SELECT tenant_ref, audit_event_ref \
+             FROM audit_evidence_record \
              ORDER BY tenant_ref, occurred_at_unix_ms, audit_event_ref",
             &[],
         )
@@ -398,7 +395,5 @@ fn retention_rejects_invalid_tenant_zero_and_future_cutoffs_instead_of_inventing
         )
         .unwrap()
         .get(0);
-    assert!(
-        expire_as_maintenance(Some("tenant_research_alpha"), Some(future_cutoff)).is_err()
-    );
+    assert!(expire_as_maintenance(Some("tenant_research_alpha"), Some(future_cutoff)).is_err());
 }

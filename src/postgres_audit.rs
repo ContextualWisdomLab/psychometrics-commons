@@ -1,4 +1,4 @@
-//! PostgreSQL 18 persistence for append-only, tenant-scoped product audit evidence.
+//! `PostgreSQL` 18 persistence for append-only, tenant-scoped product audit evidence.
 //!
 //! Callers own the database connection, transaction, credentials, and authorization decision that
 //! precedes persistence. This module stores only the already-minimized audit contract from
@@ -37,9 +37,9 @@ pub enum AuditPersistenceError {
     CorruptHistory,
     /// The Unix-millisecond event time cannot be represented by the database schema.
     TimestampOutOfRange,
-    /// Audit persistence writes require PostgreSQL `READ COMMITTED` isolation.
+    /// Audit persistence writes require `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
-    /// PostgreSQL rejected or could not execute the operation.
+    /// `PostgreSQL` rejected or could not execute the operation.
     Database(postgres::Error),
 }
 
@@ -66,7 +66,7 @@ impl Display for AuditPersistenceError {
 }
 
 impl Error for AuditPersistenceError {
-    /// Return the underlying PostgreSQL error when persistence failed.
+    /// Return the underlying `PostgreSQL` error when persistence failed.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Database(error) => Some(error),
@@ -76,7 +76,7 @@ impl Error for AuditPersistenceError {
 }
 
 impl From<postgres::Error> for AuditPersistenceError {
-    /// Wrap a PostgreSQL driver error as a typed persistence failure.
+    /// Wrap a `PostgreSQL` driver error as a typed persistence failure.
     fn from(error: postgres::Error) -> Self {
         Self::Database(error)
     }
@@ -108,7 +108,7 @@ pub fn apply_audit_evidence_migration(
 ///
 /// Exact replay is idempotent. Reusing `audit_event_ref` with a different tenant, actor, purpose,
 /// action, resource, outcome, digest, or event time fails closed rather than rewriting history.
-/// The insert and verification read intentionally use separate commands: under PostgreSQL
+/// The insert and verification read intentionally use separate commands: under `PostgreSQL`
 /// `READ COMMITTED`, `ON CONFLICT DO NOTHING` can observe a concurrent unique-key winner that is
 /// absent from the insert command's snapshot, while the following command receives a fresh
 /// snapshot and can verify that committed winner exactly.
@@ -228,7 +228,7 @@ pub fn classify_persisted_audit(
 ///
 /// # Errors
 ///
-/// Returns a database error when PostgreSQL rejects the insert.
+/// Returns a database error when `PostgreSQL` rejects the insert.
 #[doc(hidden)]
 pub fn insert_audit_row(
     transaction: &mut Transaction<'_>,
@@ -282,7 +282,7 @@ pub fn query_required_audit_row(
 ///
 /// # Errors
 ///
-/// Returns a database error when PostgreSQL rejects the lookup.
+/// Returns a database error when `PostgreSQL` rejects the lookup.
 #[doc(hidden)]
 pub fn query_optional_audit_row(
     transaction: &mut Transaction<'_>,

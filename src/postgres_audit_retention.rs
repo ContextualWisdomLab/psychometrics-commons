@@ -1,4 +1,4 @@
-//! PostgreSQL deployment-retention migration for product audit evidence.
+//! `PostgreSQL` deployment-retention migration for product audit evidence.
 //!
 //! Retention is intentionally split from the core append-only audit migration because the product
 //! does not own one universal retention period. Deployments apply this capability after
@@ -21,7 +21,7 @@ const AUDIT_EVIDENCE_OWNER_HARDENING_MIGRATION: &str =
 ///
 /// # Errors
 ///
-/// Returns the PostgreSQL error when the audit table is absent, the dedicated owner boundary is
+/// Returns the `PostgreSQL` error when the audit table is absent, the dedicated owner boundary is
 /// unsafe, or the hardened retention routine and mutation guard cannot be installed.
 pub fn apply_audit_evidence_retention_migration(
     client: &mut impl GenericClient,

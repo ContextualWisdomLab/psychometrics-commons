@@ -35,7 +35,14 @@ DECLARE
     deleted_count BIGINT;
     current_unix_ms BIGINT;
 BEGIN
-    IF session_user = current_user THEN
+    IF session_user = current_user
+       OR COALESCE(
+           (SELECT role_record.rolsuper
+            FROM pg_roles AS role_record
+            WHERE role_record.rolname = session_user),
+           FALSE
+       )
+    THEN
         RAISE EXCEPTION USING
             ERRCODE = '42501',
             MESSAGE = 'audit retention must be invoked by an explicitly granted maintenance identity distinct from the routine owner';

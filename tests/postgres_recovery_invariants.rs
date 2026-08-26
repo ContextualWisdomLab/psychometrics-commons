@@ -229,9 +229,15 @@ fn assert_restored_evidence(client: &mut Client) {
         )
         .expect("immutable audit evidence should survive restore");
     assert_eq!(restored_audit.get::<_, String>(0), "tenant_recovery_alpha");
-    assert_eq!(restored_audit.get::<_, String>(1), "operator_recovery_alpha");
+    assert_eq!(
+        restored_audit.get::<_, String>(1),
+        "operator_recovery_alpha"
+    );
     assert_eq!(restored_audit.get::<_, String>(2), "recovery_acceptance");
-    assert_eq!(restored_audit.get::<_, String>(3), "verify_restore_invariants");
+    assert_eq!(
+        restored_audit.get::<_, String>(3),
+        "verify_restore_invariants"
+    );
     assert_eq!(restored_audit.get::<_, String>(4), "restore_exercise_alpha");
     assert_eq!(restored_audit.get::<_, String>(5), "succeeded");
     assert_eq!(restored_audit.get::<_, String>(6), DIGEST_B);
@@ -251,7 +257,10 @@ fn assert_restored_audit_controls(client: &mut Client) {
     let database_error = direct_delete
         .as_db_error()
         .expect("restored audit deletion denial must come from the database trigger boundary");
-    assert_eq!(database_error.code(), &SqlState::OBJECT_NOT_IN_PREREQUISITE_STATE);
+    assert_eq!(
+        database_error.code(),
+        &SqlState::OBJECT_NOT_IN_PREREQUISITE_STATE
+    );
 
     let public_execute: bool = client
         .query_one(

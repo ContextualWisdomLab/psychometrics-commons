@@ -90,6 +90,14 @@ BEGIN
         migration_schema,
         audit_owner_name
     );
+    -- The dedicated owner executes the SECURITY DEFINER retention routine, so name
+    -- resolution of same-schema helper functions requires USAGE on that schema. Without
+    -- this grant the definer-side lookup fails closed with an undefined-function error.
+    EXECUTE format(
+        'GRANT USAGE ON SCHEMA %I TO %I',
+        migration_schema,
+        audit_owner_name
+    );
     EXECUTE format(
         'ALTER FUNCTION %I.audit_evidence_reference_is_valid(TEXT) OWNER TO %I',
         migration_schema,

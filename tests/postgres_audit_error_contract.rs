@@ -1,4 +1,4 @@
-//! Stable operator-facing error contracts for PostgreSQL audit persistence.
+//! Stable operator-facing error contracts for `PostgreSQL` audit persistence.
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};

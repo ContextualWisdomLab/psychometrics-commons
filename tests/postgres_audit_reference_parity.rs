@@ -1,4 +1,4 @@
-//! Direct-SQL parity between PostgreSQL audit identities and the current Rust opaque-reference boundary.
+//! Direct-SQL parity between `PostgreSQL` audit identities and the current Rust opaque-reference boundary.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migration;
@@ -90,5 +90,8 @@ fn database_rejects_control_default_ignorable_and_unicode_numeric_aliases() {
             ],
         )
         .unwrap();
-    assert_eq!(accepted, 1, "visible multilingual identity material must remain valid");
+    assert_eq!(
+        accepted, 1,
+        "visible multilingual identity material must remain valid"
+    );
 }

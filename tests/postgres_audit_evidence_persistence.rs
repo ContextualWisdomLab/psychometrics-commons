@@ -1,4 +1,4 @@
-//! Real PostgreSQL contract for append-only, tenant-scoped audit evidence.
+//! Real `PostgreSQL` contract for append-only, tenant-scoped audit evidence.
 
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
@@ -146,7 +146,11 @@ fn caller_identity_aliases_and_write_isolation_fail_before_persistence() {
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
-        load_audit_evidence(&mut transaction, " tenant_research_alpha ", "audit_event_missing"),
+        load_audit_evidence(
+            &mut transaction,
+            " tenant_research_alpha ",
+            "audit_event_missing"
+        ),
         Err(AuditPersistenceError::InvalidReference)
     ));
     transaction.rollback().unwrap();
@@ -253,10 +257,25 @@ fn migration_is_idempotent_and_rejects_invalid_machine_fields() {
     apply_audit_evidence_migration(&mut client).unwrap();
 
     for (purpose, action, outcome, digest) in [
-        ("HasUppercase", "publish_instrument_release", "succeeded", DIGEST),
+        (
+            "HasUppercase",
+            "publish_instrument_release",
+            "succeeded",
+            DIGEST,
+        ),
         ("instrument_publication", "has-hyphen", "succeeded", DIGEST),
-        ("instrument_publication", "publish_instrument_release", "unknown", DIGEST),
-        ("instrument_publication", "publish_instrument_release", "succeeded", "sha256:deadbeef"),
+        (
+            "instrument_publication",
+            "publish_instrument_release",
+            "unknown",
+            DIGEST,
+        ),
+        (
+            "instrument_publication",
+            "publish_instrument_release",
+            "succeeded",
+            "sha256:deadbeef",
+        ),
     ] {
         assert!(client
             .execute(

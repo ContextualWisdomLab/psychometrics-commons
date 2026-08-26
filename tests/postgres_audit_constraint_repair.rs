@@ -48,9 +48,7 @@ fn insert_raw(
     )
 }
 
-#[test]
-fn migration_reapply_restores_named_constraint_semantics() {
-    let mut client = client();
+fn create_weakened_schema(client: &mut Client) {
     client
         .batch_execute(
             "DROP SCHEMA IF EXISTS audit_constraint_repair_test CASCADE;\
@@ -80,111 +78,131 @@ fn migration_reapply_restores_named_constraint_semantics() {
              );",
         )
         .unwrap();
+}
+
+/// Reinsert cases that a repaired relation must reject: each tuple carries the exact
+/// reference that names the weakened invariant it violates.
+type InvalidReinsertCase<'a> = (
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a str,
+    &'a str,
+    i64,
+);
+
+const INVALID_REINSERT_CASES: [InvalidReinsertCase; 9] = [
+    (
+        "123",
+        "tenant_alpha",
+        "actor_alpha",
+        "purpose_alpha",
+        "action_alpha",
+        "resource_alpha",
+        "succeeded",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_tenant",
+        "123",
+        "actor_alpha",
+        "purpose_alpha",
+        "action_alpha",
+        "resource_alpha",
+        "succeeded",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_actor",
+        "tenant_alpha",
+        "123",
+        "purpose_alpha",
+        "action_alpha",
+        "resource_alpha",
+        "succeeded",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_purpose",
+        "tenant_alpha",
+        "actor_alpha",
+        "PurposeAlpha",
+        "action_alpha",
+        "resource_alpha",
+        "succeeded",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_action",
+        "tenant_alpha",
+        "actor_alpha",
+        "purpose_alpha",
+        "ActionAlpha",
+        "resource_alpha",
+        "succeeded",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_resource",
+        "tenant_alpha",
+        "actor_alpha",
+        "purpose_alpha",
+        "action_alpha",
+        "123",
+        "succeeded",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_outcome",
+        "tenant_alpha",
+        "actor_alpha",
+        "purpose_alpha",
+        "action_alpha",
+        "resource_alpha",
+        "unknown",
+        VALID_DIGEST,
+        1,
+    ),
+    (
+        "audit_invalid_digest",
+        "tenant_alpha",
+        "actor_alpha",
+        "purpose_alpha",
+        "action_alpha",
+        "resource_alpha",
+        "succeeded",
+        "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        1,
+    ),
+    (
+        "audit_invalid_time",
+        "tenant_alpha",
+        "actor_alpha",
+        "purpose_alpha",
+        "action_alpha",
+        "resource_alpha",
+        "succeeded",
+        VALID_DIGEST,
+        0,
+    ),
+];
+
+#[test]
+fn migration_reapply_restores_named_constraint_semantics() {
+    let mut client = client();
+    create_weakened_schema(&mut client);
 
     apply_audit_evidence_migration(&mut client)
         .expect("migration reapply should repair compatible named constraints in place");
-
-    let cases = [
-        (
-            "123",
-            "tenant_alpha",
-            "actor_alpha",
-            "purpose_alpha",
-            "action_alpha",
-            "resource_alpha",
-            "succeeded",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_tenant",
-            "123",
-            "actor_alpha",
-            "purpose_alpha",
-            "action_alpha",
-            "resource_alpha",
-            "succeeded",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_actor",
-            "tenant_alpha",
-            "123",
-            "purpose_alpha",
-            "action_alpha",
-            "resource_alpha",
-            "succeeded",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_purpose",
-            "tenant_alpha",
-            "actor_alpha",
-            "PurposeAlpha",
-            "action_alpha",
-            "resource_alpha",
-            "succeeded",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_action",
-            "tenant_alpha",
-            "actor_alpha",
-            "purpose_alpha",
-            "ActionAlpha",
-            "resource_alpha",
-            "succeeded",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_resource",
-            "tenant_alpha",
-            "actor_alpha",
-            "purpose_alpha",
-            "action_alpha",
-            "123",
-            "succeeded",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_outcome",
-            "tenant_alpha",
-            "actor_alpha",
-            "purpose_alpha",
-            "action_alpha",
-            "resource_alpha",
-            "unknown",
-            VALID_DIGEST,
-            1,
-        ),
-        (
-            "audit_invalid_digest",
-            "tenant_alpha",
-            "actor_alpha",
-            "purpose_alpha",
-            "action_alpha",
-            "resource_alpha",
-            "succeeded",
-            "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-            1,
-        ),
-        (
-            "audit_invalid_time",
-            "tenant_alpha",
-            "actor_alpha",
-            "purpose_alpha",
-            "action_alpha",
-            "resource_alpha",
-            "succeeded",
-            VALID_DIGEST,
-            0,
-        ),
-    ];
 
     for (
         audit_event_ref,
@@ -196,7 +214,7 @@ fn migration_reapply_restores_named_constraint_semantics() {
         outcome_code,
         evidence_digest,
         occurred_at_unix_ms,
-    ) in cases
+    ) in INVALID_REINSERT_CASES
     {
         assert!(
             insert_raw(
