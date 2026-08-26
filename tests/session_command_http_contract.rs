@@ -1,18 +1,22 @@
 //! Public HTTP contract for participant session lifecycle commands.
 
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand, SessionState};
 use psychometrics_commons_runtime::session_command_http::{
-    handle_session_command_http_request, SessionCommandHttpRuntime,
+    handle_authorized_session_command_http_request, SessionCommandAuthority,
+    SessionCommandHttpResponse, SessionCommandHttpRuntime,
 };
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const EVIDENCE_DIGEST: &str =
     "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+const TENANT_REF: &str = "tenant_session_command_http_contract";
 const SESSION_REF: &str = "ses_3d657ef743a54698868e4b6ee6c49af4";
 const PARTICIPANT_REF: &str = "ptc_471a8fd35e1747b7b25b66d219ce4ccd";
 
@@ -96,6 +100,30 @@ fn created_session() -> AssessmentSession {
 
 fn runtime_with(session: AssessmentSession) -> SessionCommandHttpRuntime {
     SessionCommandHttpRuntime::new(vec![session])
+}
+
+fn participant() -> ParticipantRecord {
+    ParticipantRecord::new_anonymous(PARTICIPANT_REF, TENANT_REF, 19_000).unwrap()
+}
+
+fn owner_actor() -> AuthorizationContext {
+    AuthorizationContext::new(
+        TENANT_REF,
+        "subject_session_command_http_contract",
+        Some(PARTICIPANT_REF),
+        &[ProductRole::Participant],
+    )
+    .unwrap()
+}
+
+fn handle_session_command_http_request(
+    request: &str,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> SessionCommandHttpResponse {
+    let participant = participant();
+    let actor = owner_actor();
+    let authority = SessionCommandAuthority::Authenticated(&actor);
+    handle_authorized_session_command_http_request(request, &authority, &participant, runtime)
 }
 
 fn post(session_ref: &str, command: &str, idempotency_key: &str) -> String {
