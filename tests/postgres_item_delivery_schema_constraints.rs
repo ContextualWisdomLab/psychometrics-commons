@@ -212,8 +212,7 @@ fn schema_rejects_numeric_identities_empty_item_sets_and_nonpositive_sequences()
 
 #[test]
 fn schema_rejects_numeric_instrument_version_refs() {
-    let _guard = schema_test_guard();
-    let mut client = test_client();
+    let (_guard, mut client) = test_clients();
     reset_schema(&mut client);
     apply_item_delivery_migration(&mut client).unwrap();
 
