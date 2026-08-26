@@ -26,12 +26,13 @@ It does **not** duplicate psychometric numerical kernels, identity credentials, 
 
 ## Personal result export
 
-Active PR #231 — not protected-main truth until an unchanged reviewed/check-clean head is integrated. After a result snapshot exists, call `ResultExport::from_snapshot` with an opaque `export_ref`, the exact BCP 47 report locale, and approved limitation text. Copy the returned JSON or human-readable report to the participant. Confirm Extraversion (or another scored construct) and its standard error match the snapshot before handing the file over. If export fails, repair the identity, locale, timestamp, or limitation text before offering a download. Do not invent a type score, do not mask the owner `participant_ref`, and do not treat this domain copy as the HTTP `POST /v1/results/{result_ref}/exports` transport.
+Protected-main result-export domain evidence is available through `ResultExport::from_snapshot`. Before creating or delivering an export, the server must authorize the authenticated actor against the exact stored result resource, its owning participant, and tenant scope; caller-supplied result, participant, or tenant values are never authority. Only after that authorization succeeds, call `ResultExport::from_snapshot` with an opaque `export_ref`, the exact BCP 47 report locale, and approved limitation text, and deliver the returned JSON or human-readable report to the participant. Before delivery, confirm that every exported construct score, disposition, present standard error, and version provenance match the immutable result snapshot. If authorization or export fails, do not deliver an artifact; repair the authoritative identity/access evidence or the locale, timestamp, or limitation text as appropriate. Do not invent a type score, do not mask the owner `participant_ref`, and do not treat this domain copy as the HTTP `POST /v1/results/{result_ref}/exports` transport; authorized HTTP delivery remains an active slice.
 
 ## Documentation
 
 ### Product, technical, and governance baseline
 
+- [Product and Technical Gap Baseline](docs/product-technical-gap-baseline.md) — exact protected-main snapshot, current open PR/issue inventory, buyer-visible gaps, and the next executable loop.
 - [Product Requirements](docs/PRD.md) — users, consumer MVP, longitudinal and research experiences, acceptance criteria, exclusions, and release policy.
 - [Technical Requirements](docs/TRD.md) — APIs/events/data contracts, state machines, identity/tenancy, idempotency, failure modes, security/privacy, accessibility, deployment, and release gates.
 - [Psychometric Measurement Governance](docs/MEASUREMENT_GOVERNANCE.md) — factor/model selection, scoreability, recovery, DIF/invariance, multilevel/time/facet structure, automated scoring, and governed rubric/item-bank evidence required for publication.
