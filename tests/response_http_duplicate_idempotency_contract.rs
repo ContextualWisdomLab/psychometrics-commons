@@ -39,7 +39,9 @@ fn duplicate_idempotency_key_is_rejected_before_dispatch() {
     client
         .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
-    client.write_all(duplicate_header_request().as_bytes()).unwrap();
+    client
+        .write_all(duplicate_header_request().as_bytes())
+        .unwrap();
     client.shutdown(Shutdown::Write).unwrap();
     let _ = client.read_to_end(&mut Vec::new());
 
