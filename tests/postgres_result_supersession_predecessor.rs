@@ -233,6 +233,21 @@ fn migration_reapply_restores_self_supersession_check() {
         .unwrap();
 
     apply_result_snapshot_migration(&mut client).unwrap();
+    let constraint_definition: String = client
+        .query_one(
+            "SELECT pg_get_constraintdef(oid) \
+             FROM pg_constraint \
+             WHERE conrelid = 'result_snapshot'::regclass \
+               AND conname = 'result_snapshot_supersedes_ref_format_check'",
+            &[],
+        )
+        .expect("reapplied supersedes format CHECK should exist")
+        .get(0);
+    assert!(
+        constraint_definition.contains("result_snapshot_reference_is_valid(supersedes_ref)"),
+        "reapplied supersedes format CHECK must use the shared durable reference validator: {constraint_definition}"
+    );
+
     let error = insert_raw_snapshot(
         &mut client,
         "result_snapshot_self_reference",
