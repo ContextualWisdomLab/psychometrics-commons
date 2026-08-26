@@ -1,0 +1,181 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public item-delivery API
+  version: 0.1.0
+  description: >
+    As-built record and reload operations for immutable item-delivery evidence.
+    The runtime uses the authoritative assessment-session aggregate and does not
+    perform item selection, calibration, scoring, or other psychometric numerics.
+paths:
+  /v1/sessions/{session_ref}/item-deliveries:
+    post:
+      operationId: recordItemDelivery
+      summary: Record one presented item version
+      description: >
+        Records one immutable item version from the exact release bound to an
+        Active assessment session. An exact Idempotency-Key replay matching
+        delivery_ref returns the original event without a duplicate. The bound
+        HTTP/1.1 listener rejects Transfer-Encoding, ambiguous framing, and
+        duplicate semantic idempotency headers before application dispatch.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Exact opaque non-numeric assessment-session reference.
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Exact opaque replay identity; must equal delivery_ref.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemDeliveryRecordRequest"
+      responses:
+        "201":
+          description: New delivery evidence accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDeliveryEvent"
+        "200":
+          description: Exact idempotent replay of accepted evidence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDeliveryEvent"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "415":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listItemDeliveries
+      summary: Reload server-ordered item-delivery evidence
+      description: >
+        Returns the in-process delivery ledger together with immutable release
+        provenance and the current authoritative session state. Persistence
+        across restart is provided by the separate product persistence lane and
+        is not claimed by this in-process transport surface.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Exact opaque non-numeric assessment-session reference.
+      responses:
+        "200":
+          description: Current in-process delivery ledger.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDeliveryLedger"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    ItemDeliveryRecordRequest:
+      type: object
+      additionalProperties: false
+      required: [delivery_ref, item_version_ref, presentation_context_ref]
+      properties:
+        delivery_ref:
+          type: string
+        item_version_ref:
+          type: string
+        presentation_context_ref:
+          type: string
+        selection_evidence_ref:
+          type: string
+    ItemDeliveryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - instrument_release_ref
+        - locale
+        - delivery_ref
+        - item_version_ref
+        - presentation_context_ref
+        - sequence
+      properties:
+        session_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        locale:
+          type: string
+        delivery_ref:
+          type: string
+        item_version_ref:
+          type: string
+        presentation_context_ref:
+          type: string
+        selection_evidence_ref:
+          type: string
+        sequence:
+          type: integer
+          minimum: 1
+    ItemDeliveryLedger:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - instrument_release_ref
+        - release_content_digest
+        - locale
+        - session_state
+        - allowed_item_version_refs
+        - events
+      properties:
+        session_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        release_content_digest:
+          type: string
+        locale:
+          type: string
+        session_state:
+          type: string
+        allowed_item_version_refs:
+          type: array
+          items:
+            type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemDeliveryEvent"
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: RFC 9457 problem details without raw request or provider data.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
