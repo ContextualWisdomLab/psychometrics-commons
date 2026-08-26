@@ -1,4 +1,4 @@
-//! PostgreSQL parity regression for invisible longitudinal reference aliases.
+//! `PostgreSQL` parity regression for invisible longitudinal reference aliases.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_longitudinal_observation::apply_longitudinal_observation_migration;
