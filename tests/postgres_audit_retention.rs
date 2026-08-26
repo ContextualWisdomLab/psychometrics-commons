@@ -5,6 +5,7 @@ use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migratio
 use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
 const AUDIT_RETENTION_TEST_LOCK_KEY: i64 = 0x4155_4454_5245_544e;
+const AUDIT_EVIDENCE_OWNER_ROLE: &str = "psychometrics_audit_evidence_owner";
 const RETENTION_MAINTENANCE_ROLE: &str = "audit_retention_test_maintenance";
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -212,6 +213,61 @@ fn retention_execution_is_not_publicly_granted_and_direct_delete_stays_blocked()
         guc_delete.is_err(),
         "setting the retention GUC directly must not authorize deletion outside the bounded routine"
     );
+}
+
+#[test]
+fn maintenance_cannot_set_role_to_owner_then_use_guc_for_direct_delete() {
+    let mut client = client();
+    apply_audit_migrations(&mut client);
+    insert_at(
+        &mut client,
+        "tenant_research_alpha",
+        "audit_event_set_role_bypass_01",
+        1_000,
+    );
+
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut attacker = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    attacker
+        .batch_execute(
+            "SET SESSION AUTHORIZATION audit_retention_test_maintenance;\
+             SET search_path TO audit_retention_test;",
+        )
+        .unwrap();
+    let set_owner = attacker.batch_execute(&format!("SET ROLE {AUDIT_EVIDENCE_OWNER_ROLE}"));
+    assert_eq!(
+        set_owner
+            .expect_err("maintenance identity must not be able to assume the audit owner role")
+            .code(),
+        Some(&SqlState::INSUFFICIENT_PRIVILEGE)
+    );
+
+    attacker
+        .query_one(
+            "SELECT set_config('psychometrics.audit_retention_execution', 'on', true)",
+            &[],
+        )
+        .expect("maintenance identity can set an untrusted custom GUC without gaining authority");
+    assert!(attacker
+        .execute(
+            "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_set_role_bypass_01'",
+            &[],
+        )
+        .is_err());
+
+    let still_present: bool = client
+        .query_one(
+            "SELECT EXISTS (\
+                 SELECT 1 FROM audit_evidence_record\
+                 WHERE audit_event_ref = 'audit_event_set_role_bypass_01'\
+             )",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert!(still_present);
 }
 
 #[test]
