@@ -7,8 +7,7 @@
 //! provider failures remain eligible for the existing bounded retry policy.
 
 use crate::postgres_scoring_job::{
-    record_permanent_scoring_failure, record_retryable_scoring_failure,
-    ScoringJobPersistenceError,
+    record_permanent_scoring_failure, record_retryable_scoring_failure, ScoringJobPersistenceError,
 };
 use crate::scoring_engine::ScoringEngineExecutionError;
 use crate::scoring_job::ScoringJobState;
