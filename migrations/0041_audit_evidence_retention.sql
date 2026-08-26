@@ -2,8 +2,10 @@
 --
 -- This migration deliberately does not choose a retention duration. Deployments must decide the
 -- tenant-scoped cutoff under their approved retention/legal-hold policy and explicitly grant
--- EXECUTE on the bounded SECURITY DEFINER routine to the maintenance authority. Ordinary
--- UPDATE/DELETE/TRUNCATE remains blocked by the audit mutation trigger.
+-- EXECUTE on the bounded SECURITY DEFINER routine to a maintenance authority distinct from the
+-- routine owner. The owner/migration identity is not an operational retention caller. Ordinary
+-- UPDATE/DELETE/TRUNCATE remains blocked by the audit mutation trigger, including when an owner
+-- session manually sets the caller-settable retention GUC.
 
 DO $audit_retention_migration$
 DECLARE
@@ -33,6 +35,12 @@ DECLARE
     deleted_count BIGINT;
     current_unix_ms BIGINT;
 BEGIN
+    IF session_user = current_user THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '42501',
+            MESSAGE = 'audit retention must be invoked by an explicitly granted maintenance identity distinct from the routine owner';
+    END IF;
+
     IF retention_tenant_ref IS NULL
        OR NOT audit_evidence_reference_is_valid(retention_tenant_ref)
     THEN
@@ -100,6 +108,7 @@ AS $mutation_guard_body$
 BEGIN
     IF TG_OP = 'DELETE'
        AND current_user = %2$L
+       AND session_user <> current_user
        AND current_setting('psychometrics.audit_retention_execution', true) = 'on'
     THEN
         RETURN OLD;
