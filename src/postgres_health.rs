@@ -274,7 +274,13 @@ fn unknown_postgres_snapshot(backlog_health: BacklogHealth) -> RuntimeHealthSnap
     .expect("unknown postgres snapshot contains one unique capability")
 }
 
-fn is_exact_schema_qualified_relation(relation: &str) -> bool {
+/// Return whether `relation` is an exact two-part unquoted `schema.relation` identity.
+///
+/// Callers that let operators declare required relations (for example through a
+/// configuration value) can reuse this predicate to reject malformed identities
+/// before they reach a probe.
+#[must_use]
+pub fn is_exact_schema_qualified_relation(relation: &str) -> bool {
     let Some((schema, name)) = relation.split_once('.') else {
         return false;
     };

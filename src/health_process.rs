@@ -2,7 +2,9 @@
 //!
 //! Operators start this process so a load balancer can keep calling GET `/live`
 //! and GET `/ready`. Liveness never opens a database connection. Readiness
-//! observes `DATABASE_URL` only after accept, and never echoes driver errors.
+//! observes `DATABASE_URL` only after accept, requires caller-declared
+//! `HEALTH_REQUIRED_RELATIONS` evidence before it can answer ready, and never
+//! echoes driver errors.
 
 use crate::health::{
     BacklogHealth, CapabilityHealth, CapabilityState, DataIntegrityHealth, RuntimeHealthSnapshot,
@@ -12,7 +14,9 @@ use crate::health_http::{
     health_request_required_capabilities, health_request_requires_readiness_snapshot,
     serve_health_http_with, HealthHttpResponse, HEALTH_HTTP_IO_TIMEOUT,
 };
-use crate::postgres_health::POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF;
+use crate::postgres_health::{
+    is_exact_schema_qualified_relation, POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF,
+};
 use crate::postgres_health_http::handle_postgres_health_http_request;
 use postgres::{Client, NoTls};
 use std::error::Error;
@@ -29,6 +33,10 @@ pub const HEALTH_LISTEN_PORT_ENV: &str = "PORT";
 pub const HEALTH_DATABASE_URL_ENV: &str = "DATABASE_URL";
 /// Optional caller-measured backlog label. Missing means unknown and not ready.
 pub const HEALTH_BACKLOG_HEALTH_ENV: &str = "HEALTH_BACKLOG_HEALTH";
+/// Optional comma-separated exact `schema.relation` identities whose presence
+/// proves data integrity for GET `/ready`. Missing or empty means integrity
+/// evidence stays unknown, so readiness fails closed even with a reachable store.
+pub const HEALTH_REQUIRED_RELATIONS_ENV: &str = "HEALTH_REQUIRED_RELATIONS";
 
 /// Fail-closed configuration error for the health-probe process.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +52,9 @@ pub enum HealthProcessConfigError {
     InvalidDatabaseUrl,
     /// `HEALTH_BACKLOG_HEALTH` was set to an unknown label.
     InvalidBacklogHealth,
+    /// `HEALTH_REQUIRED_RELATIONS` was blank, padded, empty in a component,
+    /// or contained an identity that is not an exact `schema.relation` pair.
+    InvalidRequiredRelations,
 }
 
 impl Display for HealthProcessConfigError {
@@ -62,6 +73,9 @@ impl Display for HealthProcessConfigError {
             Self::InvalidBacklogHealth => {
                 "HEALTH_BACKLOG_HEALTH must be within_bounds, stalled, or unknown when set"
             }
+            Self::InvalidRequiredRelations => {
+                "HEALTH_REQUIRED_RELATIONS must be comma-separated exact schema.relation identities when set"
+            }
         })
     }
 }
@@ -74,6 +88,7 @@ pub struct HealthProcessConfig {
     database_url: Option<String>,
     connect_config: Option<postgres::Config>,
     backlog_health: BacklogHealth,
+    required_relations: Vec<String>,
 }
 
 impl HealthProcessConfig {
@@ -94,6 +109,12 @@ impl HealthProcessConfig {
     pub const fn backlog_health(&self) -> BacklogHealth {
         self.backlog_health
     }
+
+    /// Return the caller-declared relation identities required for readiness.
+    #[must_use]
+    pub fn required_relations(&self) -> &[String] {
+        &self.required_relations
+    }
 }
 
 impl std::fmt::Debug for HealthProcessConfig {
@@ -103,6 +124,7 @@ impl std::fmt::Debug for HealthProcessConfig {
             .field("listen_addr", &self.listen_addr)
             .field("database_url_present", &self.database_url.is_some())
             .field("backlog_health", &self.backlog_health)
+            .field("required_relation_count", &self.required_relations.len())
             .finish_non_exhaustive()
     }
 }
@@ -128,12 +150,38 @@ where
     )?;
     let (database_url, connect_config) = parse_database_url(getenv(HEALTH_DATABASE_URL_ENV))?;
     let backlog_health = parse_backlog_health(getenv(HEALTH_BACKLOG_HEALTH_ENV))?;
+    let required_relations = parse_required_relations(getenv(HEALTH_REQUIRED_RELATIONS_ENV))?;
     Ok(HealthProcessConfig {
         listen_addr,
         database_url,
         connect_config,
         backlog_health,
+        required_relations,
     })
+}
+
+/// Parse the optional comma-separated required-relation list.
+///
+/// Absent input declares no relations, which leaves data-integrity evidence
+/// unknown and keeps GET `/ready` fail-closed. Present input must be an
+/// unpadded list of exact `schema.relation` identities separated by single
+/// commas; padding, empty components, or malformed identities fail closed.
+fn parse_required_relations(
+    value: Option<String>,
+) -> Result<Vec<String>, HealthProcessConfigError> {
+    let Some(raw) =
+        exact_env_value(value).map_err(|()| HealthProcessConfigError::InvalidRequiredRelations)?
+    else {
+        return Ok(Vec::new());
+    };
+    raw.split(',')
+        .map(|relation| {
+            if relation.is_empty() || !is_exact_schema_qualified_relation(relation) {
+                return Err(HealthProcessConfigError::InvalidRequiredRelations);
+            }
+            Ok(relation.to_owned())
+        })
+        .collect()
 }
 
 /// Bind the configured listen address for operator probes.
@@ -148,7 +196,9 @@ pub fn bind_health_process(config: &HealthProcessConfig) -> io::Result<TcpListen
 /// Serve GET `/live` and GET `/ready` until `accept` fails.
 ///
 /// GET `/live` uses a process-liveness snapshot and never opens a store
-/// connection. GET `/ready` connects only when `DATABASE_URL` is configured.
+/// connection. GET `/ready` connects only when `DATABASE_URL` is configured,
+/// and readiness requires the caller-declared `HEALTH_REQUIRED_RELATIONS`
+/// evidence to verify plus caller-measured backlog to be within bounds.
 /// Connect or probe failure becomes HTTP 503 without driver text.
 ///
 /// # Errors
@@ -285,12 +335,19 @@ fn answer_health_process_request(
     match config.connect_config.as_ref() {
         None => handle_health_http_request(request, &process_liveness_snapshot()),
         Some(connect_config) => match connect_operational_store(connect_config) {
-            Some(mut client) => handle_postgres_health_http_request(
-                request,
-                &mut client,
-                &[],
-                config.backlog_health(),
-            ),
+            Some(mut client) => {
+                let required_relations: Vec<&str> = config
+                    .required_relations()
+                    .iter()
+                    .map(String::as_str)
+                    .collect();
+                handle_postgres_health_http_request(
+                    request,
+                    &mut client,
+                    &required_relations,
+                    config.backlog_health(),
+                )
+            }
             None => health_ready_response(
                 &unavailable_store_snapshot(config.backlog_health()),
                 &ready_required_capabilities(request),
@@ -344,8 +401,9 @@ fn unavailable_store_snapshot(backlog_health: BacklogHealth) -> RuntimeHealthSna
 mod tests {
     use super::{
         bind_health_process, exact_env_value, parse_health_process_config,
-        ready_required_capabilities, run_health_process, serve_bound_health_process,
-        HealthProcessConfigError, HealthProcessRunError, HEALTH_LISTEN_ADDR_ENV,
+        parse_required_relations, ready_required_capabilities, run_health_process,
+        serve_bound_health_process, HealthProcessConfigError, HealthProcessRunError,
+        HEALTH_LISTEN_ADDR_ENV, HEALTH_REQUIRED_RELATIONS_ENV,
     };
     use crate::postgres_health::POSTGRES_OPERATIONAL_STORE_CAPABILITY_REF;
     use std::error::Error;
@@ -374,6 +432,47 @@ mod tests {
         );
         assert_eq!(exact_env_value(Some(String::new())), Err(()));
         assert_eq!(exact_env_value(Some(" padded".to_owned())), Err(()));
+    }
+
+    #[test]
+    fn required_relations_parse_only_exact_schema_qualified_identities() {
+        let parse = |value: Option<&str>| parse_required_relations(value.map(str::to_owned));
+        assert!(parse(None).unwrap().is_empty());
+        assert_eq!(
+            parse(Some("public.consent_ledger")).unwrap(),
+            vec!["public.consent_ledger"]
+        );
+        assert_eq!(
+            parse(Some("public.a,pg_catalog.pg_class")).unwrap(),
+            vec!["public.a", "pg_catalog.pg_class"]
+        );
+        for malformed in [
+            Some(""),
+            Some(" public.a"),
+            Some("public.a "),
+            Some("public.a,,pg_catalog.pg_class"),
+            Some("consent_ledger"),
+            Some("Public.a"),
+            Some("public.a.extra"),
+        ] {
+            assert_eq!(
+                parse(malformed),
+                Err(HealthProcessConfigError::InvalidRequiredRelations),
+                "{malformed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_exposes_declared_relations_without_echoing_them_as_urls() {
+        let config = parse_health_process_config(|key| match key {
+            HEALTH_LISTEN_ADDR_ENV => Some("127.0.0.1:0".to_owned()),
+            HEALTH_REQUIRED_RELATIONS_ENV => Some("public.consent_ledger".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(config.required_relations(), ["public.consent_ledger"]);
+        assert!(format!("{config:?}").contains("required_relation_count: 1"));
     }
 
     #[test]

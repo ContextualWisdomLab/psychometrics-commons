@@ -59,7 +59,7 @@ Protected-main result-export domain evidence is available through `ResultExport:
 
 ## Operator health probes
 
-To run the first process surface, set `HEALTH_LISTEN_ADDR` (for example `127.0.0.1:8080`) or platform `PORT`, then call `psychometrics_commons_runtime::health_process::run_health_process`. Point liveness at GET `/live` and readiness at GET `/ready`. Set `DATABASE_URL` only when the process should observe PostgreSQL for readiness, and set `HEALTH_BACKLOG_HEALTH=within_bounds` only after backlog is actually measured. A down store must not take `/live` with it.
+To run the first process surface, set `HEALTH_LISTEN_ADDR` (for example `127.0.0.1:8080`) or platform `PORT`, then call `psychometrics_commons_runtime::health_process::run_health_process`. Point liveness at GET `/live` and readiness at GET `/ready`. Set `DATABASE_URL` only when the process should observe PostgreSQL for readiness, set `HEALTH_BACKLOG_HEALTH=within_bounds` only after backlog is actually measured, and declare `HEALTH_REQUIRED_RELATIONS` (comma-separated exact `schema.relation` identities) so readiness can verify required schema evidence; without declared relations readiness stays fail-closed. A down store must not take `/live` with it.
 
 ## Architecture authority and implementation status
 

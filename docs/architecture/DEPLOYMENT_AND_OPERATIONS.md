@@ -117,7 +117,7 @@ backup/restore process
 
 A single process implementation must not blur transactional semantics merely because components are co-located.
 
-The first runnable operator surface is the health-probe process. Set `HEALTH_LISTEN_ADDR` or platform `PORT` (binds `0.0.0.0:$PORT`), then call `run_health_process`. Point liveness at GET `/live` and readiness at GET `/ready`. Optional `DATABASE_URL` is observed only for readiness. Do not treat probe success as a measured SLO.
+The first runnable operator surface is the health-probe process. Set `HEALTH_LISTEN_ADDR` or platform `PORT` (binds `0.0.0.0:$PORT`), then call `run_health_process`. Point liveness at GET `/live` and readiness at GET `/ready`. Optional `DATABASE_URL` is observed only for readiness, and optional `HEALTH_REQUIRED_RELATIONS` declares the exact `schema.relation` identities whose verified presence readiness requires; without declared relations readiness fails closed. Do not treat probe success as a measured SLO.
 
 ## 4. Health and readiness
 
