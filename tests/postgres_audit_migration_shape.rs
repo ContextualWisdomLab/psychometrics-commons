@@ -1,6 +1,6 @@
 //! Migration-order and fail-closed shape contracts for durable audit evidence.
 
-use postgres::{Client, NoTls};
+use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_audit::apply_audit_evidence_migration;
 use psychometrics_commons_runtime::postgres_audit_retention::apply_audit_evidence_retention_migration;
 
@@ -94,6 +94,110 @@ fn core_migration_uses_dedicated_nologin_owner_without_runtime_set_paths() {
         !owner.get::<_, bool>(9),
         "no non-superuser login role may inherit or SET ROLE into the audit owner"
     );
+}
+
+#[test]
+fn explicit_runtime_grant_enables_append_and_read_without_mutation_authority() {
+    let mut client = client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS audit_runtime_grant_test CASCADE; \
+             CREATE SCHEMA audit_runtime_grant_test; \
+             SET search_path TO audit_runtime_grant_test;",
+        )
+        .unwrap();
+    apply_audit_evidence_migration(&mut client).unwrap();
+
+    let backend_pid: i32 = client
+        .query_one("SELECT pg_backend_pid()", &[])
+        .unwrap()
+        .get(0);
+    let runtime_role = format!(
+        "audit_runtime_shape_{}_{}",
+        std::process::id(),
+        backend_pid
+    );
+    client
+        .batch_execute(&format!(
+            "CREATE ROLE {runtime_role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
+             GRANT USAGE ON SCHEMA audit_runtime_grant_test TO {runtime_role}; \
+             GRANT SELECT, INSERT ON TABLE audit_runtime_grant_test.audit_evidence_record TO {runtime_role};"
+        ))
+        .expect("deployment-selected runtime role must accept the documented least-privilege grants");
+
+    let privileges = client
+        .query_one(
+            "SELECT \
+                 has_schema_privilege($1, 'audit_runtime_grant_test', 'USAGE'), \
+                 has_table_privilege($1, 'audit_runtime_grant_test.audit_evidence_record', 'SELECT'), \
+                 has_table_privilege($1, 'audit_runtime_grant_test.audit_evidence_record', 'INSERT'), \
+                 has_table_privilege($1, 'audit_runtime_grant_test.audit_evidence_record', 'UPDATE'), \
+                 has_table_privilege($1, 'audit_runtime_grant_test.audit_evidence_record', 'DELETE'), \
+                 has_table_privilege($1, 'audit_runtime_grant_test.audit_evidence_record', 'TRUNCATE')",
+            &[&runtime_role],
+        )
+        .unwrap();
+    assert!(privileges.get::<_, bool>(0));
+    assert!(privileges.get::<_, bool>(1));
+    assert!(privileges.get::<_, bool>(2));
+    for privilege_index in 3..6 {
+        assert!(
+            !privileges.get::<_, bool>(privilege_index),
+            "runtime audit role must not receive mutation privileges"
+        );
+    }
+
+    client
+        .batch_execute(&format!(
+            "SET ROLE {runtime_role}; SET search_path TO audit_runtime_grant_test;"
+        ))
+        .unwrap();
+    client
+        .execute(
+            "INSERT INTO audit_evidence_record (\
+                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref, \
+                outcome_code, evidence_digest, occurred_at_unix_ms \
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            &[
+                &"audit_event_runtime_grant_01",
+                &"tenant_runtime_alpha",
+                &"actor_runtime_alpha",
+                &"runtime_audit",
+                &"record_audit_evidence",
+                &"resource_runtime_alpha",
+                &"succeeded",
+                &"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                &1_785_000_000_000_i64,
+            ],
+        )
+        .expect("documented runtime grants must permit append-only audit writes");
+    let visible: i64 = client
+        .query_one(
+            "SELECT count(*)::bigint FROM audit_evidence_record \
+             WHERE audit_event_ref = 'audit_event_runtime_grant_01'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(visible, 1);
+
+    for statement in [
+        "UPDATE audit_evidence_record SET actor_ref = 'actor_runtime_beta' WHERE audit_event_ref = 'audit_event_runtime_grant_01'",
+        "DELETE FROM audit_evidence_record WHERE audit_event_ref = 'audit_event_runtime_grant_01'",
+        "TRUNCATE TABLE audit_evidence_record",
+    ] {
+        let error = client
+            .batch_execute(statement)
+            .expect_err("runtime audit role must remain append-only after explicit deployment grants");
+        assert_eq!(error.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
+    }
+
+    client.batch_execute("RESET ROLE").unwrap();
+    client
+        .batch_execute(&format!(
+            "DROP OWNED BY {runtime_role}; DROP ROLE {runtime_role};"
+        ))
+        .unwrap();
 }
 
 #[test]
