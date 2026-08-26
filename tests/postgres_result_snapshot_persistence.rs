@@ -7,12 +7,15 @@ use psychometrics_commons_runtime::postgres_result_snapshot::{
     apply_result_snapshot_migration, persist_result_snapshot, ResultSnapshotPersistenceDisposition,
     ResultSnapshotPersistenceError,
 };
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::scoring::{
     ObservationDisposition, ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 use std::sync::{Mutex, MutexGuard};
 
 const ENGINE_DIGEST: &str =
@@ -73,21 +76,16 @@ fn snapshot_named(
     supersedes_ref: Option<&str>,
     observations: Vec<ScoreObservation>,
 ) -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new(session_ref).unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_result_one",
-                client_event_ref: "client_event_result_one",
-                item_version_ref: "item_version_001",
-                payload_digest: ENGINE_DIGEST,
-            },
-        )
-        .unwrap();
-    let response = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_result_one")
-        .unwrap();
+    let response = frozen_snapshot(
+        session_ref,
+        "response_snapshot_result_one",
+        &[ResponseWrite {
+            server_event_ref: "server_event_result_one",
+            client_event_ref: "client_event_result_one",
+            item_version_ref: "item_version_001",
+            payload_digest: ENGINE_DIGEST,
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &response,
         ScoringRequestInput {
@@ -264,21 +262,16 @@ fn observation_dispositions_and_supersession_persist_without_mutating_predecesso
 }
 
 fn overflow_snapshot() -> ResultSnapshot {
-    let mut ledger = ResponseLedger::new("session_result_overflow").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "server_event_overflow",
-                client_event_ref: "client_event_overflow",
-                item_version_ref: "item_version_001",
-                payload_digest: ENGINE_DIGEST,
-            },
-        )
-        .unwrap();
-    let response = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_overflow")
-        .unwrap();
+    let response = frozen_snapshot(
+        "session_result_overflow",
+        "response_snapshot_overflow",
+        &[ResponseWrite {
+            server_event_ref: "server_event_overflow",
+            client_event_ref: "client_event_overflow",
+            item_version_ref: "item_version_001",
+            payload_digest: ENGINE_DIGEST,
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &response,
         ScoringRequestInput {

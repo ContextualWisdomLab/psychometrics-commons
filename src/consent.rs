@@ -52,7 +52,7 @@ pub struct ConsentEventInput<'a> {
     pub occurred_at_unix_ms: u64,
 }
 
-/// One immutable normalized consent event.
+/// One immutable exact-spelling consent event.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConsentEvent {
     event_ref: String,
@@ -182,7 +182,9 @@ impl ConsentLedger {
     /// # Errors
     ///
     /// Returns [`ConsentWriteError::EmptyReference`] when `participant_ref` is
-    /// blank after normalization.
+    /// blank or otherwise rejected by the shared opaque-reference validator, and
+    /// [`ConsentWriteError::InvalidReference`] when validation would change the
+    /// caller-supplied spelling.
     pub fn new(participant_ref: &str) -> Result<Self, ConsentWriteError> {
         let participant_ref = required_reference(participant_ref)?;
         Ok(Self {
@@ -215,7 +217,7 @@ impl ConsentLedger {
         &self.events
     }
 
-    /// Record a normalized consent event or replay an identical prior event.
+    /// Record an exact-spelling consent event or replay an identical prior event.
     ///
     /// Research-purpose events require a non-empty research scope. Other
     /// purposes reject a research scope so purpose boundaries cannot be blurred.
@@ -284,8 +286,8 @@ impl ConsentLedger {
     ///
     /// # Errors
     ///
-    /// Returns [`ConsentWriteError::EmptyReference`] for a blank snapshot
-    /// reference.
+    /// Returns [`ConsentWriteError`] when the snapshot reference is invalid or
+    /// not already in its exact accepted opaque-reference spelling.
     pub fn snapshot_as(&self, snapshot_ref: &str) -> Result<ConsentSnapshot, ConsentWriteError> {
         let snapshot_ref = required_reference(snapshot_ref)?;
         Ok(ConsentSnapshot {
@@ -300,8 +302,10 @@ impl ConsentLedger {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ConsentWriteError {
-    /// A required reference is blank after normalization.
+    /// A required reference is blank or otherwise rejected by shared validation.
     EmptyReference,
+    /// A reference would require normalization instead of preserving exact spelling.
+    InvalidReference,
     /// Research consent did not declare a research scope.
     ResearchScopeRequired,
     /// A non-research purpose attempted to carry a research scope.
@@ -318,6 +322,9 @@ impl Display for ConsentWriteError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::EmptyReference => "consent references must not be empty",
+            Self::InvalidReference => {
+                "consent references must use exact opaque spelling without surrounding whitespace"
+            }
             Self::ResearchScopeRequired => "research consent requires a research scope",
             Self::ResearchScopeNotAllowed => {
                 "research scope is allowed only for research-contribution consent"
@@ -366,10 +373,10 @@ impl ResearchContribution {
     /// Returns [`ResearchContributionError::ResearchConsentRequired`] unless the
     /// supplied snapshot contains an active research grant,
     /// [`ResearchContributionError::OperationalIdentityReuse`] when the research
-    /// identity reuses the normalized operational participant reference, an
-    /// empty-reference error for invalid new identities, or an invalid-start-time
-    /// error when the contribution start is zero or predates the authorizing
-    /// research consent.
+    /// identity exactly reuses the operational participant reference, an invalid
+    /// reference error when a new identity is not already in its exact accepted
+    /// opaque spelling, or an invalid-start-time error when the contribution start
+    /// is zero or predates the authorizing research consent.
     pub fn from_snapshot(
         contribution_ref: &str,
         research_participant_ref: &str,
@@ -455,9 +462,9 @@ impl ResearchContribution {
     ///
     /// # Errors
     ///
-    /// Returns a [`ResearchContributionError`] for a blank withdrawal reference,
-    /// a withdrawal not later than contribution start, or a second conflicting
-    /// withdrawal after the contribution is already withdrawn.
+    /// Returns a [`ResearchContributionError`] for an invalid or non-exact
+    /// withdrawal reference, a withdrawal not later than contribution start, or
+    /// a second conflicting withdrawal after the contribution is already withdrawn.
     pub fn withdraw(
         &self,
         withdrawal_event_ref: &str,
@@ -489,8 +496,10 @@ impl ResearchContribution {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResearchContributionError {
-    /// A required contribution or research-participant reference is blank.
+    /// A required contribution or research-participant reference is invalid.
     EmptyReference,
+    /// A reference would require normalization instead of preserving exact spelling.
+    InvalidReference,
     /// The supplied consent snapshot has no active explicit research grant.
     ResearchConsentRequired,
     /// Research identity reused the operational participant reference.
@@ -507,6 +516,9 @@ impl Display for ResearchContributionError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::EmptyReference => "research contribution references must not be empty",
+            Self::InvalidReference => {
+                "research contribution references must use exact opaque spelling without surrounding whitespace"
+            }
             Self::ResearchConsentRequired => {
                 "research contribution requires active explicit research consent"
             }
@@ -527,9 +539,18 @@ impl Display for ResearchContributionError {
 impl Error for ResearchContributionError {}
 
 fn required_reference(reference: &str) -> Result<&str, ConsentWriteError> {
-    normalized_reference(reference).ok_or(ConsentWriteError::EmptyReference)
+    let normalized = normalized_reference(reference).ok_or(ConsentWriteError::EmptyReference)?;
+    if normalized != reference {
+        return Err(ConsentWriteError::InvalidReference);
+    }
+    Ok(normalized)
 }
 
 fn research_reference(reference: &str) -> Result<&str, ResearchContributionError> {
-    normalized_reference(reference).ok_or(ResearchContributionError::EmptyReference)
+    let normalized =
+        normalized_reference(reference).ok_or(ResearchContributionError::EmptyReference)?;
+    if normalized != reference {
+        return Err(ResearchContributionError::InvalidReference);
+    }
+    Ok(normalized)
 }

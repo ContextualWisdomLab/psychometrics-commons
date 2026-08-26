@@ -1,35 +1,34 @@
 //! Result provenance preserves the intentional absence of a norm version.
 
+#[path = "common/mod.rs"]
 mod common;
 
-use psychometrics_commons_runtime::response::{ResponseLedger, ResponseWrite};
+#[path = "response_support/mod.rs"]
+mod response_support;
+
+use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
 use psychometrics_commons_runtime::scoring::{
     ScoreObservation, ScoringRequest, ScoringRequestInput, ScoringResult,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use response_support::frozen_snapshot;
 
 const ENGINE_DIGEST: &str =
     "sha256:2222222222222222222222222222222222222222222222222222222222222222";
 
 #[test]
 fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
-    let mut ledger = ResponseLedger::new("session_ref").unwrap();
-    ledger
-        .record(
-            SessionState::Active,
-            ResponseWrite {
-                server_event_ref: "event_ref",
-                client_event_ref: "client_ref",
-                item_version_ref: "item_version_ref",
-                payload_digest:
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            },
-        )
-        .unwrap();
-    let response_snapshot = ledger
-        .freeze_as(SessionState::Completed, "response_snapshot_ref")
-        .unwrap();
+    let response_snapshot = frozen_snapshot(
+        "session_ref",
+        "response_snapshot_ref",
+        &[ResponseWrite {
+            server_event_ref: "event_ref",
+            client_event_ref: "client_ref",
+            item_version_ref: "item_version_ref",
+            payload_digest:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }],
+    );
     let request = ScoringRequest::from_snapshot(
         &response_snapshot,
         ScoringRequestInput {
