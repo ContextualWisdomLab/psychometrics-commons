@@ -190,15 +190,34 @@ fn handle_post(
             "session_ref must be an exact opaque non-numeric session identity",
         );
     }
-    let Some(idempotency_key) =
-        header_value(request, "idempotency-key").and_then(valid_idempotency_key)
-    else {
-        return ResponseHttpResponse::problem(
-            400,
-            "urn:psychometrics-commons:problem:missing-idempotency-key",
-            "Missing Idempotency Key",
-            "POST /v1/sessions/{session_ref}/responses requires an opaque Idempotency-Key header",
-        );
+    let idempotency_key = match single_header_value(request, "idempotency-key") {
+        Err(()) => {
+            return ResponseHttpResponse::problem(
+                400,
+                "urn:psychometrics-commons:problem:bad-request",
+                "Bad Request",
+                "response write requires exactly one Idempotency-Key header",
+            );
+        }
+        Ok(Some(value)) => match valid_idempotency_key(value) {
+            Some(value) => value,
+            None => {
+                return ResponseHttpResponse::problem(
+                    400,
+                    "urn:psychometrics-commons:problem:missing-idempotency-key",
+                    "Missing Idempotency Key",
+                    "POST /v1/sessions/{session_ref}/responses requires an opaque Idempotency-Key header",
+                );
+            }
+        },
+        Ok(None) => {
+            return ResponseHttpResponse::problem(
+                400,
+                "urn:psychometrics-commons:problem:missing-idempotency-key",
+                "Missing Idempotency Key",
+                "POST /v1/sessions/{session_ref}/responses requires an opaque Idempotency-Key header",
+            );
+        }
     };
     let Some(body) = request_body(request) else {
         return ResponseHttpResponse::problem(
@@ -450,20 +469,26 @@ fn valid_idempotency_key(value: &str) -> Option<&str> {
     }
 }
 
-fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
-    request
-        .lines()
-        .skip(1)
-        .take_while(|line| !line.is_empty())
-        .find_map(|line| {
-            let (header_name, value) = line.split_once(':')?;
-            header_name.eq_ignore_ascii_case(name).then(|| value.trim())
-        })
+fn single_header_value<'a>(request: &'a str, name: &str) -> Result<Option<&'a str>, ()> {
+    let mut found = None;
+    for line in request.lines().skip(1).take_while(|line| !line.is_empty()) {
+        let Some((header_name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if header_name.eq_ignore_ascii_case(name) {
+            if found.is_some() {
+                return Err(());
+            }
+            found = Some(value.trim());
+        }
+    }
+    Ok(found)
 }
 
 fn request_body(request: &str) -> Option<&str> {
     let (headers, body) = request.split_once("\r\n\r\n")?;
-    let content_length = header_value(headers, "content-length")?
+    let content_length = single_header_value(headers, "content-length")
+        .ok()??
         .parse::<usize>()
         .ok()?;
     if body.len() < content_length || !body.is_char_boundary(content_length) {
