@@ -48,6 +48,7 @@ pub mod research_release;
 pub mod response;
 #[path = "response_http_boundary.rs"]
 pub mod response_http;
+mod response_http_metadata;
 pub mod result;
 pub mod result_authorization;
 pub mod result_export;
