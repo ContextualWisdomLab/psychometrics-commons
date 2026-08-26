@@ -238,6 +238,18 @@ fn retention_rejects_invalid_tenant_zero_and_future_cutoffs_instead_of_inventing
     }
     assert!(client
         .query_one(
+            "SELECT expire_audit_evidence_before(NULL::text, 2000::bigint)",
+            &[],
+        )
+        .is_err());
+    assert!(client
+        .query_one(
+            "SELECT expire_audit_evidence_before('tenant_research_alpha', NULL::bigint)",
+            &[],
+        )
+        .is_err());
+    assert!(client
+        .query_one(
             "SELECT expire_audit_evidence_before($1, 0)",
             &[&"tenant_research_alpha"],
         )
