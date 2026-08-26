@@ -115,9 +115,9 @@ fn migration_default_ignorable_ranges() -> Vec<(u32, u32)> {
 
     body.split("),")
         .map(|range| {
-            let range = range.strip_prefix('[').expect(
-                "default-ignorable multirange entries must be inclusive-exclusive ranges",
-            );
+            let range = range
+                .strip_prefix('[')
+                .expect("default-ignorable multirange entries must be inclusive-exclusive ranges");
             let range = range.strip_suffix(')').unwrap_or(range);
             let (start, end) = range
                 .split_once(',')
@@ -211,7 +211,10 @@ fn migration_default_ignorable_ranges_exactly_match_pinned_rust_boundary() {
 fn migration_declares_and_runs_under_the_required_utf8_database_encoding() {
     let _guard = guard();
     let mut client = client();
-    let encoding: String = client.query_one("SHOW server_encoding", &[]).unwrap().get(0);
+    let encoding: String = client
+        .query_one("SHOW server_encoding", &[])
+        .unwrap()
+        .get(0);
     assert_eq!(encoding, "UTF8");
 
     assert!(MIGRATION.contains("current_setting('server_encoding')"));
