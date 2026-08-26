@@ -94,6 +94,8 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
+A scoring worker that does not already know the next job identity claims the oldest due queued or retry-scheduled `scoring_job_state` row under `READ COMMITTED` with `FOR UPDATE SKIP LOCKED` (PostgreSQL Global Development Group, 2026b, 2026c). The claim returns the stored `scoring_request_ref` and fencing lease, or `None` when no job is due. Two concurrent pollers cannot both receive the same row. A retry-scheduled row is skipped until its persisted due time. The worker is still not invoked inside the session-completion transaction.
+
 ### Integration outbox enqueue
 
 The first physical integration slice inserts an immutable outbox row under the composite identity `(source_ref, tenant_ref, event_ref)`. `INSERT ... ON CONFLICT DO NOTHING` is followed by an exact immutable-evidence query only when the insert did not create a row. Because a caller may supply its own transaction, this algorithm explicitly requires `READ COMMITTED`, where each statement receives a fresh command snapshot after a conflicting transaction completes. Stronger isolation is rejected rather than converting an invisible concurrent duplicate into a false `ConflictingReplay` result.
@@ -312,6 +314,10 @@ International Organization for Standardization. (2023). *Systems and software en
 
 National Institute of Standards and Technology. (2020). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53 Rev. 5). https://doi.org/10.6028/NIST.SP.800-53r5
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/
+PostgreSQL Global Development Group. (2026a). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*. https://www.postgresql.org/support/versioning/
+PostgreSQL Global Development Group. (2026b). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+
+PostgreSQL Global Development Group. (2026c). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+
+PostgreSQL Global Development Group. (2026d). *PostgreSQL versioning policy*. https://www.postgresql.org/support/versioning/
