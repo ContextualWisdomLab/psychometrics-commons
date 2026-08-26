@@ -280,6 +280,36 @@ fn stale_server_event_cursor_cannot_reuse_identity_across_sessions() {
 }
 
 #[test]
+fn exact_replay_survives_a_stale_cursor_that_names_its_original_server_event() {
+    let release = published_release();
+    let session = active_session(
+        "ses_response_stale_replay",
+        "ptc_response_stale_replay",
+        &release,
+    );
+    let mut runtime = ResponseHttpRuntime::new(
+        vec![session],
+        vec![release],
+        "evt_response_stale_replay",
+    );
+    let request = post_request(
+        "ses_response_stale_replay",
+        "idem_response_stale_replay",
+        "item_version_001",
+        PAYLOAD_ONE,
+    );
+
+    let created = authorized_response(&mut runtime, "ptc_response_stale_replay", &request);
+    assert_eq!(created.status(), 201);
+    runtime.replace_next_server_event_ref("evt_response_stale_replay");
+    let replay = authorized_response(&mut runtime, "ptc_response_stale_replay", &request);
+
+    assert_eq!(replay.status(), 200);
+    assert_eq!(replay.body(), created.body());
+    assert_eq!(runtime.event_count("ses_response_stale_replay"), 1);
+}
+
+#[test]
 fn body_lines_cannot_supply_the_idempotency_header() {
     let release = published_release();
     let session = active_session(
