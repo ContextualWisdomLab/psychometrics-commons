@@ -1,6 +1,6 @@
 # Rust toolchain freshness
 
-Psychometrics Commons uses Rust `1.97.1` as its exact stable compiler baseline.
+Psychometrics Commons uses Rust `1.98.0` as its exact stable compiler baseline.
 The project does not use a floating `stable` channel: a compiler transition is a
 reviewed change that must preserve formatting, compilation, Clippy, tests,
 rustdoc, PostgreSQL integration, and exact production coverage on one unchanged
@@ -22,8 +22,8 @@ reviewable pull requests rather than silently changing CI behavior.
 GitHub. (2025, August 19). *Dependabot now supports Rust toolchain updates*.
 GitHub Changelog. https://github.blog/changelog/2025-08-19-dependabot-now-supports-rust-toolchain-updates/
 
-Rust Project Developers. (2026, July 16). *Announcing Rust 1.97.1*. Rust Blog.
-https://blog.rust-lang.org/2026/07/16/Rust-1.97.1/
+Rust Release Team. (2026, August 20). *Announcing Rust 1.98.0*. Rust Blog.
+https://blog.rust-lang.org/2026/08/20/Rust-1.98.0/
 
 Taiki Endo and contributors. (2026). *cargo-llvm-cov* (Version 0.8.6)
 [Computer software]. GitHub. https://github.com/taiki-e/cargo-llvm-cov
