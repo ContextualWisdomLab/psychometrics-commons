@@ -11,6 +11,7 @@ use crate::postgres_instrument_release::{
     published_instrument_release_snapshot_from_row, InstrumentReleaseQueryError,
     PublishedInstrumentReleaseSnapshot,
 };
+use crate::reference::normalized_reference;
 use postgres::GenericClient;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -175,6 +176,65 @@ pub fn list_startable_instrument_release_page(
         releases,
         next_cursor,
     })
+}
+
+/// List all startable releases for one exact opaque instrument family when they
+/// fit in one bounded page.
+///
+/// The family predicate is applied by `PostgreSQL` before reconstruction so a
+/// family endpoint does not need to load every published family and filter in
+/// transport code. Rows are ordered by `(locale, release_ref)` and every row is
+/// reconstructed through the same immutable published-release validation used by
+/// the global catalog. Catalog discovery remains advisory: session start must
+/// still reload and lock the exact release before minting a session.
+///
+/// This helper deliberately fails closed instead of returning an unbounded or
+/// truncated family when more than [`STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE`]
+/// releases match. A future paged family transport can add an opaque family
+/// continuation contract without weakening this bounded compatibility surface.
+///
+/// # Errors
+///
+/// Returns [`StartableInstrumentCatalogError::Query`] when `instrument_ref` is
+/// blank, numeric-like, unsafe, or would change under the product opaque-reference
+/// boundary, when `PostgreSQL` cannot execute the query, or when persisted release
+/// evidence is invalid. Returns [`StartableInstrumentCatalogError::PageRequired`]
+/// when the family has more than one bounded page of published releases.
+pub fn list_startable_instrument_releases_for_family(
+    client: &mut impl GenericClient,
+    instrument_ref: &str,
+) -> Result<Vec<PublishedInstrumentReleaseSnapshot>, StartableInstrumentCatalogError> {
+    normalized_reference(instrument_ref)
+        .filter(|normalized| *normalized == instrument_ref)
+        .ok_or(InstrumentReleaseQueryError::InvalidReference)?;
+
+    let rows = client
+        .query(
+            "SELECT release_ref, instrument_ref, instrument_version_ref, construct_ref, \
+                    item_version_refs, locale, assessment_spec_ref, scoring_version_ref, \
+                    calibration_reference, norm_version_ref, narrative_version_ref, \
+                    consent_requirement_refs, intended_use_ref, limitations_ref, content_digest, \
+                    publication_state, created_at_unix_ms \
+             FROM instrument_release \
+             WHERE publication_state = $1 AND instrument_ref = $2 \
+             ORDER BY locale, release_ref \
+             LIMIT $3",
+            &[
+                &"published",
+                &instrument_ref,
+                &STARTABLE_INSTRUMENT_RELEASE_FETCH_LIMIT,
+            ],
+        )
+        .map_err(InstrumentReleaseQueryError::from)?;
+
+    if rows.len() > STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE {
+        return Err(StartableInstrumentCatalogError::PageRequired);
+    }
+
+    rows.iter()
+        .map(published_instrument_release_snapshot_from_row)
+        .collect::<Result<Vec<_>, InstrumentReleaseQueryError>>()
+        .map_err(StartableInstrumentCatalogError::from)
 }
 
 /// List all startable releases only when they fit in one bounded page.
