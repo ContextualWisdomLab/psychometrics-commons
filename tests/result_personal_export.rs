@@ -363,7 +363,9 @@ fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
     assert!(!export
         .human_readable_report()
         .contains("participant_account_en_001"));
-    assert!(export.human_readable_report().contains(HUMAN_PROVENANCE_NOTE));
+    assert!(export
+        .human_readable_report()
+        .contains(HUMAN_PROVENANCE_NOTE));
     assert!(export
         .human_readable_report()
         .contains("Do not treat this as \"employment fitness.\""));
