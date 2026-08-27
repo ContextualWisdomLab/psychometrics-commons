@@ -1,11 +1,18 @@
 //! Durable startable-instrument catalog backed by product-owned `PostgreSQL` state.
 //!
-//! This adapter lists only releases whose persisted lifecycle currently says
-//! `published`, then validates every selected row using the same stored-evidence
-//! reconstruction used by session start. The returned releases are candidates
-//! only; this function neither authorizes nor creates sessions. Callers must use
-//! the persisted session-start path for final validation because publication
-//! state can change after a catalog page is read.
+//! A persisted release is instrument-publication evidence already stored in the
+//! product database. This adapter lists only releases whose persisted lifecycle
+//! currently says `published`, then validates every selected row with the same
+//! immutable stored-evidence reconstruction used by session start.
+//!
+//! Keyset order means rows are sorted by `(instrument_ref, locale, release_ref)`
+//! and a continuation cursor resumes immediately after the last returned row,
+//! rather than counting rows from the beginning again. A non-locking catalog read
+//! does not reserve the release row while a participant is browsing. The returned
+//! releases are therefore candidates only: publication state can change after the
+//! catalog read, so the persisted session-start path locks and revalidates the exact
+//! release before creating a session. This adapter neither authorizes nor creates
+//! sessions.
 
 use crate::postgres_instrument_release::{
     published_instrument_release_snapshot_from_row, InstrumentReleaseQueryError,
@@ -100,13 +107,19 @@ impl From<InstrumentReleaseQueryError> for StartableInstrumentCatalogError {
 
 /// Read one bounded page of persisted releases that may currently start sessions.
 ///
-/// Rows are selected by keyset order `(instrument_ref, locale, release_ref)` and
-/// validated in one non-locking query. At most
+/// The database sorts releases by the stable key
+/// `(instrument_ref, locale, release_ref)`. When a previous page supplied a
+/// cursor, the next query resumes immediately after that page's last returned
+/// release. This is keyset pagination: it avoids recounting earlier rows and
+/// keeps the continuation rule tied to the same deterministic ordering.
+///
+/// The catalog query is non-locking, meaning it reads committed publication
+/// evidence without reserving a release row while the caller browses. At most
 /// [`STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE`] releases are returned, with a
-/// continuation cursor only when the query observed another row. A continuation
-/// query sees the database state committed when that statement runs, so catalog
-/// discovery remains advisory; the persisted session-start path must perform
-/// final locking validation of the exact release.
+/// continuation cursor only when the query observed another row. Because a
+/// release can be suspended or retired after discovery, catalog results are
+/// advisory. The persisted session-start path must lock and revalidate the exact
+/// release immediately before creating a session.
 ///
 /// Any malformed persisted evidence inside the returned page fails that page
 /// instead of returning partial validated content. This function does not
