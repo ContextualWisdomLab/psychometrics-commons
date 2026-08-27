@@ -2,7 +2,8 @@
 //!
 //! Integration evidence can be inserted by recovery/operator paths as well as normal Rust code.
 //! The physical schema must therefore reject every reference spelling that the domain rejects,
-//! including Unicode numeric-only values, surrounding Unicode whitespace, and controls.
+//! including Unicode numeric-only values, surrounding Unicode whitespace, controls, and invisible
+//! or display-altering Unicode default-ignorable characters.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_integration::apply_integration_migration;
@@ -137,12 +138,47 @@ fn assert_scalar_parity_batch(client: &mut Client, references: &[String], expect
     );
 }
 
+fn is_default_ignorable_identifier_character(character: char) -> bool {
+    matches!(
+        character,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{17B4}'..='\u{17B5}'
+            | '\u{180B}'..='\u{180F}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{FFF0}'..='\u{FFF8}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0000}'..='\u{E0FFF}'
+    )
+}
+
 #[test]
-fn outbox_identity_rejects_unicode_numeric_whitespace_and_control_aliases() {
+fn outbox_identity_rejects_unicode_numeric_whitespace_control_and_default_ignorable_aliases() {
     let _guard = guard();
     let mut client = client();
 
-    for invalid_ref in ["½", "²", "Ⅳ", "\u{00a0}event_alpha", "event_\u{0001}_alpha"] {
+    for invalid_ref in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}event_alpha",
+        "event_\u{0001}_alpha",
+        "event_\u{00ad}_alpha",
+        "event_\u{200b}_alpha",
+        "event_\u{202e}_alpha",
+        "event_\u{2060}_alpha",
+        "event_\u{fe0f}_alpha",
+        "event_\u{e0001}_alpha",
+    ] {
         let error = insert_outbox(&mut client, invalid_ref)
             .expect_err("direct SQL must not bypass the Rust outbox reference boundary");
         assert_check(&error);
@@ -165,8 +201,12 @@ fn database_validator_matches_rust_scalar_classes_exhaustively() {
             continue;
         }
         references.push(character.to_string());
-        expected
-            .push(!character.is_numeric() && !character.is_whitespace() && !character.is_control());
+        expected.push(
+            !character.is_numeric()
+                && !character.is_whitespace()
+                && !character.is_control()
+                && !is_default_ignorable_identifier_character(character),
+        );
         checked_scalars += 1;
 
         if references.len() == SCALAR_PARITY_BATCH_SIZE {
@@ -389,4 +429,30 @@ fn migration_reapplication_repairs_a_weaker_event_reference_check() {
     let error = insert_outbox(&mut client, "½")
         .expect_err("reapplying the product migration must repair the weaker check");
     assert_check(&error);
+}
+
+#[test]
+fn migration_reapplication_fails_closed_on_historical_default_ignorable_identity() {
+    let _guard = guard();
+    let mut client = client();
+
+    client
+        .batch_execute(
+            "ALTER TABLE integration_outbox DROP CONSTRAINT integration_outbox_event_ref_check; \
+             ALTER TABLE integration_outbox ADD CONSTRAINT integration_outbox_event_ref_check \
+             CHECK (event_ref = btrim(event_ref) AND event_ref <> '');",
+        )
+        .unwrap();
+    insert_outbox(&mut client, "event_\u{200b}_historical")
+        .expect("the weakened historical check demonstrates the invisible-identity gap");
+
+    let error = apply_integration_migration(&mut client)
+        .expect_err("migration reapplication must block until unsafe historical identity is remediated");
+    assert_eq!(
+        error
+            .as_db_error()
+            .expect("migration failure must come from PostgreSQL constraint revalidation")
+            .code(),
+        &SqlState::CHECK_VIOLATION
+    );
 }
