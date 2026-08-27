@@ -67,6 +67,8 @@ pub enum ResponseEventPersistenceError {
     InvalidReference,
     /// Event identity was replayed with different immutable evidence.
     ConflictingReplay,
+    /// Stored response-event evidence was malformed or otherwise corrupt.
+    CorruptStoredEvidence,
     /// A server sequence was reused by another event identity in the session.
     SequenceConflict,
     /// A sequence cannot be represented by the bounded database column.
@@ -87,6 +89,9 @@ impl Display for ResponseEventPersistenceError {
             }
             Self::ConflictingReplay => {
                 "response event identity was replayed with conflicting evidence"
+            }
+            Self::CorruptStoredEvidence => {
+                "stored response event evidence is not valid immutable evidence"
             }
             Self::SequenceConflict => {
                 "response event sequence was reused by a different event identity"
@@ -358,9 +363,10 @@ fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {
             ResponseEventPersistenceError::InvalidReference
         }
         WriteError::InvalidSequence => ResponseEventPersistenceError::InvalidSequence,
-        WriteError::EmptyReference
-        | WriteError::InvalidPayloadDigest
-        | WriteError::IdempotencyConflict
+        WriteError::EmptyReference | WriteError::InvalidPayloadDigest => {
+            ResponseEventPersistenceError::CorruptStoredEvidence
+        }
+        WriteError::IdempotencyConflict
         | WriteError::ServerReferenceConflict
         | WriteError::SessionNotActive(_)
         | WriteError::SnapshotRequiresCompleted(_) => {
@@ -795,9 +801,13 @@ mod reference_guard_tests {
             map_rebuild_error(WriteError::InvalidSequence),
             ResponseEventPersistenceError::InvalidSequence
         ));
+        for error in [WriteError::EmptyReference, WriteError::InvalidPayloadDigest] {
+            assert!(matches!(
+                map_rebuild_error(error),
+                ResponseEventPersistenceError::CorruptStoredEvidence
+            ));
+        }
         for error in [
-            WriteError::EmptyReference,
-            WriteError::InvalidPayloadDigest,
             WriteError::IdempotencyConflict,
             WriteError::ServerReferenceConflict,
             WriteError::SessionNotActive(SessionState::Paused),
@@ -884,6 +894,7 @@ mod reference_guard_tests {
         for error in [
             ResponseEventPersistenceError::InvalidReference,
             ResponseEventPersistenceError::ConflictingReplay,
+            ResponseEventPersistenceError::CorruptStoredEvidence,
             ResponseEventPersistenceError::SequenceConflict,
             ResponseEventPersistenceError::InvalidSequence,
             ResponseEventPersistenceError::InvalidTimestamp,
