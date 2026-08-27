@@ -173,7 +173,8 @@ fn interleaved_sessions_do_not_reuse_server_event_reference() {
         "item_version_002",
         PAYLOAD_TWO,
     );
-    let second_b = authorized_response(&mut runtime, "ptc_response_multi_b", &session_beta_followup);
+    let second_b =
+        authorized_response(&mut runtime, "ptc_response_multi_b", &session_beta_followup);
 
     assert_eq!(first_a.status(), 201);
     assert_eq!(first_b.status(), 201);
