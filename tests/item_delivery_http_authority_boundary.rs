@@ -7,10 +7,8 @@ use psychometrics_commons_runtime::item_delivery_http::{
 };
 use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand};
 
-const DIGEST_A: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const DIGEST_B: &str =
-    "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const DIGEST_A: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const DIGEST_B: &str = "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 const SESSION_REF: &str = "ses_item_delivery_authority";
 
 fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
@@ -58,10 +56,8 @@ fn delivery_state_is_derived_from_the_authoritative_assessment_session() {
     let mut runtime = ItemDeliveryHttpRuntime::new(vec![(session(&manifest), ledger)]).unwrap();
     let body = "{\"delivery_ref\":\"dlv_authority_001\",\"item_version_ref\":\"item_version_001\",\"presentation_context_ref\":\"presentation_web_v1\"}";
 
-    let before_activate = handle_item_delivery_http_request(
-        &record_request(body, body.len()),
-        &mut runtime,
-    );
+    let before_activate =
+        handle_item_delivery_http_request(&record_request(body, body.len()), &mut runtime);
     assert_eq!(before_activate.status(), 409);
     assert_eq!(runtime.event_count(SESSION_REF), 0);
 
@@ -71,10 +67,8 @@ fn delivery_state_is_derived_from_the_authoritative_assessment_session() {
         .apply_command("cmd_activate_item_delivery", 1, SessionCommand::Activate)
         .unwrap();
 
-    let after_activate = handle_item_delivery_http_request(
-        &record_request(body, body.len()),
-        &mut runtime,
-    );
+    let after_activate =
+        handle_item_delivery_http_request(&record_request(body, body.len()), &mut runtime);
     assert_eq!(after_activate.status(), 201);
     assert_eq!(runtime.event_count(SESSION_REF), 1);
 }
@@ -106,8 +100,7 @@ fn direct_handler_rejects_a_content_length_inside_a_utf8_scalar_without_panickin
     authoritative_session
         .apply_command("cmd_activate_item_delivery", 1, SessionCommand::Activate)
         .unwrap();
-    let mut runtime =
-        ItemDeliveryHttpRuntime::new(vec![(authoritative_session, ledger)]).unwrap();
+    let mut runtime = ItemDeliveryHttpRuntime::new(vec![(authoritative_session, ledger)]).unwrap();
 
     let response = handle_item_delivery_http_request(&record_request("é", 1), &mut runtime);
     assert_eq!(response.status(), 400);
