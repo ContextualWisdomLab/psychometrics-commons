@@ -283,8 +283,13 @@ fn trusted_previous_manifest_is_upgraded_to_the_rust_reference_boundary() {
     apply_scoring_job_migration(&mut client)
         .expect("a trusted previous manifest without invalid rows must upgrade in place");
 
-    let error = insert_with_reference(&mut client, ReferenceField::Job, "opaque_\u{200b}_alpha", 900)
-        .expect_err("upgraded schemas must reject Rust-invalid default-ignorable references");
+    let error = insert_with_reference(
+        &mut client,
+        ReferenceField::Job,
+        "opaque_\u{200b}_alpha",
+        900,
+    )
+    .expect_err("upgraded schemas must reject Rust-invalid default-ignorable references");
     assert_check(&error, "scoring_job_ref_format_check");
 }
 
