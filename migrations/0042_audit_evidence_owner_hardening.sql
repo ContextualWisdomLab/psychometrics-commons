@@ -1,15 +1,20 @@
 -- Dedicated, non-assumable ownership boundary for product audit evidence.
 --
--- Migration execution is an administrative deployment concern, not a runtime authority. The
--- durable audit table and its privileged helper functions are therefore owned by one cluster role
--- that cannot log in and must not be assumable by any non-superuser role. Product runtime roles are
--- deployment-selected rather than invented by this migration: a deployment that enables audit
--- persistence must explicitly grant its runtime role schema USAGE plus SELECT and INSERT on
--- audit_evidence_record, while withholding UPDATE, DELETE, TRUNCATE, and owner membership. Runtime
--- retention authorities separately receive EXECUTE on the bounded SECURITY DEFINER routine only;
--- they never receive owner membership. This migration is idempotent and is applied after the core
--- audit migration and again after the optional retention migration so a retention-aware mutation
--- guard is bound to the same owner.
+-- Migration execution is an administrative deployment concern, not a runtime authority. This
+-- owner-hardening migration requires a superuser executor: PostgreSQL grants a non-superuser
+-- CREATEROLE identity ADMIN OPTION on roles it creates, which would let that identity later grant
+-- itself SET authority over the supposedly non-assumable owner. Failing before role provisioning
+-- or ownership transfer keeps that bootstrap boundary explicit and auditable.
+--
+-- The durable audit table and its privileged helper functions are owned by one cluster role that
+-- cannot log in and must not be assumable or administrable by any non-superuser role. Product
+-- runtime roles are deployment-selected rather than invented by this migration: a deployment that
+-- enables audit persistence must explicitly grant its runtime role schema USAGE plus SELECT and
+-- INSERT on audit_evidence_record, while withholding UPDATE, DELETE, TRUNCATE, and owner
+-- membership. Runtime retention authorities separately receive EXECUTE on the bounded SECURITY
+-- DEFINER routine only; they never receive owner membership. This migration is idempotent and is
+-- applied after the core audit migration and again after the optional retention migration so a
+-- retention-aware mutation guard is bound to the same owner.
 
 DO $audit_evidence_owner_hardening$
 DECLARE
@@ -19,6 +24,17 @@ DECLARE
     unsafe_assumable_role TEXT;
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('psychometrics-commons:audit-evidence-owner'));
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_roles AS executor_role
+        WHERE executor_role.rolname = current_user
+          AND executor_role.rolsuper
+    ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '42501',
+            MESSAGE = 'audit evidence owner hardening requires a superuser migration executor';
+    END IF;
 
     SELECT role_record.oid
     INTO audit_owner_oid
@@ -69,6 +85,13 @@ BEGIN
       AND (
           pg_has_role(candidate_role.oid, audit_owner_oid, 'SET')
           OR pg_has_role(candidate_role.oid, audit_owner_oid, 'USAGE')
+          OR EXISTS (
+              SELECT 1
+              FROM pg_auth_members AS membership_record
+              WHERE membership_record.roleid = audit_owner_oid
+                AND membership_record.member = candidate_role.oid
+                AND membership_record.admin_option
+          )
       )
     ORDER BY candidate_role.rolname
     LIMIT 1;
@@ -77,7 +100,7 @@ BEGIN
         RAISE EXCEPTION USING
             ERRCODE = '42501',
             MESSAGE = format(
-                'dedicated audit evidence owner role is assumable by non-superuser role %I',
+                'dedicated audit evidence owner role is assumable or administrable by non-superuser role %I',
                 unsafe_assumable_role
             );
     END IF;
