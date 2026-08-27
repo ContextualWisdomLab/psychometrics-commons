@@ -1,9 +1,9 @@
-//! `PostgreSQL` instrument-release identity must match the Rust immutable-manifest boundary.
+//! These tests compare PostgreSQL's stored-reference checks with the Rust reference checks.
 //!
-//! The Rust domain trims Unicode outer whitespace and rejects embedded controls,
-//! default-ignorable characters, and numeric-like opaque identifiers under `char::is_numeric`.
-//! Instrument item and consent arrays also require canonical, unique opaque references. Direct SQL
-//! and migration reapplication must not leave durable publication provenance Rust cannot construct.
+//! They cover surrounding whitespace, control characters, hidden Unicode characters that should
+//! not become part of an identifier, references that look only like numbers, and duplicate item or
+//! consent references. They also verify that direct SQL and migration reapplication cannot store
+//! identifiers that the Rust application cannot create.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_instrument_release::apply_instrument_release_migration;
