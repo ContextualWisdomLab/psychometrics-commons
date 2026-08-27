@@ -112,11 +112,7 @@ fn explicit_runtime_grant_enables_append_and_read_without_mutation_authority() {
         .query_one("SELECT pg_backend_pid()", &[])
         .unwrap()
         .get(0);
-    let runtime_role = format!(
-        "audit_runtime_shape_{}_{}",
-        std::process::id(),
-        backend_pid
-    );
+    let runtime_role = format!("audit_runtime_shape_{}_{}", std::process::id(), backend_pid);
     client
         .batch_execute(&format!(
             "CREATE ROLE {runtime_role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS; \
