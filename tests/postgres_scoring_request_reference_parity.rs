@@ -208,7 +208,10 @@ fn scoring_request_reference_rejects_every_rust_boundary_whitespace_character() 
     for (index, whitespace) in rust_whitespace.into_iter().enumerate() {
         for (side, request_ref) in [
             ("leading", format!("{whitespace}scoring_request_ws_{index}")),
-            ("trailing", format!("scoring_request_ws_{index}{whitespace}")),
+            (
+                "trailing",
+                format!("scoring_request_ws_{index}{whitespace}"),
+            ),
         ] {
             let suffix = format!("whitespace_{index}_{side}");
             let error = insert_request(
