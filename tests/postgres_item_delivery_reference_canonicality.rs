@@ -35,12 +35,24 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
 fn scalar_and_array_predicates_reject_rust_invalid_aliases() {
     let mut client = client();
 
-    for reference in ["tenant\u{200b}_alpha", "tenant\u{feff}_alpha", "tenant\u{e0001}_alpha", "½", "Ⅳ"] {
+    for reference in [
+        "tenant\u{200b}_alpha",
+        "tenant\u{feff}_alpha",
+        "tenant\u{e0001}_alpha",
+        "\u{00a0}tenant_alpha",
+        "tenant_alpha\u{00a0}",
+        "tenant\u{0085}_alpha",
+        "½",
+        "Ⅳ",
+    ] {
         let accepted: bool = client
             .query_one("SELECT item_delivery_reference_is_valid($1)", &[&reference])
             .unwrap()
             .get(0);
-        assert!(!accepted, "durable scalar predicate accepted Rust-invalid alias: {reference:?}");
+        assert!(
+            !accepted,
+            "durable scalar predicate accepted Rust-invalid alias: {reference:?}"
+        );
     }
 
     let invalid_array = vec!["item_alpha", "item\u{200d}_alpha"];
@@ -51,14 +63,20 @@ fn scalar_and_array_predicates_reject_rust_invalid_aliases() {
         )
         .unwrap()
         .get(0);
-    assert!(!accepted, "durable array predicate must reuse scalar canonicality");
+    assert!(
+        !accepted,
+        "durable array predicate must reuse scalar canonicality"
+    );
 
     for reference in ["tenant_2", "tenant_가나다_東京", "opaque alpha 2", "v1-2"] {
         let accepted: bool = client
             .query_one("SELECT item_delivery_reference_is_valid($1)", &[&reference])
             .unwrap()
             .get(0);
-        assert!(accepted, "visible mixed opaque reference must remain valid: {reference:?}");
+        assert!(
+            accepted,
+            "visible mixed opaque reference must remain valid: {reference:?}"
+        );
     }
 }
 
