@@ -48,9 +48,7 @@ fn test_client() -> Client {
 
 fn reset_tables(client: &mut Client) {
     client
-        .batch_execute(
-            "DROP TABLE IF EXISTS instrument_family_pagination_test.instrument_release;",
-        )
+        .batch_execute("DROP TABLE IF EXISTS instrument_family_pagination_test.instrument_release;")
         .unwrap();
 }
 
@@ -166,7 +164,9 @@ fn family_pages_continue_without_gaps_and_reject_cross_family_cursor_replay() {
         first.releases().len(),
         STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE
     );
-    let cursor = first.next_cursor().expect("101st row requires continuation");
+    let cursor = first
+        .next_cursor()
+        .expect("101st row requires continuation");
 
     assert!(matches!(
         list_startable_instrument_release_family_page(
