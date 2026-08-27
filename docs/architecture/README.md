@@ -13,6 +13,7 @@ If you are new to the repository, read [`../GLOSSARY.md`](../GLOSSARY.md) first 
 | [`C4.md`](C4.md) | Who uses the product? Which external CWL bounded contexts exist? What are the target product containers/components and dependency directions? |
 | [`UML.md`](UML.md) | What are the main domain concepts, lifecycle states, and interaction sequences? |
 | [`ERD.md`](ERD.md) | What product-owned entities/relationships/cardinalities/immutability and restricted linkage must persistence preserve? |
+| [`RESPONSE_EVENT_PERSISTENCE.md`](RESPONSE_EVENT_PERSISTENCE.md) | How does active-PR response-event persistence preserve the accepted mid-session prefix, exact replay identity, distinct clocks, restart reconstruction, and recovery evidence without claiming protected-main delivery? |
 | [`SECURITY_AND_DATA.md`](SECURITY_AND_DATA.md) | Where are trust/data/privacy boundaries? What data classes and threats govern identity, research, AI, and tenancy? |
 | [`DEPLOYMENT_AND_OPERATIONS.md`](DEPLOYMENT_AND_OPERATIONS.md) | How do Community, Hosted, and Enterprise profiles compose? How do capability degradation, observability, backup/restore, migration, and GA recovery evidence work? |
 
