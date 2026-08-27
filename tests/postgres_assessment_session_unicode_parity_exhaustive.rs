@@ -6,15 +6,22 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_assessment_session::apply_assessment_session_migration;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const PARITY_BATCH_SIZE: usize = 4096;
+static NEXT_SCHEMA_ID: AtomicUsize = AtomicUsize::new(0);
 
 fn test_client() -> (Client, String) {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let schema = format!("assessment_session_unicode_parity_test_{}", std::process::id());
+    let schema_id = NEXT_SCHEMA_ID.fetch_add(1, Ordering::Relaxed);
+    let schema = format!(
+        "assessment_session_unicode_parity_test_{}_{}",
+        std::process::id(),
+        schema_id
+    );
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {schema} CASCADE;\
