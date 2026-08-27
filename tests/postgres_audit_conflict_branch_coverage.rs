@@ -1,4 +1,4 @@
-//! Branch-complete conflict coverage for immutable PostgreSQL audit replay classification.
+//! Branch-complete conflict coverage for immutable `PostgreSQL` audit replay classification.
 //!
 //! The persistence classifier compares each immutable field in a deliberate fail-closed order.
 //! Every comparison therefore needs evidence for both the matching and conflicting path; otherwise
