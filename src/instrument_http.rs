@@ -49,6 +49,7 @@ impl InstrumentHttpRuntime {
 pub struct InstrumentHttpResponse {
     status: u16,
     content_type: &'static str,
+    allow: Option<&'static str>,
     body: String,
 }
 
@@ -57,6 +58,7 @@ impl InstrumentHttpResponse {
         Self {
             status,
             content_type: "application/json",
+            allow: None,
             body,
         }
     }
@@ -65,6 +67,7 @@ impl InstrumentHttpResponse {
         Self {
             status,
             content_type: "application/problem+json",
+            allow: None,
             body: format!(
                 "{{\"type\":{},\"title\":{},\"status\":{status},\"detail\":{}}}",
                 json_string(type_uri),
@@ -84,6 +87,12 @@ impl InstrumentHttpResponse {
     #[must_use]
     pub const fn content_type(&self) -> &'static str {
         self.content_type
+    }
+
+    /// Return the RFC 9110 `Allow` field when the request method is rejected.
+    #[must_use]
+    pub const fn allow(&self) -> Option<&'static str> {
+        self.allow
     }
 
     /// Return the response body.
@@ -158,12 +167,14 @@ pub fn accept_one_instrument_http(
 }
 
 fn method_not_allowed() -> InstrumentHttpResponse {
-    InstrumentHttpResponse::problem(
+    let mut response = InstrumentHttpResponse::problem(
         405,
         "urn:psychometrics-commons:problem:method-not-allowed",
         "Method Not Allowed",
         "instrument routes accept GET /v1/instruments and GET /v1/instruments/{instrument_ref} only",
-    )
+    );
+    response.allow = Some("GET");
+    response
 }
 
 fn handle_list(runtime: &InstrumentHttpRuntime) -> InstrumentHttpResponse {
@@ -371,11 +382,15 @@ fn write_http_response(
     stream: &mut TcpStream,
     response: &InstrumentHttpResponse,
 ) -> io::Result<()> {
+    let allow_header = response
+        .allow
+        .map_or_else(String::new, |value| format!("Allow: {value}\r\n"));
     let payload = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\n{}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         reason_phrase(response.status),
         response.content_type,
+        allow_header,
         response.body.len(),
         response.body
     );
