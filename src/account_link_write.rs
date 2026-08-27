@@ -99,12 +99,12 @@ pub fn require_recoverable_account(
 
 /// Authorize a dual-proof account link and persist the resulting history.
 ///
-/// The in-memory participant is linked only after both proofs are current and
-/// tenant-bound. Persist then writes that history and reconciles the derived
-/// current projection. Exact replay of the same evidence is idempotent.
-///
-/// If persist fails, the caller must drop the in-memory participant. The
-/// transaction remains caller-owned.
+/// A speculative copy of the participant is linked only after both proofs are
+/// current and tenant-bound. Persist then writes that candidate history and
+/// reconciles the derived current projection. The caller-owned participant is
+/// replaced only after persistence succeeds, so durable rejection leaves the
+/// caller's aggregate unchanged. Exact replay of the same evidence is
+/// idempotent. The transaction remains caller-owned.
 ///
 /// # Errors
 ///
@@ -119,17 +119,17 @@ pub fn persist_authorized_account_link(
     link_event_ref: &str,
     linked_at_unix_ms: u64,
 ) -> Result<IdentityLinkPersistenceDisposition, AccountLinkWriteError> {
+    let mut candidate = participant.clone();
     link_authenticated_account(
-        participant,
+        &mut candidate,
         anonymous_control,
         authenticated_control,
         link_event_ref,
         linked_at_unix_ms,
     )?;
-    Ok(persist_participant_identity_history(
-        transaction,
-        participant,
-    )?)
+    let disposition = persist_participant_identity_history(transaction, &candidate)?;
+    *participant = candidate;
+    Ok(disposition)
 }
 
 /// Keep a recovered participant only when its current binding matches the proof.
