@@ -53,3 +53,41 @@ fn migration_rejects_any_non_superuser_membership_in_the_dedicated_owner() {
         .rollback()
         .expect("rollback must remove the transactional probe role and membership");
 }
+
+#[test]
+fn owner_hardening_requires_a_superuser_migration_executor() {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    let backend_pid: i32 = client
+        .query_one("SELECT pg_backend_pid()", &[])
+        .expect("backend identity must be available for an isolated migrator role")
+        .get(0);
+    let migrator_role = format!("audit_migrator_probe_{backend_pid}");
+    let schema_name = format!("audit_owner_migrator_{backend_pid}");
+
+    let mut transaction = client
+        .transaction()
+        .expect("non-superuser migration probe transaction must start");
+    transaction
+        .batch_execute(&format!(
+            "CREATE ROLE {migrator_role} NOLOGIN NOSUPERUSER NOCREATEDB CREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;\
+             CREATE SCHEMA {schema_name} AUTHORIZATION {migrator_role};\
+             SET ROLE {migrator_role};\
+             SET search_path TO {schema_name};"
+        ))
+        .expect("superuser fixture must establish the isolated CREATEROLE migration probe");
+
+    let error = apply_audit_evidence_migration(&mut transaction)
+        .expect_err("audit owner hardening must reject a non-superuser migration executor");
+    assert_eq!(error.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
+    assert_eq!(
+        error.as_db_error().map(postgres::error::DbError::message),
+        Some("audit evidence owner hardening requires a superuser migration executor")
+    );
+
+    transaction
+        .rollback()
+        .expect("rollback must remove the isolated non-superuser migration probe");
+}
