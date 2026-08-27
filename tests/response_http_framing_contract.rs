@@ -73,7 +73,7 @@ fn listener_waits_for_the_declared_body_after_headers_arrive_first() {
     assert!(response.contains("urn:psychometrics-commons:problem:session-not-found"));
 }
 
-fn framing_result(request: &[u8]) -> io::Result<()> {
+fn framing_result_and_response(request: &[u8]) -> (io::Result<()>, String) {
     let listener = bind_response_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let address_listener = listener.try_clone().unwrap();
     let server = std::thread::spawn(move || {
@@ -84,8 +84,13 @@ fn framing_result(request: &[u8]) -> io::Result<()> {
     let mut client = connect(&listener);
     client.write_all(request).unwrap();
     client.shutdown(Shutdown::Write).unwrap();
-    let _ = client.read_to_end(&mut Vec::new());
-    server.join().unwrap()
+    let mut response = String::new();
+    let _ = client.read_to_string(&mut response);
+    (server.join().unwrap(), response)
+}
+
+fn framing_result(request: &[u8]) -> io::Result<()> {
+    framing_result_and_response(request).0
 }
 
 fn request_with_extra_headers(extra_headers: &str, suffix: &str) -> Vec<u8> {
@@ -118,4 +123,17 @@ fn bytes_after_the_declared_request_are_rejected_before_dispatch() {
     let request = request_with_extra_headers("", "GET /smuggled HTTP/1.1\r\n\r\n");
     let error = framing_result(&request).unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn malformed_framing_returns_a_generic_problem_before_connection_close() {
+    let request = request_with_extra_headers("Idempotency-Key: idem_duplicate_opaque\r\n", "");
+    let (result, response) = framing_result_and_response(&request);
+    let error = result.expect_err("duplicate singleton framing must remain rejected");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+    assert!(response.contains("Content-Type: application/problem+json"));
+    assert!(response.contains("urn:psychometrics-commons:problem:bad-request"));
+    assert!(!response.contains(IDEMPOTENCY_KEY));
+    assert!(!response.contains("idem_duplicate_opaque"));
 }
