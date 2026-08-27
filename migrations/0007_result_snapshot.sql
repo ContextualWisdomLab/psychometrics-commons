@@ -334,12 +334,12 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    -- Preserve the named table CHECK as the authoritative classifier for
-    -- self-supersession. The predecessor trigger only owns references to a
-    -- different row; otherwise a self-reference is misreported as a missing
-    -- predecessor before PostgreSQL can evaluate the CHECK constraint.
+    -- Preserve the named table CHECK as the authoritative classifier for self-reference and
+    -- malformed references. The predecessor trigger owns only a well-formed reference to a
+    -- different row that is genuinely missing.
     IF NEW.supersedes_ref IS NULL
-       OR NEW.supersedes_ref = NEW.result_snapshot_ref THEN
+       OR NEW.supersedes_ref = NEW.result_snapshot_ref
+       OR NOT result_snapshot_reference_is_valid(NEW.supersedes_ref) THEN
         RETURN NEW;
     END IF;
 
