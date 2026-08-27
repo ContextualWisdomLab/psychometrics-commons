@@ -212,10 +212,13 @@ $audit_evidence_index_contract$;
 
 -- Migration 0041 deliberately replaces this guard with the narrowly authorized retention-aware
 -- version. Reapplying 0040 must repair the base append-only guard only when the retention routine
--- has not been installed; otherwise it would silently erase the later migration's capability.
+-- has not been installed in the schema currently being migrated; otherwise it would silently erase
+-- the later migration's capability.
 DO $audit_evidence_mutation_guard$
 BEGIN
-    IF to_regprocedure('expire_audit_evidence_before(text,bigint)') IS NULL THEN
+    IF to_regprocedure(
+        format('%I.expire_audit_evidence_before(text,bigint)', current_schema())
+    ) IS NULL THEN
         EXECUTE $create_base_mutation_guard$
 CREATE OR REPLACE FUNCTION reject_audit_evidence_mutation()
 RETURNS trigger
