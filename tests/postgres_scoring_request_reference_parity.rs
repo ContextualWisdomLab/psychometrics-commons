@@ -93,6 +93,7 @@ fn assert_field_rejects_rust_invalid_aliases(
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{0085}_alpha",
         "opaque_\u{00ad}_alpha",
         "opaque_\u{200b}_alpha",
         "opaque_\u{200d}_alpha",
