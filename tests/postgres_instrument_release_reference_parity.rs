@@ -1,9 +1,9 @@
 //! `PostgreSQL` instrument-release identity must match the Rust immutable-manifest boundary.
 //!
-//! The Rust domain trims Unicode outer whitespace and rejects embedded controls plus
-//! numeric-like opaque identifiers under `char::is_numeric`. Instrument item and consent
-//! arrays also require canonical, unique opaque references. Direct SQL and migration
-//! reapplication must not leave durable publication provenance that Rust cannot construct.
+//! The Rust domain trims Unicode outer whitespace and rejects embedded controls,
+//! default-ignorable characters, and numeric-like opaque identifiers under `char::is_numeric`.
+//! Instrument item and consent arrays also require canonical, unique opaque references. Direct SQL
+//! and migration reapplication must not leave durable publication provenance Rust cannot construct.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_instrument_release::apply_instrument_release_migration;
@@ -112,6 +112,13 @@ fn assert_scalar_field_rejects_rust_invalid_aliases(
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -173,7 +180,7 @@ fn assert_scalar_field_rejects_rust_invalid_aliases(
 }
 
 #[test]
-fn every_scalar_release_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
+fn every_scalar_release_reference_rejects_rust_invalid_aliases() {
     let _guard = guard();
     let mut client = client();
 
@@ -232,7 +239,20 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
     let _guard = guard();
     let mut client = client();
 
-    for invalid_ref in ["½", "²", "Ⅳ", "\u{00a0}item_alpha", "item_\u{0001}_alpha"] {
+    for invalid_ref in [
+        "½",
+        "²",
+        "Ⅳ",
+        "\u{00a0}item_alpha",
+        "item_\u{0001}_alpha",
+        "item_\u{00ad}_alpha",
+        "item_\u{200b}_alpha",
+        "item_\u{200d}_alpha",
+        "item_\u{2060}_alpha",
+        "item_\u{fe0f}_alpha",
+        "item_\u{feff}_alpha",
+        "item_\u{e0001}_alpha",
+    ] {
         let item_refs = vec![invalid_ref.to_owned()];
         let consent_refs = vec!["consent_service_v1".to_owned()];
         let error = insert_release(
@@ -261,6 +281,13 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         "Ⅳ",
         "\u{00a0}consent_alpha",
         "consent_\u{0001}_alpha",
+        "consent_\u{00ad}_alpha",
+        "consent_\u{200b}_alpha",
+        "consent_\u{200d}_alpha",
+        "consent_\u{2060}_alpha",
+        "consent_\u{fe0f}_alpha",
+        "consent_\u{feff}_alpha",
+        "consent_\u{e0001}_alpha",
     ] {
         let item_refs = vec!["item_version_alpha".to_owned()];
         let consent_refs = vec![invalid_ref.to_owned()];
@@ -360,7 +387,7 @@ fn migration_reapplication_replaces_weakened_reference_constraints() {
     let consent_refs = vec!["consent_service_upgrade_guard".to_owned()];
     let error = insert_release(
         &mut client,
-        "½",
+        "release_\u{200b}_upgrade_guard",
         "instrument_upgrade_guard",
         "instrument_version_upgrade_guard",
         "construct_upgrade_guard",
@@ -398,7 +425,7 @@ fn migration_reapplication_fails_closed_on_historical_invalid_identity() {
     let consent_refs = vec!["consent_service_historical".to_owned()];
     insert_release(
         &mut client,
-        "½",
+        "release_\u{200b}_historical",
         "instrument_historical",
         "instrument_version_historical",
         "construct_historical",
