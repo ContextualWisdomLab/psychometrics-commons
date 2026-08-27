@@ -28,7 +28,7 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "405":
-          $ref: "#/components/responses/Problem"
+          $ref: "#/components/responses/MethodNotAllowed"
   /v1/instruments/{instrument_ref}:
     get:
       operationId: getStartableInstrumentFamily
@@ -57,7 +57,7 @@ paths:
         "404":
           $ref: "#/components/responses/Problem"
         "405":
-          $ref: "#/components/responses/Problem"
+          $ref: "#/components/responses/MethodNotAllowed"
 components:
   schemas:
     InstrumentReleaseList:
@@ -133,6 +133,18 @@ components:
   responses:
     Problem:
       description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    MethodNotAllowed:
+      description: The public instrument catalog only implements GET.
+      headers:
+        Allow:
+          description: RFC 9110 method set accepted by this resource.
+          schema:
+            type: string
+            const: GET
       content:
         application/problem+json:
           schema:
