@@ -1,4 +1,4 @@
-//! Real PostgreSQL contracts for durable item-delivery reference canonicality.
+//! Real `PostgreSQL` contracts for durable item-delivery reference canonicality.
 //!
 //! The product domain rejects Unicode default-ignorable aliases and numeric-only identity
 //! spellings. Durable SQL/restore/operator paths must enforce the same acceptance grammar, and a
