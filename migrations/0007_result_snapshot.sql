@@ -300,30 +300,23 @@ BEGIN
     END IF;
 
     IF EXISTS (
-        WITH RECURSIVE supersession_lineage AS (
-            SELECT
-                result_snapshot_ref AS start_ref,
-                supersedes_ref AS current_ref,
-                ARRAY[result_snapshot_ref]::text[] AS visited_refs
-            FROM result_snapshot
-            WHERE supersedes_ref IS NOT NULL
+        WITH RECURSIVE reachable_supersession_result AS (
+            SELECT root.result_snapshot_ref
+            FROM result_snapshot AS root
+            WHERE root.supersedes_ref IS NULL
 
             UNION ALL
 
-            SELECT
-                lineage.start_ref,
-                predecessor.supersedes_ref,
-                lineage.visited_refs || predecessor.result_snapshot_ref
-            FROM supersession_lineage AS lineage
-            JOIN result_snapshot AS predecessor
-              ON predecessor.result_snapshot_ref = lineage.current_ref
-            WHERE lineage.current_ref IS NOT NULL
-              AND NOT predecessor.result_snapshot_ref = ANY(lineage.visited_refs)
+            SELECT successor.result_snapshot_ref
+            FROM reachable_supersession_result AS reachable
+            JOIN result_snapshot AS successor
+              ON successor.supersedes_ref = reachable.result_snapshot_ref
         )
         SELECT 1
-        FROM supersession_lineage
-        WHERE current_ref IS NOT NULL
-          AND current_ref = ANY(visited_refs)
+        FROM result_snapshot AS candidate
+        LEFT JOIN reachable_supersession_result AS reachable
+          ON reachable.result_snapshot_ref = candidate.result_snapshot_ref
+        WHERE reachable.result_snapshot_ref IS NULL
     ) THEN
         RAISE EXCEPTION 'result snapshot supersession lineage must be acyclic'
             USING ERRCODE = '23514';
