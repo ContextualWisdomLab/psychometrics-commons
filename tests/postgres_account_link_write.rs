@@ -242,10 +242,9 @@ fn subject_already_bound_stays_on_the_first_participant() {
         error,
         AccountLinkWriteError::Persistence(IdentityLinkPersistenceError::SubjectAlreadyBound)
     ));
-    assert_eq!(
-        second.linked_subject_ref(),
-        Some("keyverse_subject_write"),
-        "drop the in-memory second participant after persist fails; do not retry the dirty record"
+    assert!(
+        second.linked_subject_ref().is_none(),
+        "durable rejection must leave the caller-owned participant unchanged and safe to reuse"
     );
 
     let mut transaction = client.transaction().unwrap();
