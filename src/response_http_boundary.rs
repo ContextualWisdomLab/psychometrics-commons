@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 
 const HTTP_FIELD_NAME_BYTES: &[u8] =
     b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
+const FRAMING_BAD_REQUEST_BODY: &str =
+    "{\"type\":\"urn:psychometrics-commons:problem:bad-request\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"response request framing is malformed or ambiguous\"}";
 
 /// Accept one TCP connection without verified response-write authority.
 ///
@@ -39,8 +41,9 @@ const HTTP_FIELD_NAME_BYTES: &[u8] =
 /// # Errors
 ///
 /// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, oversized,
-/// incomplete, or multi-request framing; [`io::ErrorKind::TimedOut`] when the
-/// overall request deadline expires; or the underlying accept/read/write error.
+/// incomplete, or multi-request framing after best-effort delivery of a generic
+/// 400 problem response; [`io::ErrorKind::TimedOut`] when the overall request
+/// deadline expires; or the underlying accept/read/write error.
 pub fn accept_one_response_http(
     listener: &TcpListener,
     runtime: &mut ResponseHttpRuntime,
@@ -48,7 +51,7 @@ pub fn accept_one_response_http(
     let (mut stream, _) = listener.accept()?;
     let deadline = Instant::now() + RESPONSE_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream, deadline)?;
+    let request = read_http_request_or_problem(&mut stream, deadline)?;
     let response = handle_response_http_request(&request, runtime);
     write_http_response(&mut stream, &response)
 }
@@ -63,8 +66,9 @@ pub fn accept_one_response_http(
 /// # Errors
 ///
 /// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, oversized,
-/// incomplete, or multi-request framing; [`io::ErrorKind::TimedOut`] when the
-/// overall request deadline expires; or the underlying accept/read/write error.
+/// incomplete, or multi-request framing after best-effort delivery of a generic
+/// 400 problem response; [`io::ErrorKind::TimedOut`] when the overall request
+/// deadline expires; or the underlying accept/read/write error.
 pub fn accept_one_authorized_response_http(
     listener: &TcpListener,
     authority: &ResponseWriteAuthority<'_>,
@@ -74,10 +78,25 @@ pub fn accept_one_authorized_response_http(
     let (mut stream, _) = listener.accept()?;
     let deadline = Instant::now() + RESPONSE_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(RESPONSE_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream, deadline)?;
+    let request = read_http_request_or_problem(&mut stream, deadline)?;
     let response =
         handle_authorized_response_http_request(&request, authority, participant, runtime);
     write_http_response(&mut stream, &response)
+}
+
+fn read_http_request_or_problem(stream: &mut TcpStream, deadline: Instant) -> io::Result<String> {
+    match read_http_request(stream, deadline) {
+        Ok(request) => Ok(request),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            // Preserve the framing error as the server-side return value while
+            // giving a connected client a bounded, non-reflective explanation.
+            // A peer that has already gone away must not replace the original
+            // framing diagnosis with a secondary write failure.
+            let _ = write_framing_bad_request(stream);
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<String> {
@@ -283,6 +302,15 @@ fn declared_request_end(body_start: usize, content_length: &str) -> io::Result<u
     })
 }
 
+fn write_framing_bad_request(stream: &mut impl Write) -> io::Result<()> {
+    let header = format!(
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/problem+json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        FRAMING_BAD_REQUEST_BODY.len()
+    );
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(FRAMING_BAD_REQUEST_BODY.as_bytes())
+}
+
 fn write_http_response(stream: &mut impl Write, response: &ResponseHttpResponse) -> io::Result<()> {
     let allow = if response.status() == 405 {
         "Allow: POST\r\n"
@@ -318,7 +346,8 @@ mod tests {
         declared_request_end, normalize_read_error, reason_phrase, reject_full_request_buffer,
         reject_invalid_header_name, reject_non_crlf_header_lines, reject_oversized_request,
         reject_transfer_encoding, remaining_request_timeout, single_header_value,
-        write_http_response, ResponseHttpRuntime,
+        write_framing_bad_request, write_http_response, ResponseHttpRuntime,
+        FRAMING_BAD_REQUEST_BODY,
     };
     use std::io;
     use std::time::{Duration, Instant};
@@ -431,6 +460,17 @@ mod tests {
             normalize_read_error(io::Error::other("boom")).kind(),
             io::ErrorKind::Other
         );
+    }
+
+    #[test]
+    fn framing_problem_writer_is_bounded_and_non_reflective() {
+        let mut output = Vec::new();
+        write_framing_bad_request(&mut output).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(text.contains("Content-Type: application/problem+json\r\n"));
+        assert!(text.contains("Cache-Control: no-store\r\n"));
+        assert!(text.ends_with(FRAMING_BAD_REQUEST_BODY));
     }
 
     #[test]
