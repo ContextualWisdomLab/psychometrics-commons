@@ -27,11 +27,7 @@ fn owner_hardening_rejects_any_non_superuser_role_that_can_assume_the_owner() {
         .query_one("SELECT pg_backend_pid()", &[])
         .unwrap()
         .get(0);
-    let unsafe_role = format!(
-        "audit_owner_assumer_{}_{}",
-        std::process::id(),
-        backend_pid
-    );
+    let unsafe_role = format!("audit_owner_assumer_{}_{}", std::process::id(), backend_pid);
 
     let error = {
         let mut transaction = client.transaction().unwrap();
