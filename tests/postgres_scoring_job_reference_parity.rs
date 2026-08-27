@@ -1,9 +1,9 @@
 //! `PostgreSQL` scoring-job references must match the Rust opaque-reference boundary.
 //!
-//! The Rust product boundary trims Unicode outer whitespace and rejects embedded controls plus
-//! numeric-like spellings under `char::is_numeric`. Direct SQL and trusted migration upgrades must
-//! not retain durable job, request, failure, worker, lease, or result identities that the domain
-//! would reject or normalize differently.
+//! The Rust product boundary trims Unicode outer whitespace and rejects embedded controls,
+//! default-ignorable characters, and numeric-like spellings under `char::is_numeric`. Direct SQL
+//! and trusted migration upgrades must not retain durable job, request, failure, worker, lease, or
+//! result identities that the domain would reject or normalize differently.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_job::apply_scoring_job_migration;
@@ -141,7 +141,7 @@ fn fixture_lock_is_database_visible_and_timeout_bounded() {
 }
 
 #[test]
-fn every_scoring_job_reference_rejects_unicode_numeric_whitespace_and_control_aliases() {
+fn every_scoring_job_reference_rejects_unicode_numeric_whitespace_control_and_ignorable_aliases() {
     let _guard = guard();
     let mut client = client("scoring_job_reference_parity_test");
     let invalid_references = [
@@ -150,6 +150,13 @@ fn every_scoring_job_reference_rejects_unicode_numeric_whitespace_and_control_al
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (field_index, (field, constraint)) in [
@@ -168,7 +175,7 @@ fn every_scoring_job_reference_rejects_unicode_numeric_whitespace_and_control_al
                 &mut client,
                 field,
                 invalid_reference,
-                field_index * 10 + invalid_index,
+                field_index * 100 + invalid_index,
             )
             .expect_err("direct SQL must not bypass the Rust scoring-job reference boundary");
             assert_check(&error, constraint);
@@ -228,6 +235,31 @@ fn reseal_current_constraint_manifest(client: &mut Client) {
         .unwrap();
 }
 
+fn install_previous_reference_predicate(client: &mut Client) {
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION scoring_job_reference_is_valid(reference_text TEXT) \
+             RETURNS BOOLEAN \
+             LANGUAGE sql \
+             IMMUTABLE \
+             STRICT \
+             PARALLEL SAFE \
+             SET search_path = pg_catalog \
+             AS $previous_reference$ \
+                 SELECT \
+                     reference_text <> '' \
+                     AND reference_text COLLATE \"pg_unicode_fast\" !~ '(^[[:space:]])|([[:space:]]$)' \
+                     AND reference_text COLLATE \"pg_unicode_fast\" !~ '[[:cntrl:]]' \
+                     AND NOT ( \
+                         reference_text ~ '[[:digit:]]' \
+                         AND reference_text ~ '^[[:digit:]+,.eE-]+$' \
+                     ); \
+             $previous_reference$; \
+             COMMENT ON FUNCTION scoring_job_reference_is_valid(TEXT) IS NULL;",
+        )
+        .unwrap();
+}
+
 #[test]
 fn trusted_previous_manifest_is_upgraded_to_the_rust_reference_boundary() {
     let _guard = guard();
@@ -251,9 +283,31 @@ fn trusted_previous_manifest_is_upgraded_to_the_rust_reference_boundary() {
     apply_scoring_job_migration(&mut client)
         .expect("a trusted previous manifest without invalid rows must upgrade in place");
 
-    let error = insert_with_reference(&mut client, ReferenceField::Job, "½", 900)
-        .expect_err("upgraded schemas must reject Rust-invalid Unicode numeric references");
+    let error = insert_with_reference(&mut client, ReferenceField::Job, "opaque_\u{200b}_alpha", 900)
+        .expect_err("upgraded schemas must reject Rust-invalid default-ignorable references");
     assert_check(&error, "scoring_job_ref_format_check");
+}
+
+#[test]
+fn predicate_upgrade_revalidates_rows_accepted_by_the_previous_function_version() {
+    let _guard = guard();
+    let mut client = client("scoring_job_reference_predicate_upgrade_test");
+
+    install_previous_reference_predicate(&mut client);
+    insert_with_reference(
+        &mut client,
+        ReferenceField::Job,
+        "scoring_\u{200b}_job_historical",
+        901,
+    )
+    .expect("the previous predicate should admit a default-ignorable alias");
+
+    let error = apply_scoring_job_migration(&mut client)
+        .expect_err("predicate upgrades must revalidate existing durable references fail closed");
+    assert_eq!(
+        error.as_db_error().map(postgres::error::DbError::code),
+        Some(&SqlState::CHECK_VIOLATION)
+    );
 }
 
 #[test]
