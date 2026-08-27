@@ -191,6 +191,45 @@ fn every_scoring_reference_rejects_rust_invalid_aliases() {
 }
 
 #[test]
+fn scoring_request_reference_rejects_every_rust_boundary_whitespace_character() {
+    let _guard = guard();
+    let mut client = client();
+    let rust_whitespace: Vec<char> = (1u32..=0x0010_FFFF)
+        .filter_map(char::from_u32)
+        .filter(|character| character.is_whitespace())
+        .collect();
+
+    assert!(
+        !rust_whitespace.is_empty(),
+        "Rust must expose at least one whitespace scalar"
+    );
+
+    for (index, whitespace) in rust_whitespace.into_iter().enumerate() {
+        for (side, request_ref) in [
+            ("leading", format!("{whitespace}scoring_request_ws_{index}")),
+            ("trailing", format!("scoring_request_ws_{index}{whitespace}")),
+        ] {
+            let suffix = format!("whitespace_{index}_{side}");
+            let error = insert_request(
+                &mut client,
+                &request_ref,
+                &format!("session_{suffix}"),
+                &format!("response_snapshot_{suffix}"),
+                &format!("assessment_spec_{suffix}"),
+                &format!("instrument_version_{suffix}"),
+                &format!("scoring_version_{suffix}"),
+                &format!("calibration_reference_{suffix}"),
+                None,
+            )
+            .expect_err(
+                "durable scoring identity must reject every character Rust trims at a boundary",
+            );
+            assert_check(&error, "scoring_request_scoring_request_ref_format_check");
+        }
+    }
+}
+
+#[test]
 fn migration_reapplication_replaces_a_weakened_reference_constraint() {
     let _guard = guard();
     let mut client = client();
