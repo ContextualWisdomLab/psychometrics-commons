@@ -100,15 +100,17 @@ fn get(path: &str) -> String {
 #[test]
 fn percent_encoded_utf8_family_ref_resolves_to_exact_stored_identity() {
     let runtime = InstrumentHttpRuntime::new(vec![published_multilingual()]);
-    let response = handle_instrument_http_request(
-        &get("/v1/instruments/instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%AC"),
-        &runtime,
-    );
 
-    assert_eq!(response.status(), 200);
-    assert!(response
-        .body()
-        .contains("\"instrument_ref\":\"instrument_성격_東京\""));
+    for path in [
+        "/v1/instruments/instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%AC",
+        "/v1/instruments/instrument_%ec%84%b1%ea%b2%a9_%e6%9d%b1%e4%ba%ac",
+    ] {
+        let response = handle_instrument_http_request(&get(path), &runtime);
+        assert_eq!(response.status(), 200, "{path}");
+        assert!(response
+            .body()
+            .contains("\"instrument_ref\":\"instrument_성격_東京\""));
+    }
 }
 
 #[test]
@@ -118,6 +120,9 @@ fn encoded_separator_and_malformed_percent_escape_fail_closed() {
     for path in [
         "/v1/instruments/instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%AC%2Fextra",
         "/v1/instruments/instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%",
+        "/v1/instruments/instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%A",
+        "/v1/instruments/instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%ZZ",
+        "/v1/instruments/instrument_%FF",
         "/v1/instruments/%20instrument_%EC%84%B1%EA%B2%A9_%E6%9D%B1%E4%BA%AC",
     ] {
         let response = handle_instrument_http_request(&get(path), &runtime);
