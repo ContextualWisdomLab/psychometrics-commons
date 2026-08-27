@@ -17,12 +17,12 @@ At the evaluated protected-main baseline, session/result HTTP contracts and mult
 
 Active PR #415 adds `POST /v1/sessions/{session_ref}/responses`, but it is **not protected-main truth** until reviewed and merged. Its current architecture impact is bounded and already covered by existing normative views:
 
-- TRD §6 defines response-event identity/idempotency and TRD §10–11 defines identity, resource authorization, and tenant isolation; TRD §18 already names the response-write operation family.
-- C4 already routes the public API through `tenant_authorization` before session/response components and assigns validation/authorization to the Runtime API process.
-- UML already models participant response submission, Active-state validation, append-only response evidence, server sequence, and idempotent replay in the anonymous-assessment sequence.
-- ERD already models `assessment_session` → `response_event` cardinality and the response event's opaque identity, item, digest, and server sequence fields.
+- The Technical Requirements Document (TRD) §6 defines response-event identity/idempotency, TRD §10–11 defines identity, resource authorization, and tenant isolation, and TRD §18 already names the response-write operation family.
+- The C4 context/container/component architecture views already route the public API through `tenant_authorization` before session/response components and assign validation/authorization to the Runtime API process.
+- The Unified Modeling Language (UML) views already model participant response submission, Active-state validation, append-only response evidence, server sequence, and idempotent replay in the anonymous-assessment sequence.
+- The logical Entity–Relationship Diagram (ERD) already models `assessment_session` → `response_event` cardinality and the response event's opaque identity, item, digest, and server sequence fields.
 - Security/Data already states that clients are untrusted, server-side authorization is authoritative, tenant/resource authorization is required, and opaque references are identifiers rather than capabilities.
-- Roadmap Phase 3 already requires the versioned public/admin HTTP API, RFC 9457 errors, OpenAPI validation, and an anonymous start→response→completion→score→result journey.
+- Roadmap Phase 3 already requires the versioned public/admin HTTP API, RFC 9457 Problem Details error responses, OpenAPI validation, and an anonymous start→response→completion→score→result journey.
 
 Those mappings do not change their semantics for this slice and therefore do not need duplicate edits merely to restate the same rule. PR #415 does update the machine-readable response OpenAPI, ADR-0014/traceability lineage, changelog, and this assessment, while preserving its Active-PR maturity marker.
 
