@@ -11,7 +11,8 @@ use crate::postgres_instrument_release::{
     published_instrument_release_snapshot_from_row, InstrumentReleaseQueryError,
     PublishedInstrumentReleaseSnapshot,
 };
-use postgres::GenericClient;
+use crate::reference::normalized_reference;
+use postgres::{GenericClient, Row};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -157,6 +158,86 @@ pub fn list_startable_instrument_release_page(
     }
     .map_err(InstrumentReleaseQueryError::from)?;
 
+    page_from_rows(rows)
+}
+
+/// Read one bounded page of currently startable releases for one exact instrument family.
+///
+/// Family filtering is executed in `PostgreSQL`; callers do not load the complete
+/// public catalog and filter it in transport code. Within a family, rows are
+/// ordered by `(locale, release_ref)`. The continuation cursor is bound to the
+/// exact family that produced it and fails closed if reused for another family.
+/// No locale fallback is inferred, and session start must still reload and lock
+/// the exact persisted release before creating a session.
+///
+/// # Errors
+///
+/// Returns [`StartableInstrumentCatalogError::Query`] with
+/// [`InstrumentReleaseQueryError::InvalidReference`] when `instrument_ref` is
+/// blank, numeric-like, unsafe, noncanonical, or when a continuation cursor was
+/// produced for another family. Database and stored-evidence failures also fail
+/// closed as [`StartableInstrumentCatalogError::Query`].
+pub fn list_startable_instrument_release_page_for_family(
+    client: &mut impl GenericClient,
+    instrument_ref: &str,
+    after: Option<&StartableInstrumentReleaseCursor>,
+) -> Result<StartableInstrumentReleasePage, StartableInstrumentCatalogError> {
+    let canonical = normalized_reference(instrument_ref)
+        .filter(|normalized| *normalized == instrument_ref)
+        .ok_or(InstrumentReleaseQueryError::InvalidReference)?;
+
+    let rows = match after {
+        Some(cursor) => {
+            if cursor.instrument_ref != canonical {
+                return Err(InstrumentReleaseQueryError::InvalidReference.into());
+            }
+            client.query(
+                "SELECT release_ref, instrument_ref, instrument_version_ref, construct_ref, \
+                        item_version_refs, locale, assessment_spec_ref, scoring_version_ref, \
+                        calibration_reference, norm_version_ref, narrative_version_ref, \
+                        consent_requirement_refs, intended_use_ref, limitations_ref, content_digest, \
+                        publication_state, created_at_unix_ms \
+                 FROM instrument_release \
+                 WHERE publication_state = $1 \
+                   AND instrument_ref = $2 \
+                   AND (locale, release_ref) > ($3, $4) \
+                 ORDER BY locale, release_ref \
+                 LIMIT $5",
+                &[
+                    &"published",
+                    &canonical,
+                    &cursor.locale,
+                    &cursor.release_ref,
+                    &STARTABLE_INSTRUMENT_RELEASE_FETCH_LIMIT,
+                ],
+            )
+        }
+        None => client.query(
+            "SELECT release_ref, instrument_ref, instrument_version_ref, construct_ref, \
+                    item_version_refs, locale, assessment_spec_ref, scoring_version_ref, \
+                    calibration_reference, norm_version_ref, narrative_version_ref, \
+                    consent_requirement_refs, intended_use_ref, limitations_ref, content_digest, \
+                    publication_state, created_at_unix_ms \
+             FROM instrument_release \
+             WHERE publication_state = $1 \
+               AND instrument_ref = $2 \
+             ORDER BY locale, release_ref \
+             LIMIT $3",
+            &[
+                &"published",
+                &canonical,
+                &STARTABLE_INSTRUMENT_RELEASE_FETCH_LIMIT,
+            ],
+        ),
+    }
+    .map_err(InstrumentReleaseQueryError::from)?;
+
+    page_from_rows(rows)
+}
+
+fn page_from_rows(
+    rows: Vec<Row>,
+) -> Result<StartableInstrumentReleasePage, StartableInstrumentCatalogError> {
     let has_more = rows.len() > STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE;
     let releases = rows
         .iter()
