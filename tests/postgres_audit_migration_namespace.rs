@@ -1,7 +1,7 @@
 //! Namespace-resolution contracts for the audit migration.
 //!
 //! Migration 0040 must inspect retention capabilities in the schema it is actively migrating. An
-//! unqualified PostgreSQL routine lookup follows `search_path`, so a same-named routine in another
+//! unqualified `PostgreSQL` routine lookup follows `search_path`, so a same-named routine in another
 //! schema must never decide whether the audit mutation guard is installed or preserved.
 
 const AUDIT_SCHEMA_MIGRATION: &str = include_str!("../migrations/0040_audit_evidence_record.sql");
