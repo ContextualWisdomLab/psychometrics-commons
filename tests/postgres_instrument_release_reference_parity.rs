@@ -234,11 +234,7 @@ fn every_scalar_release_reference_rejects_rust_invalid_aliases() {
     }
 }
 
-#[test]
-fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
-    let _guard = guard();
-    let mut client = client();
-
+fn assert_item_reference_array_rejects_rust_invalid_aliases(client: &mut Client) {
     for invalid_ref in [
         "½",
         "²",
@@ -256,7 +252,7 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         let item_refs = vec![invalid_ref.to_owned()];
         let consent_refs = vec!["consent_service_v1".to_owned()];
         let error = insert_release(
-            &mut client,
+            client,
             &format!("release_item_{}", invalid_ref.len()),
             "instrument_big_five",
             "instrument_version_big_five_v1",
@@ -274,7 +270,9 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         .expect_err("item-version arrays must enforce the Rust reference boundary");
         assert_check(&error, "instrument_release_item_refs_format_check");
     }
+}
 
+fn assert_consent_reference_array_rejects_rust_invalid_aliases(client: &mut Client) {
     for invalid_ref in [
         "½",
         "²",
@@ -292,7 +290,7 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         let item_refs = vec!["item_version_alpha".to_owned()];
         let consent_refs = vec![invalid_ref.to_owned()];
         let error = insert_release(
-            &mut client,
+            client,
             &format!("release_consent_{}", invalid_ref.len()),
             "instrument_big_five",
             "instrument_version_big_five_v1",
@@ -310,6 +308,15 @@ fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
         .expect_err("consent arrays must enforce the Rust reference boundary");
         assert_check(&error, "instrument_release_consent_refs_format_check");
     }
+}
+
+#[test]
+fn item_and_consent_reference_arrays_require_canonical_unique_opaque_values() {
+    let _guard = guard();
+    let mut client = client();
+
+    assert_item_reference_array_rejects_rust_invalid_aliases(&mut client);
+    assert_consent_reference_array_rejects_rust_invalid_aliases(&mut client);
 
     let duplicate_items = vec![
         "item_version_alpha".to_owned(),
