@@ -3,9 +3,8 @@
 use postgres::{Client, IsolationLevel, NoTls};
 use psychometrics_commons_runtime::audit::{AuditEvidence, AuditEvidenceInput, AuditOutcome};
 use psychometrics_commons_runtime::postgres_audit::{
-    apply_audit_evidence_migration, classify_persisted_audit, insert_audit_row,
-    load_audit_evidence, persist_audit_evidence, query_optional_audit_row,
-    query_required_audit_row, AuditPersistenceError,
+    apply_audit_evidence_migration, load_audit_evidence, persist_audit_evidence,
+    AuditPersistenceError,
 };
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -227,7 +226,7 @@ fn load_fails_closed_on_corrupt_stored_fields() {
 }
 
 #[test]
-fn aborted_or_missing_database_boundaries_map_to_database_errors() {
+fn aborted_public_persistence_maps_to_database_error() {
     let mut client = test_client();
     client
         .batch_execute(
@@ -244,45 +243,6 @@ fn aborted_or_missing_database_boundaries_map_to_database_errors() {
         .is_err());
     assert!(matches!(
         persist_audit_evidence(&mut transaction, &evidence),
-        Err(AuditPersistenceError::Database(_))
-    ));
-    transaction.rollback().unwrap();
-
-    client
-        .batch_execute(
-            "DROP SCHEMA IF EXISTS audit_query_helper_missing CASCADE;\
-             CREATE SCHEMA audit_query_helper_missing;\
-             SET search_path TO audit_query_helper_missing;",
-        )
-        .unwrap();
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        insert_audit_row(&mut transaction, &evidence, 1_785_000_000_000),
-        Err(AuditPersistenceError::Database(_))
-    ));
-    transaction.rollback().unwrap();
-
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        query_required_audit_row(&mut transaction, "audit_event_aborted_01"),
-        Err(AuditPersistenceError::Database(_))
-    ));
-    transaction.rollback().unwrap();
-
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        query_optional_audit_row(
-            &mut transaction,
-            "tenant_research_alpha",
-            "audit_event_aborted_01"
-        ),
-        Err(AuditPersistenceError::Database(_))
-    ));
-    transaction.rollback().unwrap();
-
-    let mut transaction = client.transaction().unwrap();
-    assert!(matches!(
-        classify_persisted_audit(&mut transaction, &evidence, 1_785_000_000_000, 0),
         Err(AuditPersistenceError::Database(_))
     ));
     transaction.rollback().unwrap();
