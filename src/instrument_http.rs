@@ -104,8 +104,10 @@ impl InstrumentHttpResponse {
 
 /// Translate one raw HTTP/1.1 request into a catalog list or family response.
 ///
-/// Unknown methods, encoded or numeric instrument references, and families with
-/// no startable published release fail closed with RFC 9457 problem details.
+/// Unknown methods, malformed/unsafe encoded references, numeric references,
+/// and families with no startable published release fail closed with RFC 9457
+/// problem details. Valid UTF-8 percent encoding is decoded exactly once so
+/// visible multilingual opaque references remain addressable over HTTP.
 #[must_use]
 pub fn handle_instrument_http_request(
     request: &str,
@@ -182,7 +184,7 @@ fn handle_list(runtime: &InstrumentHttpRuntime) -> InstrumentHttpResponse {
 }
 
 fn handle_family(path: &str, runtime: &InstrumentHttpRuntime) -> InstrumentHttpResponse {
-    let Some(instrument_ref) = path
+    let Some(encoded_instrument_ref) = path
         .strip_prefix("/v1/instruments/")
         .filter(|value| !value.is_empty() && !value.contains('/'))
     else {
@@ -193,16 +195,14 @@ fn handle_family(path: &str, runtime: &InstrumentHttpRuntime) -> InstrumentHttpR
             "instrument routes accept GET /v1/instruments and GET /v1/instruments/{instrument_ref} only",
         );
     };
-    if instrument_ref.contains('%')
+    let Some(instrument_ref) = decode_path_segment(encoded_instrument_ref) else {
+        return invalid_instrument_reference();
+    };
+    if instrument_ref.contains('/')
         || instrument_ref.chars().any(char::is_whitespace)
-        || normalized_reference(instrument_ref).is_none()
+        || normalized_reference(&instrument_ref) != Some(instrument_ref.as_str())
     {
-        return InstrumentHttpResponse::problem(
-            400,
-            "urn:psychometrics-commons:problem:bad-request",
-            "Bad Request",
-            "instrument_ref must be an opaque non-numeric family identity",
-        );
+        return invalid_instrument_reference();
     }
     let releases: Vec<&InstrumentRelease> = published_releases(runtime)
         .into_iter()
@@ -220,10 +220,46 @@ fn handle_family(path: &str, runtime: &InstrumentHttpRuntime) -> InstrumentHttpR
         200,
         format!(
             "{{\"instrument_ref\":{},\"releases\":{}}}",
-            json_string(instrument_ref),
+            json_string(&instrument_ref),
             release_array(&releases)
         ),
     )
+}
+
+fn invalid_instrument_reference() -> InstrumentHttpResponse {
+    InstrumentHttpResponse::problem(
+        400,
+        "urn:psychometrics-commons:problem:bad-request",
+        "Bad Request",
+        "instrument_ref must be an opaque non-numeric family identity",
+    )
+}
+
+fn decode_path_segment(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hex_value(*bytes.get(index + 1)?)?;
+            let low = hex_value(*bytes.get(index + 2)?)?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+const fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn published_releases(runtime: &InstrumentHttpRuntime) -> Vec<&InstrumentRelease> {
