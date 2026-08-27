@@ -69,6 +69,50 @@ const fn is_default_ignorable_identifier_character(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::normalized_reference;
+    use crate::postgres_integration::apply_integration_migration;
+    use postgres::{Client, NoTls};
+
+    const SCALAR_PARITY_BATCH_SIZE: usize = 32_768;
+
+    fn reference_parity_client() -> Client {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "DROP SCHEMA IF EXISTS integration_reference_domain_parity_test CASCADE; \
+                 CREATE SCHEMA integration_reference_domain_parity_test; \
+                 SET search_path TO integration_reference_domain_parity_test;",
+            )
+            .unwrap();
+        apply_integration_migration(&mut client).unwrap();
+        client
+    }
+
+    fn assert_postgres_parity_batch(
+        client: &mut Client,
+        references: &[String],
+        expected: &[bool],
+    ) {
+        let mismatches: Vec<String> = client
+            .query_one(
+                "SELECT COALESCE(array_agg(reference_text), ARRAY[]::text[]) \
+                 FROM (\
+                     SELECT reference_text \
+                     FROM unnest($1::text[], $2::boolean[]) \
+                          AS candidate(reference_text, expected_valid) \
+                     WHERE integration_reference_is_valid(reference_text) \
+                           IS DISTINCT FROM expected_valid \
+                     LIMIT 8\
+                 ) AS mismatch",
+                &[&references, &expected],
+            )
+            .expect("the persisted reference validator must be callable")
+            .get(0);
+        assert!(
+            mismatches.is_empty(),
+            "PostgreSQL reference classification diverged from normalized_reference for {mismatches:?}"
+        );
+    }
 
     #[test]
     fn opaque_references_reject_embedded_control_characters() {
@@ -103,5 +147,36 @@ mod tests {
             normalized_reference("participant_ref_가나다_東京_éclair"),
             Some("participant_ref_가나다_東京_éclair")
         );
+    }
+
+    #[test]
+    fn postgres_validator_matches_domain_reference_normalization_for_every_unicode_scalar() {
+        let mut client = reference_parity_client();
+        let mut references = Vec::with_capacity(SCALAR_PARITY_BATCH_SIZE);
+        let mut expected = Vec::with_capacity(SCALAR_PARITY_BATCH_SIZE);
+        let mut checked_scalars = 0usize;
+
+        for character in (0..=char::MAX as u32).filter_map(char::from_u32) {
+            if character == '\0' {
+                // PostgreSQL text cannot represent U+0000. Other representable controls are
+                // exercised through the same domain validator in this exhaustive comparison.
+                continue;
+            }
+            let reference = character.to_string();
+            expected.push(normalized_reference(&reference) == Some(reference.as_str()));
+            references.push(reference);
+            checked_scalars += 1;
+
+            if references.len() == SCALAR_PARITY_BATCH_SIZE {
+                assert_postgres_parity_batch(&mut client, &references, &expected);
+                references.clear();
+                expected.clear();
+            }
+        }
+
+        if !references.is_empty() {
+            assert_postgres_parity_batch(&mut client, &references, &expected);
+        }
+        assert!(checked_scalars > 1_000_000);
     }
 }
