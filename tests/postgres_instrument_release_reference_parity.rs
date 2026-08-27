@@ -1,4 +1,4 @@
-//! These tests compare PostgreSQL's stored-reference checks with the Rust reference checks.
+//! These tests compare `PostgreSQL`'s stored-reference checks with the Rust reference checks.
 //!
 //! They cover surrounding whitespace, control characters, hidden Unicode characters that should
 //! not become part of an identifier, references that look only like numbers, and duplicate item or
