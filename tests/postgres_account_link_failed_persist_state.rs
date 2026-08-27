@@ -13,14 +13,24 @@ use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_participant_identity_link::{
     apply_participant_identity_link_migration, IdentityLinkPersistenceError,
 };
-use std::sync::{Mutex, MutexGuard};
 
-static FAILED_PERSIST_STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
+const FAILED_PERSIST_STATE_LOCK_KEY: i64 = 0x4143_4354_4C4B_4641;
 
-fn test_guard() -> MutexGuard<'static, ()> {
-    FAILED_PERSIST_STATE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+fn test_guard() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut guard = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    guard
+        .batch_execute("SET lock_timeout TO '60s'")
+        .expect("database-lock waits should have a finite CI bound");
+    guard
+        .query_one(
+            "SELECT pg_advisory_lock($1)",
+            &[&FAILED_PERSIST_STATE_LOCK_KEY],
+        )
+        .expect("account-link failed-persist fixture lock should be acquired");
+    guard
 }
 
 fn test_client() -> Client {
