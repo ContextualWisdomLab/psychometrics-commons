@@ -1,9 +1,16 @@
 //! `PostgreSQL` assessment-session identity must match the Rust opaque-reference boundary.
 //!
-//! Session headers and append-only command history are durable lifecycle provenance. Direct SQL
-//! must not persist Unicode-numeric aliases, surrounding Unicode whitespace, embedded controls,
-//! or default-ignorable code points that `normalized_reference` rejects or would normalize in the
-//! Rust domain.
+//! An opaque reference is a product-issued identifier whose exact accepted spelling carries
+//! identity; callers must not treat trimmed or visually similar spellings as the same resource.
+//! Durable lifecycle provenance is the persisted session header and append-only command evidence
+//! used to reconstruct that identity after restart or recovery. A Unicode scalar value is a valid
+//! Unicode code point representable by Rust `char`; surrogate code points are excluded.
+//! Default-ignorable characters are normally hidden by Unicode rendering, so this product rejects
+//! them to prevent visually identical aliases from becoming distinct durable identifiers.
+//!
+//! Direct SQL therefore must not persist Unicode-numeric aliases, surrounding Unicode whitespace,
+//! embedded controls, or default-ignorable code points that `normalized_reference` rejects or
+//! would normalize in the Rust domain.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_assessment_session::apply_assessment_session_migration;
