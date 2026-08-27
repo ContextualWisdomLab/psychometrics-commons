@@ -9,10 +9,9 @@
 //! and a continuation cursor resumes immediately after the last returned row,
 //! rather than counting rows from the beginning again. A non-locking catalog read
 //! does not reserve the release row while a participant is browsing. The returned
-//! releases are therefore candidates only: publication state can change after the
-//! catalog read, so the persisted session-start path locks and revalidates the exact
-//! release before creating a session. This adapter neither authorizes nor creates
-//! sessions.
+//! releases are therefore candidates only: publication state can change after the catalog read,
+//! so the persisted session-start path locks and revalidates the exact release
+//! before creating a session. This adapter neither authorizes nor creates sessions.
 
 use crate::postgres_instrument_release::{
     published_instrument_release_snapshot_from_row, InstrumentReleaseQueryError,
