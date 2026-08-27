@@ -20,6 +20,8 @@ const EVIDENCE_DIGEST: &str =
 const INSTRUMENT_REF: &str = "instrument_ref_가나다_東京_éclair";
 const ENCODED_INSTRUMENT_REF: &str =
     "instrument_ref_%EA%B0%80%EB%82%98%EB%8B%A4_%E6%9D%B1%E4%BA%AC_%C3%A9clair";
+const MIXED_CASE_ENCODED_INSTRUMENT_REF: &str =
+    "instrument_ref_%EA%B0%80%EB%82%98%EB%8B%A4_%E6%9D%B1%E4%BA%AC_%c3%a9clair";
 
 fn published_multilingual_release() -> InstrumentRelease {
     let manifest = InstrumentReleaseManifest::new(
@@ -95,16 +97,19 @@ fn request(path: &str) -> String {
 #[test]
 fn percent_encoded_utf8_family_path_resolves_the_exact_multilingual_reference() {
     let runtime = InstrumentHttpRuntime::new(vec![published_multilingual_release()]);
-    let response = handle_instrument_http_request(
-        &request(&format!("/v1/instruments/{ENCODED_INSTRUMENT_REF}")),
-        &runtime,
-    );
 
-    assert_eq!(response.status(), 200);
-    assert!(response
-        .body()
-        .contains(&format!("\"instrument_ref\":\"{INSTRUMENT_REF}\"")));
-    assert!(response.body().contains("release_multilingual_catalog_v1"));
+    for encoded_reference in [ENCODED_INSTRUMENT_REF, MIXED_CASE_ENCODED_INSTRUMENT_REF] {
+        let response = handle_instrument_http_request(
+            &request(&format!("/v1/instruments/{encoded_reference}")),
+            &runtime,
+        );
+
+        assert_eq!(response.status(), 200, "{encoded_reference}");
+        assert!(response
+            .body()
+            .contains(&format!("\"instrument_ref\":\"{INSTRUMENT_REF}\"")));
+        assert!(response.body().contains("release_multilingual_catalog_v1"));
+    }
 }
 
 #[test]
@@ -112,6 +117,7 @@ fn malformed_or_separator_percent_encoding_fails_closed() {
     let runtime = InstrumentHttpRuntime::new(vec![published_multilingual_release()]);
 
     for path in [
+        "/v1/instruments/instrument_ref_%",
         "/v1/instruments/instrument_ref_%GG",
         "/v1/instruments/instrument_ref_%E3%81",
         "/v1/instruments/instrument_ref_%2Fhidden",
