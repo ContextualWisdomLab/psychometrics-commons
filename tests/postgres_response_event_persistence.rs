@@ -616,7 +616,7 @@ fn stored_noncanonical_digest_fails_closed_on_reload() {
         .unwrap();
     assert!(matches!(
         load_err(&mut client, "session_ipip_ko_digest"),
-        ResponseEventPersistenceError::ConflictingReplay
+        ResponseEventPersistenceError::CorruptStoredEvidence
     ));
 }
 
