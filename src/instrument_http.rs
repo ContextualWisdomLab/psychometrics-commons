@@ -404,12 +404,6 @@ fn apply_request_read(
                 Ok(RequestReadProgress::Continue)
             }
         }
-        Err(error)
-            if error.kind() == io::ErrorKind::TimedOut
-                || error.kind() == io::ErrorKind::WouldBlock =>
-        {
-            Ok(RequestReadProgress::Complete)
-        }
         Err(error) => Err(error),
     }
 }
