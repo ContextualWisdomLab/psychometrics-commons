@@ -10,7 +10,8 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::postgres_instrument_catalog::{
-    list_startable_instrument_releases, StartableInstrumentCatalogError,
+    list_startable_instrument_release_page, list_startable_instrument_releases,
+    StartableInstrumentCatalogError,
 };
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release, InstrumentReleaseQueryError,
@@ -308,7 +309,7 @@ fn startable_catalog_is_empty_without_published_rows() {
 }
 
 #[test]
-fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
+fn storage_constraint_rejects_duplicate_item_references() {
     let _guard = test_guard();
     let mut client = test_client();
     reset_tables(&mut client);
@@ -322,10 +323,6 @@ fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
         &mut client,
         &published_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
     );
-    // Protected-main hardening now enforces exact opaque item-reference spelling in the
-    // schema itself, so duplicated item references cannot be persisted at all. Fail-closed
-    // behavior therefore lives at the deepest available layer: the corrupting UPDATE must
-    // be rejected by the storage constraint before any catalog query can observe it.
     let corrupt = client.execute(
         "UPDATE instrument_release SET item_version_refs = ARRAY[\
              'item_version_001', 'item_version_001'\
@@ -349,6 +346,44 @@ fn startable_catalog_fails_closed_on_corrupt_published_evidence() {
         vec!["release_alpha_en_v1", "release_big_five_ko_v1"]
     );
     transaction.commit().unwrap();
+}
+
+#[test]
+fn startable_catalog_propagates_invalid_stored_value_after_constraint_bypass() {
+    let _guard = test_guard();
+    let mut client = test_client();
+    reset_tables(&mut client);
+    apply_instrument_release_migration(&mut client).unwrap();
+
+    persist(
+        &mut client,
+        &published_release("release_alpha_en_v1", "instrument_alpha", "en-US"),
+    );
+    persist(
+        &mut client,
+        &published_release("release_big_five_ko_v1", "instrument_big_five", "ko-KR"),
+    );
+
+    // The normal migration prevents this state. Dropping the two owned constraints
+    // simulates a legacy/tampered database so the catalog's independent row
+    // reconstruction boundary is exercised rather than merely re-testing DDL.
+    client
+        .batch_execute(
+            "ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_item_refs_not_empty_check;\
+             ALTER TABLE instrument_release DROP CONSTRAINT instrument_release_item_refs_format_check;\
+             UPDATE instrument_release SET item_version_refs = ARRAY[]::TEXT[]\
+             WHERE release_ref = 'release_big_five_ko_v1';",
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        list_startable_instrument_release_page(&mut transaction, None),
+        Err(StartableInstrumentCatalogError::Query(
+            InstrumentReleaseQueryError::InvalidStoredValue
+        ))
+    ));
+    transaction.rollback().unwrap();
 }
 
 #[test]
