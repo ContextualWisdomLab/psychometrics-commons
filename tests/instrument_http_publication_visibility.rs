@@ -1,8 +1,9 @@
 //! Regression coverage for public instrument-catalog publication visibility.
 //!
 //! The public catalog is an authorization boundary for starting assessments:
-//! only exactly `Published` releases may be discoverable. Draft and suspended
-//! families must remain indistinguishable from a missing family.
+//! only exactly `Published` releases may be discoverable. Draft, review,
+//! suspended, and retired families must remain indistinguishable from a missing
+//! family.
 
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
@@ -70,11 +71,7 @@ fn approved_evidence(release_ref: &str, evidence_ref: &str) -> PublicationEviden
     .unwrap()
 }
 
-fn published_release(
-    release_ref: &str,
-    instrument_ref: &str,
-    evidence_ref: &str,
-) -> InstrumentRelease {
+fn review_release(release_ref: &str, instrument_ref: &str) -> InstrumentRelease {
     let mut release =
         InstrumentRelease::new(manifest(release_ref, instrument_ref), 10_000).unwrap();
     release
@@ -84,6 +81,15 @@ fn published_release(
             10_100,
         )
         .unwrap();
+    release
+}
+
+fn published_release(
+    release_ref: &str,
+    instrument_ref: &str,
+    evidence_ref: &str,
+) -> InstrumentRelease {
+    let mut release = review_release(release_ref, instrument_ref);
     release
         .bind_publication_evidence(approved_evidence(release_ref, evidence_ref))
         .unwrap();
@@ -108,6 +114,7 @@ fn collection_exposes_only_exactly_published_releases() {
         "instrument_visible_family",
         "publication_evidence_visible",
     );
+    let review = review_release("release_hidden_review", "instrument_review_family");
     let mut suspended = published_release(
         "release_hidden_suspended",
         "instrument_suspended_family",
@@ -120,24 +127,39 @@ fn collection_exposes_only_exactly_published_releases() {
             10_300,
         )
         .unwrap();
+    let mut retired = published_release(
+        "release_hidden_retired",
+        "instrument_retired_family",
+        "publication_evidence_retired",
+    );
+    retired
+        .apply_command(
+            "publication_retire_hidden",
+            PublicationCommand::Retire,
+            10_300,
+        )
+        .unwrap();
     let draft = InstrumentRelease::new(
         manifest("release_hidden_draft", "instrument_draft_family"),
         10_000,
     )
     .unwrap();
 
-    let runtime = InstrumentHttpRuntime::new(vec![draft, suspended, visible]);
+    let runtime = InstrumentHttpRuntime::new(vec![draft, review, suspended, retired, visible]);
     let response =
         handle_instrument_http_request(&get_request(INSTRUMENT_COLLECTION_PATH), &runtime);
 
     assert_eq!(response.status(), 200);
     assert!(response.body().contains("release_visible_published"));
-    assert!(!response.body().contains("release_hidden_suspended"));
     assert!(!response.body().contains("release_hidden_draft"));
+    assert!(!response.body().contains("release_hidden_review"));
+    assert!(!response.body().contains("release_hidden_suspended"));
+    assert!(!response.body().contains("release_hidden_retired"));
 }
 
 #[test]
 fn unpublished_only_families_are_indistinguishable_from_missing_families() {
+    let review = review_release("release_hidden_review", "instrument_review_family");
     let mut suspended = published_release(
         "release_hidden_suspended",
         "instrument_suspended_family",
@@ -150,14 +172,31 @@ fn unpublished_only_families_are_indistinguishable_from_missing_families() {
             10_300,
         )
         .unwrap();
+    let mut retired = published_release(
+        "release_hidden_retired",
+        "instrument_retired_family",
+        "publication_evidence_retired",
+    );
+    retired
+        .apply_command(
+            "publication_retire_hidden",
+            PublicationCommand::Retire,
+            10_300,
+        )
+        .unwrap();
     let draft = InstrumentRelease::new(
         manifest("release_hidden_draft", "instrument_draft_family"),
         10_000,
     )
     .unwrap();
-    let runtime = InstrumentHttpRuntime::new(vec![draft, suspended]);
+    let runtime = InstrumentHttpRuntime::new(vec![draft, review, suspended, retired]);
 
-    for family in ["instrument_draft_family", "instrument_suspended_family"] {
+    for family in [
+        "instrument_draft_family",
+        "instrument_review_family",
+        "instrument_suspended_family",
+        "instrument_retired_family",
+    ] {
         let response = handle_instrument_http_request(
             &get_request(&format!("/v1/instruments/{family}")),
             &runtime,
