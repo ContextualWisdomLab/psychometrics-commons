@@ -10,7 +10,7 @@ use psychometrics_commons_runtime::item_delivery::ItemDeliveryLedger;
 use psychometrics_commons_runtime::item_delivery_http::{
     handle_item_delivery_http_request, ItemDeliveryHttpRuntime, ITEM_DELIVERY_COLLECTION_SUFFIX,
 };
-use psychometrics_commons_runtime::session::SessionState;
+use psychometrics_commons_runtime::session::{AssessmentSession, SessionCommand};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -41,8 +41,20 @@ fn manifest() -> InstrumentReleaseManifest {
 }
 
 fn active_runtime() -> ItemDeliveryHttpRuntime {
-    let ledger = ItemDeliveryLedger::from_manifest(SESSION_REF, &manifest()).unwrap();
-    ItemDeliveryHttpRuntime::new(vec![(SessionState::Active, ledger)])
+    let manifest = manifest();
+    let ledger = ItemDeliveryLedger::from_manifest(SESSION_REF, &manifest).unwrap();
+    let mut session = AssessmentSession::from_currently_published_manifest(
+        SESSION_REF,
+        "participant_item_delivery_http",
+        &manifest,
+        "ko-KR",
+        1,
+    )
+    .unwrap();
+    session
+        .apply_command("cmd_activate_item_delivery_http", 1, SessionCommand::Activate)
+        .unwrap();
+    ItemDeliveryHttpRuntime::new(vec![(session, ledger)]).unwrap()
 }
 
 fn collection_path(session_ref: &str) -> String {
@@ -241,7 +253,11 @@ fn unpublished_item_paused_session_and_conflicting_replay_fail_closed() {
         .contains("urn:psychometrics-commons:problem:idempotency-conflict"));
     assert_eq!(runtime.event_count(SESSION_REF), 1);
 
-    runtime.set_session_state(SESSION_REF, SessionState::Paused);
+    runtime
+        .session_mut(SESSION_REF)
+        .unwrap()
+        .apply_command("cmd_pause_item_delivery_http", 2, SessionCommand::Pause)
+        .unwrap();
     let paused_body = format!(
         "{{\"delivery_ref\":\"dlv_after_pause\",\"item_version_ref\":\"item_version_002\",\"presentation_context_ref\":\"{PRESENTATION}\"}}"
     );
