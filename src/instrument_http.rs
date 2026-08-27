@@ -470,24 +470,20 @@ mod unit_tests {
             apply_request_read(&mut oversized, b"y", Ok(1)).unwrap(),
             RequestReadProgress::Complete
         ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::TimedOut, "timeout"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
-        assert!(matches!(
-            apply_request_read(
-                &mut Vec::new(),
-                b"",
-                Err(io::Error::new(ErrorKind::WouldBlock, "block"))
-            )
-            .unwrap(),
-            RequestReadProgress::Complete
-        ));
+        let timeout = apply_request_read(
+            &mut Vec::new(),
+            b"",
+            Err(io::Error::new(ErrorKind::TimedOut, "timeout")),
+        )
+        .expect_err("read timeout must remain an I/O timeout");
+        assert_eq!(timeout.kind(), ErrorKind::TimedOut);
+        let would_block = apply_request_read(
+            &mut Vec::new(),
+            b"",
+            Err(io::Error::new(ErrorKind::WouldBlock, "block")),
+        )
+        .expect_err("would-block must remain an I/O error");
+        assert_eq!(would_block.kind(), ErrorKind::WouldBlock);
         assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
         assert!(parse_request_line("GET /v1/instruments SMTP/1.0\r\n\r\n").is_none());
         assert!(parse_request_line("GET /v1/instruments HTTP/1.1 leftover\r\n\r\n").is_none());
