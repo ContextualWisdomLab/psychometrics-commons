@@ -84,7 +84,9 @@ fn assert_conflicting_replay(client: &mut Client, event_ref: &str, conflict: Evi
     }
 
     let conflicting = evidence(event_ref, conflict);
-    let mut transaction = client.transaction().expect("conflict transaction must start");
+    let mut transaction = client
+        .transaction()
+        .expect("conflict transaction must start");
     assert!(matches!(
         persist_audit_evidence(&mut transaction, &conflicting),
         Err(AuditPersistenceError::ConflictingReplay)
