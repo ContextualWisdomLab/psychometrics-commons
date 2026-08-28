@@ -3,13 +3,15 @@
 //! The immutable reference validator is consumed by CHECK constraints. `PostgreSQL` does not
 //! automatically revalidate historical rows when such a function is replaced, so the migration
 //! must derive its validation marker from the live validator definition. Concurrent migration
-//! reapplies must also serialize the marker decision before either caller rebuilds constraints.
+//! reapplies must serialize that marker decision without taking an exclusive table lock when the
+//! already-installed policy is unchanged.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_request::apply_scoring_request_migration;
 use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "scoring_request_migration_policy_test";
+const POLICY_LOCK_CLASS_ID: i32 = 1_883_264_113;
 static FIXTURE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn fixture_test_guard() -> MutexGuard<'static, ()> {
@@ -64,19 +66,21 @@ fn reference_policy_marker_is_derived_from_live_validator_definition() {
 }
 
 #[test]
-fn concurrent_reapply_waits_on_the_policy_table_lock() {
+fn concurrent_reapply_waits_on_the_schema_policy_lock() {
     let _guard = fixture_test_guard();
     let mut setup = connect();
     prepare_schema(&mut setup);
 
     let mut holder = connect();
     holder
-        .batch_execute(&format!(
-            "SET search_path TO {SCHEMA}; \
-             BEGIN; \
-             LOCK TABLE scoring_request IN ACCESS EXCLUSIVE MODE;"
-        ))
-        .expect("the test holder must acquire the scoring-request policy table lock");
+        .batch_execute(&format!("SET search_path TO {SCHEMA}; BEGIN;"))
+        .unwrap();
+    holder
+        .query_one(
+            "SELECT pg_advisory_xact_lock($1, hashtext(current_schema()))",
+            &[&POLICY_LOCK_CLASS_ID],
+        )
+        .expect("the test holder must acquire the schema-scoped policy lock");
 
     let mut contender = connect();
     contender
@@ -85,11 +89,11 @@ fn concurrent_reapply_waits_on_the_policy_table_lock() {
         ))
         .unwrap();
     let error = apply_scoring_request_migration(&mut contender)
-        .expect_err("a concurrent reapply must wait on the policy table lock");
+        .expect_err("a concurrent reapply must wait on the schema policy lock");
     assert_eq!(
         error.code(),
         Some(&SqlState::QUERY_CANCELED),
-        "the bounded wait must end at the serialization boundary, not another migration failure"
+        "the bounded wait must end at the policy serialization boundary"
     );
 
     holder.batch_execute("ROLLBACK").unwrap();
@@ -98,4 +102,31 @@ fn concurrent_reapply_waits_on_the_policy_table_lock() {
         .unwrap();
     apply_scoring_request_migration(&mut contender)
         .expect("migration reapply must succeed after the competing policy transaction releases");
+}
+
+#[test]
+fn unchanged_reapply_does_not_block_an_active_reader() {
+    let _guard = fixture_test_guard();
+    let mut setup = connect();
+    prepare_schema(&mut setup);
+
+    let mut reader = connect();
+    reader
+        .batch_execute(&format!("SET search_path TO {SCHEMA}; BEGIN;"))
+        .unwrap();
+    reader
+        .query_one("SELECT count(*) FROM scoring_request", &[])
+        .expect("reader must acquire and retain an ordinary table read lock");
+
+    let mut reapplier = connect();
+    reapplier
+        .batch_execute(&format!(
+            "SET search_path TO {SCHEMA}; SET statement_timeout = '500ms';"
+        ))
+        .unwrap();
+    apply_scoring_request_migration(&mut reapplier).expect(
+        "an unchanged policy reapply must not require ACCESS EXCLUSIVE while readers are active",
+    );
+
+    reader.batch_execute("ROLLBACK").unwrap();
 }
