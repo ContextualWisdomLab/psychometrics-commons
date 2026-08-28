@@ -129,16 +129,13 @@ fn session_command_authorized(
     if participant.participant_ref() != session.participant_ref() {
         return false;
     }
-    let Ok(resource) = ResourceScope::participant_owned(
+    ResourceScope::participant_owned(
         ResourceKind::AssessmentSession,
         participant.tenant_ref(),
         participant.participant_ref(),
         session.session_ref(),
-    ) else {
-        return false;
-    };
-
-    match authority {
+    )
+    .is_ok_and(|resource| match authority {
         SessionCommandAuthority::Authenticated(actor) => {
             authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
         }
@@ -151,7 +148,7 @@ fn session_command_authorized(
                 && authorize_anonymous_session_command(context, participant, session, *now_unix_ms)
                     .is_ok()
         }
-    }
+    })
 }
 
 /// Accept one TCP connection and classify one fully framed request without mutation authority.
@@ -434,12 +431,18 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        authorized_command_session_ref, declared_request_end, normalize_read_error, reason_phrase,
-        reject_full_request_buffer, reject_invalid_header_name, reject_non_crlf_header_lines,
-        reject_oversized_request, reject_transfer_encoding, remaining_request_timeout,
-        single_header_value,
+        authorized_command_session_ref, declared_request_end, normalize_read_error,
+        read_http_request, reason_phrase, reject_full_request_buffer, reject_invalid_header_name,
+        reject_non_crlf_header_lines, reject_oversized_request, reject_transfer_encoding,
+        remaining_request_timeout, session_command_authorized, single_header_value,
+        SessionCommandAuthority,
     };
-    use std::io;
+    use crate::authorization::{AuthorizationContext, ProductRole};
+    use crate::participant::ParticipantRecord;
+    use crate::session::AssessmentSession;
+    use std::io::{self, Write};
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -463,6 +466,16 @@ mod tests {
             None
         );
         assert_eq!(authorized_command_session_ref("GARBAGE\r\n"), None);
+        assert_eq!(
+            authorized_command_session_ref("POST /v1/sessions/ses_one/commands SMTP/1.0\r\n\r\n"),
+            None
+        );
+        assert_eq!(
+            authorized_command_session_ref(
+                "POST /v1/sessions/ses_one/commands HTTP/1.1 extra\r\n\r\n"
+            ),
+            None
+        );
     }
 
     #[test]
@@ -583,5 +596,97 @@ mod tests {
         assert_eq!(reason_phrase(405), "Method Not Allowed");
         assert_eq!(reason_phrase(409), "Conflict");
         assert_eq!(reason_phrase(418), "Error");
+    }
+
+    #[test]
+    fn session_authorization_rejects_a_foreign_participant_before_scope_creation() {
+        let session = AssessmentSession::from_persisted_created(
+            "ses_boundary_authorization",
+            "ptc_boundary_authorization",
+            "release_boundary_authorization",
+            "version_boundary_authorization",
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "en-US",
+            1_000,
+        )
+        .unwrap();
+        let foreign_participant = ParticipantRecord::new_anonymous(
+            "ptc_boundary_authorization_foreign",
+            "tenant_boundary_authorization",
+            1_001,
+        )
+        .unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_boundary_authorization",
+            "subject_boundary_authorization",
+            Some("ptc_boundary_authorization"),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let authority = SessionCommandAuthority::Authenticated(&actor);
+
+        assert!(!session_command_authorized(
+            &authority,
+            &foreign_participant,
+            &session
+        ));
+    }
+
+    fn start_request_reader() -> (TcpStream, thread::JoinHandle<io::Result<String>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_http_request(&mut stream, Instant::now() + Duration::from_secs(1))
+        });
+        (TcpStream::connect(address).unwrap(), server)
+    }
+
+    #[test]
+    fn request_reader_rejects_eof_before_a_complete_frame() {
+        let (mut client, server) = start_request_reader();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1")
+            .unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "session-command HTTP request ended before one complete frame was received"
+        );
+    }
+
+    #[test]
+    fn request_reader_waits_for_a_split_header_delimiter() {
+        let (mut client, server) = start_request_reader();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1")
+            .unwrap();
+        thread::sleep(Duration::from_millis(20));
+        client.write_all(b"\r\n\r\n").unwrap();
+
+        assert_eq!(
+            server.join().unwrap().unwrap(),
+            "POST /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn request_reader_rejects_bytes_after_the_declared_frame() {
+        let (mut client, server) = start_request_reader();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1\r\nContent-Length: 0")
+            .unwrap();
+        thread::sleep(Duration::from_millis(20));
+        client.write_all(b"\r\n\r\nextra").unwrap();
+
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "session-command HTTP request contains bytes beyond one framed request"
+        );
     }
 }
