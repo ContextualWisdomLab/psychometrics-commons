@@ -424,6 +424,7 @@ fn all_public_error_variants_have_stable_messages_and_database_sources() {
     for error in [
         LongitudinalObservationPersistenceError::InvalidReference,
         LongitudinalObservationPersistenceError::InvalidNumericRange,
+        LongitudinalObservationPersistenceError::ObservationIdentityConflict,
         LongitudinalObservationPersistenceError::ConflictingReplay,
         LongitudinalObservationPersistenceError::CorruptHistory,
         LongitudinalObservationPersistenceError::UnsupportedIsolationLevel,

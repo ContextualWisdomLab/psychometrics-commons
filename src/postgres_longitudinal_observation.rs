@@ -312,11 +312,8 @@ fn classify_existing(
     }
     let row = &rows[0];
     let anomaly_code = clock_anomaly_code(record.clock_anomaly()).map(str::to_owned);
+    // The identity guard above proves these fields match whenever the record reference matches.
     let exact_header = row.get::<_, String>(0) == record.observation_record_ref()
-        && row.get::<_, String>(1) == tenant_ref
-        && row.get::<_, String>(2) == record.enrollment_ref()
-        && row.get::<_, String>(3) == record.source_system_ref()
-        && row.get::<_, String>(4) == record.source_observation_ref()
         && row.get::<_, String>(5) == record.construct_ref()
         && row.get::<_, String>(6) == record.measure_ref()
         && row.get::<_, i64>(7) == postgres_u64(record.validity_start_at_unix_ms())?
