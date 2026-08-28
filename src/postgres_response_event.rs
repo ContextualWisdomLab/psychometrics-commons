@@ -221,6 +221,14 @@ pub fn load_response_event_receipts(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Vec<ResponseEventReceipt>, ResponseEventPersistenceError> {
+    let (receipts, _) = load_response_event_state(transaction, session_ref)?;
+    Ok(receipts)
+}
+
+fn load_response_event_state(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<(Vec<ResponseEventReceipt>, ResponseLedger), ResponseEventPersistenceError> {
     require_read_committed(transaction)?;
     let session_ref = required_reference(session_ref)?;
     let rows = transaction.query(
@@ -261,8 +269,8 @@ pub fn load_response_event_receipts(
             received_at_unix_ms,
         });
     }
-    require_contiguous_receipt_history(session_ref, &receipts)?;
-    Ok(receipts)
+    let ledger = response_ledger_from_receipts(session_ref, &receipts)?;
+    Ok((receipts, ledger))
 }
 
 /// Rebuild the accepted response ledger for one session after restart.
@@ -279,9 +287,8 @@ pub fn load_response_ledger(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<ResponseLedger, ResponseEventPersistenceError> {
-    let receipts = load_response_event_receipts(transaction, session_ref)?;
-    let events = receipts.into_iter().map(|receipt| receipt.event).collect();
-    ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)
+    let (_, ledger) = load_response_event_state(transaction, session_ref)?;
+    Ok(ledger)
 }
 
 fn classify_existing_event(
@@ -345,16 +352,23 @@ fn classify_unique_violation(error: postgres::Error) -> ResponseEventPersistence
     }
 }
 
-fn require_contiguous_receipt_history(
+fn response_ledger_from_receipts(
     session_ref: &str,
     receipts: &[ResponseEventReceipt],
-) -> Result<(), ResponseEventPersistenceError> {
+) -> Result<ResponseLedger, ResponseEventPersistenceError> {
     let events = receipts
         .iter()
         .map(|receipt| receipt.event.clone())
         .collect();
-    ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)?;
-    Ok(())
+    ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)
+}
+
+#[cfg(test)]
+fn require_contiguous_receipt_history(
+    session_ref: &str,
+    receipts: &[ResponseEventReceipt],
+) -> Result<(), ResponseEventPersistenceError> {
+    response_ledger_from_receipts(session_ref, receipts).map(|_| ())
 }
 
 fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {

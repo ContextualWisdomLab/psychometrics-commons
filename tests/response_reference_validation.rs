@@ -33,6 +33,11 @@ fn response_ledger_session_reference_must_be_opaque() {
 }
 
 #[test]
+fn response_ledger_accepts_an_exact_opaque_session_reference() {
+    assert!(ResponseLedger::new("session_ref").is_ok());
+}
+
+#[test]
 fn response_identity_references_reject_numeric_like_values() {
     let session = active_session("session_ref");
     for request in [

@@ -86,9 +86,9 @@ impl ResponseEvent {
         payload_digest: impl AsRef<str>,
         sequence: usize,
     ) -> Result<Self, WriteError> {
-        let server_event_ref = exact_persisted_reference(server_event_ref.as_ref())?;
-        let client_event_ref = exact_persisted_reference(client_event_ref.as_ref())?;
-        let item_version_ref = exact_persisted_reference(item_version_ref.as_ref())?;
+        let server_event_ref = exact_reference(server_event_ref.as_ref())?;
+        let client_event_ref = exact_reference(client_event_ref.as_ref())?;
+        let item_version_ref = exact_reference(item_version_ref.as_ref())?;
         let payload_digest = payload_digest.as_ref();
         if payload_digest.trim().is_empty() {
             return Err(WriteError::EmptyReference);
@@ -307,7 +307,7 @@ impl ResponseLedger {
         session_ref: impl AsRef<str>,
         events: Vec<ResponseEvent>,
     ) -> Result<Self, WriteError> {
-        let session_ref = exact_persisted_reference(session_ref.as_ref())?;
+        let session_ref = exact_reference(session_ref.as_ref())?;
         for (index, event) in events.iter().enumerate() {
             if event.sequence != index + 1 {
                 return Err(WriteError::InvalidSequence);
@@ -490,13 +490,6 @@ fn exact_reference(reference: &str) -> Result<&str, WriteError> {
         return Err(WriteError::InvalidReference);
     }
     Ok(normalized)
-}
-
-fn exact_persisted_reference(reference: &str) -> Result<&str, WriteError> {
-    match normalized_reference(reference) {
-        Some(normalized) if normalized == reference => Ok(reference),
-        _ => Err(WriteError::InvalidReference),
-    }
 }
 
 fn is_canonical_sha256(digest: &str) -> bool {
