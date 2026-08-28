@@ -278,6 +278,35 @@ fn scoring_request_reference_rejects_every_rust_boundary_whitespace_character() 
 }
 
 #[test]
+fn scoring_request_reference_rejects_every_c1_control_character() {
+    let _guard = guard();
+    let mut client = client();
+
+    for code_point in 0x80u32..=0x9f {
+        let control = char::from_u32(code_point).expect("C1 control scalar must be valid Unicode");
+        assert!(
+            control.is_control(),
+            "Rust must classify U+{code_point:04X} as a control character"
+        );
+        let suffix = format!("c1_{code_point:04x}");
+        let request_ref = format!("scoring_request_{control}_{suffix}");
+        let error = insert_request(
+            &mut client,
+            &request_ref,
+            &format!("session_{suffix}"),
+            &format!("response_snapshot_{suffix}"),
+            &format!("assessment_spec_{suffix}"),
+            &format!("instrument_version_{suffix}"),
+            &format!("scoring_version_{suffix}"),
+            &format!("calibration_reference_{suffix}"),
+            None,
+        )
+        .expect_err("every C1 control accepted by PostgreSQL text must fail the durable reference CHECK");
+        assert_check(&error, "scoring_request_scoring_request_ref_format_check");
+    }
+}
+
+#[test]
 fn current_policy_reapply_preserves_reference_constraint_objects() {
     let _guard = guard();
     let mut client = client();
