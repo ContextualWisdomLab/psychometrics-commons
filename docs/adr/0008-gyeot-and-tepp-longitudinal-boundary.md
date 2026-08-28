@@ -50,7 +50,7 @@ For active PR #417:
 - exact same-source/evidence replay returns the already accepted observation;
 - same source identity with changed evidence returns `LongitudinalObservationError::IdempotencyConflict` at the in-memory boundary;
 - a distinct source observation that reuses an accepted `observation_record_ref` returns `LongitudinalObservationError::ObservationIdentityConflict` before aggregate mutation;
-- at the PostgreSQL adapter, a distinct source or tenant/source binding that collides on an existing durable `observation_record_ref` returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, while same-source/different-evidence replay remains `LongitudinalObservationPersistenceError::ConflictingReplay`;
+- at the PostgreSQL adapter, a distinct source observation that collides on an existing durable `observation_record_ref` returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, while same-source replay under a different tenant or with different evidence remains `LongitudinalObservationPersistenceError::ConflictingReplay`;
 - the rejected collision does not replace the accepted observation and does not append or rewrite membership rows.
 
 This ADR does not define a participant-facing HTTP endpoint or event schema for longitudinal ingestion because no such transport is implemented on protected main or #417. A later transport must preserve these identifiers and failure classes without inventing normalization aliases or a different idempotency scope.

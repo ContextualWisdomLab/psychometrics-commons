@@ -299,8 +299,7 @@ fn classify_existing(
     )?;
     let record_identity_collision = rows.iter().any(|row| {
         row.get::<_, String>(0) == record.observation_record_ref()
-            && (row.get::<_, String>(1) != tenant_ref
-                || row.get::<_, String>(2) != record.enrollment_ref()
+            && (row.get::<_, String>(2) != record.enrollment_ref()
                 || row.get::<_, String>(3) != record.source_system_ref()
                 || row.get::<_, String>(4) != record.source_observation_ref())
     });
@@ -478,7 +477,8 @@ mod numeric_guard_tests {
             require_clock_anomaly_code(None, Some(ClockAnomaly::RecordedAfterReceived)),
             Err(LongitudinalObservationPersistenceError::CorruptHistory)
         ));
-        let identity_conflict = LongitudinalObservationPersistenceError::ObservationIdentityConflict;
+        let identity_conflict =
+            LongitudinalObservationPersistenceError::ObservationIdentityConflict;
         assert!(Error::source(&identity_conflict).is_none());
         assert!(identity_conflict.to_string().contains("record identity"));
         let error = LongitudinalObservationPersistenceError::ConflictingReplay;
