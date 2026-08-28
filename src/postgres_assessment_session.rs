@@ -2387,6 +2387,11 @@ mod tests {
         ));
         transaction.commit().unwrap();
 
+        assert_corrupt_stored_identity_is_rejected(&mut client);
+        assert_missing_participant_column_is_rejected(&mut client);
+    }
+
+    fn assert_corrupt_stored_identity_is_rejected(client: &mut Client) {
         client
             .batch_execute(
                 "ALTER TABLE assessment_session \
@@ -2409,7 +2414,9 @@ mod tests {
             Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
         ));
         transaction.rollback().unwrap();
+    }
 
+    fn assert_missing_participant_column_is_rejected(client: &mut Client) {
         client
             .execute(
                 "UPDATE instrument_release SET publication_state = 'suspended' WHERE release_ref = $1",

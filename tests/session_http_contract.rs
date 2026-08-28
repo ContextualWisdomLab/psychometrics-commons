@@ -415,6 +415,7 @@ fn memory_port_records_exact_replay_disposition() {
         Err(AssessmentSessionPersistenceError::InvalidReference)
     ));
     assert!(port.load(SESSION).unwrap().is_some());
+    assert!(port.load(&format!(" {SESSION} ")).unwrap().is_some());
     assert!(port.load("ses_missing").unwrap().is_none());
     port.next_load_error = Some(AssessmentSessionPersistenceError::InvalidReference);
     assert_eq!(authorized_get(&mut port, SESSION).status(), 400);
