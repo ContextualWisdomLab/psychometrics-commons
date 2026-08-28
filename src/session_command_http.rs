@@ -408,18 +408,10 @@ fn session_command_session_ref_is_transport_safe(session_ref: &str) -> bool {
 
 fn valid_idempotency_key(value: &str) -> Option<&str> {
     let normalized = value.trim();
-    if normalized.is_empty() || normalized.chars().any(char::is_whitespace) {
+    if normalized.chars().any(char::is_whitespace) {
         return None;
     }
-    let numeric_like = normalized.chars().any(char::is_numeric)
-        && normalized
-            .chars()
-            .all(|character| character.is_numeric() || matches!(character, '+' | '-' | '.' | ','));
-    if numeric_like {
-        None
-    } else {
-        Some(normalized)
-    }
+    normalized_reference(normalized)
 }
 
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {
@@ -511,6 +503,8 @@ mod unit_tests {
         assert_eq!(valid_idempotency_key("   "), None);
         assert_eq!(valid_idempotency_key("idem spaced key"), None);
         assert_eq!(valid_idempotency_key("1,2"), None);
+        assert_eq!(valid_idempotency_key("idem\u{200b}_key"), None);
+        assert_eq!(valid_idempotency_key("1e3"), None);
         assert_eq!(valid_idempotency_key("+1"), None);
     }
 
