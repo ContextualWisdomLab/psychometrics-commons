@@ -684,7 +684,7 @@ fn request_body(request: &str) -> Option<&str> {
         .ok()??
         .parse::<usize>()
         .ok()?;
-    if body.len() != content_length || !body.is_char_boundary(content_length) {
+    if body.len() != content_length {
         return None;
     }
     Some(&body[..content_length])
@@ -728,8 +728,9 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod unit_tests {
     use super::{
-        has_strict_crlf, json_string, response_collection_session_ref, response_session_authorized,
-        response_session_ref_is_transport_safe, split_target, valid_idempotency_key, write_problem,
+        has_strict_crlf, json_string, request_body, response_collection_session_ref,
+        response_session_authorized, response_session_ref_is_transport_safe, single_header_value,
+        split_target, valid_http_field_name, valid_idempotency_key, write_problem,
         ResponseHttpRuntime, ResponseWriteAuthority,
     };
     use crate::authorization::{AuthorizationContext, ProductRole};
@@ -759,6 +760,13 @@ mod unit_tests {
         assert_eq!(valid_idempotency_key("42"), None);
         assert_eq!(valid_idempotency_key("   "), None);
         assert_eq!(valid_idempotency_key("idem spaced key"), None);
+        assert!(valid_http_field_name("Content-Length"));
+        assert!(!valid_http_field_name(""));
+        assert!(single_header_value("POST / HTTP/1.1\r\n: value\r\n\r\n", "host").is_err());
+        assert_eq!(
+            request_body("POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"),
+            Some("{}")
+        );
         assert!(!has_strict_crlf("A: b\rX"));
     }
 
