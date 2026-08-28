@@ -17,8 +17,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0020_response_event.sql");
 const POSTGRES_EPOCH_UNIX_MS: u64 = 946_684_800_000;
 const MAX_POSTGRES_TIMESTAMP_UNIX_MS: u64 = POSTGRES_EPOCH_UNIX_MS + (i64::MAX as u64 / 1_000);
-const INVALID_SEQUENCE_ERROR: &str =
-    "response event sequence is missing, gapped, or outside the PostgreSQL bigint range";
 
 /// One accepted event plus the distinct observed and received clocks.
 ///
@@ -473,6 +471,9 @@ mod reference_guard_tests {
     use postgres::{Client, IsolationLevel, NoTls};
     use std::time::{Duration, UNIX_EPOCH};
 
+    const INVALID_SEQUENCE_ERROR: &str =
+        "response event sequence is missing, gapped, or outside the PostgreSQL bigint range";
+
     #[test]
     fn blank_numeric_and_overflow_sequences_fail_closed() {
         assert!(matches!(
@@ -594,7 +595,7 @@ mod reference_guard_tests {
         ];
         let gapped_error = response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts)
             .expect_err("gapped receipt history must fail closed");
-        assert_eq!(gapped_error.to_string(), super::INVALID_SEQUENCE_ERROR);
+        assert_eq!(gapped_error.to_string(), INVALID_SEQUENCE_ERROR);
         let duplicate_receipts = [
             receipt(first, 1_700_000_000_000, 1_700_000_000_250),
             receipt(duplicate_server, 1_700_000_000_500, 1_700_000_000_750),
