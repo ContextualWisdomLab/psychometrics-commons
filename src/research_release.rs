@@ -435,7 +435,7 @@ fn has_effective_restricted_identity_inventory(
         let Some(normalized) = normalized_reference(identity) else {
             return false;
         };
-        if normalized != identity {
+        if normalized != *identity {
             return false;
         }
         has_effective_identity = true;
