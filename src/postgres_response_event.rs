@@ -545,32 +545,46 @@ mod reference_guard_tests {
         }
     }
 
+    fn persisted_event(
+        server_event_ref: &str,
+        client_event_ref: &str,
+        item_version_ref: &str,
+        payload_digest: &str,
+        sequence: usize,
+    ) -> ResponseEvent {
+        ResponseEvent::from_persisted(
+            server_event_ref,
+            client_event_ref,
+            item_version_ref,
+            payload_digest,
+            sequence,
+        )
+        .unwrap()
+    }
+
     #[test]
     fn gapped_or_duplicate_receipt_history_fails_closed() {
-        let first = ResponseEvent::from_persisted(
+        let first = persisted_event(
             "server_event_item_01",
             "client_event_item_01",
             "item_version_n1_ko",
             "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             1,
-        )
-        .unwrap();
-        let gapped = ResponseEvent::from_persisted(
+        );
+        let gapped = persisted_event(
             "server_event_item_03",
             "client_event_item_03",
             "item_version_n3_ko",
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             3,
-        )
-        .unwrap();
-        let duplicate_server = ResponseEvent::from_persisted(
+        );
+        let duplicate_server = persisted_event(
             "server_event_item_01",
             "client_event_item_02",
             "item_version_n2_ko",
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             2,
-        )
-        .unwrap();
+        );
         let first_receipt = receipt(first.clone(), 1_700_000_000_000, 1_700_000_000_250);
         let gapped_receipts = [
             first_receipt,
