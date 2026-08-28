@@ -303,6 +303,7 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
     "credential",
     "database",
     "identity",
+    "itemdelivery",
     "keyverse",
     "linkage",
     "linked",
@@ -311,7 +312,11 @@ const FORBIDDEN_RESEARCH_NAMESPACE_PREFIX_MARKERS: &[&str] = &[
     "participant",
     "password",
     "pseudonym",
+    "response",
+    "result",
+    "scoringrequest",
     "secret",
+    "session",
     "subject",
     "token",
 ];
@@ -532,7 +537,6 @@ fn compact_public_release_column(column_name: &str) -> String {
 }
 
 /// Fold ASCII case and camelCase/PascalCase acronym boundaries so CSV/JSON export aliases match the denylist.
-///
 /// `researchParticipantRef` becomes `research_participant_ref` and stays
 /// allowed. `assessmentPARTICIPANTRef` becomes `assessment_participant_ref`
 /// and is rejected rather than bypassing the denylist through an uppercase run.
