@@ -198,7 +198,10 @@ enum RouteParse<'a> {
 }
 
 fn parse_export_route(target: &str) -> RouteParse<'_> {
-    let Some(rest) = target.strip_prefix("/v1/results/") else {
+    let Some(rest) = target.strip_prefix(RESULT_COLLECTION_PATH) else {
+        return RouteParse::NotFound;
+    };
+    let Some(rest) = rest.strip_prefix('/') else {
         return RouteParse::NotFound;
     };
     let Some(result_snapshot_ref) = rest.strip_suffix("/exports") else {
