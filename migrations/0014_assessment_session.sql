@@ -96,27 +96,73 @@ CREATE TABLE IF NOT EXISTS assessment_session (
     PRIMARY KEY (session_ref)
 );
 
--- Older schemas used anonymous CHECK constraints generated from the column names. Remove those
--- historical predicates when present, then recreate stable named constraints on every apply so
--- upgrades scan existing rows under the Rust-equivalent identity contract.
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_session_ref_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_participant_ref_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_instrument_release_ref_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_instrument_version_ref_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_version_ref_format_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_release_ref_format_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_participant_ref_format_check;
-ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_session_ref_format_check;
+-- Constraint comments are the migration policy-version marker. Bump the marker whenever the
+-- validator semantics change. An unchanged marker means the rows were already validated by this
+-- exact policy, so routine reapplication avoids repeated full-table scans and ACCESS EXCLUSIVE
+-- DROP/ADD work. Missing/stale markers or historical anonymous checks trigger one fail-closed
+-- rebuild and validation pass.
+DO $assessment_session_reference_constraints$
+DECLARE
+    policy_marker CONSTANT TEXT :=
+        'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+    current_policy_count BIGINT;
+    has_historical_constraint BOOLEAN;
+BEGIN
+    SELECT COUNT(*)
+      INTO current_policy_count
+      FROM pg_constraint
+     WHERE conrelid = 'assessment_session'::regclass
+       AND conname::text = ANY (ARRAY[
+            'assessment_session_session_ref_format_check',
+            'assessment_session_participant_ref_format_check',
+            'assessment_session_release_ref_format_check',
+            'assessment_session_version_ref_format_check'
+       ]::text[])
+       AND obj_description(oid, 'pg_constraint') = policy_marker;
 
-ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_session_ref_format_check CHECK (
-    assessment_session_reference_is_valid(session_ref)
-);
-ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_participant_ref_format_check CHECK (
-    assessment_session_reference_is_valid(participant_ref)
-);
-ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_release_ref_format_check CHECK (
-    assessment_session_reference_is_valid(instrument_release_ref)
-);
-ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_version_ref_format_check CHECK (
-    assessment_session_reference_is_valid(instrument_version_ref)
-);
+    SELECT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conrelid = 'assessment_session'::regclass
+           AND conname::text = ANY (ARRAY[
+                'assessment_session_session_ref_check',
+                'assessment_session_participant_ref_check',
+                'assessment_session_instrument_release_ref_check',
+                'assessment_session_instrument_version_ref_check'
+           ]::text[])
+    ) INTO has_historical_constraint;
+
+    IF current_policy_count <> 4 OR has_historical_constraint THEN
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_session_ref_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_participant_ref_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_instrument_release_ref_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_instrument_version_ref_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_version_ref_format_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_release_ref_format_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_participant_ref_format_check;
+        ALTER TABLE assessment_session DROP CONSTRAINT IF EXISTS assessment_session_session_ref_format_check;
+
+        ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_session_ref_format_check CHECK (
+            assessment_session_reference_is_valid(session_ref)
+        );
+        ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_participant_ref_format_check CHECK (
+            assessment_session_reference_is_valid(participant_ref)
+        );
+        ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_release_ref_format_check CHECK (
+            assessment_session_reference_is_valid(instrument_release_ref)
+        );
+        ALTER TABLE assessment_session ADD CONSTRAINT assessment_session_version_ref_format_check CHECK (
+            assessment_session_reference_is_valid(instrument_version_ref)
+        );
+
+        COMMENT ON CONSTRAINT assessment_session_session_ref_format_check ON assessment_session IS
+            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+        COMMENT ON CONSTRAINT assessment_session_participant_ref_format_check ON assessment_session IS
+            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+        COMMENT ON CONSTRAINT assessment_session_release_ref_format_check ON assessment_session IS
+            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+        COMMENT ON CONSTRAINT assessment_session_version_ref_format_check ON assessment_session IS
+            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+    END IF;
+END
+$assessment_session_reference_constraints$;
