@@ -7,8 +7,16 @@
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
+use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA_LOCK_KEY: i64 = 0x4954_444E_554D_5041;
+static FIXTURE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn fixture_test_guard() -> MutexGuard<'static, ()> {
+    FIXTURE_TEST_LOCK
+        .lock()
+        .expect("item-delivery numeric-parity fixture test lock must not be poisoned")
+}
 
 fn client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
@@ -62,6 +70,7 @@ fn is_default_ignorable(character: char) -> bool {
 
 #[test]
 fn sql_rejects_every_single_scalar_rust_classifies_as_numeric() {
+    let _guard = fixture_test_guard();
     let mut client = client();
     let rust_numeric: Vec<String> = (1u32..=0x0010_FFFF)
         .filter_map(char::from_u32)
@@ -94,6 +103,7 @@ fn sql_rejects_every_single_scalar_rust_classifies_as_numeric() {
 
 #[test]
 fn sql_does_not_overclassify_visible_rust_nonnumeric_scalars_as_numeric() {
+    let _guard = fixture_test_guard();
     let mut client = client();
     let rust_visible_nonnumeric: Vec<i32> = (1u32..=0x0010_FFFF)
         .filter_map(char::from_u32)
@@ -135,6 +145,7 @@ fn sql_does_not_overclassify_visible_rust_nonnumeric_scalars_as_numeric() {
 
 #[test]
 fn sql_rejects_every_outer_whitespace_scalar_rust_classifies_as_whitespace() {
+    let _guard = fixture_test_guard();
     let mut client = client();
     let rust_whitespace: Vec<i32> = (1u32..=0x0010_FFFF)
         .filter_map(char::from_u32)
