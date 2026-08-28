@@ -175,9 +175,9 @@ pub fn list_startable_instrument_release_page(
         .map(published_instrument_release_snapshot_from_row)
         .collect::<Result<Vec<_>, InstrumentReleaseQueryError>>()?;
     let next_cursor = if has_more {
-        releases
-            .last()
-            .map(StartableInstrumentReleaseCursor::from_snapshot)
+        Some(StartableInstrumentReleaseCursor::from_snapshot(
+            &releases[STARTABLE_INSTRUMENT_RELEASE_PAGE_SIZE - 1],
+        ))
     } else {
         None
     };
