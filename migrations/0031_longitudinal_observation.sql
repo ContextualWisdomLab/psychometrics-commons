@@ -2,9 +2,10 @@
 
 -- Keep the database boundary aligned with Rust 1.97's Unicode 17 reference contract.
 -- The generated numeric int4multirange below is the exact Unicode 17 numeric code-point set used
--- by rustc 1.97. The explicit control and Default_Ignorable_Code_Point ranges mirror the shared
--- Rust guard so direct SQL, restore, and operator paths cannot persist byte-distinct invisible
--- aliases that the product domain rejects. Mixed opaque identifiers remain valid because a value
+-- by rustc 1.97. Explicit Rust-whitespace, control, and Default_Ignorable_Code_Point ranges mirror
+-- the shared Rust guard so direct SQL, restore, and operator paths cannot depend on database
+-- locale/collation or persist byte-distinct aliases that the product domain rejects. Mixed opaque
+-- identifiers remain valid because whitespace is rejected only at the two outer edges and a value
 -- is numeric-like only when it contains at least one numeric code point and every character is
 -- numeric or an allowed numeric spelling token. The fixed pg_catalog search path prevents
 -- caller-controlled schemas from changing function resolution inside this CHECK helper.
@@ -16,12 +17,17 @@ PARALLEL SAFE
 SET search_path = pg_catalog
 AS $longitudinal_reference$
     WITH reference_character AS (
-        SELECT substr(reference_value, character_index, 1) AS character_text
+        SELECT
+            character_index,
+            substr(reference_value, character_index, 1) AS character_text
         FROM generate_series(1, character_length(reference_value)) AS character_index
     ),
     reference_classification AS (
         SELECT
+            character_index,
             character_text,
+            ascii(character_text) <@ '{[9,14),[32,33),[133,134),[160,161),[5760,5761),[8192,8203),[8232,8234),[8239,8240),[8287,8288),[12288,12289)}'::int4multirange
+                AS is_whitespace,
             ascii(character_text) <@ '{[0,32),[127,160)}'::int4multirange
                 AS is_control,
             ascii(character_text) <@ '{[173,174),[847,848),[1564,1565),[4447,4449),[6068,6070),[6155,6160),[8203,8208),[8234,8239),[8288,8304),[12644,12645),[65024,65040),[65279,65280),[65440,65441),[65520,65529),[113824,113828),[119155,119163),[917504,921600)}'::int4multirange
@@ -33,8 +39,16 @@ AS $longitudinal_reference$
     SELECT
         reference_value IS NOT NULL
         AND reference_value <> ''
-        AND left(reference_value, 1) !~ '[[:space:]]'
-        AND right(reference_value, 1) !~ '[[:space:]]'
+        AND NOT COALESCE(
+            bool_or(
+                is_whitespace
+                AND (
+                    character_index = 1
+                    OR character_index = character_length(reference_value)
+                )
+            ),
+            FALSE
+        )
         AND NOT COALESCE(bool_or(is_control), FALSE)
         AND NOT COALESCE(bool_or(is_default_ignorable), FALSE)
         AND NOT COALESCE(
