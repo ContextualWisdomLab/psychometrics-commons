@@ -269,6 +269,9 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "refresh_token",
     "api_key",
     "client_secret",
+    "session_cookie",
+    "cookie_header",
+    "set_cookie",
     "database_url",
     "database_dsn",
     "database_password",
@@ -343,6 +346,8 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 ///   restricted identity, authentication, credential, or internal-location marker.
 /// - Identity, authentication, credential, and internal-location column names fail closed
 ///   even when aliases add transport prefixes, suffixes, separators, or inserted digits.
+/// - Session-cookie and HTTP cookie-header credential columns fail closed, while ordinary
+///   cookie-governance metadata is not rejected merely for containing the word `cookie`.
 /// - Supply at least one published column and an effective product-authorized exact
 ///   restricted-identity inventory. A malformed nonblank inventory entry fails closed; blank
 ///   placeholders are ignored. An empty or unavailable inventory is never clean-release evidence.
