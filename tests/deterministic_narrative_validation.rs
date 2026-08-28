@@ -66,6 +66,23 @@ fn invalid_assignment_identity_is_not_downgraded_to_a_provenance_mismatch() {
 }
 
 #[test]
+fn deterministic_fallback_accepts_canonical_inline_score_digest_identity() {
+    let units = [unit()];
+    let digest_identity = StyleAssignmentIdentity {
+        score_identity: ScoreIdentity::CanonicalScorePayloadDigest(RULE_DIGEST),
+        ..identity()
+    };
+    let digest_selection = ApprovedStyleSelection {
+        assignment_key: digest_identity.assignment_key().unwrap(),
+        ..selection()
+    };
+
+    assert!(bundle(&units)
+        .render(&digest_identity, &digest_selection)
+        .is_ok());
+}
+
+#[test]
 fn deterministic_fallback_rejects_noncanonical_assignment_reference_aliases() {
     let units = [unit()];
     let aliases = [

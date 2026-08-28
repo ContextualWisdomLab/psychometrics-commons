@@ -64,3 +64,17 @@ fn mapping_rejects_noncanonical_assignment_reference_aliases() {
         );
     }
 }
+
+#[test]
+fn mapping_accepts_canonical_inline_score_digest_identity() {
+    let digest_identity = StyleAssignmentIdentity {
+        score_identity: ScoreIdentity::CanonicalScorePayloadDigest(RULE_DIGEST),
+        ..identity()
+    };
+    let assigned = assign_personality_style(&digest_identity, &observations()).unwrap();
+
+    assert_eq!(
+        assigned.assignment_key,
+        digest_identity.assignment_key().unwrap()
+    );
+}
