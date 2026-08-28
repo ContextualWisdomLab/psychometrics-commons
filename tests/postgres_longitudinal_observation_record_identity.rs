@@ -148,3 +148,59 @@ fn distinct_sources_cannot_rebind_one_durable_commons_record_identity() {
     assert_eq!(observation_count, 1);
     assert_eq!(membership_count, 1);
 }
+
+#[test]
+fn another_tenant_cannot_rebind_one_durable_commons_record_identity() {
+    let mut client = client();
+    let first = record(
+        "longitudinal_observation_record_cross_tenant_identity",
+        "gyeot_observation_cross_tenant_identity",
+        1_776_336_360_000,
+        1_776_336_420_000,
+    );
+    let collision = record(
+        "longitudinal_observation_record_cross_tenant_identity",
+        "gyeot_observation_cross_tenant_identity",
+        1_776_336_360_000,
+        1_776_336_420_000,
+    );
+
+    assert_eq!(
+        persist(&mut client, "tenant_clinic_seoul", &first).unwrap(),
+        LongitudinalObservationPersistenceDisposition::Inserted
+    );
+    assert!(matches!(
+        persist(&mut client, "tenant_clinic_busan", &collision),
+        Err(LongitudinalObservationPersistenceError::ObservationIdentityConflict)
+    ));
+
+    assert_eq!(
+        load(
+            &mut client,
+            "tenant_clinic_seoul",
+            "longitudinal_observation_record_cross_tenant_identity",
+        )
+        .unwrap(),
+        Some(first)
+    );
+    assert_eq!(
+        load(
+            &mut client,
+            "tenant_clinic_busan",
+            "longitudinal_observation_record_cross_tenant_identity",
+        )
+        .unwrap(),
+        None
+    );
+
+    let observation_count: i64 = client
+        .query_one("SELECT count(*) FROM longitudinal_observation", &[])
+        .unwrap()
+        .get(0);
+    let membership_count: i64 = client
+        .query_one("SELECT count(*) FROM longitudinal_membership_share", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(observation_count, 1);
+    assert_eq!(membership_count, 1);
+}
