@@ -156,7 +156,7 @@ BEGIN
            ))
       INTO reference_contract_version;
 
-    -- CREATE TABLE IF NOT EXISTS leaves same-named CHECK definitions untouched, while
+    -- An existing table keeps same-named CHECK definitions untouched, while
     -- CREATE OR REPLACE FUNCTION does not make PostgreSQL scan historical rows after semantic
     -- predicate changes. Recreate predicate-dependent checks only when the validator-derived
     -- marker advances. A fresh install also enters this branch once on empty tables. Replacement
