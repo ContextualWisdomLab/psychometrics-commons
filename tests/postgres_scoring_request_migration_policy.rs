@@ -37,6 +37,25 @@ fn prepare_schema(client: &mut Client) {
 }
 
 #[test]
+fn migration_checks_utf8_before_installing_unicode_reference_validator() {
+    let migration = include_str!("../migrations/0011_scoring_request.sql");
+    let encoding_guard = migration
+        .find("current_setting('server_encoding') <> 'UTF8'")
+        .expect("migration must fail closed when PostgreSQL server encoding is not UTF8");
+    let validator = migration
+        .find("CREATE OR REPLACE FUNCTION scoring_request_reference_is_valid")
+        .expect("migration must install the scoring-request reference validator");
+
+    assert!(
+        encoding_guard < validator,
+        "UTF8 must be verified before ascii(substr(...)) is used as a Unicode code-point oracle"
+    );
+    assert!(migration.contains(
+        "scoring_request reference parity requires PostgreSQL server_encoding UTF8"
+    ));
+}
+
+#[test]
 fn reference_policy_marker_is_derived_from_live_validator_definition() {
     let _guard = fixture_test_guard();
     let mut client = connect();
