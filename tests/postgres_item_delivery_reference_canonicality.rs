@@ -1,14 +1,26 @@
 //! Real `PostgreSQL` contracts for durable item-delivery reference canonicality.
 //!
 //! The product domain rejects Unicode default-ignorable aliases and numeric-only identity
-//! spellings. Durable SQL/restore/operator paths must enforce the same acceptance grammar, and a
-//! migration reapply must revalidate rows written under a weaker historical predicate.
+//! spellings. Durable SQL/restore/operator paths must enforce the same acceptance grammar. A
+//! reference-policy upgrade must revalidate rows written under weaker historical semantics, while
+//! an ordinary idempotent migration reapply must preserve already-current constraint objects.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const ITEM_DELIVERY_REFERENCE_FIXTURE_LOCK_KEY: i64 = 0x4954_4452_4341_4E4F;
+const REFERENCE_CONSTRAINTS: [&str; 9] = [
+    "item_delivery_event_delivery_ref_format_check",
+    "item_delivery_event_item_ref_format_check",
+    "item_delivery_event_presentation_ref_format_check",
+    "item_delivery_event_selection_ref_format_check",
+    "item_delivery_event_tenant_ref_format_check",
+    "item_delivery_ledger_allowed_items_format_check",
+    "item_delivery_ledger_release_ref_format_check",
+    "item_delivery_ledger_session_ref_format_check",
+    "item_delivery_ledger_tenant_ref_format_check",
+];
 
 fn client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
@@ -38,6 +50,30 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
         .expect("reference rejection must be a PostgreSQL constraint failure");
     assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
     assert_eq!(database_error.constraint(), Some(constraint));
+}
+
+fn reference_constraint_oids(client: &mut Client) -> Vec<(String, String)> {
+    let constraint_names: Vec<String> = REFERENCE_CONSTRAINTS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    let rows = client
+        .query(
+            "SELECT conname, oid::text \
+             FROM pg_constraint \
+             WHERE conname = ANY($1::text[]) \
+             ORDER BY conname",
+            &[&constraint_names],
+        )
+        .expect("reference constraints must be inspectable");
+    assert_eq!(
+        rows.len(),
+        REFERENCE_CONSTRAINTS.len(),
+        "all predicate-dependent item-delivery reference constraints must exist"
+    );
+    rows.into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect()
 }
 
 #[test]
@@ -90,6 +126,21 @@ fn scalar_and_array_predicates_reject_rust_invalid_aliases() {
 }
 
 #[test]
+fn current_policy_reapply_preserves_reference_constraint_objects() {
+    let mut client = client();
+    let before = reference_constraint_oids(&mut client);
+
+    apply_item_delivery_migration(&mut client)
+        .expect("an already-current item-delivery migration must remain idempotent");
+
+    let after = reference_constraint_oids(&mut client);
+    assert_eq!(
+        after, before,
+        "an unchanged reference policy must not drop and rebuild validated constraints"
+    );
+}
+
+#[test]
 fn migration_reapply_revalidates_rows_written_under_a_weaker_predicate() {
     let mut client = client();
 
@@ -98,7 +149,8 @@ fn migration_reapply_revalidates_rows_written_under_a_weaker_predicate() {
             "CREATE OR REPLACE FUNCTION item_delivery_reference_is_valid(reference_value TEXT) \
              RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog AS $$ \
                  SELECT reference_value IS NOT NULL AND reference_value <> '' \
-             $$;",
+             $$; \
+             COMMENT ON FUNCTION item_delivery_reference_is_valid(TEXT) IS NULL;",
         )
         .unwrap();
 
@@ -115,6 +167,6 @@ fn migration_reapply_revalidates_rows_written_under_a_weaker_predicate() {
         .expect("the deliberately weakened historical predicate should admit the regression row");
 
     let error = apply_item_delivery_migration(&mut client)
-        .expect_err("migration reapply must scan and reject the historical invisible alias");
+        .expect_err("reference-policy upgrade must scan and reject the historical invisible alias");
     assert_check(&error, "item_delivery_ledger_tenant_ref_format_check");
 }
