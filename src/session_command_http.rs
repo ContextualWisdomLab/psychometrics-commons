@@ -297,6 +297,7 @@ const fn next_action(state: SessionState) -> &'static str {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 enum CommandParse {
     Public(SessionCommand),
     ScoringOrOperator,
@@ -510,73 +511,73 @@ mod unit_tests {
 
     #[test]
     fn public_command_parser_accepts_only_participant_verbs() {
-        assert!(matches!(
+        assert_eq!(
             parse_public_command("{\"command\":\"activate\"}"),
             CommandParse::Public(SessionCommand::Activate)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"pause\"}"),
             CommandParse::Public(SessionCommand::Pause)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"resume\"}"),
             CommandParse::Public(SessionCommand::Resume)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"complete\"}"),
             CommandParse::Public(SessionCommand::Complete)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"cancel\"}"),
             CommandParse::Public(SessionCommand::Cancel)
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"begin_scoring\"}"),
             CommandParse::ScoringOrOperator
-        ));
+        );
         for operator in ["record_score", "release", "expire", "invalidate"] {
-            assert!(matches!(
+            assert_eq!(
                 parse_public_command(&format!("{{\"command\":\"{operator}\"}}")),
                 CommandParse::ScoringOrOperator
-            ));
+            );
         }
-        assert!(matches!(
+        assert_eq!(
             parse_public_command("{\"command\":\"nope\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(parse_public_command("{}"), CommandParse::Invalid));
-        assert!(matches!(
+        );
+        assert_eq!(parse_public_command("{}"), CommandParse::Invalid);
+        assert_eq!(
             parse_public_command("{\"command\":\"activate\",\"extra\":\"x\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"activate\",\"command\":\"pause\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"act\\nivate\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"a\\q\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"\u{0001}\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"activate\",}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"command\":\"act\\\"ive\\\\x\\ry\\tt\"}"),
             CommandParse::Invalid
-        ));
-        assert!(matches!(
+        );
+        assert_eq!(
             parse_public_command("{\"first\":\"ok\",\"second\":\"unterminated }"),
             CommandParse::Invalid
-        ));
+        );
     }
 
     #[test]

@@ -428,3 +428,28 @@ fn a_body_line_cannot_supply_the_idempotency_header() {
         SessionState::Created
     );
 }
+
+#[test]
+fn successful_command_escapes_opaque_references_in_json() {
+    let session_ref = r#"ses_command_\"quote\\slash"#;
+    let command_ref = r#"cmd_\"quote\\slash"#;
+    let session = AssessmentSession::new(
+        session_ref,
+        PARTICIPANT_REF,
+        &published_release(),
+        "ko-KR",
+        20_000,
+    )
+    .unwrap();
+    let mut runtime = runtime_with(session);
+
+    let response = handle_session_command_http_request(
+        &post(session_ref, "activate", command_ref),
+        &mut runtime,
+    );
+
+    assert_eq!(response.status(), 200);
+    assert!(response.body().contains(r#"ses_command_\\\"quote"#));
+    assert!(response.body().contains(r#"quote\\\\slash"#));
+    assert!(response.body().contains(r#"cmd_\\\"quote"#));
+}

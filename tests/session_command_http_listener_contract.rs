@@ -281,3 +281,23 @@ fn listener_rejects_a_content_length_that_splits_a_utf8_code_point_without_panic
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     assert!(response.is_empty());
 }
+
+#[test]
+fn listener_rejects_non_crlf_header_lines_before_dispatch() {
+    for request in [
+        b"GET / HTTP/1.1\nHost: localhost\r\n\r\n".as_slice(),
+        b"GET / HTTP/1.1\rHost: localhost\r\n\r\n".as_slice(),
+    ] {
+        let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let server_listener = listener.try_clone().unwrap();
+        let server = thread::spawn(move || {
+            let mut runtime = SessionCommandHttpRuntime::new(Vec::new());
+            accept_one_session_command_http(&server_listener, &mut runtime)
+        });
+
+        let mut stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        stream.write_all(request).unwrap();
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+}
