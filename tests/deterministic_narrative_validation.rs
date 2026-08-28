@@ -66,6 +66,44 @@ fn invalid_assignment_identity_is_not_downgraded_to_a_provenance_mismatch() {
 }
 
 #[test]
+fn deterministic_fallback_rejects_noncanonical_assignment_reference_aliases() {
+    let units = [unit()];
+    let aliases = [
+        StyleAssignmentIdentity {
+            score_identity: ScoreIdentity::ScoreProfileRef(" score_profile_alpha "),
+            ..identity()
+        },
+        StyleAssignmentIdentity {
+            instrument_version_ref: " instrument_version_ipip_big_five_en_v1 ",
+            ..identity()
+        },
+        StyleAssignmentIdentity {
+            scoring_version_ref: " scoring_version_big_five_v1 ",
+            ..identity()
+        },
+        StyleAssignmentIdentity {
+            norm_version_ref: Some(" norm_version_reference_v1 "),
+            ..identity()
+        },
+        StyleAssignmentIdentity {
+            style_mapping_version_ref: " style_mapping_version_v1 ",
+            ..identity()
+        },
+    ];
+
+    for alias in aliases {
+        let alias_selection = ApprovedStyleSelection {
+            assignment_key: alias.assignment_key().unwrap(),
+            ..selection()
+        };
+        assert_eq!(
+            bundle(&units).render(&alias, &alias_selection),
+            Err(NarrativeFallbackError::InvalidIdentity)
+        );
+    }
+}
+
+#[test]
 fn exact_rule_digest_mismatch_fails_closed_even_when_both_digests_are_valid() {
     let units = [unit()];
     let other_bundle = DeterministicNarrativeBundle {
