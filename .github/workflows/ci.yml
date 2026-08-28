@@ -149,9 +149,11 @@ jobs:
       - name: Verify cargo-llvm-cov version
         run: cargo llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
       - name: Generate line coverage
-        run: cargo llvm-cov --all-targets --json --summary-only --output-path coverage.json
+        run: |
+          cargo llvm-cov --all-targets --json --summary-only --output-path coverage.json
+          cargo llvm-cov report --lcov --output-path coverage-lines.lcov
       - name: Enforce complete line coverage
-        run: python3 scripts/check_coverage.py coverage.json --kind lines
+        run: python3 scripts/check_coverage.py coverage-lines.lcov --kind lines
       - name: Diagnose missing line coverage
         if: failure()
         run: |
@@ -229,9 +231,11 @@ jobs:
       - name: Verify cargo-llvm-cov version
         run: cargo +nightly-2026-08-18 llvm-cov --version | grep -F "$CARGO_LLVM_COV_VERSION"
       - name: Generate branch coverage
-        run: cargo +nightly-2026-08-18 llvm-cov --branch --all-targets --json --summary-only --output-path coverage-branches.json
+        run: |
+          cargo +nightly-2026-08-18 llvm-cov --branch --all-targets --json --summary-only --output-path coverage-branches.json
+          cargo +nightly-2026-08-18 llvm-cov report --branch --lcov --output-path coverage-branches.lcov
       - name: Enforce complete branch coverage
-        run: python3 scripts/check_coverage.py coverage-branches.json --kind branches
+        run: python3 scripts/check_coverage.py coverage-branches.lcov --kind branches
       - name: Diagnose missing branch coverage
         if: failure()
         run: |
