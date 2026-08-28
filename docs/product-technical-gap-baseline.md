@@ -55,7 +55,7 @@ The evaluated head contains a Rust product-runtime library with PostgreSQL adapt
 
 ## Current PR and gate refresh (2026-08-28)
 
-After fetching `origin`, protected `main` is `09534ef52c9307ce0dc559e9d908ebd715c641a1`. GitHub lists 58 open PRs at this snapshot. Since the previous baseline, protected main merged #248 (longitudinal observation persistence), #253 (credential-bound session authority), #257 (authorized result reads), #261 (Quick/Deep release binding), #287 (canonical narrative rule references), #314 (Personality Style mapping v1), and #413 (response-ledger session-signature test reconciliation). #284 and #289 are closed without merge. The complete live inventory remains [GitHub's open-PR view](https://github.com/ContextualWisdomLab/psychometrics-commons/pulls?q=is%3Aopen+is%3Apr+base%3Amain).
+After fetching `origin`, protected `main` is `09534ef52c9307ce0dc559e9d908ebd715c641a1`. GitHub lists 61 open PRs at this snapshot. Since the previous baseline, protected main merged #248 (longitudinal observation persistence), #253 (credential-bound session authority), #257 (authorized result reads), #261 (Quick/Deep release binding), #287 (canonical narrative rule references), #314 (Personality Style mapping v1), and #413 (response-ledger session-signature test reconciliation). #284 and #289 are closed without merge. The complete live inventory remains [GitHub's open-PR view](https://github.com/ContextualWisdomLab/psychometrics-commons/pulls?q=is%3Aopen+is%3Apr+base%3Amain).
 
 The current buyer-impact queue is intentionally bounded; every action still requires refetching the exact PR head, base, checks, reviews, security results, and unresolved threads:
 
