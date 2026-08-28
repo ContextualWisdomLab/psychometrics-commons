@@ -86,6 +86,15 @@ fn coverage_failures_identify_the_incomplete_source_files() {
 }
 
 #[test]
+fn coverage_contract_validates_merged_lcov_records() {
+    assert!(
+        CI_WORKFLOW.contains("python3 scripts/check_coverage.py coverage-lines.lcov --kind lines")
+    );
+    assert!(CI_WORKFLOW
+        .contains("python3 scripts/check_coverage.py coverage-branches.lcov --kind branches"));
+}
+
+#[test]
 fn line_coverage_failure_diagnostic_exposes_instantiation_gaps() {
     assert!(CI_WORKFLOW
         .contains("cargo llvm-cov report --text --show-missing-lines --show-instantiations"));
