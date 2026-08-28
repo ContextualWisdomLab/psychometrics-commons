@@ -96,18 +96,24 @@ CREATE TABLE IF NOT EXISTS assessment_session (
     PRIMARY KEY (session_ref)
 );
 
--- Constraint comments are the migration policy-version marker. Bump the marker whenever the
--- validator semantics change. An unchanged marker means the rows were already validated by this
--- exact policy, so routine reapplication avoids repeated full-table scans and ACCESS EXCLUSIVE
+-- Constraint comments are migration-policy evidence derived from PostgreSQL's normalized live
+-- validator definition. A validator change therefore changes the marker automatically, forcing
+-- existing rows through the new CHECK semantics instead of relying on a maintainer to remember a
+-- manual version bump. An unchanged marker avoids repeated full-table scans and ACCESS EXCLUSIVE
 -- DROP/ADD work. Missing/stale markers or historical anonymous checks trigger one fail-closed
 -- rebuild and validation pass.
 DO $assessment_session_reference_constraints$
 DECLARE
-    policy_marker CONSTANT TEXT :=
-        'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+    policy_marker TEXT;
     current_policy_count BIGINT;
     has_historical_constraint BOOLEAN;
 BEGIN
+    SELECT 'psychometrics-commons:assessment-session-reference:'
+           || md5(pg_get_functiondef(
+               'assessment_session_reference_is_valid(text)'::regprocedure
+           ))
+      INTO policy_marker;
+
     SELECT COUNT(*)
       INTO current_policy_count
       FROM pg_constraint
@@ -155,14 +161,22 @@ BEGIN
             assessment_session_reference_is_valid(instrument_version_ref)
         );
 
-        COMMENT ON CONSTRAINT assessment_session_session_ref_format_check ON assessment_session IS
-            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
-        COMMENT ON CONSTRAINT assessment_session_participant_ref_format_check ON assessment_session IS
-            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
-        COMMENT ON CONSTRAINT assessment_session_release_ref_format_check ON assessment_session IS
-            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
-        COMMENT ON CONSTRAINT assessment_session_version_ref_format_check ON assessment_session IS
-            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT assessment_session_session_ref_format_check ON assessment_session IS %L',
+            policy_marker
+        );
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT assessment_session_participant_ref_format_check ON assessment_session IS %L',
+            policy_marker
+        );
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT assessment_session_release_ref_format_check ON assessment_session IS %L',
+            policy_marker
+        );
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT assessment_session_version_ref_format_check ON assessment_session IS %L',
+            policy_marker
+        );
     END IF;
 END
 $assessment_session_reference_constraints$;
