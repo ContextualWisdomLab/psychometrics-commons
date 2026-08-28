@@ -15,10 +15,7 @@ fn postgres_rejects_every_rust_whitespace_scalar_at_reference_edges() {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let schema = format!(
-        "longitudinal_whitespace_parity_test_{}",
-        std::process::id()
-    );
+    let schema = format!("longitudinal_whitespace_parity_test_{}", std::process::id());
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {schema} CASCADE;\
@@ -32,7 +29,10 @@ fn postgres_rejects_every_rust_whitespace_scalar_at_reference_edges() {
         .filter_map(char::from_u32)
         .filter(|character| character.is_whitespace())
         .collect();
-    assert!(!whitespace.is_empty(), "the pinned Rust toolchain must classify whitespace");
+    assert!(
+        !whitespace.is_empty(),
+        "the pinned Rust toolchain must classify whitespace"
+    );
 
     for character in whitespace {
         for reference in [
