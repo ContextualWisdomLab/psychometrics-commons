@@ -18,7 +18,9 @@ fn client() -> Client {
             "SELECT set_config('lock_timeout', '60s', false), pg_advisory_lock($1)",
             &[&ITEM_DELIVERY_REFERENCE_FIXTURE_LOCK_KEY],
         )
-        .expect("shared item-delivery reference fixture lock must be acquired within sixty seconds");
+        .expect(
+            "shared item-delivery reference fixture lock must be acquired within sixty seconds",
+        );
     client
         .batch_execute(
             "DROP SCHEMA IF EXISTS item_delivery_reference_canonicality_test CASCADE; \
