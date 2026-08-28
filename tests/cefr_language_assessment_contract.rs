@@ -51,7 +51,7 @@ fn draft_pin_contains_exact_upstream_commit_and_schema_digests() {
         pin.result_snapshot_schema_digest(),
         CEFR_RESULT_SNAPSHOT_SCHEMA_DIGEST
     );
-    assert!(CEFR_LANGUAGE_ASSESSMENT_DRAFT_COMMIT.len() == 40);
+    assert_eq!(CEFR_LANGUAGE_ASSESSMENT_DRAFT_COMMIT.len(), 40);
 }
 
 #[test]
