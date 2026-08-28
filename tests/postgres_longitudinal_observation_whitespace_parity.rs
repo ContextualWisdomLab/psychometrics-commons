@@ -2,7 +2,9 @@
 //!
 //! `normalized_reference` trims with Rust `char::is_whitespace`, so durable validation must reject
 //! every Rust-whitespace scalar at either edge without rejecting the same visible whitespace when
-//! it is legitimate identity material inside an otherwise opaque reference.
+//! it is legitimate identity material inside an otherwise opaque reference. The result must not
+//! depend on the caller's text collation: a durable identity validator must behave the same under
+//! the database default and PostgreSQL's byte-oriented `C` collation.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_longitudinal_observation::apply_longitudinal_observation_migration;
@@ -37,27 +39,37 @@ fn postgres_rejects_every_rust_whitespace_scalar_at_reference_edges() {
             format!("{character}tenant_alpha"),
             format!("tenant_alpha{character}"),
         ] {
-            let is_valid: bool = client
-                .query_one("SELECT longitudinal_reference_is_valid($1)", &[&reference])
-                .expect("PostgreSQL whitespace-parity query must execute")
-                .get(0);
-            assert!(
-                !is_valid,
-                "PostgreSQL accepted outer Rust whitespace U+{:04X} in {reference:?}",
-                character as u32
-            );
+            for query in [
+                "SELECT longitudinal_reference_is_valid($1)",
+                "SELECT longitudinal_reference_is_valid($1::text COLLATE \"C\")",
+            ] {
+                let is_valid: bool = client
+                    .query_one(query, &[&reference])
+                    .expect("PostgreSQL whitespace-parity query must execute")
+                    .get(0);
+                assert!(
+                    !is_valid,
+                    "PostgreSQL accepted outer Rust whitespace U+{:04X} in {reference:?} for query {query:?}",
+                    character as u32
+                );
+            }
         }
     }
 
     for reference in ["tenant alpha", "tenant\u{00a0}alpha", "tenant\u{3000}alpha"] {
-        let is_valid: bool = client
-            .query_one("SELECT longitudinal_reference_is_valid($1)", &[&reference])
-            .expect("PostgreSQL embedded-whitespace parity query must execute")
-            .get(0);
-        assert!(
-            is_valid,
-            "visible embedded whitespace must remain valid identity material: {reference:?}"
-        );
+        for query in [
+            "SELECT longitudinal_reference_is_valid($1)",
+            "SELECT longitudinal_reference_is_valid($1::text COLLATE \"C\")",
+        ] {
+            let is_valid: bool = client
+                .query_one(query, &[&reference])
+                .expect("PostgreSQL embedded-whitespace parity query must execute")
+                .get(0);
+            assert!(
+                is_valid,
+                "visible embedded whitespace must remain valid identity material: {reference:?} for query {query:?}"
+            );
+        }
     }
 
     client
