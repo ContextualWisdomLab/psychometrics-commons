@@ -449,15 +449,15 @@ const fn reason_phrase(status: u16) -> &'static str {
 mod tests {
     use super::{
         authorized_command_session_ref, declared_request_end, normalize_read_error,
-        read_http_request, reason_phrase, reject_full_request_buffer, reject_invalid_header_name,
-        reject_non_crlf_header_lines, reject_oversized_request, reject_transfer_encoding,
-        remaining_request_timeout, session_command_authorized, single_header_value,
-        SessionCommandAuthority,
+        read_http_request, read_request_or_respond_bad_request, reason_phrase,
+        reject_full_request_buffer, reject_invalid_header_name, reject_non_crlf_header_lines,
+        reject_oversized_request, reject_transfer_encoding, remaining_request_timeout,
+        session_command_authorized, single_header_value, SessionCommandAuthority,
     };
     use crate::authorization::{AuthorizationContext, ProductRole};
     use crate::participant::ParticipantRecord;
     use crate::session::AssessmentSession;
-    use std::io::{self, Write};
+    use std::io::{self, Read, Write};
     use std::net::{Shutdown, TcpListener, TcpStream};
     use std::thread;
     use std::time::{Duration, Instant};
@@ -673,6 +673,47 @@ mod tests {
             error.to_string(),
             "session-command HTTP request ended before one complete frame was received"
         );
+    }
+
+    #[test]
+    fn request_boundary_writes_a_problem_for_invalid_framing() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_request_or_respond_bad_request(
+                &mut stream,
+                Instant::now() + Duration::from_secs(1),
+            )
+        });
+        let mut client = TcpStream::connect(address).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1")
+            .unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(response.contains("urn:psychometrics-commons:problem:bad-request"));
+    }
+
+    #[test]
+    fn request_boundary_propagates_non_framing_read_errors() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = TcpStream::connect(address).unwrap();
+        let (mut server_stream, _) = listener.accept().unwrap();
+
+        let error =
+            read_request_or_respond_bad_request(&mut server_stream, Instant::now()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        client.shutdown(Shutdown::Both).unwrap();
     }
 
     #[test]
