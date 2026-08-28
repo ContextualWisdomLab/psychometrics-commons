@@ -40,17 +40,23 @@ CREATE TABLE IF NOT EXISTS assessment_session_command (
     UNIQUE (session_ref, command_sequence)
 );
 
--- Use the same policy-version marker as the session-header references. A constraint carrying this
--- marker has already validated existing command-history rows under the exact Rust 1.97 / Unicode 17
--- identity policy. Routine reapplication therefore leaves its object and validation state intact;
--- a missing/stale marker or historical anonymous check triggers one fail-closed rebuild.
+-- Use the same validator-derived policy marker as the session-header references. The marker hashes
+-- PostgreSQL's normalized live function definition, so changing validator semantics automatically
+-- invalidates prior validation evidence. Routine reapplication leaves an unchanged constraint and
+-- its validation state intact; a changed definition, missing marker, or historical anonymous check
+-- triggers one fail-closed rebuild.
 DO $assessment_session_command_reference_constraint$
 DECLARE
-    policy_marker CONSTANT TEXT :=
-        'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+    policy_marker TEXT;
     current_policy_count BIGINT;
     has_historical_constraint BOOLEAN;
 BEGIN
+    SELECT 'psychometrics-commons:assessment-session-reference:'
+           || md5(pg_get_functiondef(
+               'assessment_session_reference_is_valid(text)'::regprocedure
+           ))
+      INTO policy_marker;
+
     SELECT COUNT(*)
       INTO current_policy_count
       FROM pg_constraint
@@ -74,9 +80,10 @@ BEGIN
             ADD CONSTRAINT assessment_session_command_command_ref_format_check CHECK (
                 assessment_session_reference_is_valid(command_ref)
             );
-        COMMENT ON CONSTRAINT assessment_session_command_command_ref_format_check
-            ON assessment_session_command IS
-            'psychometrics-commons:assessment-session-reference-v1-rust-1.97-unicode-17';
+        EXECUTE format(
+            'COMMENT ON CONSTRAINT assessment_session_command_command_ref_format_check ON assessment_session_command IS %L',
+            policy_marker
+        );
     END IF;
 END
 $assessment_session_command_reference_constraint$;
