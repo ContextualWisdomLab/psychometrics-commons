@@ -7,8 +7,16 @@
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_request::apply_scoring_request_migration;
+use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA: &str = "scoring_request_migration_policy_test";
+static FIXTURE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn fixture_test_guard() -> MutexGuard<'static, ()> {
+    FIXTURE_TEST_LOCK
+        .lock()
+        .expect("scoring-request migration fixture test lock must not be poisoned")
+}
 
 fn connect() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
@@ -28,6 +36,7 @@ fn prepare_schema(client: &mut Client) {
 
 #[test]
 fn reference_policy_marker_is_derived_from_live_validator_definition() {
+    let _guard = fixture_test_guard();
     let mut client = connect();
     prepare_schema(&mut client);
 
@@ -56,6 +65,7 @@ fn reference_policy_marker_is_derived_from_live_validator_definition() {
 
 #[test]
 fn concurrent_reapply_waits_on_the_policy_table_lock() {
+    let _guard = fixture_test_guard();
     let mut setup = connect();
     prepare_schema(&mut setup);
 
@@ -83,7 +93,9 @@ fn concurrent_reapply_waits_on_the_policy_table_lock() {
     );
 
     holder.batch_execute("ROLLBACK").unwrap();
-    contender.batch_execute("SET statement_timeout = 0").unwrap();
+    contender
+        .batch_execute("SET statement_timeout = 0")
+        .unwrap();
     apply_scoring_request_migration(&mut contender)
         .expect("migration reapply must succeed after the competing policy transaction releases");
 }
