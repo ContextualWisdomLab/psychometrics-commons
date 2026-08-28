@@ -85,6 +85,64 @@ fn reference_policy_marker_is_derived_from_live_validator_definition() {
 }
 
 #[test]
+fn reapply_repairs_weakened_reference_constraint_without_marker_reset() {
+    let _guard = fixture_test_guard();
+    let mut client = connect();
+    prepare_schema(&mut client);
+
+    let marker_before: Option<String> = client
+        .query_one(
+            "SELECT obj_description(\
+                 'scoring_request_reference_is_valid(text)'::regprocedure, \
+                 'pg_proc'\
+             )",
+            &[],
+        )
+        .expect("installed reference-policy marker must be readable")
+        .get(0);
+    client
+        .batch_execute(
+            "ALTER TABLE scoring_request \
+                 DROP CONSTRAINT scoring_request_scoring_request_ref_format_check; \
+             ALTER TABLE scoring_request \
+                 ADD CONSTRAINT scoring_request_scoring_request_ref_format_check \
+                 CHECK (char_length(scoring_request_ref) > 0);",
+        )
+        .expect("fixture must be able to simulate constraint drift without touching the marker");
+    let marker_after_drift: Option<String> = client
+        .query_one(
+            "SELECT obj_description(\
+                 'scoring_request_reference_is_valid(text)'::regprocedure, \
+                 'pg_proc'\
+             )",
+            &[],
+        )
+        .expect("constraint drift must leave the function marker readable")
+        .get(0);
+    assert_eq!(
+        marker_after_drift, marker_before,
+        "the regression must preserve the stale marker while weakening only a CHECK constraint"
+    );
+
+    apply_scoring_request_migration(&mut client)
+        .expect("reapply must repair constraint drift even when the function marker is unchanged");
+    let repaired_definition: String = client
+        .query_one(
+            "SELECT pg_get_constraintdef(oid) \
+             FROM pg_constraint \
+             WHERE conrelid = 'scoring_request'::regclass \
+               AND conname = 'scoring_request_scoring_request_ref_format_check'",
+            &[],
+        )
+        .expect("repaired reference constraint must exist")
+        .get(0);
+    assert!(
+        repaired_definition.contains("scoring_request_reference_is_valid(scoring_request_ref)"),
+        "reapply must replace a weakened same-name constraint with the canonical validator"
+    );
+}
+
+#[test]
 fn concurrent_reapply_waits_on_the_schema_policy_lock() {
     let _guard = fixture_test_guard();
     let mut setup = connect();
