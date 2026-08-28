@@ -18,7 +18,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0020_response_event.sql");
 const POSTGRES_EPOCH_UNIX_MS: u64 = 946_684_800_000;
-const MAX_POSTGRES_TIMESTAMP_UNIX_MS: u64 = POSTGRES_EPOCH_UNIX_MS + (i64::MAX as u64 / 1_000);
+// PostgreSQL's END_TIMESTAMP is the exclusive 294277-01-01 boundary,
+// 9_223_371_331_200_000 whole milliseconds after its 2000-01-01 epoch.
+const POSTGRES_TIMESTAMP_END_MS_FROM_POSTGRES_EPOCH: u64 = 9_223_371_331_200_000;
+const MAX_POSTGRES_TIMESTAMP_UNIX_MS: u64 =
+    POSTGRES_EPOCH_UNIX_MS + POSTGRES_TIMESTAMP_END_MS_FROM_POSTGRES_EPOCH - 1;
 
 /// One accepted event plus the distinct observed and received clocks.
 ///
