@@ -18,7 +18,7 @@ fn migration_checks_utf8_before_installing_unicode_reference_validator() {
         encoding_guard < validator,
         "UTF8 must be verified before ascii(substr(...)) is used as a Unicode code-point oracle"
     );
-    assert!(migration.contains(
-        "scoring_job reference parity requires PostgreSQL server_encoding UTF8"
-    ));
+    assert!(
+        migration.contains("scoring_job reference parity requires PostgreSQL server_encoding UTF8")
+    );
 }
