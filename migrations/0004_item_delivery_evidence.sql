@@ -4,9 +4,9 @@
 -- no embedded control/default-ignorable characters, and no numeric-like spelling under
 -- `char::is_numeric`. PostgreSQL 18 UTF-8 and pg_unicode_fast are runtime prerequisites.
 --
--- PostgreSQL assumes functions used by CHECK constraints are immutable. This
--- migration recreates every dependent CHECK whenever the predicates are applied,
--- so pre-existing rows are re-evaluated before an upgraded schema is accepted.
+-- PostgreSQL assumes functions used by CHECK constraints are immutable. A policy-version
+-- marker on the scalar predicate makes semantic upgrades recreate and validate every dependent
+-- CHECK once, while ordinary idempotent migration reapplication preserves validated constraints.
 CREATE OR REPLACE FUNCTION item_delivery_reference_is_valid(reference_value TEXT)
 RETURNS BOOLEAN
 LANGUAGE SQL
@@ -142,43 +142,65 @@ CREATE TABLE IF NOT EXISTS item_delivery_event (
     CONSTRAINT item_delivery_event_sequence_unique UNIQUE (session_ref, delivery_sequence)
 );
 
--- CREATE TABLE IF NOT EXISTS leaves same-named CHECK definitions untouched. Recreate each
--- predicate-dependent constraint so an upgrade scans pre-existing rows under the Rust-equivalent
--- validator instead of silently accepting historical aliases.
-ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_selection_ref_format_check;
-ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_presentation_ref_format_check;
-ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_item_ref_format_check;
-ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_delivery_ref_format_check;
-ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_tenant_ref_format_check;
-ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_allowed_items_format_check;
-ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_release_ref_format_check;
-ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_session_ref_format_check;
-ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_tenant_ref_format_check;
+DO $item_delivery_reference_constraints$
+DECLARE
+    reference_contract_version CONSTANT TEXT :=
+        'psychometrics-commons:item-delivery-reference-v2-rust-1.97-default-ignorable';
+    stored_reference_contract_version TEXT := obj_description(
+        'item_delivery_reference_is_valid(text)'::regprocedure,
+        'pg_proc'
+    );
+BEGIN
+    -- CREATE TABLE IF NOT EXISTS leaves same-named CHECK definitions untouched, while
+    -- CREATE OR REPLACE FUNCTION does not make PostgreSQL scan historical rows after semantic
+    -- predicate changes. Recreate predicate-dependent checks only when the migration-owned policy
+    -- marker advances. A fresh install also enters this branch once on empty tables. Replacement
+    -- CHECK creation validates all existing rows, so an unsafe historical alias fails the upgrade
+    -- atomically; an already-current schema preserves constraint objects and avoids repeated
+    -- exclusive locks plus full-table scans on ordinary startup/reapply.
+    IF stored_reference_contract_version IS DISTINCT FROM reference_contract_version THEN
+        ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_selection_ref_format_check;
+        ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_presentation_ref_format_check;
+        ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_item_ref_format_check;
+        ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_delivery_ref_format_check;
+        ALTER TABLE item_delivery_event DROP CONSTRAINT IF EXISTS item_delivery_event_tenant_ref_format_check;
+        ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_allowed_items_format_check;
+        ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_release_ref_format_check;
+        ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_session_ref_format_check;
+        ALTER TABLE item_delivery_ledger DROP CONSTRAINT IF EXISTS item_delivery_ledger_tenant_ref_format_check;
 
-ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_tenant_ref_format_check CHECK (
-    item_delivery_reference_is_valid(tenant_ref)
-);
-ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_session_ref_format_check CHECK (
-    item_delivery_reference_is_valid(session_ref)
-);
-ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_release_ref_format_check CHECK (
-    item_delivery_reference_is_valid(instrument_release_ref)
-);
-ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_allowed_items_format_check CHECK (
-    item_delivery_reference_array_is_valid(allowed_item_version_refs)
-);
-ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_tenant_ref_format_check CHECK (
-    item_delivery_reference_is_valid(tenant_ref)
-);
-ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_delivery_ref_format_check CHECK (
-    item_delivery_reference_is_valid(delivery_event_ref)
-);
-ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_item_ref_format_check CHECK (
-    item_delivery_reference_is_valid(item_version_ref)
-);
-ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_presentation_ref_format_check CHECK (
-    item_delivery_reference_is_valid(presentation_context_ref)
-);
-ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_selection_ref_format_check CHECK (
-    selection_evidence_ref IS NULL OR item_delivery_reference_is_valid(selection_evidence_ref)
-);
+        ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_tenant_ref_format_check CHECK (
+            item_delivery_reference_is_valid(tenant_ref)
+        );
+        ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_session_ref_format_check CHECK (
+            item_delivery_reference_is_valid(session_ref)
+        );
+        ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_release_ref_format_check CHECK (
+            item_delivery_reference_is_valid(instrument_release_ref)
+        );
+        ALTER TABLE item_delivery_ledger ADD CONSTRAINT item_delivery_ledger_allowed_items_format_check CHECK (
+            item_delivery_reference_array_is_valid(allowed_item_version_refs)
+        );
+        ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_tenant_ref_format_check CHECK (
+            item_delivery_reference_is_valid(tenant_ref)
+        );
+        ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_delivery_ref_format_check CHECK (
+            item_delivery_reference_is_valid(delivery_event_ref)
+        );
+        ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_item_ref_format_check CHECK (
+            item_delivery_reference_is_valid(item_version_ref)
+        );
+        ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_presentation_ref_format_check CHECK (
+            item_delivery_reference_is_valid(presentation_context_ref)
+        );
+        ALTER TABLE item_delivery_event ADD CONSTRAINT item_delivery_event_selection_ref_format_check CHECK (
+            selection_evidence_ref IS NULL OR item_delivery_reference_is_valid(selection_evidence_ref)
+        );
+    END IF;
+
+    EXECUTE format(
+        'COMMENT ON FUNCTION item_delivery_reference_is_valid(TEXT) IS %L',
+        reference_contract_version
+    );
+END;
+$item_delivery_reference_constraints$;
