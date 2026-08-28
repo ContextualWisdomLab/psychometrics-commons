@@ -196,12 +196,8 @@ pub fn accept_one_authorized_session_command_http(
     let deadline = Instant::now() + SESSION_COMMAND_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
     let request = read_http_request(&mut stream, deadline)?;
-    let response = handle_authorized_session_command_http_request(
-        &request,
-        authority,
-        participant,
-        runtime,
-    );
+    let response =
+        handle_authorized_session_command_http_request(&request, authority, participant, runtime);
     write_http_response(&mut stream, &response)
 }
 
@@ -449,9 +445,7 @@ mod tests {
     #[test]
     fn authorization_target_parser_accepts_only_exact_post_command_routes() {
         assert_eq!(
-            authorized_command_session_ref(
-                "POST /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"
-            ),
+            authorized_command_session_ref("POST /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"),
             Some("ses_one")
         );
         assert_eq!(
@@ -461,15 +455,11 @@ mod tests {
             Some("ses_one")
         );
         assert_eq!(
-            authorized_command_session_ref(
-                "GET /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"
-            ),
+            authorized_command_session_ref("GET /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"),
             None
         );
         assert_eq!(
-            authorized_command_session_ref(
-                "POST /v1/sessions/ses_one/responses HTTP/1.1\r\n\r\n"
-            ),
+            authorized_command_session_ref("POST /v1/sessions/ses_one/responses HTTP/1.1\r\n\r\n"),
             None
         );
         assert_eq!(authorized_command_session_ref("GARBAGE\r\n"), None);
@@ -509,7 +499,8 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
-        let transfer = "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let transfer =
+            "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert_eq!(
             reject_transfer_encoding(transfer).unwrap_err().kind(),
             io::ErrorKind::InvalidData
@@ -533,9 +524,7 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         assert_eq!(
-            reject_non_crlf_header_lines(b"A: b\rX")
-                .unwrap_err()
-                .kind(),
+            reject_non_crlf_header_lines(b"A: b\rX").unwrap_err().kind(),
             io::ErrorKind::InvalidData
         );
     }
@@ -567,9 +556,13 @@ mod tests {
         );
         assert!(remaining_request_timeout(Instant::now() + Duration::from_secs(1)).is_ok());
         assert_eq!(
-            remaining_request_timeout(Instant::now() - Duration::from_millis(1))
-                .unwrap_err()
-                .kind(),
+            remaining_request_timeout(
+                Instant::now()
+                    .checked_sub(Duration::from_millis(1))
+                    .expect("the current instant must be after one millisecond ago"),
+            )
+            .unwrap_err()
+            .kind(),
             io::ErrorKind::TimedOut
         );
         assert_eq!(

@@ -94,7 +94,8 @@ fn serve_authorized(
     participant_ref: &str,
     runtime: &mut SessionCommandHttpRuntime,
 ) -> io::Result<()> {
-    let participant = ParticipantRecord::new_anonymous(participant_ref, TENANT_REF, 19_000).unwrap();
+    let participant =
+        ParticipantRecord::new_anonymous(participant_ref, TENANT_REF, 19_000).unwrap();
     let actor = AuthorizationContext::new(
         TENANT_REF,
         "subject_session_command_listener",
@@ -221,11 +222,7 @@ fn listener_waits_for_a_declared_body_delivered_after_the_headers() {
     let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let addr = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
-        serve_authorized(
-            &listener,
-            "ptc_listener_command_delayed_body",
-            &mut runtime,
-        )
+        serve_authorized(&listener, "ptc_listener_command_delayed_body", &mut runtime)
     });
 
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();

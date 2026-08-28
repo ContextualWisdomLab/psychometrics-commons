@@ -1,6 +1,6 @@
 //! Wire and durable lifecycle vocabularies must not drift apart.
 //!
-//! Public HTTP responses and PostgreSQL reconstruction describe the same session
+//! Public HTTP responses and `PostgreSQL` reconstruction describe the same session
 //! lifecycle. A future state rename must therefore change both representations in
 //! one reviewed workstream rather than silently creating two vocabularies.
 
