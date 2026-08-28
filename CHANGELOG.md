@@ -73,6 +73,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Durable item-delivery references now reject Unicode default-ignorable/control characters, Unicode boundary whitespace, and numeric-only aliases consistently with the Rust opaque-reference boundary; predicate-version upgrades atomically revalidate the dependent PostgreSQL CHECK constraints while unchanged reapplies preserve them.
 - Stale shorter assessment-session command history now fails closed instead of rewinding the current-state projection, so a later Pause/Resume still reloads after a rejected Activate-only persist.
 - Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
