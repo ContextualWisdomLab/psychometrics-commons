@@ -10,11 +10,11 @@ use psychometrics_commons_runtime::response::ResponseEvent;
 const SCHEMA: &str = "response_event_timestamp_boundary_test";
 const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-// PostgreSQL's timestamp upper bound is exclusive 294277-01-01. At the
-// response-event API's whole-millisecond precision, this is the final valid
-// Unix millisecond and the immediately following millisecond must fail before
-// a database write is attempted.
-const POSTGRES_MAX_WHOLE_MILLISECOND_UNIX_MS: u64 = 9_223_372_277_884_799;
+// PostgreSQL's timestamp upper bound is exclusive 294277-01-01. The exclusive
+// boundary is 9_223_371_331_200_000 ms after PostgreSQL's 2000-01-01 epoch;
+// adding the Unix-to-PostgreSQL epoch offset yields the final valid whole Unix
+// millisecond below.
+const POSTGRES_MAX_WHOLE_MILLISECOND_UNIX_MS: u64 = 9_224_318_015_999_999;
 const FIRST_INVALID_POSTGRES_MILLISECOND_UNIX_MS: u64 = POSTGRES_MAX_WHOLE_MILLISECOND_UNIX_MS + 1;
 
 fn test_client() -> Client {
