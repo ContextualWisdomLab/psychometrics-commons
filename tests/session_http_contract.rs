@@ -44,9 +44,9 @@ fn create_request(idempotency: &str, locale: &str) -> String {
     )
 }
 
-fn authorized_get<P: SessionHttpPort>(
+fn authorized_request<P: SessionHttpPort>(
     port: &mut P,
-    session_ref: &str,
+    request: &str,
 ) -> psychometrics_commons_runtime::session_http::SessionHttpResponse {
     let participant =
         ParticipantRecord::new_anonymous(PARTICIPANT, "tenant_session_http", 1).unwrap();
@@ -58,13 +58,39 @@ fn authorized_get<P: SessionHttpPort>(
     )
     .unwrap();
     let authority = SessionHttpAuthority::Authenticated(&actor);
-    handle_authorized_session_http_request(
-        &format!("GET /v1/sessions/{session_ref} HTTP/1.1\r\nHost: assessment.example\r\n\r\n"),
-        &authority,
-        &participant,
+    handle_authorized_session_http_request(request, &authority, &participant, port, 20_000)
+}
+
+fn authorized_get<P: SessionHttpPort>(
+    port: &mut P,
+    session_ref: &str,
+) -> psychometrics_commons_runtime::session_http::SessionHttpResponse {
+    authorized_request(
         port,
-        20_000,
+        &format!("GET /v1/sessions/{session_ref} HTTP/1.1\r\nHost: assessment.example\r\n\r\n"),
     )
+}
+
+#[test]
+fn authorized_handler_classifies_malformed_methods_and_paths_before_loading() {
+    let mut port = MemorySessionHttpPort::published();
+    assert_eq!(authorized_request(&mut port, "NOT-A-REQUEST").status(), 400);
+    assert_eq!(
+        authorized_request(&mut port, "GET /v1/sessions HTTP/1.1\r\n\r\n").status(),
+        405
+    );
+    assert_eq!(
+        authorized_request(&mut port, "GET /v1/sessions/ HTTP/1.1\r\n\r\n").status(),
+        404
+    );
+    assert_eq!(
+        authorized_request(&mut port, "GET /v1/sessions/12 HTTP/1.1\r\n\r\n").status(),
+        404
+    );
+    assert_eq!(
+        authorized_request(&mut port, &create_request("ses_authorized_post", "ko-KR")).status(),
+        201
+    );
 }
 
 #[test]
@@ -369,6 +395,20 @@ fn memory_port_records_exact_replay_disposition() {
         Err(AssessmentSessionStartError::Persistence(
             AssessmentSessionPersistenceError::ConflictingReplay
         ))
+    ));
+    port.next_load_error = Some(AssessmentSessionPersistenceError::InvalidStoredIdentity);
+    assert!(port.load(SESSION).is_err());
+    assert!(matches!(
+        port.load("12"),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        port.load_for_participant("12", PARTICIPANT),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        port.load_for_participant(SESSION, "12"),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
     ));
     assert!(port.load(SESSION).unwrap().is_some());
     assert!(port.load("ses_missing").unwrap().is_none());

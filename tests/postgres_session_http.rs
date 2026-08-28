@@ -7,7 +7,10 @@ use psychometrics_commons_runtime::instrument::{
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
 use psychometrics_commons_runtime::participant::ParticipantRecord;
-use psychometrics_commons_runtime::postgres_assessment_session::apply_assessment_session_migration;
+use psychometrics_commons_runtime::postgres_assessment_session::{
+    apply_assessment_session_migration, load_assessment_session_for_participant,
+    AssessmentSessionPersistenceError,
+};
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release,
 };
@@ -301,6 +304,14 @@ fn http_create_reloads_after_restart_and_replays_after_suspend() {
     assert_eq!(loaded.body(), created.body());
     assert_eq!(foreign.status(), 404);
     assert!(!foreign.body().contains(PARTICIPANT_REF));
+    assert!(matches!(
+        load_assessment_session_for_participant(
+            &mut transaction,
+            "ses_http_ko_quick",
+            " ptc_eb1b318917d24ca0ac5153c37ff696c7",
+        ),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
     transaction.commit().unwrap();
 
     client
