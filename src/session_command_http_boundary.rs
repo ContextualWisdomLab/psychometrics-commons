@@ -205,10 +205,8 @@ fn read_request_or_respond_bad_request(
     match read_http_request(stream, deadline) {
         Ok(request) => Ok(request),
         Err(error) if error.kind() == io::ErrorKind::InvalidData => {
-            write_http_response(
-                stream,
-                &implementation::SessionCommandHttpResponse::framing_error(),
-            )?;
+            let response = implementation::SessionCommandHttpResponse::framing_error();
+            write_http_response(stream, &response)?;
             Err(error)
         }
         Err(error) => Err(error),
