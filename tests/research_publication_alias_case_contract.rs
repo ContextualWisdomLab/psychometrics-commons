@@ -358,7 +358,7 @@ fn unavailable_identity_inventory_error_is_safe_and_actionable() {
 
     assert_eq!(
         message,
-        "supply an authorized restricted-identity inventory before packaging the public release fixture"
+        "supply an authorized exact restricted-identity inventory before packaging the public release fixture"
     );
     assert!(!message.contains("participant_seoul_clinic_one"));
     assert!(!message.contains("keyverse_subject_seoul_clinic_one"));
