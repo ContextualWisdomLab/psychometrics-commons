@@ -1,4 +1,4 @@
-//! Real PostgreSQL boundary contract for response-event timestamps.
+//! Real `PostgreSQL` boundary contract for response-event timestamps.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_event::{
