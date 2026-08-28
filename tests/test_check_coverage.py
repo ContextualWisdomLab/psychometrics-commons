@@ -48,6 +48,14 @@ class CoverageContractTests(unittest.TestCase):
                 ["lines coverage: PASS (1/1, 100%)"],
             )
 
+    def test_lcov_line_records_reject_zero_source_line(self) -> None:
+        """A synthetic line zero must never count as covered production code."""
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage-lines.lcov"
+            report.write_text("SF:src/example.rs\nDA:0,1\nend_of_record\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "LCOV line numbers must be positive"):
+                CHECK_COVERAGE.validate_report(report, ["lines"])
+
     def test_lcov_branch_records_reject_uncovered_branches(self) -> None:
         """Reject zero and not-taken LCOV branch records."""
         with tempfile.TemporaryDirectory() as directory:
