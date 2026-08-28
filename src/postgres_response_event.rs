@@ -571,11 +571,7 @@ mod reference_guard_tests {
             2,
         )
         .unwrap();
-        let first_receipt = ResponseEventReceipt {
-            event: first.clone(),
-            observed_at_unix_ms: 1_700_000_000_000,
-            received_at_unix_ms: 1_700_000_000_250,
-        };
+        let first_receipt = receipt(first.clone(), 1_700_000_000_000, 1_700_000_000_250);
         let gapped_receipts = [
             first_receipt,
             receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
