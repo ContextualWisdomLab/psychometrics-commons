@@ -3,6 +3,18 @@
 -- `char::is_numeric` is true. The generated int4multiranges below mirror rustc 1.97 / Unicode 17
 -- numeric and Default_Ignorable_Code_Point sets; pg_unicode_fast supplies Unicode
 -- whitespace/control classification.
+-- `ascii(substr(...))` is a Unicode code-point oracle only under UTF8, so reject unsupported
+-- database encodings before installing or replacing the immutable validator.
+DO $instrument_release_encoding_guard$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'instrument_release reference parity requires PostgreSQL server_encoding UTF8';
+    END IF;
+END
+$instrument_release_encoding_guard$;
+
 CREATE OR REPLACE FUNCTION instrument_release_reference_is_valid(reference_text TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
