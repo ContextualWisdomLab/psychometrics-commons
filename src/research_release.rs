@@ -264,6 +264,12 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "pseudonym_key",
     "pseudonym_key_version",
     "subject_ref",
+    "assessment_session_ref",
+    "session_ref",
+    "result_ref",
+    "response_ref",
+    "item_delivery_ref",
+    "scoring_request_ref",
     "access_token",
     "auth_token",
     "refresh_token",
@@ -344,6 +350,9 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 /// - `research_participant_ref` is the allowed public research identity namespace. Clear
 ///   export, staging, and author-metadata prefixes remain allowed unless they also carry a
 ///   restricted identity, authentication, credential, or internal-location marker.
+/// - Operational product-resource references, including assessment session, result, response,
+///   item-delivery, and scoring-request references, fail closed instead of linking a research
+///   row back to the hosted product lifecycle.
 /// - Identity, authentication, credential, and internal-location column names fail closed
 ///   even when aliases add transport prefixes, suffixes, separators, or inserted digits.
 /// - Session-cookie and HTTP cookie-header credential columns fail closed, while ordinary
