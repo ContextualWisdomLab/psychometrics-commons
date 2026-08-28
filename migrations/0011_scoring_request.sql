@@ -89,18 +89,30 @@ CREATE TABLE IF NOT EXISTS scoring_request (
 
 DO $scoring_request_reference_upgrade$
 DECLARE
-    reference_contract_version CONSTANT TEXT :=
-        'psychometrics-commons:scoring-request-reference-v2-rust-1.97-default-ignorable';
-    stored_reference_contract_version TEXT := obj_description(
-        'scoring_request_reference_is_valid(text)'::regprocedure,
-        'pg_proc'
-    );
+    reference_contract_version TEXT;
+    stored_reference_contract_version TEXT;
 BEGIN
+    -- Serialize the policy decision before reading its marker. `LOCK TABLE` is transaction-scoped,
+    -- so one reapply cannot observe stale policy evidence and race another caller through DROP/ADD.
+    -- The migration is already executed as one simple-query transaction by PostgreSQL.
+    LOCK TABLE scoring_request IN ACCESS EXCLUSIVE MODE;
+
+    SELECT 'psychometrics-commons:scoring-request-reference:'
+           || md5(pg_get_functiondef(
+               'scoring_request_reference_is_valid(text)'::regprocedure
+           ))
+      INTO reference_contract_version;
+    SELECT obj_description(
+               'scoring_request_reference_is_valid(text)'::regprocedure,
+               'pg_proc'
+           )
+      INTO stored_reference_contract_version;
+
     -- PostgreSQL assumes functions used by CHECK constraints are immutable. CREATE OR REPLACE
     -- FUNCTION therefore does not revalidate historical rows when predicate semantics change.
-    -- Upgrade and validate the eight owned constraints only when this migration-owned policy
+    -- Upgrade and validate the eight owned constraints only when the validator-derived policy
     -- marker advances; an already-current startup/reapply preserves constraint OIDs and avoids
-    -- repeated full-table scans under ACCESS EXCLUSIVE locks.
+    -- repeated validation scans after the short serialization lock is acquired.
     IF stored_reference_contract_version IS DISTINCT FROM reference_contract_version THEN
         -- Immutable scoring identity is evidence, not cleanup input. Detect legacy-invalid rows
         -- before touching constraints so operators can make an explicit governed quarantine or
