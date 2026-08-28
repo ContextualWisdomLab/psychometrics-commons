@@ -183,9 +183,10 @@ pub struct PublicReleaseFixtureColumn<'a> {
 /// Identities that a public release fixture must not carry.
 ///
 /// Pass the product-authorized operational, Keyverse, and restricted-linkage values
-/// already held for the people represented by the fixture. At least one effective
-/// nonblank identity must be supplied so an omitted inventory cannot be mistaken for
-/// a clean scan. This boundary never queries another service's application database.
+/// already held for the people represented by the fixture. At least one effective exact
+/// nonblank identity must be supplied so an omitted or malformed inventory cannot be
+/// mistaken for a clean scan. Blank placeholders are ignored. This boundary never queries
+/// another service's application database.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RestrictedReleaseIdentities<'a> {
     /// Operational assessment participant references.
@@ -228,7 +229,7 @@ impl Display for PublicReleaseLeakageError {
                 "supply at least one published column before treating a public release fixture scan as clean"
             }
             Self::IdentityInventoryUnavailable => {
-                "supply an authorized restricted-identity inventory before packaging the public release fixture"
+                "supply an authorized exact restricted-identity inventory before packaging the public release fixture"
             }
             Self::StructuredValueUnsupported => {
                 "flatten or independently scan structured public-release values before packaging the fixture"
@@ -342,8 +343,9 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 ///   restricted identity, authentication, credential, or internal-location marker.
 /// - Identity, authentication, credential, and internal-location column names fail closed
 ///   even when aliases add transport prefixes, suffixes, separators, or inserted digits.
-/// - Supply at least one published column and a product-authorized restricted-identity
-///   inventory. An empty fixture or unavailable inventory is never clean-release evidence.
+/// - Supply at least one published column and an effective product-authorized exact
+///   restricted-identity inventory. A malformed nonblank inventory entry fails closed; blank
+///   placeholders are ignored. An empty or unavailable inventory is never clean-release evidence.
 /// - Flat cell values are checked for authorized restricted identities even when a known
 ///   identity is embedded in otherwise flat text. Unicode default-ignorable formatting
 ///   characters do not make an otherwise matching restricted identity publishable. Object and
@@ -400,7 +402,8 @@ pub fn scan_public_release_fixture(
 fn has_effective_restricted_identity_inventory(
     restricted: RestrictedReleaseIdentities<'_>,
 ) -> bool {
-    [
+    let mut has_effective_identity = false;
+    for identity in [
         restricted.operational_participant_refs,
         restricted.keyverse_subject_refs,
         restricted.linkage_refs,
@@ -408,7 +411,19 @@ fn has_effective_restricted_identity_inventory(
     ]
     .into_iter()
     .flatten()
-    .any(|identity| !identity.trim().is_empty())
+    {
+        if identity.trim().is_empty() {
+            continue;
+        }
+        let Some(normalized) = normalized_reference(identity) else {
+            return false;
+        };
+        if normalized != identity {
+            return false;
+        }
+        has_effective_identity = true;
+    }
+    has_effective_identity
 }
 
 fn forbidden_public_release_column(column_name: &str) -> bool {
