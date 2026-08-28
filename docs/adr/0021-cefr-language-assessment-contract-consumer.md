@@ -67,14 +67,19 @@ task_specification_schema_digest
 result_snapshot_schema_digest
 ```
 
-Each accepted result must carry the exact shared contract version, immutable
-blueprint reference, result-schema digest, opaque executable-validator evidence
-reference, four measured domains exactly once, and `cefr_aligned` claim status.
-The product-side gate rejects blank/unsafe references, version or digest drift,
-blueprint rebinding, incomplete/duplicate domains, linking/certification
-claims, and overall reporting. Schema structure remains the upstream
-validator's responsibility; the product verifies the validator evidence
-identity and binding.
+The shared profile version is `cwl_cefr_language_assessment/v1`; each result
+envelope carries the more specific
+`cwl_cefr_language_assessment/result_snapshot/v1` contract version. Each
+accepted result must carry the exact versions, immutable blueprint reference,
+result-schema digest, opaque executable-validator evidence reference, and
+`cefr_aligned` claim status. Measured domains must be unique members of the
+four-domain required set; profile-only results may contain an incomplete
+measured subset, while overall reporting requires every required domain to be
+measured. The product-side gate rejects blank/unsafe references, version or
+digest drift, blueprint rebinding, duplicate/unsupported measured domains,
+linking/certification claims, and overall reporting. Schema structure remains
+the upstream validator's responsibility; the product verifies the validator
+evidence identity and binding.
 
 No idempotency key or transport is added by this review-only domain slice. Once
 HTTP/event transport exists, its contract must be machine-readable and
@@ -93,16 +98,16 @@ the logical ERD before migration.
 
 1. The source commit and all three schema digests remain exact and immutable
    for a consumer build.
-2. A result cannot cross this boundary without exact contract/version,
-   blueprint, result-schema, validator-evidence, and domain bindings.
+2. A result cannot cross this boundary without exact profile/result-envelope
+   versions, blueprint, result-schema, validator-evidence, and domain bindings.
 3. Only `cefr_aligned` is accepted by the initial profile.
 4. Overall reporting cannot be enabled by a result payload alone.
 5. No CEFR descriptor, raw response/audio, PII, or numeric engine payload is
    copied into this shared contract.
 
 `tests/cefr_language_assessment_contract.rs` enforces pin identity, reference
-validation, all four domains, result binding, claim separation, overall denial,
-and stable typed errors.
+validation, unique measured-domain subsets, result binding, claim separation,
+overall denial, and stable typed errors.
 
 ## Failure and degraded modes
 

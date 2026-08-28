@@ -148,18 +148,22 @@ Inkspan may provide authoring/editor primitives but is not a source of truth for
 ### 6.1 CEFR language-assessment consumer boundary
 
 The first language-assessment consumer is an English A1-B2 placement profile. It
-consumes the exact `cwl_cefr_language_assessment/v1` contract from
+consumes the exact `cwl_cefr_language_assessment/v1` profile from
 `learning-interoperability-contracts` through immutable commit and schema
-digests. The consumer stores only opaque product references and four required
-domains: reading reception, listening reception, written production, and spoken
+digests. Its result envelope declares the exact
+`cwl_cefr_language_assessment/result_snapshot/v1` contract version. The
+consumer stores only opaque product references and four required domains:
+reading reception, listening reception, written production, and spoken
 production.
 
-The initial consumer is profile-only and permits `cefr_aligned` claims. It does
-not authorize an overall level, `cefr_linked`, or `certification_decision`
-claim until the exact blueprint and governed standard-setting/linking or
-certification evidence are available. The upstream contract validator remains
-the schema authority; Psychometrics Commons verifies its evidence identity and
-product bindings.
+The initial consumer is profile-only and permits `cefr_aligned` claims. A
+profile-only result may contain a unique measured subset of the required
+domains; insufficient or unmeasured domains remain explicit in the upstream
+result envelope. It does not authorize an overall level, `cefr_linked`, or
+`certification_decision` claim until the exact blueprint and governed
+standard-setting/linking or certification evidence are available. The upstream
+contract validator remains the schema authority; Psychometrics Commons verifies
+its evidence identity and product bindings.
 
 ## 7. Product boundaries
 

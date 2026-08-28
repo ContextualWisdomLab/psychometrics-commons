@@ -16,7 +16,9 @@ or provider payloads into the shared contract.
 
 The upstream repository owns the JSON schemas and executable validator. The
 consumer boundary pins the exact Draft commit and raw schema SHA-256 digests;
-the pin is review evidence only until upstream publishes a released artifact.
+the profile namespace is `cwl_cefr_language_assessment/v1`, while result
+envelopes declare `cwl_cefr_language_assessment/result_snapshot/v1`. The pin is
+review evidence only until upstream publishes a released artifact.
 
 ## APA 7 reference
 

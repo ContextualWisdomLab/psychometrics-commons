@@ -329,7 +329,9 @@ external framework authority and keeps descriptor prose, translations, authored
 tasks, raw responses, audio, and model payloads outside the shared product
 contract. The consumer pins the exact upstream contract commit and schema
 digests, then requires an external executable-validator evidence reference
-before accepting a result envelope.
+before accepting a result envelope. The profile namespace is
+`cwl_cefr_language_assessment/v1`; the result envelope uses the exact
+`cwl_cefr_language_assessment/result_snapshot/v1` version.
 
 `cefr_aligned` means that the exact CEFR construct/profile references are bound;
 it is not an empirical linking or certification claim. `cefr_linked` additionally
@@ -340,10 +342,12 @@ profiles first, and does not authorize an overall level without an exact
 blueprint policy and complete measured required domains.
 
 The initial required domains are reading reception, listening reception, written
-production, and spoken production. Domain probability, uncertainty, and level
-interpretation values remain outputs of the versioned measurement authority;
-this repository validates their contract identity and evidence binding but does
-not calculate them.
+production, and spoken production. Profile-only results may expose a unique
+measured subset while retaining explicit insufficient/unmeasured domain status;
+all required domains must be measured only for an authorized overall report.
+Domain probability, uncertainty, and level interpretation values remain outputs
+of the versioned measurement authority; this repository validates their
+contract identity and evidence binding but does not calculate them.
 
 ## 19. Publication decision record
 

@@ -5,7 +5,8 @@ use psychometrics_commons_runtime::cefr_language_assessment::{
     CefrResultValidationInput, EnglishA1B2PlacementProfile,
     CEFR_ASSESSMENT_BLUEPRINT_SCHEMA_DIGEST, CEFR_LANGUAGE_ASSESSMENT_CONTRACT_REPOSITORY,
     CEFR_LANGUAGE_ASSESSMENT_CONTRACT_VERSION, CEFR_LANGUAGE_ASSESSMENT_DRAFT_COMMIT,
-    CEFR_RESULT_SNAPSHOT_SCHEMA_DIGEST, CEFR_TASK_SPECIFICATION_SCHEMA_DIGEST,
+    CEFR_LANGUAGE_ASSESSMENT_PROFILE_VERSION, CEFR_RESULT_SNAPSHOT_SCHEMA_DIGEST,
+    CEFR_TASK_SPECIFICATION_SCHEMA_DIGEST,
 };
 
 fn profile() -> EnglishA1B2PlacementProfile {
@@ -33,6 +34,14 @@ fn valid_input(profile: &EnglishA1B2PlacementProfile) -> CefrResultValidationInp
 
 #[test]
 fn draft_pin_contains_exact_upstream_commit_and_schema_digests() {
+    assert_eq!(
+        CEFR_LANGUAGE_ASSESSMENT_PROFILE_VERSION,
+        "cwl_cefr_language_assessment/v1"
+    );
+    assert_eq!(
+        CEFR_LANGUAGE_ASSESSMENT_CONTRACT_VERSION,
+        "cwl_cefr_language_assessment/result_snapshot/v1"
+    );
     let pin = CefrContractPin::draft_pr_five_review_pin();
     assert_eq!(
         pin.repository(),
@@ -176,15 +185,20 @@ fn result_validation_rejects_contract_identity_and_evidence_mismatches() {
 }
 
 #[test]
-fn result_validation_rejects_incomplete_claims_and_overall_reporting() {
+fn result_validation_accepts_profile_only_partial_measurement() {
     let profile = profile();
     let mut input = valid_input(&profile);
     input.measured_domains = &profile.required_domains()[..3];
-    assert_eq!(
-        profile.validate_result(input),
-        Err(CefrProfileError::InvalidRequiredDomainSet)
-    );
+    assert!(profile.validate_result(input).is_ok());
 
+    let mut input = valid_input(&profile);
+    input.measured_domains = &[];
+    assert!(profile.validate_result(input).is_ok());
+}
+
+#[test]
+fn result_validation_rejects_duplicate_domains_unsupported_claims_and_overall_reporting() {
+    let profile = profile();
     let mut input = valid_input(&profile);
     input.measured_domains = &[
         CefrActivityDomain::ReadingReception,

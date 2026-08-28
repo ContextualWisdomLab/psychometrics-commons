@@ -220,11 +220,14 @@ schema_validation_ref
 
 The four initial required domains are `reading_reception`,
 `listening_reception`, `written_production`, and `spoken_production`. A result
-must use the exact profile contract version, blueprint reference, result-schema
-digest, and external validator evidence reference; all four domains must be
-measured exactly once. The consumer accepts `cefr_aligned` only and rejects an
-overall reported level until the immutable blueprint authorizes
-`overall_and_profile` reporting with complete required-domain evidence.
+must use the exact profile and result-envelope versions, blueprint reference,
+result-schema digest, and external validator evidence reference. The measured
+domain references must be unique members of that required-domain set; a
+profile-only result may leave one or more required domains unmeasured when the
+upstream envelope records the corresponding limitation. The consumer accepts
+`cefr_aligned` only and rejects an overall reported level until the immutable
+blueprint authorizes `overall_and_profile` reporting with complete
+required-domain evidence.
 
 This is a product-domain identity/evidence gate, not a replacement JSON-schema
 validator. No HTTP or event transport is claimed until an as-built machine-

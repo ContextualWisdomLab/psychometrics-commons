@@ -9,7 +9,10 @@ use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-/// Version of the shared CWL CEFR language-assessment profile.
+/// Versioned profile namespace owned by the shared CWL CEFR contract.
+pub const CEFR_LANGUAGE_ASSESSMENT_PROFILE_VERSION: &str = "cwl_cefr_language_assessment/v1";
+
+/// Version of the shared CWL CEFR result-snapshot envelope.
 pub const CEFR_LANGUAGE_ASSESSMENT_CONTRACT_VERSION: &str =
     "cwl_cefr_language_assessment/result_snapshot/v1";
 
@@ -148,7 +151,7 @@ pub enum CefrProfileError {
     ResultSchemaDigestMismatch,
     /// No external executable-schema-validation evidence was supplied.
     MissingSchemaValidationReference,
-    /// The result does not report all four required placement domains exactly.
+    /// The measured-domain references are duplicated or outside the profile.
     InvalidRequiredDomainSet,
     /// The claim would require linking or certification evidence not present here.
     UnsupportedClaimStatus,
@@ -167,7 +170,7 @@ impl Display for CefrProfileError {
                 "CEFR result requires external executable schema-validation evidence"
             }
             Self::InvalidRequiredDomainSet => {
-                "CEFR result must contain each required placement domain exactly once"
+                "CEFR result measured-domain references must be unique required placement domains"
             }
             Self::UnsupportedClaimStatus => {
                 "CEFR placement profile accepts aligned claims only until linking evidence is governed"
@@ -288,10 +291,16 @@ impl EnglishA1B2PlacementProfile {
         required_reference(input.result_ref)?;
         required_reference(input.schema_validation_ref)
             .map_err(|_| CefrProfileError::MissingSchemaValidationReference)?;
-        if input.measured_domains.len() != REQUIRED_DOMAINS.len()
-            || REQUIRED_DOMAINS
+        let has_duplicate_domain = input
+            .measured_domains
+            .iter()
+            .enumerate()
+            .any(|(index, domain)| input.measured_domains[..index].contains(domain));
+        if has_duplicate_domain
+            || input
+                .measured_domains
                 .iter()
-                .any(|required| !input.measured_domains.contains(required))
+                .any(|domain| !REQUIRED_DOMAINS.contains(domain))
         {
             return Err(CefrProfileError::InvalidRequiredDomainSet);
         }
