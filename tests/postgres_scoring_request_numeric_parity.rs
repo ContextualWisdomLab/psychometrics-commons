@@ -33,15 +33,7 @@ fn client() -> Client {
 fn is_numeric_syntax_separator(character: char) -> bool {
     matches!(
         character,
-        '+' | '-'
-            | '.'
-            | ','
-            | 'e'
-            | 'E'
-            | '\u{066B}'
-            | '\u{066C}'
-            | '\u{FF0E}'
-            | '\u{FF0C}'
+        '+' | '-' | '.' | ',' | 'e' | 'E' | '\u{066B}' | '\u{066C}' | '\u{FF0E}' | '\u{FF0C}'
     )
 }
 
