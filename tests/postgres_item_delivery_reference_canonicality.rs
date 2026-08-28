@@ -62,6 +62,8 @@ fn reference_constraint_oids(client: &mut Client) -> Vec<(String, String)> {
             "SELECT conname, oid::text \
              FROM pg_constraint \
              WHERE conname = ANY($1::text[]) \
+               AND connamespace = current_schema()::regnamespace \
+               AND conrelid IN ('item_delivery_ledger'::regclass, 'item_delivery_event'::regclass) \
              ORDER BY conname",
             &[&constraint_names],
         )
