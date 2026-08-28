@@ -3,6 +3,18 @@
 -- `char::is_numeric` is true. The generated int4multiranges below mirror rustc 1.97 / Unicode 17
 -- numeric and Default_Ignorable_Code_Point sets; pg_unicode_fast supplies Unicode
 -- whitespace/control classification.
+-- `ascii(substr(...))` is a Unicode code-point oracle only under UTF8, so reject unsupported
+-- database encodings before installing or replacing the immutable validator.
+DO $scoring_job_encoding_guard$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'scoring_job reference parity requires PostgreSQL server_encoding UTF8';
+    END IF;
+END
+$scoring_job_encoding_guard$;
+
 CREATE OR REPLACE FUNCTION scoring_job_reference_is_valid(reference_text TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -319,7 +331,8 @@ $create_scoring_job_state$;
         ORDER BY constraint_record.conname
     ) INTO actual_constraints;
 
-    actual_constraint_manifest := array_to_string(actual_constraints, E'\n');
+    actual_constraint_manifest := array_to_string(actual_constraints, E'\
+');
 
     IF NOT created_table THEN
         stored_constraint_manifest := obj_description(relation_ref, 'pg_class');
@@ -419,7 +432,8 @@ $create_scoring_job_state$;
         ORDER BY constraint_record.conname
     ) INTO actual_constraints;
 
-    actual_constraint_manifest := array_to_string(actual_constraints, E'\n');
+    actual_constraint_manifest := array_to_string(actual_constraints, E'\
+');
 
     BEGIN
         INSERT INTO scoring_job_state (
