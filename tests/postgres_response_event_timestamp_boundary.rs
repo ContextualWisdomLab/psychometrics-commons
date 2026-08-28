@@ -15,8 +15,7 @@ const DIGEST: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 // Unix millisecond and the immediately following millisecond must fail before
 // a database write is attempted.
 const POSTGRES_MAX_WHOLE_MILLISECOND_UNIX_MS: u64 = 9_223_372_277_884_799;
-const FIRST_INVALID_POSTGRES_MILLISECOND_UNIX_MS: u64 =
-    POSTGRES_MAX_WHOLE_MILLISECOND_UNIX_MS + 1;
+const FIRST_INVALID_POSTGRES_MILLISECOND_UNIX_MS: u64 = POSTGRES_MAX_WHOLE_MILLISECOND_UNIX_MS + 1;
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
