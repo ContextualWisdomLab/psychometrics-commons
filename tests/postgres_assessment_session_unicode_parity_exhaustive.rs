@@ -1,6 +1,6 @@
 //! Exhaustive Unicode parity tests for assessment-session references.
 //!
-//! These tests ask one simple question: for every Unicode character PostgreSQL can store, does the
+//! These tests ask one simple question: for every Unicode character `PostgreSQL` can store, does the
 //! database make the same accept/reject decision that the Rust product boundary expects? A mismatch
 //! means a reference could be accepted in one layer and rejected or normalized differently in the
 //! other, which would violate the durable identity contract.
