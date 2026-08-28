@@ -3,13 +3,26 @@
 //! The product domain trims Unicode whitespace and rejects embedded control/default-ignorable
 //! characters and numeric-like spellings under Rust `char::is_numeric`. Direct SQL and migration
 //! reapplication must not leave durable scoring evidence that the Rust domain would reject or
-//! normalize.
+//! normalize. A policy upgrade must revalidate historical rows, while an unchanged reapply must
+//! preserve already-current constraint objects rather than repeatedly scanning and locking the
+//! scoring-request table.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_request::apply_scoring_request_migration;
 use std::sync::{Mutex, MutexGuard};
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+const REFERENCE_CONSTRAINTS: [&str; 8] = [
+    "scoring_request_assessment_spec_ref_format_check",
+    "scoring_request_calibration_reference_format_check",
+    "scoring_request_instrument_version_ref_format_check",
+    "scoring_request_norm_version_ref_format_check",
+    "scoring_request_response_snapshot_ref_format_check",
+    "scoring_request_scoring_request_ref_format_check",
+    "scoring_request_scoring_version_ref_format_check",
+    "scoring_request_session_ref_format_check",
+];
 
 fn guard() -> MutexGuard<'static, ()> {
     TEST_LOCK
@@ -37,6 +50,36 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
         .expect("reference rejection must come from a PostgreSQL CHECK constraint");
     assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
     assert_eq!(database_error.constraint(), Some(constraint));
+}
+
+fn reference_constraint_oids(client: &mut Client) -> Vec<(String, String)> {
+    let names: Vec<String> = REFERENCE_CONSTRAINTS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    let rows = client
+        .query(
+            "SELECT conname, oid::text \
+             FROM pg_constraint \
+             WHERE conname = ANY($1::text[]) \
+             ORDER BY conname",
+            &[&names],
+        )
+        .expect("scoring-request reference constraints must be inspectable");
+    assert_eq!(
+        rows.len(),
+        REFERENCE_CONSTRAINTS.len(),
+        "all scoring-request reference constraints must exist"
+    );
+    rows.into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect()
+}
+
+fn mark_reference_policy_as_legacy(client: &mut Client) {
+    client
+        .batch_execute("COMMENT ON FUNCTION scoring_request_reference_is_valid(TEXT) IS NULL;")
+        .expect("test fixture must mark the reference policy as an older unversioned contract");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -234,6 +277,22 @@ fn scoring_request_reference_rejects_every_rust_boundary_whitespace_character() 
 }
 
 #[test]
+fn current_policy_reapply_preserves_reference_constraint_objects() {
+    let _guard = guard();
+    let mut client = client();
+    let before = reference_constraint_oids(&mut client);
+
+    apply_scoring_request_migration(&mut client)
+        .expect("an already-current scoring-request migration must remain idempotent");
+
+    let after = reference_constraint_oids(&mut client);
+    assert_eq!(
+        after, before,
+        "an unchanged reference policy must not drop and rebuild validated constraints"
+    );
+}
+
+#[test]
 fn migration_reapplication_replaces_a_weakened_reference_constraint() {
     let _guard = guard();
     let mut client = client();
@@ -253,6 +312,7 @@ fn migration_reapplication_replaces_a_weakened_reference_constraint() {
                  );",
         )
         .unwrap();
+    mark_reference_policy_as_legacy(&mut client);
 
     apply_scoring_request_migration(&mut client).unwrap();
 
@@ -291,6 +351,7 @@ fn migration_reapplication_fails_closed_before_rewriting_legacy_invalid_identity
                  );",
         )
         .unwrap();
+    mark_reference_policy_as_legacy(&mut client);
 
     insert_request(
         &mut client,
