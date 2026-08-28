@@ -576,32 +576,24 @@ mod reference_guard_tests {
             observed_at_unix_ms: 1_700_000_000_000,
             received_at_unix_ms: 1_700_000_000_250,
         };
+        let gapped_receipts = [
+            first_receipt,
+            receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
+        ];
+        let gapped_result =
+            response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts);
         assert!(matches!(
-            response_ledger_from_receipts(
-                "session_ipip_ko_quick",
-                &[
-                    first_receipt,
-                    receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
-                ]
-            ),
+            gapped_result,
             Err(ResponseEventPersistenceError::InvalidSequence)
         ));
+        let duplicate_receipts = [
+            receipt(first, 1_700_000_000_000, 1_700_000_000_250),
+            receipt(duplicate_server, 1_700_000_000_500, 1_700_000_000_750),
+        ];
+        let duplicate_result =
+            response_ledger_from_receipts("session_ipip_ko_quick", &duplicate_receipts);
         assert!(matches!(
-            response_ledger_from_receipts(
-                "session_ipip_ko_quick",
-                &[
-                    ResponseEventReceipt {
-                        event: first,
-                        observed_at_unix_ms: 1_700_000_000_000,
-                        received_at_unix_ms: 1_700_000_000_250,
-                    },
-                    ResponseEventReceipt {
-                        event: duplicate_server,
-                        observed_at_unix_ms: 1_700_000_000_500,
-                        received_at_unix_ms: 1_700_000_000_750,
-                    },
-                ]
-            ),
+            duplicate_result,
             Err(ResponseEventPersistenceError::ConflictingReplay)
         ));
         assert!(response_ledger_from_receipts("session_ipip_ko_quick", &[]).is_ok());
