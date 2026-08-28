@@ -352,7 +352,10 @@ fn observation_disposition_name(disposition: ObservationDisposition) -> &'static
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResultSnapshotPersistenceError> {
-    normalized_reference(reference).ok_or(ResultSnapshotPersistenceError::InvalidReference)
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(ResultSnapshotPersistenceError::InvalidReference),
+    }
 }
 
 fn postgres_timestamp(timestamp: u64) -> Result<i64, ResultSnapshotPersistenceError> {
