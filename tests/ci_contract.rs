@@ -121,7 +121,7 @@ fn rust_toolchains_are_exact_and_reviewably_updated() {
     const NIGHTLY_LLVM_COV_VERSION: &str =
         "cargo +nightly-2026-08-18 llvm-cov --version | grep -F \"$CARGO_LLVM_COV_VERSION\"";
     const NIGHTLY_BRANCH_JSON: &str =
-        "cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json";
+        "cargo +nightly-2026-08-18 llvm-cov --branch --all-targets --json --summary-only --output-path coverage-branches.json";
 
     assert!(RUST_TOOLCHAIN.contains("channel = \"1.97.1\""));
     assert!(!RUST_TOOLCHAIN.contains("channel = \"stable\""));
