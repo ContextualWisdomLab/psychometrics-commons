@@ -92,10 +92,11 @@ DECLARE
     reference_contract_version TEXT;
     stored_reference_contract_version TEXT;
 BEGIN
-    -- Serialize the policy decision before reading its marker. `LOCK TABLE` is transaction-scoped,
-    -- so one reapply cannot observe stale policy evidence and race another caller through DROP/ADD.
-    -- The migration is already executed as one simple-query transaction by PostgreSQL.
-    LOCK TABLE scoring_request IN ACCESS EXCLUSIVE MODE;
+    -- Serialize the policy decision without locking the hot data table when the installed policy is
+    -- already current. The transaction-scoped advisory key is partitioned by schema so concurrent
+    -- deployments of separate schemas do not block each other. ALTER TABLE still acquires the
+    -- required table lock only when a real policy transition must rebuild and validate constraints.
+    PERFORM pg_advisory_xact_lock(1883264113, hashtext(current_schema()));
 
     SELECT 'psychometrics-commons:scoring-request-reference:'
            || md5(pg_get_functiondef(
@@ -112,7 +113,7 @@ BEGIN
     -- FUNCTION therefore does not revalidate historical rows when predicate semantics change.
     -- Upgrade and validate the eight owned constraints only when the validator-derived policy
     -- marker advances; an already-current startup/reapply preserves constraint OIDs and avoids
-    -- repeated validation scans after the short serialization lock is acquired.
+    -- both a validation scan and an ACCESS EXCLUSIVE table lock.
     IF stored_reference_contract_version IS DISTINCT FROM reference_contract_version THEN
         -- Immutable scoring identity is evidence, not cleanup input. Detect legacy-invalid rows
         -- before touching constraints so operators can make an explicit governed quarantine or
