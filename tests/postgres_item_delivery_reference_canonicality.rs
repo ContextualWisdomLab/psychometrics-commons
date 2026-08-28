@@ -26,8 +26,11 @@ fn client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
     client
+        .batch_execute("SET lock_timeout = '60s';")
+        .expect("shared item-delivery reference fixture lock timeout must be configured");
+    client
         .query_one(
-            "SELECT set_config('lock_timeout', '60s', false), pg_advisory_lock($1)",
+            "SELECT pg_advisory_lock($1)",
             &[&ITEM_DELIVERY_REFERENCE_FIXTURE_LOCK_KEY],
         )
         .expect(
