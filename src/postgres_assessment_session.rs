@@ -1065,7 +1065,8 @@ fn require_read_committed(
 mod tests {
     use super::{
         apply_assessment_session_migration, created_session_for_start_from_published_snapshot,
-        first_insert_seal_allows_exact_replay, load_assessment_session, persist_assessment_session,
+        first_insert_seal_allows_exact_replay, load_assessment_session,
+        load_assessment_session_for_participant, persist_assessment_session,
         persist_assessment_session_commands, published_snapshot_matches_session,
         reject_stale_command_prefix, start_created_assessment_session,
         start_created_assessment_session_from_stored_release, stored_start_identity_matches,
@@ -2363,6 +2364,14 @@ mod tests {
             AssessmentSessionPersistenceDisposition::Duplicate
         );
         assert_eq!(replayed.session_ref(), started.session_ref());
+        assert!(matches!(
+            load_assessment_session_for_participant(
+                &mut transaction,
+                "ses_library_stored_start",
+                " ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            ),
+            Err(AssessmentSessionPersistenceError::InvalidReference)
+        ));
         assert!(matches!(
             start_created_assessment_session_from_stored_release(
                 &mut transaction,
