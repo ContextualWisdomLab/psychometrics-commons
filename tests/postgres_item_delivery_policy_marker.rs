@@ -29,10 +29,15 @@ fn reference_policy_marker_is_derived_from_the_live_validator_definition() {
                      'item_delivery_reference_is_valid(text)'::regprocedure, \
                      'pg_proc'\
                  ), \
-                 'psychometrics-commons:item-delivery-reference:' || \
-                     md5(pg_get_functiondef(\
-                         'item_delivery_reference_is_valid(text)'::regprocedure\
-                     ))",
+                     'psychometrics-commons:item-delivery-reference:' || \
+                     md5(\
+                         pg_get_functiondef(\
+                             'item_delivery_reference_is_valid(text)'::regprocedure\
+                         ) || E'\\n' || \
+                         pg_get_functiondef(\
+                             'item_delivery_reference_array_is_valid(text[])'::regprocedure\
+                         )\
+                     )",
             &[],
         )
         .expect("item-delivery reference policy marker must be inspectable");
