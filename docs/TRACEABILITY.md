@@ -192,6 +192,6 @@ CI should validate documentation paths/status vocabulary and, where real transpo
 
 Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
 
-OpenAPI Initiative. (2025). *OpenAPI Specification, Version 3.2.0*.
+OpenAPI Initiative. (2025). *OpenAPI Specification, Version 3.2.0*. https://spec.openapis.org/oas/v3.2.0.html
 
-AsyncAPI Initiative. (2026). *AsyncAPI Specification, Version 3.1.0*.
+AsyncAPI Initiative. (2026). *AsyncAPI Specification, Version 3.1.0*. https://www.asyncapi.com/docs/reference/specification/v3.1.0

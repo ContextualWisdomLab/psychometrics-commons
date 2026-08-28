@@ -171,6 +171,7 @@ fn activate_pause_resume_complete_and_exact_replay_keep_server_state() {
     );
     assert_eq!(paused.status(), 200);
     assert!(paused.body().contains("\"state\":\"paused\""));
+    assert!(paused.body().contains("\"sequence\":2"));
     assert!(paused.body().contains("POST resume"));
 
     let resumed = handle_session_command_http_request(
@@ -179,6 +180,7 @@ fn activate_pause_resume_complete_and_exact_replay_keep_server_state() {
     );
     assert_eq!(resumed.status(), 200);
     assert!(resumed.body().contains("\"state\":\"active\""));
+    assert!(resumed.body().contains("\"sequence\":3"));
 
     let completed = handle_session_command_http_request(
         &post(SESSION_REF, "complete", "cmd_complete_primary"),
@@ -186,6 +188,7 @@ fn activate_pause_resume_complete_and_exact_replay_keep_server_state() {
     );
     assert_eq!(completed.status(), 200);
     assert!(completed.body().contains("\"state\":\"completed\""));
+    assert!(completed.body().contains("\"sequence\":4"));
     assert!(completed.body().contains("GET /v1/results/{result_ref}"));
     assert_eq!(
         runtime.session(SESSION_REF).unwrap().state(),
@@ -330,10 +333,11 @@ fn malformed_identity_method_and_missing_session_fail_closed() {
     assert_eq!(bad_body.status(), 400);
 
     let whitespace_ref = handle_session_command_http_request(
-        &post("ses_one two", "activate", "cmd_whitespace_session"),
+        &post("ses_one%20two", "activate", "cmd_whitespace_session"),
         &mut runtime,
     );
     assert_eq!(whitespace_ref.status(), 400);
+    assert!(whitespace_ref.body().contains("opaque non-numeric"));
 }
 
 #[test]

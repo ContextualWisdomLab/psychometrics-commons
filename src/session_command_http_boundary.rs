@@ -168,7 +168,7 @@ pub fn accept_one_session_command_http(
     let (mut stream, _) = listener.accept()?;
     let deadline = Instant::now() + SESSION_COMMAND_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream, deadline)?;
+    let request = read_request_or_respond_bad_request(&mut stream, deadline)?;
     let response = handle_session_command_http_request(&request, runtime);
     write_http_response(&mut stream, &response)
 }
@@ -192,10 +192,27 @@ pub fn accept_one_authorized_session_command_http(
     let (mut stream, _) = listener.accept()?;
     let deadline = Instant::now() + SESSION_COMMAND_HTTP_IO_TIMEOUT;
     stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
-    let request = read_http_request(&mut stream, deadline)?;
+    let request = read_request_or_respond_bad_request(&mut stream, deadline)?;
     let response =
         handle_authorized_session_command_http_request(&request, authority, participant, runtime);
     write_http_response(&mut stream, &response)
+}
+
+fn read_request_or_respond_bad_request(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> io::Result<String> {
+    match read_http_request(stream, deadline) {
+        Ok(request) => Ok(request),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            write_http_response(
+                stream,
+                &implementation::SessionCommandHttpResponse::framing_error(),
+            )?;
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<String> {

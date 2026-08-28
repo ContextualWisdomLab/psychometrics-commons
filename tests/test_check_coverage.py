@@ -59,6 +59,23 @@ class CoverageContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "branches coverage is incomplete: 1/2"):
                 CHECK_COVERAGE.validate_report(report, ["branches"])
 
+    def test_lcov_branch_records_merge_duplicate_logical_branches(self) -> None:
+        """Count duplicate instantiation records as one logical branch."""
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage-branches.lcov"
+            report.write_text(
+                "SF:src/example.rs\n"
+                "BRDA:7,0,0,0\n"
+                "BRDA:7,0,0,1\n"
+                "BRDA:7,0,1,1\n"
+                "end_of_record\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                CHECK_COVERAGE.validate_report(report, ["branches"]),
+                ["branches coverage: PASS (2/2, 100%)"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

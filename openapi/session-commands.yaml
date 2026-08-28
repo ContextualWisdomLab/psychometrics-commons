@@ -15,9 +15,15 @@ paths:
       summary: Apply one participant lifecycle command
       description: >
         Applies Activate, Pause, Resume, Complete, or Cancel. Send the same
-        Idempotency-Key to replay the original resulting state. After
-        Activate, POST /v1/sessions/{session_ref}/responses for each published
-        item. After every item is recorded, POST complete.
+        Idempotency-Key to replay the original resulting state. The separate
+        response-write operation is supplied by Active PR #415 and is not part
+        of this command family until integrated. Unauthorized or out-of-scope
+        participant or tenant requests are intentionally returned as 404.
+      x-authorization-contract: >
+        The embedding host supplies a server-verified AuthorizationContext or
+        anonymous-session credential plus server-owned participant evidence.
+        This in-process slice does not define or consume a network authentication
+        header; possession of session_ref is never authorization.
       parameters:
         - name: session_ref
           in: path

@@ -79,6 +79,15 @@ impl SessionCommandHttpResponse {
         }
     }
 
+    pub(crate) fn framing_error() -> Self {
+        Self::problem(
+            400,
+            "urn:psychometrics-commons:problem:bad-request",
+            "Bad Request",
+            "session command HTTP request framing is invalid",
+        )
+    }
+
     /// Return the HTTP status code.
     #[must_use]
     pub const fn status(&self) -> u16 {

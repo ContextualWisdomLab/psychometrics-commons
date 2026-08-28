@@ -107,6 +107,12 @@ fn serve_authorized(
     accept_one_authorized_session_command_http(listener, &authority, &participant, runtime)
 }
 
+fn assert_bad_request_response(response: &str) {
+    assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+    assert!(response.contains("Content-Type: application/problem+json"));
+    assert!(response.contains("urn:psychometrics-commons:problem:bad-request"));
+}
+
 #[test]
 fn listener_activates_a_created_session_over_tcp() {
     let session = AssessmentSession::new(
@@ -279,7 +285,49 @@ fn listener_rejects_a_content_length_that_splits_a_utf8_code_point_without_panic
     stream.read_to_string(&mut response).unwrap();
     let error = server.join().unwrap().unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    assert!(response.is_empty());
+    assert_bad_request_response(&response);
+}
+
+#[test]
+fn authorized_listener_returns_a_problem_for_invalid_framing() {
+    let session = AssessmentSession::new(
+        "ses_listener_command_authorized_utf8_boundary",
+        "ptc_listener_command_authorized_utf8_boundary",
+        &published_release(),
+        "en-US",
+        20_000,
+    )
+    .unwrap();
+    let mut runtime = SessionCommandHttpRuntime::new(vec![session]);
+    let listener = bind_session_command_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        serve_authorized(
+            &listener,
+            "ptc_listener_command_authorized_utf8_boundary",
+            &mut runtime,
+        )
+    });
+
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let body = "{\"command\":\"activaté\"}";
+    let split_inside_e_acute = body.find('é').unwrap() + 1;
+    let headers = format!(
+        "POST /v1/sessions/ses_listener_command_authorized_utf8_boundary/commands HTTP/1.1\r\nIdempotency-Key: cmd_listener_authorized_utf8_boundary\r\nContent-Length: {split_inside_e_acute}\r\n\r\n"
+    );
+    stream.write_all(headers.as_bytes()).unwrap();
+    stream
+        .write_all(&body.as_bytes()[..split_inside_e_acute])
+        .unwrap();
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let error = server.join().unwrap().unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_bad_request_response(&response);
 }
 
 #[test]

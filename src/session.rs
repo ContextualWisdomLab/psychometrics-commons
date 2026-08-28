@@ -579,18 +579,7 @@ impl SessionState {
     /// Return the stable persisted vocabulary for this state.
     #[must_use]
     pub const fn persist_name(self) -> &'static str {
-        match self {
-            Self::Created => "created",
-            Self::Active => "active",
-            Self::Paused => "paused",
-            Self::Completed => "completed",
-            Self::Scoring => "scoring",
-            Self::Scored => "scored",
-            Self::Released => "released",
-            Self::Expired => "expired",
-            Self::Cancelled => "cancelled",
-            Self::Invalidated => "invalidated",
-        }
+        self.as_str()
     }
 
     /// Parse a persisted session-state name.

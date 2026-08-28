@@ -44,6 +44,7 @@ def validate_lcov_kind(path: Path, kind: str) -> str:
     record_prefix = "DA:" if kind == "lines" else "BRDA:"
     count = 0
     covered = 0
+    branch_coverage: dict[tuple[str, int, str, str], bool] = {}
     source: str | None = None
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -91,8 +92,14 @@ def validate_lcov_kind(path: Path, kind: str) -> str:
                         ) from error
                     if hits < 0:
                         raise ValueError("LCOV branch hit counts cannot be negative")
+                key = (source, line_number, fields[1], fields[2])
+                branch_coverage[key] = branch_coverage.get(key, False) or hits > 0
+                continue
             count += 1
             covered += int(hits > 0)
+    if kind == "branches":
+        count = len(branch_coverage)
+        covered = sum(branch_coverage.values())
     if source is not None:
         raise ValueError("LCOV report ended before the source record was closed")
     if count == 0:

@@ -59,7 +59,7 @@ Protected-main result-export domain evidence is available through `ResultExport:
 
 ## Public session commands (Active PR)
 
-`POST /v1/sessions/{session_ref}/commands` is the participant lifecycle write. Send `{"command":"activate"}` with an opaque `Idempotency-Key` to begin answering. Then `POST /v1/sessions/{session_ref}/responses` for each published item. After the last answer, `{"command":"complete"}`. Use `pause` / `resume` for a break, or `cancel` to stop. This process-memory family does not create sessions or survive restart.
+`POST /v1/sessions/{session_ref}/commands` is the participant lifecycle write. Send `{"command":"activate"}` with an opaque `Idempotency-Key` to begin answering. The separate response-write step, `POST /v1/sessions/{session_ref}/responses`, is supplied by Active PR #415 and is not part of this PR until integrated. After the last answer, `{"command":"complete"}`. Use `pause` / `resume` for a break, or `cancel` to stop. This process-memory family does not create sessions or survive restart.
 
 The as-built contract is [`openapi/session-commands.yaml`](openapi/session-commands.yaml). It is not protected-main truth until this head is reviewed, check-clean, and integrated.
 
