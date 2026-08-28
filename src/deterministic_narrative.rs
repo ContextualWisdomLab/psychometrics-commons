@@ -5,7 +5,7 @@
 //! Instead, it verifies the ADR-0018 canonical style-assignment identity and renders only the
 //! localized interpretation units selected by an approved, separately versioned mapping.
 
-use crate::narrative::{StyleAssignmentIdentity, StyleAssignmentKey};
+use crate::narrative::{ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentKey};
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -151,6 +151,7 @@ impl DeterministicNarrativeBundle<'_> {
         selection: &ApprovedStyleSelection<'_>,
     ) -> Result<RenderedNarrative, NarrativeFallbackError> {
         self.validate()?;
+        validate_canonical_assignment_identity(identity)?;
         let assignment_key = identity
             .assignment_key()
             .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
@@ -254,13 +255,35 @@ fn validate_interpretation_selection(
     if interpretation_unit_refs.is_empty() {
         return Err(NarrativeFallbackError::EmptySelection);
     }
-    let mut seen = Vec::with_capacity(interpretation_unit_refs.len());
+    let mut seen = Vec::with_capacity(interpreted_unit_refs.len());
     for unit_ref in interpretation_unit_refs {
         let unit_ref = required_canonical_reference(unit_ref)?;
         if seen.contains(&unit_ref) {
             return Err(NarrativeFallbackError::DuplicateReference);
         }
         seen.push(unit_ref);
+    }
+    Ok(())
+}
+
+fn validate_canonical_assignment_identity(
+    identity: &StyleAssignmentIdentity<'_>,
+) -> Result<(), NarrativeFallbackError> {
+    if let ScoreIdentity::ScoreProfileRef(reference) = identity.score_identity {
+        required_canonical_reference(reference)
+            .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
+    }
+    for reference in [
+        identity.instrument_version_ref,
+        identity.scoring_version_ref,
+        identity.style_mapping_version_ref,
+    ] {
+        required_canonical_reference(reference)
+            .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
+    }
+    if let Some(reference) = identity.norm_version_ref {
+        required_canonical_reference(reference)
+            .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
     }
     Ok(())
 }
