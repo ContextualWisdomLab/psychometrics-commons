@@ -135,8 +135,10 @@ src/lib.rs
 ├── postgres_response_snapshot.rs # PostgreSQL immutable response-snapshot persistence
 ├── postgres_result_snapshot.rs   # PostgreSQL immutable result-snapshot persistence
 ├── postgres_assessment_session.rs # PostgreSQL session/reload/command persistence
+├── postgres_longitudinal_observation.rs # PostgreSQL immutable longitudinal observation persistence
 ├── result_authorization.rs       # personal result resource authorization
 ├── result_export.rs              # immutable personal result export domain copy
+├── result_http.rs                 # authorized immutable result-read transport
 ├── session_http.rs               # persist-backed session HTTP transport
 ├── reference.rs      # internal opaque-reference normalization
 ├── research_release.rs  # product-side Research Commons release-evidence gate
