@@ -590,10 +590,8 @@ mod reference_guard_tests {
             first_receipt,
             receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
         ];
-        let gapped_result =
-            response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts);
         assert!(matches!(
-            gapped_result,
+            response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts),
             Err(ResponseEventPersistenceError::InvalidSequence)
         ));
         let duplicate_receipts = [
