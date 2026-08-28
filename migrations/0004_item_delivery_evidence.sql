@@ -7,7 +7,18 @@
 -- PostgreSQL assumes functions used by CHECK constraints are immutable. A marker derived from
 -- the scalar and array predicate definitions makes semantic upgrades recreate and validate every
 -- dependent CHECK once, while ordinary idempotent migration reapplication preserves validated
--- constraints.
+-- constraints. `ascii(...)` is used as a Unicode code-point oracle below and is only valid for
+-- this contract under UTF8, so fail closed before installing either validator on another encoding.
+DO $item_delivery_encoding_guard$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'item_delivery reference parity requires PostgreSQL server_encoding UTF8';
+    END IF;
+END
+$item_delivery_encoding_guard$;
+
 CREATE OR REPLACE FUNCTION item_delivery_reference_is_valid(reference_value TEXT)
 RETURNS BOOLEAN
 LANGUAGE SQL
