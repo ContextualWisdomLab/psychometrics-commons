@@ -33,6 +33,36 @@ fn result_export_openapi_is_pinned_to_the_implemented_operation() {
 }
 
 #[test]
+fn result_export_openapi_constrains_request_identity_and_score_states() {
+    let opaque_reference_binding = "$ref: \"#/components/schemas/OpaqueReference\"";
+    assert!(
+        RESULT_EXPORT_OPENAPI.matches(opaque_reference_binding).count() >= 2,
+        "result_ref and Idempotency-Key must both reuse the opaque-reference schema"
+    );
+
+    for required_fragment in [
+        "    OpaqueReference:\n",
+        "      x-runtime-validator: exact_opaque_reference\n",
+        "      minLength: 1\n",
+        "      allOf:\n",
+        "    ScoreObservation:\n",
+        "      oneOf:\n",
+        "        - title: Scored observation\n",
+        "              const: scored\n",
+        "        - title: Non-scored observation\n",
+        "                - abstained\n",
+        "                - failed\n",
+        "                - excluded\n",
+        "              type: \"null\"\n",
+    ] {
+        assert!(
+            RESULT_EXPORT_OPENAPI.contains(required_fragment),
+            "missing fail-closed result-export schema constraint: {required_fragment:?}"
+        );
+    }
+}
+
+#[test]
 fn result_export_openapi_preserves_immutable_scoring_provenance() {
     for required_property in [
         "        export_ref:\n",
