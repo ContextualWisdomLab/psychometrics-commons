@@ -172,3 +172,33 @@ fn migration_reapply_revalidates_rows_written_under_a_weaker_predicate() {
         .expect_err("reference-policy upgrade must scan and reject the historical invisible alias");
     assert_check(&error, "item_delivery_ledger_tenant_ref_format_check");
 }
+
+#[test]
+fn migration_reapply_revalidates_rows_after_array_predicate_changes() {
+    let mut client = client();
+
+    client
+        .batch_execute(
+            "CREATE OR REPLACE FUNCTION item_delivery_reference_array_is_valid(reference_values TEXT[]) \
+             RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE PARALLEL SAFE \
+             SET search_path = pg_catalog, item_delivery_reference_canonicality_test AS $$ \
+                 SELECT reference_values IS NOT NULL \
+             $$;",
+        )
+        .unwrap();
+
+    client
+        .execute(
+            "INSERT INTO item_delivery_ledger (\
+                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
+                 allowed_item_version_refs\
+             ) VALUES ('tenant_array_upgrade', 'session_array_upgrade', 'release_array_upgrade', \
+                       $1, 'en-US', ARRAY['item_duplicate', 'item_duplicate'])",
+            &[&DIGEST],
+        )
+        .expect("the deliberately weakened array predicate should admit duplicate item identities");
+
+    let error = apply_item_delivery_migration(&mut client)
+        .expect_err("array-policy upgrade must rescan and reject the historical duplicate item set");
+    assert_check(&error, "item_delivery_ledger_allowed_items_format_check");
+}
