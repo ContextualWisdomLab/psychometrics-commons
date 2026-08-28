@@ -414,6 +414,10 @@ fn memory_port_records_exact_replay_disposition() {
         port.load_for_participant(SESSION, " ptc_eb1b318917d24ca0ac5153c37ff696c7 "),
         Err(AssessmentSessionPersistenceError::InvalidReference)
     ));
+    assert!(port
+        .load_for_participant(&format!(" {SESSION} "), PARTICIPANT)
+        .unwrap()
+        .is_some());
     assert!(port.load(SESSION).unwrap().is_some());
     assert!(port.load(&format!(" {SESSION} ")).unwrap().is_some());
     assert!(port.load("ses_missing").unwrap().is_none());
