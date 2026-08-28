@@ -533,6 +533,18 @@ mod reference_guard_tests {
         ));
     }
 
+    fn receipt(
+        event: ResponseEvent,
+        observed_at_unix_ms: u64,
+        received_at_unix_ms: u64,
+    ) -> ResponseEventReceipt {
+        ResponseEventReceipt {
+            event,
+            observed_at_unix_ms,
+            received_at_unix_ms,
+        }
+    }
+
     #[test]
     fn gapped_or_duplicate_receipt_history_fails_closed() {
         let first = ResponseEvent::from_persisted(
@@ -569,11 +581,7 @@ mod reference_guard_tests {
                 "session_ipip_ko_quick",
                 &[
                     first_receipt,
-                    ResponseEventReceipt {
-                        event: gapped,
-                        observed_at_unix_ms: 1_700_000_000_500,
-                        received_at_unix_ms: 1_700_000_000_750,
-                    },
+                    receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
                 ]
             ),
             Err(ResponseEventPersistenceError::InvalidSequence)
