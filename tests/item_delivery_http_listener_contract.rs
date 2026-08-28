@@ -51,7 +51,11 @@ fn runtime() -> ItemDeliveryHttpRuntime {
     )
     .unwrap();
     session
-        .apply_command("cmd_activate_tcp_item_delivery", 1, SessionCommand::Activate)
+        .apply_command(
+            "cmd_activate_tcp_item_delivery",
+            1,
+            SessionCommand::Activate,
+        )
         .unwrap();
     ItemDeliveryHttpRuntime::new(vec![(session, ledger)]).unwrap()
 }
