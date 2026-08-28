@@ -184,7 +184,7 @@ fn migration_reapply_revalidates_rows_after_array_predicate_changes() {
              SET search_path = pg_catalog, item_delivery_reference_canonicality_test AS $$ \
                  SELECT reference_values IS NOT NULL \
              $$; \
-             COMMENT ON FUNCTION item_delivery_reference_array_is_valid(TEXT[]) IS NULL;",
+             COMMENT ON FUNCTION item_delivery_reference_is_valid(TEXT) IS 'stale item-delivery reference marker';",
         )
         .unwrap();
 
