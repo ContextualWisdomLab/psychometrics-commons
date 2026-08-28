@@ -8,10 +8,17 @@ use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_item_delivery::apply_item_delivery_migration;
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const ITEM_DELIVERY_REFERENCE_FIXTURE_LOCK_KEY: i64 = 0x4954_4452_4341_4E4F;
 
 fn client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
     let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+    client
+        .query_one(
+            "SELECT set_config('lock_timeout', '60s', false), pg_advisory_lock($1)",
+            &[&ITEM_DELIVERY_REFERENCE_FIXTURE_LOCK_KEY],
+        )
+        .expect("shared item-delivery reference fixture lock must be acquired within sixty seconds");
     client
         .batch_execute(
             "DROP SCHEMA IF EXISTS item_delivery_reference_canonicality_test CASCADE; \
