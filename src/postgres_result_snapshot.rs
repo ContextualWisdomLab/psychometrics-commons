@@ -393,6 +393,10 @@ mod reference_guard_tests {
             required_reference("12"),
             Err(ResultSnapshotPersistenceError::InvalidReference)
         ));
+        assert!(matches!(
+            required_reference(" result_snapshot_ko_v1 "),
+            Err(ResultSnapshotPersistenceError::InvalidReference)
+        ));
         assert_eq!(
             required_reference("result_snapshot_ko_v1").unwrap(),
             "result_snapshot_ko_v1"
