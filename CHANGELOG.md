@@ -5,6 +5,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ## Unreleased
 
 ### Added
+- Active PR #409 adds a fail-closed pre-publication public-fixture privacy scanner for restricted operational/Keyverse/linkage identities, credential/internal-location column aliases, unsupported structured cells, and invisible default-ignorable structured prefixes. The scanner depends on the product-authorized restricted-identity inventory, does not publish/register a research release, and is active-PR evidence only—not protected-main implementation or risk closure.
 - Active PR #248 adds PostgreSQL 18 durability for immutable normalized longitudinal observation evidence: exact source identity, separate validity/recorded/received/ingested clocks, explicit membership shares whose deferred transaction invariant totals 10,000 basis points, exact replay, tenant isolation, and fail-closed rebinding/immutability. This entry is active-PR evidence only and is not a protected-main or release claim.
 - Active PR #287 rejects padded or otherwise noncanonical published narrative, style-mapping, interpretation-unit, and approved-selection references before deterministic rendering. Numeric score authority and the protected-main narrative boundary are unchanged; this is active-PR evidence only and not a release claim.
 - Personal result export delivery authorization (`authorize_result_export_read`) reuses the stored-record `ReadOwnResult` check on the product-owned participant and immutable result, then requires the export's result snapshot reference and copied participant reference to match that exact snapshot. A cross-tenant caller fails closed with the ordinary result-authorization denial before export-binding details are evaluated, so a mismatched export is not an existence oracle. No new permission or persistence is introduced; authorized HTTP transport ships through merged `src/result_export_http.rs` and `openapi/result-exports.yaml`. This is the post-#231 export-delivery guard (ADR-0010 provenance; ADR-0003 tenant-bound authorization).
@@ -74,7 +75,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 ### Fixed
 
 - Stale shorter assessment-session command history now fails closed instead of rewinding the current-state projection, so a later Pause/Resume still reloads after a rejected Activate-only persist.
-- Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
+- Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating it as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
 - Scoring results now reject non-canonical engine-artifact digests and accept only `sha256:` followed by 64 lowercase hexadecimal characters as immutable provenance.
 - Exact replay of an already accepted response event remains idempotent after collection pauses or closes, while conflicting replay evidence still fails closed and genuinely new responses remain restricted to active sessions.
