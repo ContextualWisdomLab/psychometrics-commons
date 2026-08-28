@@ -19,7 +19,7 @@ Evidence status uses these meanings:
 
 The authority order is accepted/superseding ADR → PRD/TRD → measurement, AI, and research governance → quality/security/compliance/risk constraints → architecture views → machine-readable contracts → code, migrations, tests, and operational evidence. A lower layer cannot promote a target into shipped behavior.
 
-Abbreviations used here are defined for first-time readers: P0/P1/P2 are priority levels (blocking, high, and planned); MAE is mean absolute error; RMSE is root mean square error; WCAG is the Web Content Accessibility Guidelines; 3NF is third normal form; ERD is entity-relationship diagram; ADR is architecture decision record; CWL is ContextualWisdomLab; `MERGEABLE` and `BLOCKED` are GitHub merge-state values; OpenCode is the required hosted code-review gate; and Strix is the hosted security-scan gate.
+Abbreviations used here are defined for first-time readers: P0/P1/P2 are priority levels (blocking, high, and planned); MAE is mean absolute error; RMSE is root mean square error; WCAG is the Web Content Accessibility Guidelines; 3NF is third normal form; ERD is entity-relationship diagram; ADR is architecture decision record; CWL is ContextualWisdomLab; CEFR is the Common European Framework of Reference for Languages; DIF is differential item functioning; IPIP is the International Personality Item Pool; LCOV is a line-coverage report format; SBOM is software bill of materials; SLO/RPO/RTO are service-level objective, recovery-point objective, and recovery-time objective; `MERGEABLE` and `BLOCKED` are GitHub merge-state values; OpenCode is the required hosted code-review gate; and Strix is the hosted security-scan gate.
 
 ## Observed protected-main baseline
 
