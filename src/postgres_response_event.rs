@@ -568,7 +568,7 @@ mod reference_guard_tests {
             response_ledger_from_receipts(
                 "session_ipip_ko_quick",
                 &[
-                    first_receipt.clone(),
+                    first_receipt,
                     ResponseEventReceipt {
                         event: gapped,
                         observed_at_unix_ms: 1_700_000_000_500,
@@ -582,7 +582,11 @@ mod reference_guard_tests {
             response_ledger_from_receipts(
                 "session_ipip_ko_quick",
                 &[
-                    first_receipt,
+                    ResponseEventReceipt {
+                        event: first,
+                        observed_at_unix_ms: 1_700_000_000_000,
+                        received_at_unix_ms: 1_700_000_000_250,
+                    },
                     ResponseEventReceipt {
                         event: duplicate_server,
                         observed_at_unix_ms: 1_700_000_000_500,
