@@ -1,6 +1,6 @@
 //! Static contract for bounded supersession-lineage validation during migration reapply.
 //!
-//! Real PostgreSQL tests prove dangling and cyclic historical evidence is rejected.
+//! Real `PostgreSQL` tests prove dangling and cyclic historical evidence is rejected.
 //! This contract additionally prevents the reapply guard from regressing to a
 //! per-row ancestor walk that materializes quadratic intermediate lineage on a
 //! long correction chain. The migration should walk forward from root results,
