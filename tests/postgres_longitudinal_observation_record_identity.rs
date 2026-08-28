@@ -15,6 +15,15 @@ use psychometrics_commons_runtime::postgres_longitudinal_observation::{
     persist_longitudinal_observation, LongitudinalObservationPersistenceDisposition,
     LongitudinalObservationPersistenceError,
 };
+use std::sync::{Mutex, MutexGuard};
+
+static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn guard() -> MutexGuard<'static, ()> {
+    TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn client() -> Client {
     let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
@@ -104,6 +113,7 @@ fn load(
 
 #[test]
 fn distinct_sources_cannot_rebind_one_durable_commons_record_identity() {
+    let _guard = guard();
     let mut client = client();
     let first = record(
         "longitudinal_observation_record_shared_identity",
@@ -151,6 +161,7 @@ fn distinct_sources_cannot_rebind_one_durable_commons_record_identity() {
 
 #[test]
 fn another_tenant_cannot_rebind_one_durable_commons_record_identity() {
+    let _guard = guard();
     let mut client = client();
     let first = record(
         "longitudinal_observation_record_cross_tenant_identity",
