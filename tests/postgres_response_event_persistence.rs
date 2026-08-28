@@ -523,10 +523,11 @@ fn persist_and_load_require_read_committed_and_opaque_session() {
         ),
         Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
     ));
-    assert!(matches!(
-        load_response_ledger(&mut serializable, "session_ipip_ko_isolation"),
-        Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
-    ));
+    assert!(
+        load_response_ledger(&mut serializable, "session_ipip_ko_isolation")
+            .expect("read-only ledger reconstruction must accept serializable isolation")
+            .is_empty()
+    );
     serializable.rollback().unwrap();
 
     assert!(matches!(

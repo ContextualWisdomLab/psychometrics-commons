@@ -47,7 +47,10 @@ fn read_only_reload_accepts_repeatable_read_snapshot() {
     let receipts = load_response_event_receipts(&mut transaction, "session_isolation_01")
         .expect("read-only receipt reconstruction must accept a repeatable-read snapshot");
     assert_eq!(receipts.len(), 1);
-    assert_eq!(receipts[0].event().server_event_ref(), "server_event_isolation_01");
+    assert_eq!(
+        receipts[0].event().server_event_ref(),
+        "server_event_isolation_01"
+    );
 
     let ledger = load_response_ledger(&mut transaction, "session_isolation_01")
         .expect("read-only ledger reconstruction must accept a repeatable-read snapshot");
