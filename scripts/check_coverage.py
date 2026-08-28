@@ -78,8 +78,8 @@ def validate_lcov_kind(path: Path, kind: str) -> str:
                     line_number = int(fields[0])
                 except ValueError as error:
                     raise ValueError("LCOV branch records must contain an integer line") from error
-                if line_number < 0:
-                    raise ValueError("LCOV branch line numbers cannot be negative")
+                if line_number <= 0:
+                    raise ValueError("LCOV branch line numbers must be positive")
                 if fields[3] == "-":
                     hits = 0
                 else:
