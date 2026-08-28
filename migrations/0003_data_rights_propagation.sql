@@ -5,6 +5,18 @@
 -- numeric-like strings use `char::is_numeric`, including Unicode No/Nl characters such as ½, ²,
 -- and Ⅳ. PostgreSQL 18 UTF-8 with pg_unicode_fast supplies matching whitespace/control semantics;
 -- generated int4multiranges mirror Rust 1.97 / Unicode 17 numeric and Default_Ignorable sets.
+-- `ascii(substr(...))` is a Unicode code-point oracle only under UTF8, so reject unsupported
+-- database encodings before installing or replacing the immutable validator.
+DO $data_rights_encoding_guard$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'data_rights reference parity requires PostgreSQL server_encoding UTF8';
+    END IF;
+END
+$data_rights_encoding_guard$;
+
 CREATE OR REPLACE FUNCTION data_rights_reference_is_valid(reference_text TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
