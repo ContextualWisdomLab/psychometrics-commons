@@ -450,6 +450,6 @@ fn successful_command_escapes_opaque_references_in_json() {
 
     assert_eq!(response.status(), 200);
     assert!(response.body().contains(r#"ses_command_\\\"quote"#));
-    assert!(response.body().contains(r#"quote\\\\slash"#));
+    assert!(response.body().contains(r"quote\\\\slash"));
     assert!(response.body().contains(r#"cmd_\\\"quote"#));
 }
