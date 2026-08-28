@@ -327,7 +327,7 @@ fn every_membership_dimension_and_source_alias_rejects_rebinding() {
         persist(&mut client, "tenant_clinic_busan", &busan_record).unwrap(),
         LongitudinalObservationPersistenceDisposition::Inserted
     );
-    assert_conflict(&mut client, "tenant_clinic_busan", &base);
+    assert_identity_conflict(&mut client, "tenant_clinic_busan", &base);
 }
 
 #[test]
