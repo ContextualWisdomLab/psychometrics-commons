@@ -1,8 +1,8 @@
-//! Exhaustive real-PostgreSQL parity for Rust numeric-only item-delivery references.
+//! Exhaustive real-PostgreSQL parity for Rust item-delivery reference classification.
 //!
-//! Item-delivery SQL carries a generated Unicode numeric table so direct SQL cannot admit a
-//! numeric-only identity that Rust `char::is_numeric` rejects. This contract checks both directions
-//! against the full scalar set exposed by the pinned Rust toolchain rather than relying on
+//! Item-delivery SQL carries generated Unicode numeric handling and a Unicode-aware whitespace
+//! boundary so direct SQL cannot admit aliases that the pinned Rust `char` classifiers reject.
+//! These contracts check the relevant scalar sets exhaustively rather than relying on
 //! representative examples.
 
 use postgres::{Client, NoTls};
@@ -130,5 +130,42 @@ fn sql_does_not_overclassify_visible_rust_nonnumeric_scalars_as_numeric() {
     assert!(
         rejected.is_empty(),
         "SQL overclassified visible Rust-nonnumeric scalars in numeric-shaped references: {rejected:?}"
+    );
+}
+
+#[test]
+fn sql_rejects_every_outer_whitespace_scalar_rust_classifies_as_whitespace() {
+    let mut client = client();
+    let rust_whitespace: Vec<i32> = (1u32..=0x0010_FFFF)
+        .filter_map(char::from_u32)
+        .filter(|character| character.is_whitespace())
+        .map(|character| {
+            i32::try_from(u32::from(character)).expect("Unicode scalar values always fit in i32")
+        })
+        .collect();
+
+    assert!(
+        !rust_whitespace.is_empty(),
+        "the pinned Rust toolchain must expose Unicode whitespace scalars"
+    );
+
+    let accepted: Vec<(i32, bool, bool)> = client
+        .query(
+            "SELECT codepoint, \
+                    item_delivery_reference_is_valid(chr(codepoint) || 'alpha') AS leading_valid, \
+                    item_delivery_reference_is_valid('alpha' || chr(codepoint)) AS trailing_valid \
+             FROM unnest($1::int4[]) AS codepoint \
+             WHERE item_delivery_reference_is_valid(chr(codepoint) || 'alpha') \
+                OR item_delivery_reference_is_valid('alpha' || chr(codepoint))",
+            &[&rust_whitespace],
+        )
+        .expect("PostgreSQL must reject every Rust-whitespace scalar at either reference boundary")
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1), row.get(2)))
+        .collect();
+
+    assert!(
+        accepted.is_empty(),
+        "SQL accepted outer whitespace that Rust rejects: {accepted:?}"
     );
 }
