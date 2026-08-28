@@ -1,9 +1,9 @@
 //! Guard item-delivery CHECK revalidation when the scalar reference validator changes.
 //!
-//! PostgreSQL does not automatically rescan rows behind an immutable CHECK predicate when the
+//! `PostgreSQL` does not automatically rescan rows behind an immutable CHECK predicate when the
 //! predicate function is replaced. The migration therefore stores a policy marker on the scalar
 //! validator and rebuilds its dependent CHECK constraints only when that marker changes. This
-//! contract derives the expected marker from PostgreSQL's normalized live function definition so
+//! contract derives the expected marker from `PostgreSQL`'s normalized live function definition so
 //! a future validator edit cannot silently retain stale validation evidence.
 
 use postgres::{Client, NoTls};
