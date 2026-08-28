@@ -4,7 +4,7 @@
 //! every Rust-whitespace scalar at either edge without rejecting the same visible whitespace when
 //! it is legitimate identity material inside an otherwise opaque reference. The result must not
 //! depend on the caller's text collation: a durable identity validator must behave the same under
-//! the database default and PostgreSQL's byte-oriented `C` collation.
+//! the database default and `PostgreSQL`'s byte-oriented `C` collation.
 
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::postgres_longitudinal_observation::apply_longitudinal_observation_migration;
