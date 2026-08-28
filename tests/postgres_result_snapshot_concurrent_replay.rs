@@ -92,20 +92,20 @@ fn snapshot() -> ResultSnapshot {
 fn install_insert_pause_trigger(client: &mut Client) {
     client
         .batch_execute(&format!(
-            "CREATE OR REPLACE FUNCTION test_pause_result_snapshot_insert()\
-             RETURNS trigger\
-             LANGUAGE plpgsql\
-             AS $$\
-             BEGIN\
-                 IF current_setting('psychometrics_commons.test_result_insert_pause', true) = 'on' THEN\
-                     PERFORM pg_advisory_xact_lock({INSERT_PAUSE_LOCK_KEY});\
-                 END IF;\
-                 RETURN NEW;\
-             END;\
-             $$;\
-             CREATE TRIGGER result_snapshot_zz_test_pause_insert\
-             BEFORE INSERT ON result_snapshot\
-             FOR EACH ROW EXECUTE FUNCTION test_pause_result_snapshot_insert();"
+            r#"CREATE OR REPLACE FUNCTION test_pause_result_snapshot_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF current_setting('psychometrics_commons.test_result_insert_pause', true) = 'on' THEN
+        PERFORM pg_advisory_xact_lock({INSERT_PAUSE_LOCK_KEY});
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER result_snapshot_zz_test_pause_insert
+BEFORE INSERT ON result_snapshot
+FOR EACH ROW EXECUTE FUNCTION test_pause_result_snapshot_insert();"#
         ))
         .expect("test-only result insert pause trigger must install");
 }
