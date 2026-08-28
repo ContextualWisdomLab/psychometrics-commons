@@ -602,10 +602,12 @@ mod reference_guard_tests {
         ];
         let duplicate_result =
             response_ledger_from_receipts("session_ipip_ko_quick", &duplicate_receipts);
-        assert!(matches!(
-            duplicate_result,
-            Err(ResponseEventPersistenceError::ConflictingReplay)
-        ));
+        let duplicate_error =
+            duplicate_result.expect_err("duplicate receipt history must fail closed");
+        assert_eq!(
+            duplicate_error.to_string(),
+            "response event identity was replayed with conflicting evidence"
+        );
         assert!(response_ledger_from_receipts("session_ipip_ko_quick", &[]).is_ok());
     }
 
