@@ -296,12 +296,7 @@ impl EnglishA1B2PlacementProfile {
             .iter()
             .enumerate()
             .any(|(index, domain)| input.measured_domains[..index].contains(domain));
-        if has_duplicate_domain
-            || input
-                .measured_domains
-                .iter()
-                .any(|domain| !REQUIRED_DOMAINS.contains(domain))
-        {
+        if has_duplicate_domain {
             return Err(CefrProfileError::InvalidRequiredDomainSet);
         }
         if input.claim_status != self.claim_status() {
