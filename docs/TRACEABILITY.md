@@ -56,7 +56,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Invariant | Source | Enforcement/evidence on evaluated main | Missing evidence before GA |
 |---|---|---|---|
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation and protected-main persist-backed `POST /v1/sessions`; the protected-main session GET still needs a transport authorization boundary | Command HTTP, authorized session reload, tenant isolation, and complete response/item flow remain missing |
-| Authorized session reload | TRD §5, §11; Security/Data | Active PR #438 at `4a0855b788dd135bdcf8f3646fbc3d985ae7c351` binds reload to a server-owned participant and uses an owner-bound PostgreSQL query; this is not protected-main evidence | Exact reviewed/check-clean merge, hosted PostgreSQL evidence, and protected-main refetch |
+| Authorized session reload | TRD §5, §11; Security/Data | Active PR #438 at `08c654ea9aaf2cd3aba8e669d950a9a52e76fede` binds reload to a server-owned participant and uses an owner-bound PostgreSQL query; this is not protected-main evidence | Exact reviewed/check-clean merge, hosted PostgreSQL evidence, and protected-main refetch |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
 | Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
