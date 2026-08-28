@@ -3,7 +3,8 @@ info:
   title: Psychometrics Commons public session-start API
   version: 0.1.0
   description: >
-    As-built public create and reload of one created assessment session.
+    As-built public creation and authority-gated reload of one created
+    assessment session.
     POST /v1/sessions starts from the stored published instrument release
     locked in the same transaction. Idempotency-Key is the durable session
     reference. Exact replay after later persist Suspend or Retire returns
@@ -56,6 +57,12 @@ paths:
     get:
       operationId: loadAssessmentSession
       summary: Reload one stored session after restart
+      description: >
+        Requires a host-verified authenticated participant authority or a
+        current anonymous-session credential bound to the exact tenant,
+        participant, and session. The raw transport classifier has no caller
+        authority and returns the same 404 as an unknown session; it must not
+        be used to reload stored session data.
       parameters:
         - name: session_ref
           in: path

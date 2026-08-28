@@ -1,16 +1,19 @@
 //! Persist-backed session HTTP uses the sealed stored-release start path.
 
 use postgres::{error::SqlState, Client, NoTls};
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
     PublicationEvidenceProvenance, PublicationEvidenceRecord, PublicationEvidenceStatus,
 };
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_assessment_session::apply_assessment_session_migration;
 use psychometrics_commons_runtime::postgres_instrument_release::{
     apply_instrument_release_migration, persist_instrument_release,
 };
 use psychometrics_commons_runtime::session_http::{
-    handle_session_http_request, PostgresSessionHttpPort, SESSION_COLLECTION_PATH,
+    handle_authorized_session_http_request, handle_session_http_request, PostgresSessionHttpPort,
+    SessionHttpAuthority, SessionHttpPort, SESSION_COLLECTION_PATH,
 };
 
 const VALID_DIGEST: &str =
@@ -154,6 +157,37 @@ fn create_request(session_ref: &str) -> String {
     )
 }
 
+fn authorized_get<P: SessionHttpPort>(
+    port: &mut P,
+    session_ref: &str,
+) -> psychometrics_commons_runtime::session_http::SessionHttpResponse {
+    authorized_get_as(port, session_ref, PARTICIPANT_REF, "tenant_session_http")
+}
+
+fn authorized_get_as<P: SessionHttpPort>(
+    port: &mut P,
+    session_ref: &str,
+    participant_ref: &str,
+    tenant_ref: &str,
+) -> psychometrics_commons_runtime::session_http::SessionHttpResponse {
+    let participant = ParticipantRecord::new_anonymous(participant_ref, tenant_ref, 1).unwrap();
+    let actor = AuthorizationContext::new(
+        tenant_ref,
+        "subject_session_http",
+        Some(participant_ref),
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let authority = SessionHttpAuthority::Authenticated(&actor);
+    handle_authorized_session_http_request(
+        &format!("GET /v1/sessions/{session_ref} HTTP/1.1\r\n\r\n"),
+        &authority,
+        &participant,
+        port,
+        20_000,
+    )
+}
+
 /// Proves that fixture serialization is enforced by `PostgreSQL` across separate client sessions.
 #[test]
 fn fixture_lock_is_visible_across_database_sessions() {
@@ -252,16 +286,21 @@ fn http_create_reloads_after_restart_and_replays_after_suspend() {
     transaction.commit().unwrap();
 
     let mut transaction = client.transaction().unwrap();
-    let loaded = {
+    let (loaded, foreign) = {
         let mut port = PostgresSessionHttpPort::new(&mut transaction);
-        handle_session_http_request(
-            "GET /v1/sessions/ses_http_ko_quick HTTP/1.1\r\n\r\n",
+        let loaded = authorized_get(&mut port, "ses_http_ko_quick");
+        let foreign = authorized_get_as(
             &mut port,
-            20_000,
-        )
+            "ses_http_ko_quick",
+            "ptc_foreign_session_http",
+            "tenant_session_http",
+        );
+        (loaded, foreign)
     };
     assert_eq!(loaded.status(), 200);
     assert_eq!(loaded.body(), created.body());
+    assert_eq!(foreign.status(), 404);
+    assert!(!foreign.body().contains(PARTICIPANT_REF));
     transaction.commit().unwrap();
 
     client
