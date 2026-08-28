@@ -2,7 +2,7 @@
 //!
 //! The migration avoids repeatedly rebuilding validated CHECK constraints. That optimization is
 //! safe only when the marker stored on each constraint changes whenever the SQL validator changes.
-//! This real-PostgreSQL contract derives the expected marker from PostgreSQL's own normalized
+//! This real-PostgreSQL contract derives the expected marker from `PostgreSQL`'s own normalized
 //! function definition, so a future validator edit cannot silently keep a stale validation marker.
 
 use postgres::{Client, NoTls};
