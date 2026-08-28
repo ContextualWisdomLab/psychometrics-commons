@@ -52,6 +52,10 @@ DECLARE
     created_table BOOLEAN;
     actual_columns TEXT[];
     actual_constraint_names TEXT[];
+    constraint_name TEXT;
+    constraint_clause TEXT;
+    expected_constraint_definition TEXT;
+    actual_constraint_definition TEXT;
 BEGIN
     PERFORM pg_advisory_xact_lock(hashtext('psychometrics-commons:migration-0040'));
     relation_ref := to_regclass('audit_evidence_record');
@@ -121,30 +125,75 @@ $create_audit_evidence_record$;
             MESSAGE = 'audit_evidence_record column contract does not match migration 0040';
     END IF;
 
-    -- Constraint names alone are not evidence of invariant semantics. Rebuild every owned
-    -- constraint so migration reapplication repairs a weaker same-named historical definition;
-    -- incompatible existing rows fail closed while the constraint is revalidated.
-    ALTER TABLE audit_evidence_record
-        DROP CONSTRAINT IF EXISTS audit_evidence_event_ref_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_tenant_ref_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_actor_ref_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_resource_ref_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_purpose_code_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_action_code_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_outcome_allowed_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_digest_shape_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_occurrence_positive_check,
-        DROP CONSTRAINT IF EXISTS audit_evidence_record_pkey,
-        ADD CONSTRAINT audit_evidence_record_pkey PRIMARY KEY (audit_event_ref),
-        ADD CONSTRAINT audit_evidence_event_ref_shape_check CHECK (audit_evidence_reference_is_valid(audit_event_ref)),
-        ADD CONSTRAINT audit_evidence_tenant_ref_shape_check CHECK (audit_evidence_reference_is_valid(tenant_ref)),
-        ADD CONSTRAINT audit_evidence_actor_ref_shape_check CHECK (audit_evidence_reference_is_valid(actor_ref)),
-        ADD CONSTRAINT audit_evidence_resource_ref_shape_check CHECK (audit_evidence_reference_is_valid(resource_ref)),
-        ADD CONSTRAINT audit_evidence_purpose_code_shape_check CHECK (purpose_code ~ '^[a-z][a-z0-9_]*$'),
-        ADD CONSTRAINT audit_evidence_action_code_shape_check CHECK (action_code ~ '^[a-z][a-z0-9_]*$'),
-        ADD CONSTRAINT audit_evidence_outcome_allowed_check CHECK (outcome_code IN ('succeeded', 'denied', 'failed')),
-        ADD CONSTRAINT audit_evidence_digest_shape_check CHECK (evidence_digest ~ '^sha256:[0-9a-f]{64}$'),
-        ADD CONSTRAINT audit_evidence_occurrence_positive_check CHECK (occurred_at_unix_ms > 0);
+    -- Generate PostgreSQL's canonical definitions from an ephemeral contract relation. This lets
+    -- reapplication compare semantics rather than names while leaving already-correct constraints
+    -- and the primary-key index untouched. Only missing or drifted definitions take the heavier
+    -- target-table DROP/ADD + validation path.
+    EXECUTE $create_constraint_contract$
+CREATE TEMP TABLE audit_evidence_constraint_contract_template (
+    audit_event_ref TEXT NOT NULL,
+    tenant_ref TEXT NOT NULL,
+    actor_ref TEXT NOT NULL,
+    purpose_code TEXT NOT NULL,
+    action_code TEXT NOT NULL,
+    resource_ref TEXT NOT NULL,
+    outcome_code TEXT NOT NULL,
+    evidence_digest TEXT NOT NULL,
+    occurred_at_unix_ms BIGINT NOT NULL,
+    CONSTRAINT audit_evidence_record_pkey PRIMARY KEY (audit_event_ref),
+    CONSTRAINT audit_evidence_event_ref_shape_check CHECK (audit_evidence_reference_is_valid(audit_event_ref)),
+    CONSTRAINT audit_evidence_tenant_ref_shape_check CHECK (audit_evidence_reference_is_valid(tenant_ref)),
+    CONSTRAINT audit_evidence_actor_ref_shape_check CHECK (audit_evidence_reference_is_valid(actor_ref)),
+    CONSTRAINT audit_evidence_resource_ref_shape_check CHECK (audit_evidence_reference_is_valid(resource_ref)),
+    CONSTRAINT audit_evidence_purpose_code_shape_check CHECK (purpose_code ~ '^[a-z][a-z0-9_]*$'),
+    CONSTRAINT audit_evidence_action_code_shape_check CHECK (action_code ~ '^[a-z][a-z0-9_]*$'),
+    CONSTRAINT audit_evidence_outcome_allowed_check CHECK (outcome_code IN ('succeeded', 'denied', 'failed')),
+    CONSTRAINT audit_evidence_digest_shape_check CHECK (evidence_digest ~ '^sha256:[0-9a-f]{64}$'),
+    CONSTRAINT audit_evidence_occurrence_positive_check CHECK (occurred_at_unix_ms > 0)
+) ON COMMIT DROP
+$create_constraint_contract$;
+
+    FOR constraint_name, constraint_clause IN
+        SELECT contract_name, contract_clause
+        FROM (VALUES
+            ('audit_evidence_record_pkey', $constraint$PRIMARY KEY (audit_event_ref)$constraint$),
+            ('audit_evidence_event_ref_shape_check', $constraint$CHECK (audit_evidence_reference_is_valid(audit_event_ref))$constraint$),
+            ('audit_evidence_tenant_ref_shape_check', $constraint$CHECK (audit_evidence_reference_is_valid(tenant_ref))$constraint$),
+            ('audit_evidence_actor_ref_shape_check', $constraint$CHECK (audit_evidence_reference_is_valid(actor_ref))$constraint$),
+            ('audit_evidence_resource_ref_shape_check', $constraint$CHECK (audit_evidence_reference_is_valid(resource_ref))$constraint$),
+            ('audit_evidence_purpose_code_shape_check', $constraint$CHECK (purpose_code ~ '^[a-z][a-z0-9_]*$')$constraint$),
+            ('audit_evidence_action_code_shape_check', $constraint$CHECK (action_code ~ '^[a-z][a-z0-9_]*$')$constraint$),
+            ('audit_evidence_outcome_allowed_check', $constraint$CHECK (outcome_code IN ('succeeded', 'denied', 'failed'))$constraint$),
+            ('audit_evidence_digest_shape_check', $constraint$CHECK (evidence_digest ~ '^sha256:[0-9a-f]{64}$')$constraint$),
+            ('audit_evidence_occurrence_positive_check', $constraint$CHECK (occurred_at_unix_ms > 0)$constraint$)
+        ) AS constraint_contract(contract_name, contract_clause)
+    LOOP
+        SELECT pg_get_constraintdef(constraint_record.oid, TRUE)
+        INTO expected_constraint_definition
+        FROM pg_constraint AS constraint_record
+        WHERE constraint_record.conrelid = 'pg_temp.audit_evidence_constraint_contract_template'::regclass
+          AND constraint_record.conname = constraint_name;
+
+        SELECT pg_get_constraintdef(constraint_record.oid, TRUE)
+        INTO actual_constraint_definition
+        FROM pg_constraint AS constraint_record
+        WHERE constraint_record.conrelid = relation_ref
+          AND constraint_record.conname = constraint_name;
+
+        IF actual_constraint_definition IS DISTINCT FROM expected_constraint_definition THEN
+            EXECUTE format(
+                'ALTER TABLE audit_evidence_record DROP CONSTRAINT IF EXISTS %I',
+                constraint_name
+            );
+            EXECUTE format(
+                'ALTER TABLE audit_evidence_record ADD CONSTRAINT %I %s',
+                constraint_name,
+                constraint_clause
+            );
+        END IF;
+    END LOOP;
+
+    EXECUTE 'DROP TABLE pg_temp.audit_evidence_constraint_contract_template';
 
     SELECT ARRAY(
         SELECT constraint_record.conname::TEXT
