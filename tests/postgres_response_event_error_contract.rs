@@ -21,6 +21,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             "response event identity was replayed with conflicting evidence",
         ),
         (
+            ResponseEventPersistenceError::CorruptStoredEvidence,
+            "stored response event evidence is not valid immutable evidence",
+        ),
+        (
             ResponseEventPersistenceError::SequenceConflict,
             "response event sequence was reused by a different event identity",
         ),
