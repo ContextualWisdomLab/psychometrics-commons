@@ -8,7 +8,6 @@
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_request::apply_scoring_request_migration;
 
-const MIGRATION_LOCK_KEY: i64 = 5_999_726_343_356_564_817;
 const SCHEMA: &str = "scoring_request_migration_policy_test";
 
 fn connect() -> Client {
@@ -56,17 +55,18 @@ fn reference_policy_marker_is_derived_from_live_validator_definition() {
 }
 
 #[test]
-fn concurrent_reapply_waits_on_the_migration_policy_lock() {
+fn concurrent_reapply_waits_on_the_policy_table_lock() {
     let mut setup = connect();
     prepare_schema(&mut setup);
 
     let mut holder = connect();
     holder
-        .batch_execute(&format!("SET search_path TO {SCHEMA}; BEGIN;"))
-        .unwrap();
-    holder
-        .query_one("SELECT pg_advisory_xact_lock($1)", &[&MIGRATION_LOCK_KEY])
-        .expect("the test holder must acquire the scoring-request migration policy lock");
+        .batch_execute(&format!(
+            "SET search_path TO {SCHEMA}; \
+             BEGIN; \
+             LOCK TABLE scoring_request IN ACCESS EXCLUSIVE MODE;"
+        ))
+        .expect("the test holder must acquire the scoring-request policy table lock");
 
     let mut contender = connect();
     contender
@@ -75,11 +75,11 @@ fn concurrent_reapply_waits_on_the_migration_policy_lock() {
         ))
         .unwrap();
     let error = apply_scoring_request_migration(&mut contender)
-        .expect_err("a concurrent reapply must wait on the migration policy lock");
+        .expect_err("a concurrent reapply must wait on the policy table lock");
     assert_eq!(
         error.code(),
         Some(&SqlState::QUERY_CANCELED),
-        "the bounded wait must end at the advisory-lock boundary, not another migration failure"
+        "the bounded wait must end at the serialization boundary, not another migration failure"
     );
 
     holder.batch_execute("ROLLBACK").unwrap();
