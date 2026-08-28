@@ -343,13 +343,15 @@ const fn reason_phrase(status: u16) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        declared_request_end, normalize_read_error, reason_phrase, reject_full_request_buffer,
-        reject_invalid_header_name, reject_non_crlf_header_lines, reject_oversized_request,
-        reject_transfer_encoding, remaining_request_timeout, single_header_value,
-        write_framing_bad_request, write_http_response, ResponseHttpRuntime,
+        declared_request_end, normalize_read_error, read_http_request_or_problem, reason_phrase,
+        reject_full_request_buffer, reject_invalid_header_name, reject_non_crlf_header_lines,
+        reject_oversized_request, reject_transfer_encoding, remaining_request_timeout,
+        single_header_value, write_framing_bad_request, write_http_response, ResponseHttpRuntime,
         FRAMING_BAD_REQUEST_BODY,
     };
-    use std::io;
+    use std::io::{self, Write};
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::thread;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -508,5 +510,52 @@ mod tests {
         assert_eq!(reason_phrase(405), "Method Not Allowed");
         assert_eq!(reason_phrase(409), "Conflict");
         assert_eq!(reason_phrase(418), "Error");
+    }
+
+    fn start_request_reader(
+        timeout: Duration,
+    ) -> (TcpStream, thread::JoinHandle<io::Result<String>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_http_request_or_problem(&mut stream, Instant::now() + timeout)
+        });
+        (TcpStream::connect(address).unwrap(), server)
+    }
+
+    #[test]
+    fn request_reader_maps_socket_timeout_without_replacing_it_with_a_bad_request() {
+        let (_client, server) = start_request_reader(Duration::from_millis(20));
+
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn request_reader_rejects_eof_after_a_partial_frame() {
+        let (mut client, server) = start_request_reader(Duration::from_secs(1));
+        client
+            .write_all(b"POST /v1/sessions/ses_one/responses HTTP/1.1")
+            .unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn request_reader_waits_for_a_split_header_delimiter() {
+        let (mut client, server) = start_request_reader(Duration::from_secs(1));
+        client
+            .write_all(b"POST /v1/sessions/ses_one/responses HTTP/1.1")
+            .unwrap();
+        thread::sleep(Duration::from_millis(20));
+        client.write_all(b"\r\n\r\n").unwrap();
+
+        assert_eq!(
+            server.join().unwrap().unwrap(),
+            "POST /v1/sessions/ses_one/responses HTTP/1.1\r\n\r\n"
+        );
     }
 }

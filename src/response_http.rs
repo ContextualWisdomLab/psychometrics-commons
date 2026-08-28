@@ -428,16 +428,13 @@ fn response_session_authorized(
     if participant.participant_ref() != session.participant_ref() {
         return false;
     }
-    let Ok(resource) = ResourceScope::participant_owned(
+    ResourceScope::participant_owned(
         ResourceKind::AssessmentSession,
         participant.tenant_ref(),
         participant.participant_ref(),
         session.session_ref(),
-    ) else {
-        return false;
-    };
-
-    match authority {
+    )
+    .is_ok_and(|resource| match authority {
         ResponseWriteAuthority::Authenticated(actor) => {
             authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
         }
@@ -450,7 +447,7 @@ fn response_session_authorized(
                 && authorize_anonymous_session_command(context, participant, session, *now_unix_ms)
                     .is_ok()
         }
-    }
+    })
 }
 
 fn session_not_found_problem() -> ResponseHttpResponse {
@@ -731,11 +728,14 @@ fn json_string(value: &str) -> String {
 #[cfg(test)]
 mod unit_tests {
     use super::{
-        json_string, response_collection_session_ref, response_session_ref_is_transport_safe,
-        split_target, valid_idempotency_key, write_problem, ResponseHttpRuntime,
+        has_strict_crlf, json_string, response_collection_session_ref, response_session_authorized,
+        response_session_ref_is_transport_safe, split_target, valid_idempotency_key, write_problem,
+        ResponseHttpRuntime, ResponseWriteAuthority,
     };
+    use crate::authorization::{AuthorizationContext, ProductRole};
+    use crate::participant::ParticipantRecord;
     use crate::response::WriteError;
-    use crate::session::SessionState;
+    use crate::session::{AssessmentSession, SessionState};
 
     #[test]
     fn helpers_cover_paths_escapes_and_identity_guards() {
@@ -759,6 +759,7 @@ mod unit_tests {
         assert_eq!(valid_idempotency_key("42"), None);
         assert_eq!(valid_idempotency_key("   "), None);
         assert_eq!(valid_idempotency_key("idem spaced key"), None);
+        assert!(!has_strict_crlf("A: b\rX"));
     }
 
     #[test]
@@ -847,5 +848,39 @@ mod unit_tests {
         assert_eq!(runtime.event_count("ses_unknown"), 0);
         runtime.replace_next_server_event_ref(String::from("evt_rebound"));
         assert_eq!(runtime.event_count("ses_unknown"), 0);
+    }
+
+    #[test]
+    fn response_authorization_rejects_a_foreign_participant_before_scope_creation() {
+        let session = AssessmentSession::from_persisted_created(
+            "ses_response_http_authorization",
+            "ptc_response_http_authorization",
+            "release_response_http_authorization",
+            "version_response_http_authorization",
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "en-US",
+            1_000,
+        )
+        .unwrap();
+        let foreign_participant = ParticipantRecord::new_anonymous(
+            "ptc_response_http_authorization_foreign",
+            "tenant_response_http_authorization",
+            1_001,
+        )
+        .unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_response_http_authorization",
+            "subject_response_http_authorization",
+            Some("ptc_response_http_authorization"),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let authority = ResponseWriteAuthority::Authenticated(&actor);
+
+        assert!(!response_session_authorized(
+            &authority,
+            &foreign_participant,
+            &session
+        ));
     }
 }
