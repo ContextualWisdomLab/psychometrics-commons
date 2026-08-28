@@ -163,6 +163,17 @@ fn assert_conflict(
     ));
 }
 
+fn assert_identity_conflict(
+    client: &mut Client,
+    tenant_ref: &str,
+    candidate: &LongitudinalObservationRecord,
+) {
+    assert!(matches!(
+        persist(client, tenant_ref, candidate),
+        Err(LongitudinalObservationPersistenceError::ObservationIdentityConflict)
+    ));
+}
+
 #[test]
 fn every_immutable_header_dimension_rejects_rebinding() {
     let _guard = guard();
@@ -179,12 +190,7 @@ fn every_immutable_header_dimension_rejects_rebinding() {
 
     let memberships = base_memberships();
     let spec = ObservationSpec::base(&memberships);
-    let variants = [
-        ObservationSpec {
-            observation_record_ref: "longitudinal_observation_record_other",
-            ..spec
-        }
-        .build(),
+    let source_identity_variants = [
         ObservationSpec {
             enrollment_ref: "longitudinal_enrollment_other",
             ..spec
@@ -197,6 +203,17 @@ fn every_immutable_header_dimension_rejects_rebinding() {
         .build(),
         ObservationSpec {
             source_observation_ref: "gyeot_observation_other",
+            ..spec
+        }
+        .build(),
+    ];
+    for candidate in &source_identity_variants {
+        assert_identity_conflict(&mut client, "tenant_clinic_seoul", candidate);
+    }
+
+    let replay_variants = [
+        ObservationSpec {
+            observation_record_ref: "longitudinal_observation_record_other",
             ..spec
         }
         .build(),
@@ -251,7 +268,7 @@ fn every_immutable_header_dimension_rejects_rebinding() {
         }
         .build(),
     ];
-    for candidate in &variants {
+    for candidate in &replay_variants {
         assert_conflict(&mut client, "tenant_clinic_seoul", candidate);
     }
     assert_conflict(&mut client, "tenant_clinic_busan", &base);
