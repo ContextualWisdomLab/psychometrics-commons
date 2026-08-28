@@ -18,6 +18,13 @@ use std::sync::{Mutex, MutexGuard};
 
 const RELEASE_DIGEST: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const REFERENCE_CONSTRAINTS: [&str; 5] = [
+    "assessment_session_command_command_ref_format_check",
+    "assessment_session_participant_ref_format_check",
+    "assessment_session_release_ref_format_check",
+    "assessment_session_session_ref_format_check",
+    "assessment_session_version_ref_format_check",
+];
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -47,6 +54,35 @@ fn assert_check(error: &postgres::Error, constraint: &str) {
         .expect("reference rejection must come from a PostgreSQL CHECK constraint");
     assert_eq!(database_error.code(), &SqlState::CHECK_VIOLATION);
     assert_eq!(database_error.constraint(), Some(constraint));
+}
+
+fn reference_constraint_oids(client: &mut Client) -> Vec<(String, String)> {
+    let constraint_names: Vec<String> = REFERENCE_CONSTRAINTS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    let rows = client
+        .query(
+            "SELECT conname, oid::text \
+             FROM pg_constraint \
+             WHERE conname = ANY($1::text[]) \
+               AND connamespace = current_schema()::regnamespace \
+               AND conrelid IN (\
+                   'assessment_session'::regclass, \
+                   'assessment_session_command'::regclass\
+               ) \
+             ORDER BY conname",
+            &[&constraint_names],
+        )
+        .expect("assessment-session reference constraints must be inspectable");
+    assert_eq!(
+        rows.len(),
+        REFERENCE_CONSTRAINTS.len(),
+        "all assessment-session reference constraints must exist"
+    );
+    rows.into_iter()
+        .map(|row| (row.get(0), row.get(1)))
+        .collect()
 }
 
 fn insert_session(
@@ -202,6 +238,22 @@ fn command_reference_uses_the_same_opaque_identity_boundary() {
             "assessment_session_command_command_ref_format_check",
         );
     }
+}
+
+#[test]
+fn unchanged_reference_policy_reapply_preserves_constraint_objects() {
+    let _guard = guard();
+    let mut client = client();
+    let before = reference_constraint_oids(&mut client);
+
+    apply_assessment_session_migration(&mut client)
+        .expect("an unchanged assessment-session reference policy must remain idempotent");
+
+    let after = reference_constraint_oids(&mut client);
+    assert_eq!(
+        after, before,
+        "unchanged reference policy must not drop and rebuild validated constraints"
+    );
 }
 
 #[test]
