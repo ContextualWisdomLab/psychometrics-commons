@@ -298,6 +298,33 @@ fn restricted_prefix_cannot_hide_behind_research_participant_namespace() {
 }
 
 #[test]
+fn operational_resource_stems_cannot_enter_public_release() {
+    for column_name in [
+        "session",
+        "result",
+        "response",
+        "item_delivery",
+        "scoring_request",
+        "session_research_participant_ref",
+        "result_research_participant_ref",
+        "response_research_participant_ref",
+        "item_delivery_research_participant_ref",
+        "scoring_request_research_participant_ref",
+    ] {
+        let columns = [PublicReleaseFixtureColumn {
+            column_name,
+            cell_values: &["opaque_operational_resource_handle"],
+        }];
+
+        assert_eq!(
+            scan_public_release_fixture(&columns, restricted_identities()),
+            Err(PublicReleaseLeakageError::ForbiddenColumn),
+            "{column_name} must not expose a hosted-runtime resource handle under a bare operational stem"
+        );
+    }
+}
+
+#[test]
 fn prefixed_research_participant_namespace_remains_public() {
     for column_name in [
         "public_research_participant_ref",
