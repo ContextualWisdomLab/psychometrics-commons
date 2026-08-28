@@ -578,10 +578,7 @@ fn matches_restricted_identity(cell: &str, restricted_identities: &[&str]) -> bo
         return true;
     }
 
-    if !cell
-        .chars()
-        .any(is_default_ignorable_identifier_character)
-    {
+    if !cell.chars().any(is_default_ignorable_identifier_character) {
         return false;
     }
 
