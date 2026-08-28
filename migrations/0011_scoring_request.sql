@@ -4,6 +4,18 @@
 -- numeric and Default_Ignorable_Code_Point sets; pg_unicode_fast supplies Unicode
 -- whitespace/control classification. Separator matching is by Unicode scalar value rather than
 -- text collation so nondeterministic database collations cannot broaden Rust's exact-char grammar.
+-- `ascii(substr(...))` is a Unicode code-point oracle only under UTF8, so reject unsupported
+-- database encodings before installing or replacing the immutable validator.
+DO $scoring_request_encoding_guard$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'scoring_request reference parity requires PostgreSQL server_encoding UTF8';
+    END IF;
+END
+$scoring_request_encoding_guard$;
+
 CREATE OR REPLACE FUNCTION scoring_request_reference_is_valid(reference_text TEXT)
 RETURNS BOOLEAN
 LANGUAGE sql
