@@ -3,9 +3,11 @@
 //! This adapter stores the mid-session ledger so a process restart can rebuild
 //! the same accepted prefix before snapshot freeze. It does not store response
 //! bodies and does not compute scores. The caller owns the connection,
-//! credentials, and transaction boundary. Replay requires `READ COMMITTED` so a
-//! concurrent insert that wins a unique-key race is visible to the exact-replay
-//! classifier.
+//! credentials, and transaction boundary. Writes and replay classification
+//! require `READ COMMITTED` so a concurrent insert that wins a unique-key race
+//! is visible to the exact-replay classifier. Read-only reconstruction accepts
+//! the caller's stronger transaction snapshot because it does not perform that
+//! race-sensitive write/classify sequence.
 
 use crate::reference::normalized_reference;
 use crate::response::{ResponseEvent, ResponseLedger, WriteError};
@@ -211,12 +213,14 @@ pub fn persist_response_event(
 /// Rows are read in `server_sequence` order. A missing session returns an empty
 /// list. Gapped, reordered, conflicting identities, inverted, or zero stored
 /// times fail closed before any receipt is returned. Observed time stays
-/// distinct from platform receipt time.
+/// distinct from platform receipt time. Because this path is read-only, it can
+/// use the caller's `READ COMMITTED`, `REPEATABLE READ`, or `SERIALIZABLE`
+/// transaction snapshot without weakening replay classification on writes.
 ///
 /// # Errors
 ///
-/// Returns [`ResponseEventPersistenceError`] for an unbound session, unsupported
-/// isolation, corrupt stored history, invalid stored time, or a database failure.
+/// Returns [`ResponseEventPersistenceError`] for an unbound session, corrupt
+/// stored history, invalid stored time, or a database failure.
 pub fn load_response_event_receipts(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
@@ -228,7 +232,6 @@ fn load_response_event_state(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<(Vec<ResponseEventReceipt>, ResponseLedger), ResponseEventPersistenceError> {
-    require_read_committed(transaction)?;
     let session_ref = required_reference(session_ref)?;
     let rows = transaction.query(
         "SELECT response_event_ref, client_event_ref, item_version_ref, \
@@ -276,12 +279,13 @@ fn load_response_event_state(
 ///
 /// Rows are read in `server_sequence` order. A missing session returns an empty
 /// ledger. Gapped, reordered, conflicting identities, or invalid stored times
-/// fail closed.
+/// fail closed. This read-only path preserves the caller's transaction
+/// isolation snapshot and does not impose the write-only `READ COMMITTED` gate.
 ///
 /// # Errors
 ///
-/// Returns [`ResponseEventPersistenceError`] for an unbound session, unsupported
-/// isolation, corrupt stored history, or a database failure.
+/// Returns [`ResponseEventPersistenceError`] for an unbound session, corrupt
+/// stored history, or a database failure.
 pub fn load_response_ledger(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
@@ -756,7 +760,7 @@ mod reference_guard_tests {
     }
 
     #[test]
-    fn persist_and_load_instantiate_unsupported_isolation_in_the_library() {
+    fn persist_requires_read_committed_but_loads_accept_stronger_isolation() {
         let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
         let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
         client
@@ -774,13 +778,13 @@ mod reference_guard_tests {
             1,
         )
         .unwrap();
-        let mut serializable = client
+        let mut stronger = client
             .build_transaction()
             .isolation_level(IsolationLevel::RepeatableRead)
             .start()
             .unwrap();
         let persist_error = persist_response_event(
-            &mut serializable,
+            &mut stronger,
             "session_ipip_ko_iso",
             &event,
             1_700_000_000_000,
@@ -795,23 +799,19 @@ mod reference_guard_tests {
             persist_error.to_string(),
             "response event persistence requires read committed isolation"
         );
-        let load_error = load_response_event_receipts(&mut serializable, "session_ipip_ko_iso")
-            .expect_err("lib load must reject stronger isolation");
+        assert!(
+            load_response_event_receipts(&mut stronger, "session_ipip_ko_iso")
+                .expect("read-only receipt load must accept stronger isolation")
+                .is_empty()
+        );
+        assert!(load_response_ledger(&mut stronger, "session_ipip_ko_iso")
+            .expect("read-only ledger load must accept stronger isolation")
+            .is_empty());
         assert!(matches!(
-            load_error,
-            ResponseEventPersistenceError::UnsupportedIsolationLevel
-        ));
-        let ledger_load_error = load_response_ledger(&mut serializable, "session_ipip_ko_iso")
-            .expect_err("lib ledger load must reject stronger isolation");
-        assert!(matches!(
-            ledger_load_error,
-            ResponseEventPersistenceError::UnsupportedIsolationLevel
-        ));
-        assert!(matches!(
-            require_read_committed(&mut serializable),
+            require_read_committed(&mut stronger),
             Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
         ));
-        serializable.rollback().unwrap();
+        stronger.rollback().unwrap();
         let mut committed = client.transaction().unwrap();
         assert!(require_read_committed(&mut committed).is_ok());
         assert!(
