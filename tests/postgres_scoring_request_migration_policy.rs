@@ -2,9 +2,9 @@
 //!
 //! The immutable reference validator is consumed by CHECK constraints. `PostgreSQL` does not
 //! automatically revalidate historical rows when such a function is replaced, so the migration
-//! must derive its validation marker from the live validator definition. Concurrent migration
-//! reapplies must serialize that marker decision without taking an exclusive table lock when the
-//! already-installed policy is unchanged.
+//! must derive its validation marker from the live validator and owned CHECK manifest. Concurrent
+//! migration reapplies must serialize that marker decision without taking an exclusive table lock
+//! when the already-installed policy is unchanged.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_scoring_request::apply_scoring_request_migration;
@@ -56,22 +56,50 @@ fn migration_checks_utf8_before_installing_unicode_reference_validator() {
 }
 
 #[test]
-fn reference_policy_marker_is_derived_from_live_validator_definition() {
+fn reference_policy_marker_is_derived_from_live_validator_and_constraints() {
     let _guard = fixture_test_guard();
     let mut client = connect();
     prepare_schema(&mut client);
 
     let row = client
         .query_one(
-            "SELECT \
+            "WITH constraint_manifest AS (\
+                 SELECT string_agg(\
+                     format(\
+                         '%s:%s:%s:%s:%s', \
+                         constraint_record.conname, \
+                         constraint_record.contype, \
+                         constraint_record.convalidated, \
+                         constraint_record.conenforced, \
+                         pg_get_constraintdef(constraint_record.oid)\
+                     ), \
+                     E'\\n' ORDER BY constraint_record.conname\
+                 ) AS manifest \
+                 FROM pg_constraint AS constraint_record \
+                 WHERE constraint_record.conrelid = 'scoring_request'::regclass \
+                   AND constraint_record.conname = ANY (ARRAY[\
+                       'scoring_request_scoring_request_ref_format_check', \
+                       'scoring_request_session_ref_format_check', \
+                       'scoring_request_response_snapshot_ref_format_check', \
+                       'scoring_request_assessment_spec_ref_format_check', \
+                       'scoring_request_instrument_version_ref_format_check', \
+                       'scoring_request_scoring_version_ref_format_check', \
+                       'scoring_request_calibration_reference_format_check', \
+                       'scoring_request_norm_version_ref_format_check'\
+                   ])\
+             ) \
+             SELECT \
                  obj_description(\
                      'scoring_request_reference_is_valid(text)'::regprocedure, \
                      'pg_proc'\
                  ), \
                  'psychometrics-commons:scoring-request-reference:' || \
-                     md5(pg_get_functiondef(\
-                         'scoring_request_reference_is_valid(text)'::regprocedure\
-                     ))",
+                     md5(\
+                         pg_get_functiondef(\
+                             'scoring_request_reference_is_valid(text)'::regprocedure\
+                         ) || E'\\n' || COALESCE(constraint_manifest.manifest, '')\
+                     ) \
+             FROM constraint_manifest",
             &[],
         )
         .expect("scoring-request reference policy marker must be inspectable");
@@ -80,7 +108,7 @@ fn reference_policy_marker_is_derived_from_live_validator_definition() {
     assert_eq!(
         actual_marker.as_deref(),
         Some(expected_marker.as_str()),
-        "validator edits must automatically invalidate stale CHECK validation evidence"
+        "validator or owned CHECK edits must invalidate stale validation evidence"
     );
 }
 
