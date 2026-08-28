@@ -1,3 +1,6 @@
+//! Contract tests that keep instrument catalog documentation beginner-readable and
+//! preserve the advisory discovery boundary before session-start revalidation.
+
 const CATALOG_SOURCE: &str = include_str!("../src/postgres_instrument_catalog.rs");
 const ARCHITECTURE: &str = include_str!("../ARCHITECTURE.md");
 
