@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS scoring_request (
 DO $scoring_request_reference_upgrade$
 DECLARE
     reference_contract_version TEXT;
+    reference_constraint_manifest TEXT;
     stored_reference_contract_version TEXT;
 BEGIN
     -- Serialize the policy decision without locking the hot data table when the installed policy is
@@ -110,10 +111,36 @@ BEGIN
     -- required table lock only when a real policy transition must rebuild and validate constraints.
     PERFORM pg_advisory_xact_lock(1883264113, hashtext(current_schema()));
 
+    SELECT string_agg(
+               format(
+                   '%s:%s:%s:%s:%s',
+                   constraint_record.conname,
+                   constraint_record.contype,
+                   constraint_record.convalidated,
+                   constraint_record.conenforced,
+                   pg_get_constraintdef(constraint_record.oid)
+               ),
+               E'\n' ORDER BY constraint_record.conname
+           )
+      INTO reference_constraint_manifest
+      FROM pg_constraint AS constraint_record
+     WHERE constraint_record.conrelid = 'scoring_request'::regclass
+       AND constraint_record.conname = ANY (ARRAY[
+           'scoring_request_scoring_request_ref_format_check',
+           'scoring_request_session_ref_format_check',
+           'scoring_request_response_snapshot_ref_format_check',
+           'scoring_request_assessment_spec_ref_format_check',
+           'scoring_request_instrument_version_ref_format_check',
+           'scoring_request_scoring_version_ref_format_check',
+           'scoring_request_calibration_reference_format_check',
+           'scoring_request_norm_version_ref_format_check'
+       ]);
     SELECT 'psychometrics-commons:scoring-request-reference:'
-           || md5(pg_get_functiondef(
-               'scoring_request_reference_is_valid(text)'::regprocedure
-           ))
+           || md5(
+               pg_get_functiondef(
+                   'scoring_request_reference_is_valid(text)'::regprocedure
+               ) || E'\n' || COALESCE(reference_constraint_manifest, '')
+           )
       INTO reference_contract_version;
     SELECT obj_description(
                'scoring_request_reference_is_valid(text)'::regprocedure,
@@ -123,9 +150,10 @@ BEGIN
 
     -- PostgreSQL assumes functions used by CHECK constraints are immutable. CREATE OR REPLACE
     -- FUNCTION therefore does not revalidate historical rows when predicate semantics change.
-    -- Upgrade and validate the eight owned constraints only when the validator-derived policy
-    -- marker advances; an already-current startup/reapply preserves constraint OIDs and avoids
-    -- both a validation scan and an ACCESS EXCLUSIVE table lock.
+    -- The marker covers both the live validator and the eight owned CHECK definitions, so a
+    -- weakened, missing, unvalidated, or otherwise drifted same-name constraint also forces
+    -- repair. An already-current startup/reapply preserves constraint OIDs and avoids both a
+    -- validation scan and an ACCESS EXCLUSIVE table lock.
     IF stored_reference_contract_version IS DISTINCT FROM reference_contract_version THEN
         -- Immutable scoring identity is evidence, not cleanup input. Detect legacy-invalid rows
         -- before touching constraints so operators can make an explicit governed quarantine or
@@ -201,6 +229,37 @@ BEGIN
                 norm_version_ref IS NULL OR scoring_request_reference_is_valid(norm_version_ref)
             );
 
+        SELECT string_agg(
+                   format(
+                       '%s:%s:%s:%s:%s',
+                       constraint_record.conname,
+                       constraint_record.contype,
+                       constraint_record.convalidated,
+                       constraint_record.conenforced,
+                       pg_get_constraintdef(constraint_record.oid)
+                   ),
+                   E'\n' ORDER BY constraint_record.conname
+               )
+          INTO reference_constraint_manifest
+          FROM pg_constraint AS constraint_record
+         WHERE constraint_record.conrelid = 'scoring_request'::regclass
+           AND constraint_record.conname = ANY (ARRAY[
+               'scoring_request_scoring_request_ref_format_check',
+               'scoring_request_session_ref_format_check',
+               'scoring_request_response_snapshot_ref_format_check',
+               'scoring_request_assessment_spec_ref_format_check',
+               'scoring_request_instrument_version_ref_format_check',
+               'scoring_request_scoring_version_ref_format_check',
+               'scoring_request_calibration_reference_format_check',
+               'scoring_request_norm_version_ref_format_check'
+           ]);
+        SELECT 'psychometrics-commons:scoring-request-reference:'
+               || md5(
+                   pg_get_functiondef(
+                       'scoring_request_reference_is_valid(text)'::regprocedure
+                   ) || E'\n' || COALESCE(reference_constraint_manifest, '')
+               )
+          INTO reference_contract_version;
         EXECUTE format(
             'COMMENT ON FUNCTION scoring_request_reference_is_valid(TEXT) IS %L',
             reference_contract_version
