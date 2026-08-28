@@ -590,10 +590,12 @@ mod reference_guard_tests {
             first_receipt,
             receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
         ];
-        assert!(matches!(
-            response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts),
-            Err(ResponseEventPersistenceError::InvalidSequence)
-        ));
+        let gapped_error = response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts)
+            .expect_err("gapped receipt history must fail closed");
+        assert_eq!(
+            gapped_error.to_string(),
+            "response event sequence is missing, gapped, or outside the PostgreSQL bigint range"
+        );
         let duplicate_receipts = [
             receipt(first, 1_700_000_000_000, 1_700_000_000_250),
             receipt(duplicate_server, 1_700_000_000_500, 1_700_000_000_750),
