@@ -1,3 +1,5 @@
+# checkov:skip=CKV_OPENAPI_4:Session GET authentication is supplied by the host's in-process SessionHttpAuthority boundary, not a network security scheme.
+# checkov:skip=CKV_OPENAPI_5:Session GET authentication is supplied by the host's in-process SessionHttpAuthority boundary, not a network security scheme.
 openapi: 3.2.0
 info:
   title: Psychometrics Commons public session-start API
