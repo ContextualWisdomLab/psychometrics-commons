@@ -69,6 +69,7 @@ fn mapping_rejects_noncanonical_assignment_reference_aliases() {
 fn mapping_accepts_canonical_inline_score_digest_identity() {
     let digest_identity = StyleAssignmentIdentity {
         score_identity: ScoreIdentity::CanonicalScorePayloadDigest(RULE_DIGEST),
+        norm_version_ref: None,
         ..identity()
     };
     let assigned = assign_personality_style(&digest_identity, &observations()).unwrap();
