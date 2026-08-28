@@ -176,7 +176,11 @@ pub fn accept_one_item_delivery_http(
 }
 
 fn validate_complete_request(request: &str) -> io::Result<()> {
-    let Some(header_offset) = request.as_bytes().windows(4).position(|window| window == b"\r\n\r\n") else {
+    let Some(header_offset) = request
+        .as_bytes()
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+    else {
         return Err(incomplete_request_error());
     };
     let body_start = header_offset + 4;
@@ -330,7 +334,9 @@ fn declared_request_end(body_start: usize, value: &str) -> io::Result<usize> {
     let length = value
         .parse::<usize>()
         .map_err(|_| invalid_content_length_error())?;
-    body_start.checked_add(length).ok_or_else(request_size_error)
+    body_start
+        .checked_add(length)
+        .ok_or_else(request_size_error)
 }
 
 fn malformed_header_error() -> io::Error {
