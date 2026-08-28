@@ -124,7 +124,7 @@ fn distinct_sources_cannot_rebind_one_durable_commons_record_identity() {
     );
     assert!(matches!(
         persist(&mut client, "tenant_clinic_seoul", &collision),
-        Err(LongitudinalObservationPersistenceError::ConflictingReplay)
+        Err(LongitudinalObservationPersistenceError::ObservationIdentityConflict)
     ));
 
     assert_eq!(
