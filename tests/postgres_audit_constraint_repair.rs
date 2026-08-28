@@ -80,6 +80,22 @@ fn create_weakened_schema(client: &mut Client) {
         .unwrap();
 }
 
+fn constraint_identity(client: &mut Client) -> Vec<(String, i64, i64)> {
+    client
+        .query(
+            "SELECT conname::text, oid::bigint, conindid::bigint \
+             FROM pg_constraint \
+             WHERE conrelid = 'audit_evidence_record'::regclass \
+               AND contype IN ('c', 'p') \
+             ORDER BY conname",
+            &[],
+        )
+        .unwrap()
+        .into_iter()
+        .map(|row| (row.get(0), row.get(1), row.get(2)))
+        .collect()
+}
+
 /// Reinsert cases that a repaired relation must reject: each tuple carries the exact
 /// reference that names the weakened invariant it violates.
 type InvalidReinsertCase<'a> = (
@@ -233,4 +249,26 @@ fn migration_reapply_restores_named_constraint_semantics() {
             "migration reapply must restore the invariant violated by {audit_event_ref}"
         );
     }
+}
+
+#[test]
+fn healthy_migration_reapply_preserves_validated_constraint_identity() {
+    let mut client = client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS audit_constraint_identity_test CASCADE;\
+             CREATE SCHEMA audit_constraint_identity_test;\
+             SET search_path TO audit_constraint_identity_test;",
+        )
+        .unwrap();
+
+    apply_audit_evidence_migration(&mut client).unwrap();
+    let before = constraint_identity(&mut client);
+    apply_audit_evidence_migration(&mut client).unwrap();
+    let after = constraint_identity(&mut client);
+
+    assert_eq!(
+        after, before,
+        "healthy migration reapplication must not rebuild validated constraints or the primary-key index"
+    );
 }
