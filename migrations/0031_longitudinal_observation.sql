@@ -9,6 +9,18 @@
 -- is numeric-like only when it contains at least one numeric code point and every character is
 -- numeric or an allowed numeric spelling token. The fixed pg_catalog search path prevents
 -- caller-controlled schemas from changing function resolution inside this CHECK helper.
+-- `ascii(...)` is a Unicode code-point oracle only under UTF8, so reject unsupported database
+-- encodings before installing or replacing the immutable validator.
+DO $longitudinal_encoding_guard$
+BEGIN
+    IF current_setting('server_encoding') <> 'UTF8' THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '0A000',
+            MESSAGE = 'longitudinal reference parity requires PostgreSQL server_encoding UTF8';
+    END IF;
+END
+$longitudinal_encoding_guard$;
+
 CREATE OR REPLACE FUNCTION longitudinal_reference_is_valid(reference_value text)
 RETURNS boolean
 LANGUAGE sql
