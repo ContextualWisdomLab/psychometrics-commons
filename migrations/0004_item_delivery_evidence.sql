@@ -4,8 +4,8 @@
 -- no embedded control/default-ignorable characters, and no numeric-like spelling under
 -- `char::is_numeric`. PostgreSQL 18 UTF-8 and pg_unicode_fast are runtime prerequisites.
 --
--- PostgreSQL assumes functions used by CHECK constraints are immutable. A policy-version
--- marker on the scalar predicate makes semantic upgrades recreate and validate every dependent
+-- PostgreSQL assumes functions used by CHECK constraints are immutable. A marker derived from
+-- the scalar predicate definition makes semantic upgrades recreate and validate every dependent
 -- CHECK once, while ordinary idempotent migration reapplication preserves validated constraints.
 CREATE OR REPLACE FUNCTION item_delivery_reference_is_valid(reference_value TEXT)
 RETURNS BOOLEAN
@@ -144,16 +144,21 @@ CREATE TABLE IF NOT EXISTS item_delivery_event (
 
 DO $item_delivery_reference_constraints$
 DECLARE
-    reference_contract_version CONSTANT TEXT :=
-        'psychometrics-commons:item-delivery-reference-v2-rust-1.97-default-ignorable';
+    reference_contract_version TEXT;
     stored_reference_contract_version TEXT := obj_description(
         'item_delivery_reference_is_valid(text)'::regprocedure,
         'pg_proc'
     );
 BEGIN
+    SELECT 'psychometrics-commons:item-delivery-reference:'
+           || md5(pg_get_functiondef(
+               'item_delivery_reference_is_valid(text)'::regprocedure
+           ))
+      INTO reference_contract_version;
+
     -- CREATE TABLE IF NOT EXISTS leaves same-named CHECK definitions untouched, while
     -- CREATE OR REPLACE FUNCTION does not make PostgreSQL scan historical rows after semantic
-    -- predicate changes. Recreate predicate-dependent checks only when the migration-owned policy
+    -- predicate changes. Recreate predicate-dependent checks only when the validator-derived
     -- marker advances. A fresh install also enters this branch once on empty tables. Replacement
     -- CHECK creation validates all existing rows, so an unsafe historical alias fails the upgrade
     -- atomically; an already-current schema preserves constraint objects and avoids repeated
