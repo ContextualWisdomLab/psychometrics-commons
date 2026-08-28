@@ -9,7 +9,7 @@
 
 use crate::reference::normalized_reference;
 use crate::response::{ResponseEvent, ResponseLedger, WriteError};
-use postgres::Transaction;
+use postgres::{Error as PgError, GenericClient, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -132,9 +132,7 @@ impl From<postgres::Error> for ResponseEventPersistenceError {
 /// # Errors
 ///
 /// Returns the `PostgreSQL` error if the migration cannot be applied.
-pub fn apply_response_event_migration(
-    client: &mut impl postgres::GenericClient,
-) -> Result<(), postgres::Error> {
+pub fn apply_response_event_migration(client: &mut impl GenericClient) -> Result<(), PgError> {
     client.batch_execute(RESPONSE_EVENT_MIGRATION)
 }
 
