@@ -104,7 +104,9 @@ fn sql_does_not_overclassify_visible_rust_nonnumeric_scalars() {
                 && !is_default_ignorable(*character)
                 && !is_numeric_syntax_separator(*character)
         })
-        .map(|character| character as u32 as i32)
+        .map(|character| {
+            i32::try_from(u32::from(character)).expect("Unicode scalar values always fit in i32")
+        })
         .collect();
 
     assert!(
