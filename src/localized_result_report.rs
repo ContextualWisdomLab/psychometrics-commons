@@ -157,6 +157,7 @@ impl LocalizedResultReport {
     }
 }
 
+/// Reviewed participant-facing labels for one exact supported locale.
 #[derive(Clone, Copy)]
 struct ReportLabels {
     title: &'static str,
@@ -194,6 +195,7 @@ const KO_KR: ReportLabels = ReportLabels {
     standard_error: "표준오차",
 };
 
+/// Resolve only an exact locale for which the runtime has reviewed report labels.
 fn labels_for_locale(locale: &str) -> Option<&'static ReportLabels> {
     match locale {
         "en-US" => Some(&EN_US),
@@ -202,6 +204,7 @@ fn labels_for_locale(locale: &str) -> Option<&'static ReportLabels> {
     }
 }
 
+/// Assemble participant-facing text from copied result evidence and reviewed labels.
 fn render_report(export: &ResultExport, limitations: &[&str], labels: &ReportLabels) -> String {
     let mut report = String::new();
     report.push_str(labels.title);
@@ -215,6 +218,7 @@ fn render_report(export: &ResultExport, limitations: &[&str], labels: &ReportLab
     report
 }
 
+/// Append copied score observations without recalculating any scientific value.
 fn append_score_section(report: &mut String, export: &ResultExport, labels: &ReportLabels) {
     report.push_str(labels.scores);
     report.push('\n');
@@ -238,6 +242,7 @@ fn append_score_section(report: &mut String, export: &ResultExport, labels: &Rep
     }
 }
 
+/// Append the already-approved participant limitations without changing their text.
 fn append_limitations_section(report: &mut String, limitations: &[&str], labels: &ReportLabels) {
     report.push_str(labels.limitations);
     report.push('\n');
@@ -248,6 +253,7 @@ fn append_limitations_section(report: &mut String, limitations: &[&str], labels:
     }
 }
 
+/// Map a stored score disposition to its reviewed participant-facing locale label.
 const fn disposition_label(
     disposition: ObservationDisposition,
     labels: &ReportLabels,
