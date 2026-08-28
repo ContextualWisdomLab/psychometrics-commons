@@ -1,7 +1,7 @@
 //! Machine-readable contract gate for the personal result-export HTTP boundary.
 //!
 //! ADR-0014 requires every implemented HTTP operation to carry an exact
-//! OpenAPI 3.2.x as-built contract in the same or a prerequisite change. This
+//! `OpenAPI` 3.2.x as-built contract in the same or a prerequisite change. This
 //! test includes the contract at compile time so deleting or deferring the
 //! artifact makes the result-export slice fail closed.
 
