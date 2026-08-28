@@ -267,13 +267,17 @@ fn listener_rejects_a_content_length_that_splits_a_utf8_code_point_without_panic
         .unwrap();
     let body = "{\"command\":\"activaté\"}";
     let split_inside_e_acute = body.find('é').unwrap() + 1;
-    let request = format!(
-        "POST /v1/sessions/ses_listener_command_utf8_boundary/commands HTTP/1.1\r\nIdempotency-Key: cmd_listener_utf8_boundary\r\nContent-Length: {split_inside_e_acute}\r\n\r\n{body}"
+    let headers = format!(
+        "POST /v1/sessions/ses_listener_command_utf8_boundary/commands HTTP/1.1\r\nIdempotency-Key: cmd_listener_utf8_boundary\r\nContent-Length: {split_inside_e_acute}\r\n\r\n"
     );
-    stream.write_all(request.as_bytes()).unwrap();
+    stream.write_all(headers.as_bytes()).unwrap();
+    stream
+        .write_all(&body.as_bytes()[..split_inside_e_acute])
+        .unwrap();
 
     let mut response = String::new();
     stream.read_to_string(&mut response).unwrap();
-    server.join().unwrap().unwrap();
-    assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+    let error = server.join().unwrap().unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(response.is_empty());
 }
