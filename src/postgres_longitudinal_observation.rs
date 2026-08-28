@@ -299,7 +299,8 @@ fn classify_existing(
     )?;
     let record_identity_collision = rows.iter().any(|row| {
         row.get::<_, String>(0) == record.observation_record_ref()
-            && (row.get::<_, String>(2) != record.enrollment_ref()
+            && (row.get::<_, String>(1) != tenant_ref
+                || row.get::<_, String>(2) != record.enrollment_ref()
                 || row.get::<_, String>(3) != record.source_system_ref()
                 || row.get::<_, String>(4) != record.source_observation_ref())
     });

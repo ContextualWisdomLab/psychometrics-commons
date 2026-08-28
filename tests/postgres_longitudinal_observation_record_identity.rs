@@ -171,7 +171,7 @@ fn another_tenant_cannot_rebind_one_durable_commons_record_identity() {
     );
     let collision = record(
         "longitudinal_observation_record_cross_tenant_identity",
-        "gyeot_observation_cross_tenant_identity_distinct_source",
+        "gyeot_observation_cross_tenant_identity",
         1_776_336_360_000,
         1_776_336_420_000,
     );

@@ -50,7 +50,7 @@ For active PR #417:
 - exact same-source/evidence replay returns the already accepted observation;
 - same source identity with changed evidence returns `LongitudinalObservationError::IdempotencyConflict` at the in-memory boundary;
 - a distinct source observation that reuses an accepted `observation_record_ref` returns `LongitudinalObservationError::ObservationIdentityConflict` before aggregate mutation;
-- at the PostgreSQL adapter, a distinct source observation that collides on an existing durable `observation_record_ref` returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, while same-source replay under a different tenant or with different evidence remains `LongitudinalObservationPersistenceError::ConflictingReplay`;
+- at the PostgreSQL adapter, a distinct source observation or tenant that collides on an existing durable `observation_record_ref` returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, while same-source replay with different evidence remains `LongitudinalObservationPersistenceError::ConflictingReplay`;
 - the rejected collision does not replace the accepted observation and does not append or rewrite membership rows.
 
 This ADR does not define a participant-facing HTTP endpoint or event schema for longitudinal ingestion because no such transport is implemented on protected main or #417. A later transport must preserve these identifiers and failure classes without inventing normalization aliases or a different idempotency scope.
@@ -127,7 +127,7 @@ This #417 change does not add a new trust boundary, encryption mechanism, retent
 
 The #417 correction introduces no new runtime service, listener, dependency, readiness probe, migration, backup format, or deployment profile. Existing PostgreSQL longitudinal persistence remains the operational durability boundary on protected main.
 
-Operators should treat a durable `ObservationIdentityConflict` on `observation_record_ref` as an immutable record-identity rebinding attempt to investigate, not as permission to overwrite the accepted row. A same-source replay with changed immutable evidence remains `ConflictingReplay`. Normal mutation of longitudinal observation or membership evidence remains database-blocked by the existing immutability controls.
+Operators should treat a durable `ObservationIdentityConflict` on `observation_record_ref` as an immutable record-identity rebinding attempt to investigate, not as permission to overwrite the accepted row. A same-source replay with changed immutable evidence remains `ConflictingReplay`; a cross-tenant reuse of the same record identity is an identity conflict. Normal mutation of longitudinal observation or membership evidence remains database-blocked by the existing immutability controls.
 
 No SLO, RPO, or RTO value is introduced by this ADR. Repository recovery/backup acceptance remains governed by the deployment/operations architecture and existing product persistence evidence.
 
@@ -158,7 +158,7 @@ The identity correction is not accepted merely because documentation describes i
 - exact source replay and same-source/different-evidence idempotency regressions;
 - real PostgreSQL regression proving a durable record-identity collision returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, the failed transaction is rolled back, and the original observation plus membership rows remain unchanged;
 - tenant-scoped persistence/reload tests from the existing longitudinal persistence suite;
-- exact owned-production statement and branch coverage;
+- the exact owned-production statement, 100% branch coverage, and all other metrics exposed by tooling, using realistic tests without meaningless exclusions;
 - rustfmt, Clippy, rustdoc, Runtime CI, Security Scan, SAST, SPDX SBOM evidence, supply-chain provenance, and every then-live mandatory organization workflow on the unchanged exact head;
 - zero valid unresolved review findings and qualifying independent non-author approval under live policy.
 

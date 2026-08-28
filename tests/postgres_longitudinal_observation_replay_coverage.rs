@@ -271,7 +271,7 @@ fn every_immutable_header_dimension_rejects_rebinding() {
     for candidate in &replay_variants {
         assert_conflict(&mut client, "tenant_clinic_seoul", candidate);
     }
-    assert_conflict(&mut client, "tenant_clinic_busan", &base);
+    assert_identity_conflict(&mut client, "tenant_clinic_busan", &base);
 }
 
 #[test]
