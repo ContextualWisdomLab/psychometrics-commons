@@ -131,6 +131,42 @@ fn scalar_and_array_predicates_reject_rust_invalid_aliases() {
 }
 
 #[test]
+fn array_predicate_survives_schema_rename_without_migration_reapply() {
+    let mut client = client();
+    client
+        .batch_execute(
+            "DROP SCHEMA IF EXISTS item_delivery_reference_canonicality_renamed CASCADE; \
+             ALTER SCHEMA item_delivery_reference_canonicality_test \
+                 RENAME TO item_delivery_reference_canonicality_renamed; \
+             SET search_path TO item_delivery_reference_canonicality_renamed;",
+        )
+        .expect("renaming the owned schema must be possible without reapplying the migration");
+
+    let valid_array = vec!["item_alpha", "item_beta"];
+    let valid: bool = client
+        .query_one(
+            "SELECT item_delivery_reference_array_is_valid($1)",
+            &[&valid_array],
+        )
+        .expect("array predicate must retain its scalar-validator dependency after schema rename")
+        .get(0);
+    assert!(valid, "valid item references must remain accepted after schema rename");
+
+    let invalid_array = vec!["item_alpha", "item\u{200b}_beta"];
+    let invalid: bool = client
+        .query_one(
+            "SELECT item_delivery_reference_array_is_valid($1)",
+            &[&invalid_array],
+        )
+        .expect("renamed-schema array predicate must still evaluate invalid references")
+        .get(0);
+    assert!(
+        !invalid,
+        "renamed-schema array predicate must keep scalar canonicality enforcement"
+    );
+}
+
+#[test]
 fn current_policy_reapply_preserves_reference_constraint_objects() {
     let mut client = client();
     let before = reference_constraint_oids(&mut client);
