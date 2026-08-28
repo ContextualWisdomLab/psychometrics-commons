@@ -289,8 +289,9 @@ fn http_create_reloads_after_restart_and_replays_after_suspend() {
     transaction.commit().unwrap();
 
     let mut transaction = client.transaction().unwrap();
-    let (loaded, foreign) = {
+    let (unfiltered, loaded, foreign) = {
         let mut port = PostgresSessionHttpPort::new(&mut transaction);
+        let unfiltered = port.load("ses_http_ko_quick");
         let loaded = authorized_get(&mut port, "ses_http_ko_quick");
         let foreign = authorized_get_as(
             &mut port,
@@ -298,8 +299,9 @@ fn http_create_reloads_after_restart_and_replays_after_suspend() {
             "ptc_foreign_session_http",
             "tenant_session_http",
         );
-        (loaded, foreign)
+        (unfiltered, loaded, foreign)
     };
+    assert!(unfiltered.unwrap().is_some());
     assert_eq!(loaded.status(), 200);
     assert_eq!(loaded.body(), created.body());
     assert_eq!(foreign.status(), 404);
