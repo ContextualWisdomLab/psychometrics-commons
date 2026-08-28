@@ -331,6 +331,37 @@ fn every_membership_dimension_and_source_alias_rejects_rebinding() {
 }
 
 #[test]
+fn ambiguous_source_replay_fails_closed_as_conflicting_replay() {
+    let _guard = guard();
+    let mut client = fresh_client();
+    let base = base_record();
+    assert_eq!(
+        persist(&mut client, "tenant_clinic_seoul", &base).unwrap(),
+        LongitudinalObservationPersistenceDisposition::Inserted
+    );
+
+    // Simulate schema drift so the replay query returns both a record-ref match and
+    // a second source-tuple match; classification must fail closed without guessing.
+    client
+        .batch_execute(
+            "ALTER TABLE longitudinal_observation \
+             DROP CONSTRAINT longitudinal_observation_source_identity_unique;",
+        )
+        .unwrap();
+    let memberships = base_memberships();
+    let duplicate_source = ObservationSpec {
+        observation_record_ref: "longitudinal_observation_record_duplicate_source",
+        ..ObservationSpec::base(&memberships)
+    }
+    .build();
+    assert_eq!(
+        persist(&mut client, "tenant_clinic_seoul", &duplicate_source).unwrap(),
+        LongitudinalObservationPersistenceDisposition::Inserted
+    );
+    assert_conflict(&mut client, "tenant_clinic_seoul", &base);
+}
+
+#[test]
 fn corrupted_sequence_and_anomaly_evidence_fail_closed_after_restart() {
     let _guard = guard();
     let mut client = fresh_client();
