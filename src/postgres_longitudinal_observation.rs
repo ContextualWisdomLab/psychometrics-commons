@@ -35,6 +35,8 @@ pub enum LongitudinalObservationPersistenceError {
     InvalidReference,
     /// A Rust clock or sequence cannot be represented by `PostgreSQL` `bigint`.
     InvalidNumericRange,
+    /// A distinct source observation attempted to reuse an existing Commons record identity.
+    ObservationIdentityConflict,
     /// An observation or tenant-scoped source identity was replayed with different evidence.
     ConflictingReplay,
     /// Persisted rows cannot be reconstructed into one valid immutable domain record.
@@ -53,6 +55,9 @@ impl Display for LongitudinalObservationPersistenceError {
             }
             Self::InvalidNumericRange => {
                 "longitudinal observation clocks or membership sequence exceed the PostgreSQL bigint range"
+            }
+            Self::ObservationIdentityConflict => {
+                "a distinct longitudinal source observation cannot reuse an existing Commons observation record identity"
             }
             Self::ConflictingReplay => {
                 "longitudinal observation identity was replayed with conflicting immutable evidence"
@@ -102,16 +107,17 @@ pub fn apply_longitudinal_observation_migration(
 ///
 /// Exact replay is idempotent. Reusing either the global Commons observation
 /// identity or the tenant-scoped `(enrollment, source system, source observation)`
-/// identity with different evidence fails closed. The same source tuple may exist
-/// in a different tenant only under a different observation-record identity.
-/// The caller owns the transaction and must use `READ COMMITTED` so a concurrent
-/// winner is visible to replay classification.
+/// identity with different evidence fails closed. A distinct source that reuses an
+/// existing Commons record identity is classified separately as an observation-identity
+/// conflict. The same source tuple may exist in a different tenant only under a different
+/// observation-record identity. The caller owns the transaction and must use
+/// `READ COMMITTED` so a concurrent winner is visible to replay classification.
 ///
 /// # Errors
 ///
 /// Returns [`LongitudinalObservationPersistenceError`] for a noncanonical tenant,
-/// unsupported isolation, unrepresentable numeric values, conflicting replay, or
-/// a database failure.
+/// unsupported isolation, unrepresentable numeric values, observation-record identity
+/// collision, conflicting replay, or a database failure.
 pub fn persist_longitudinal_observation(
     transaction: &mut Transaction<'_>,
     tenant_ref: &str,
@@ -291,6 +297,16 @@ fn classify_existing(
             &record.source_observation_ref(),
         ],
     )?;
+    let record_identity_collision = rows.iter().any(|row| {
+        row.get::<_, String>(0) == record.observation_record_ref()
+            && (row.get::<_, String>(1) != tenant_ref
+                || row.get::<_, String>(2) != record.enrollment_ref()
+                || row.get::<_, String>(3) != record.source_system_ref()
+                || row.get::<_, String>(4) != record.source_observation_ref())
+    });
+    if record_identity_collision {
+        return Err(LongitudinalObservationPersistenceError::ObservationIdentityConflict);
+    }
     if rows.len() != 1 {
         return Err(LongitudinalObservationPersistenceError::ConflictingReplay);
     }
@@ -462,6 +478,9 @@ mod numeric_guard_tests {
             require_clock_anomaly_code(None, Some(ClockAnomaly::RecordedAfterReceived)),
             Err(LongitudinalObservationPersistenceError::CorruptHistory)
         ));
+        let identity_conflict = LongitudinalObservationPersistenceError::ObservationIdentityConflict;
+        assert!(Error::source(&identity_conflict).is_none());
+        assert!(identity_conflict.to_string().contains("record identity"));
         let error = LongitudinalObservationPersistenceError::ConflictingReplay;
         assert!(Error::source(&error).is_none());
         assert!(error.to_string().contains("conflicting"));
