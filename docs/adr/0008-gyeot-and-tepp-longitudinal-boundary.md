@@ -13,7 +13,7 @@ Longitudinal self-understanding requires mobile momentary collection, offline op
 
 The decision therefore separates collection, product-owned authorization/ingestion/persistence, and temporal analysis while keeping the identity and transaction rules at the boundary explicit.
 
-This ADR is a mixture of protected-main as-built behavior and target behavior. Protected `main@09534ef52c9307ce0dc559e9d908ebd715c641a1` includes in-memory normalized observation ingestion plus PostgreSQL 18 persistence for immutable observation records and membership shares. Active PR #417 adds the in-memory `observation_record_ref` collision guard and regression evidence described below. Enrollment persistence, participant-facing longitudinal HTTP, live Gyeot adapter execution, and TEPP dispatch remain target work.
+This ADR is a mixture of protected-main as-built behavior and target behavior. Protected `main@09534ef52c9307ce0dc559e9d908ebd715c641a1` includes in-memory normalized observation ingestion plus PostgreSQL 18 persistence for immutable observation records and membership shares. Active PR #417 adds the in-memory `observation_record_ref` collision guard and aligns the PostgreSQL adapter's typed collision classification with that same immutable record-identity distinction. Enrollment persistence, participant-facing longitudinal HTTP, live Gyeot adapter execution, and TEPP dispatch remain target work.
 
 ## Decision
 
@@ -43,14 +43,14 @@ A normalized observation carries two independent identity dimensions:
 - `observation_record_ref`: the Psychometrics Commons-owned opaque public record identity;
 - `(tenant_ref, enrollment_ref, source_system_ref, source_observation_ref)`: the source-observation identity used for exact replay and source-conflict classification.
 
-Protected main persistence already enforces `observation_record_ref` as the primary key and the source tuple as a unique key. Active PR #417 aligns the in-memory aggregate with that durable identity language.
+Protected main persistence already enforces `observation_record_ref` as the primary key and the source tuple as a unique key. Active PR #417 aligns the in-memory aggregate and persistence classification with that durable identity language.
 
 For active PR #417:
 
 - exact same-source/evidence replay returns the already accepted observation;
 - same source identity with changed evidence returns `LongitudinalObservationError::IdempotencyConflict` at the in-memory boundary;
 - a distinct source observation that reuses an accepted `observation_record_ref` returns `LongitudinalObservationError::ObservationIdentityConflict` before aggregate mutation;
-- at the PostgreSQL adapter, a distinct source that collides on an existing durable `observation_record_ref` is classified as `LongitudinalObservationPersistenceError::ConflictingReplay`;
+- at the PostgreSQL adapter, a distinct source or tenant/source binding that collides on an existing durable `observation_record_ref` returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, while same-source/different-evidence replay remains `LongitudinalObservationPersistenceError::ConflictingReplay`;
 - the rejected collision does not replace the accepted observation and does not append or rewrite membership rows.
 
 This ADR does not define a participant-facing HTTP endpoint or event schema for longitudinal ingestion because no such transport is implemented on protected main or #417. A later transport must preserve these identifiers and failure classes without inventing normalization aliases or a different idempotency scope.
@@ -84,7 +84,7 @@ Protected main owns two PostgreSQL entities in `migrations/0031_longitudinal_obs
 
 The source tuple `(tenant_ref, enrollment_ref, source_system_ref, source_observation_ref)` is unique, while `observation_record_ref` is globally unique in the owned table. The persistence adapter operates inside the caller's PostgreSQL transaction. The #417 collision regression explicitly starts a transaction, attempts the conflicting persist, rolls the transaction back on the typed error, then proves the original observation remains the only observation row and its original membership remains the only membership row.
 
-Active PR #417 does not add or change a migration. It aligns the in-memory domain identity invariant with the already durable primary-key/source-identity contract and adds real-PostgreSQL regression evidence.
+Active PR #417 does not add or change a migration. It aligns the in-memory domain identity invariant and the durable adapter's typed record-identity conflict with the already enforced primary-key/source-identity contract and adds real-PostgreSQL regression evidence.
 
 ## Invariants
 
@@ -107,7 +107,7 @@ Current enforcement evidence includes `tests/longitudinal_observation_record_ide
 - A source/network outage leaves collection in the Gyeot-owned bounded offline queue; it does not cause Psychometrics Commons to synthesize observations.
 - A duplicate exact source replay returns existing accepted evidence rather than a second logical record.
 - A same-source evidence change fails closed as idempotency conflict.
-- A distinct source attempting to reuse an existing Commons record identity fails closed; in-memory state is not mutated, and a persistence attempt is rolled back by the caller transaction in the regression contract.
+- A distinct source attempting to reuse an existing Commons record identity fails closed with the record-identity conflict class at both the in-memory and durable adapter boundaries; in-memory state is not mutated, and a persistence attempt is rolled back by the caller transaction in the regression contract.
 - Existing observation and membership rows remain unchanged after the rejected durable collision.
 - Clock anomalies are represented/validated rather than silently reordered.
 - TEPP unavailability does not delete or mutate accepted observations. Analysis retry/degraded behavior belongs to the future TEPP dispatch contract and must preserve immutable input references.
@@ -125,17 +125,17 @@ This #417 change does not add a new trust boundary, encryption mechanism, retent
 
 ## Deployment and operations impact
 
-The #417 domain correction introduces no new runtime service, listener, dependency, readiness probe, migration, backup format, or deployment profile. Existing PostgreSQL longitudinal persistence remains the operational durability boundary on protected main.
+The #417 correction introduces no new runtime service, listener, dependency, readiness probe, migration, backup format, or deployment profile. Existing PostgreSQL longitudinal persistence remains the operational durability boundary on protected main.
 
-Operators should treat a durable `ConflictingReplay` on `observation_record_ref` as an identity/evidence conflict to investigate, not as permission to overwrite the accepted row. Normal mutation of longitudinal observation or membership evidence remains database-blocked by the existing immutability controls.
+Operators should treat a durable `ObservationIdentityConflict` on `observation_record_ref` as an immutable record-identity rebinding attempt to investigate, not as permission to overwrite the accepted row. A same-source replay with changed immutable evidence remains `ConflictingReplay`. Normal mutation of longitudinal observation or membership evidence remains database-blocked by the existing immutability controls.
 
 No SLO, RPO, or RTO value is introduced by this ADR. Repository recovery/backup acceptance remains governed by the deployment/operations architecture and existing product persistence evidence.
 
 ## Migration and rollback
 
-There is no database migration in #417. The active change is additive domain validation plus tests. Rolling back #417 before merge means dropping that branch; protected-main persistence still retains its existing primary-key/source-identity constraints.
+There is no database migration in #417. The active change is additive domain/persistence classification plus tests. Rolling back #417 before merge means dropping that branch; protected-main persistence still retains its existing primary-key/source-identity constraints and the broader historical `ConflictingReplay` classification.
 
-After #417 is integrated, reverting the domain guard alone would intentionally reintroduce a divergence between in-memory and durable identity semantics and therefore should occur only if a superseding decision changes the product identity contract. Accepted immutable observation rows are not rewritten as part of rollback or roll-forward.
+After #417 is integrated, reverting the record-identity guards/classification alone would intentionally reintroduce a divergence between in-memory and durable identity semantics and therefore should occur only if a superseding decision changes the product identity contract. Accepted immutable observation rows are not rewritten as part of rollback or roll-forward.
 
 A future migration that changes longitudinal identity cardinality must fail closed on incompatible historical evidence rather than silently renaming or merging immutable records.
 
@@ -144,7 +144,7 @@ A future migration that changes longitudinal identity cardinality must fail clos
 - `ARCHITECTURE.md`: unchanged; the bounded-context split and longitudinal ownership already describe the same decision.
 - `docs/architecture/C4.md`: unchanged; no container/component or dependency direction changes.
 - `docs/architecture/UML.md`: no new lifecycle or public operation is introduced by #417; current longitudinal domain semantics remain compatible.
-- `docs/architecture/ERD.md`: protected-main logical/physical identity cardinality already has one immutable observation identity; #417 changes in-memory enforcement, not the schema.
+- `docs/architecture/ERD.md`: protected-main logical/physical identity cardinality already has one immutable observation identity; #417 changes in-memory enforcement and typed persistence classification, not the schema.
 - `docs/architecture/SECURITY_AND_DATA.md`: unchanged for #417 because no trust/data-flow/privacy class changes; existing tenant/privacy rules continue to apply.
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`: unchanged because there is no new runtime/deployment/recovery mechanism.
 - `docs/TRACEABILITY.md`: active-PR status must remain clearly distinguished from protected-main truth until #417 merges.
@@ -156,7 +156,7 @@ The identity correction is not accepted merely because documentation describes i
 
 - domain regression proving a distinct source cannot reuse an accepted Commons record identity and that the first record remains in the aggregate;
 - exact source replay and same-source/different-evidence idempotency regressions;
-- real PostgreSQL regression proving a durable record-identity collision returns a typed conflict, the failed transaction is rolled back, and the original observation plus membership rows remain unchanged;
+- real PostgreSQL regression proving a durable record-identity collision returns `LongitudinalObservationPersistenceError::ObservationIdentityConflict`, the failed transaction is rolled back, and the original observation plus membership rows remain unchanged;
 - tenant-scoped persistence/reload tests from the existing longitudinal persistence suite;
 - exact owned-production statement and branch coverage;
 - rustfmt, Clippy, rustdoc, Runtime CI, Security Scan, SAST, SPDX SBOM evidence, supply-chain provenance, and every then-live mandatory organization workflow on the unchanged exact head;
@@ -179,8 +179,8 @@ The broader scientific release path additionally requires the TEPP-owned tempora
 
 Positive consequences:
 
-- in-memory and durable observation identity semantics converge;
-- exact replay remains idempotent while genuine identity rebinding is distinguishable;
+- in-memory and durable observation identity semantics converge, including the typed record-identity conflict class;
+- exact replay remains idempotent while genuine identity rebinding is distinguishable from same-source evidence conflict;
 - a failed collision cannot silently replace observation or membership evidence;
 - ownership between Gyeot, Psychometrics Commons, and TEPP remains explicit.
 
