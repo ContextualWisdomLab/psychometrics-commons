@@ -198,7 +198,8 @@ fn migration_reapply_revalidates_rows_after_array_predicate_changes() {
         )
         .expect("the deliberately weakened array predicate should admit duplicate item identities");
 
-    let error = apply_item_delivery_migration(&mut client)
-        .expect_err("array-policy upgrade must rescan and reject the historical duplicate item set");
+    let error = apply_item_delivery_migration(&mut client).expect_err(
+        "array-policy upgrade must rescan and reject the historical duplicate item set",
+    );
     assert_check(&error, "item_delivery_ledger_allowed_items_format_check");
 }
