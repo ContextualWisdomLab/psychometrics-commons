@@ -1,8 +1,8 @@
 # Requirements and Architecture Traceability
 
 - Status: Normative traceability index
-- Date: 2026-08-21
-- Evaluated protected-main implementation baseline: `4499d9c0889c082487ddbd7fd8d0d5d18257995d`
+- Date: 2026-08-28
+- Evaluated protected-main implementation baseline: `09534ef52c9307ce0dc559e9d908ebd715c641a1`
 
 This document prevents product requirements, architecture decisions, governance, code, and release evidence from drifting independently. It is intentionally explicit about what is **implemented on the evaluated protected-main baseline**, what exists only on an **active PR**, and what remains **target architecture**.
 
@@ -27,15 +27,15 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance, `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence, and protected-main request-bound external adapter `src/scoring_engine.rs`; live fast-mlsirm execution remains Target |
 | Bounded asynchronous scoring retry/quarantine with stale-worker fencing | PRD §9.4, §10 | TRD §8; ADR-0015 transaction boundary | ADR-0004, ADR-0010, ADR-0015 | **Implemented** product lifecycle plus PostgreSQL enqueue, claim, retry, completion, expiry recovery, and cancellation without transferring a fence; live fast-mlsirm execution remains Target |
-| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; authorized result-read transport is active PR #257 and not protected-main truth |
-| Authorized immutable personal result read | PRD §3.1, §9.4 | TRD §18 `GET /v1/results/{result_ref}`; result authorization boundary | ADR-0003, ADR-0010 | **Active PR** #257 exposes an authorized immutable result read that checks server-owned participant/result bindings before route identity; it is not protected-main truth |
+| Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; authorized result-read transport is protected-main evidence through merged #257 |
+| Authorized immutable personal result read | PRD §3.1, §9.4 | TRD §18 `GET /v1/results/{result_ref}`; result authorization boundary | ADR-0003, ADR-0010 | **Implemented** through merged #257: the authorized immutable result read checks server-owned participant/result bindings before route identity |
 | Personal JSON and human-readable result export | PRD §3.1, §9.4 | TRD §18 `POST /v1/results/{result_ref}/exports`; ADR-0010 export provenance | ADR-0010 | **Implemented** domain copy through merged #231, delivery guard through merged #249 (`src/result_export_authorization.rs`), and authorized HTTP transport through merged #256 |
 | Immutable result provenance | PRD §3.1, §9.4 | TRD §9 | ADR-0004, ADR-0010 | **Implemented** in `src/result.rs`; result-serving transport is Target |
 | Personal JSON and human-readable result export | PRD §3.1, §9.4 | TRD §18 `POST /v1/results/{result_ref}/exports`; ADR-0010 export provenance | ADR-0010 | **Implemented** domain copy through merged #231, delivery guard through merged #249 (`src/result_export_authorization.rs`), and authorized HTTP transport through merged #256 (`src/result_export_http.rs`, `openapi/result-exports.yaml`) |
 | Deterministic narrative fallback | PRD §3.2, §9.5 | TRD §17; Architecture narrative view | ADR-0009, ADR-0010, ADR-0018 | **Implemented** through merged #287 (`src/deterministic_narrative.rs`, `src/style_mapping.rs`): published narrative/rule references must already use canonical opaque spelling before deterministic rendering; numeric score authority is unchanged |
 | Continuous scores remain source of truth; Personality Style is presentation | PRD §3.2 | Measurement Governance; AI Governance | ADR-0018 | Target product narrative mapping; numeric source remains External fast-mlsirm contract |
 | Immutable instrument release/version lifecycle | PRD §6, §9 | TRD §7; UML publication state | ADR-0005, ADR-0010 | **Implemented** in `src/instrument.rs` plus `migrations/0006_instrument_release.sql` and `src/postgres_instrument_release.rs`: immutable release manifest, exact version/digest/locale/item set, fail-closed Draft/Review/Published/Suspended/Retired lifecycle, idempotent publication events, and new-session eligibility |
-| Quick and Deep assessment paths | PRD §3.1, §9 | TRD §5–7; immutable release/item-delivery boundary | ADR-0005, ADR-0010 | **Active PR #261** binds ordered Quick/Deep item subsets to one immutable release and copies release locale/provenance; path persistence, item-delivery transport, conversion, and scoring integration remain Target |
+| Quick and Deep assessment paths | PRD §3.1, §9 | TRD §5–7; immutable release/item-delivery boundary | ADR-0005, ADR-0010 | **Implemented** through merged #261: ordered Quick/Deep item subsets bind to one immutable release and copy release locale/provenance; item-delivery transport, conversion, and scoring integration remain Target |
 | Instrument publication requires intended-use scientific/right/locale evidence | PRD §6, §9, §10 | Measurement Governance; publication evidence gate | ADR-0004, ADR-0013, ADR-0019 | **Implemented** policy gate and immutable evidence provenance in `src/instrument.rs`; each real instrument still requires its own rights/locale/scientific evidence artifacts before publication |
 | Optional Keyverse account linking | PRD §3.1, §9.7 | TRD §10; UML identity-link lifecycle | ADR-0003, ADR-0020 | **Partially implemented**: issuer-scoped first-link fail-closed domain primitive in `src/participant.rs`; append-only unlink/relink/recovery history, persistence, audit, and transport remain Target |
 | Cross-cutting tenant/task authorization | PRD §7, §9 | TRD §11; Security/Data | ADR-0001, ADR-0003 | **Implemented** fail-closed domain gate in `src/authorization.rs` binds consent operations to participant-owned `ConsentLedger` / `ManageOwnConsent`; persistence/policy-adapter/public-transport integration remains Target |
@@ -48,7 +48,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Operation-scoped capability health | PRD §7, §13 | `docs/OPERABILITY.md` §3–4; Deployment/Operations | ADR-0011, ADR-0017 | **Implemented** domain health/readiness contract in `src/health.rs` plus `src/postgres_health.rs` PostgreSQL major/write-readiness and caller-declared relation presence; HTTP probes, measured thresholds, and deployment evidence remain Target |
 | Korean/English exact locale versions | PRD §3.1, §9.9 | TRD §28; instrument release + locale governance | ADR-0013, ADR-0019 | **Partially implemented**: locale is pinned/validated by `src/instrument.rs`; merged #259 ships protected-main exact `ko-KR`/`en-US` participant report labels that copy immutable scores and provenance; real form content, rights, translation, invariance, HTTP delivery, and accessible reference-client serving remain Target |
 | WCAG 2.2 AA supported reference client | PRD §9.10 | TRD §27; Quality Attributes | ADR-0002, ADR-0013 | Target; no reference client implementation on evaluated main |
-| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/orchestration adapter; `src/longitudinal_observation.rs` records validity, recorded, received, and ingested clocks with explicit membership shares. **Active PR #248 / IMPLEMENTED_ON_ACTIVE_PR** adds PostgreSQL 18 persistence for immutable normalized observation records and membership shares via `migrations/0031_longitudinal_observation.sql` and `src/postgres_longitudinal_observation.rs`; enrollment persistence, HTTP, Gyeot collection, and TEPP kernels remain Target |
+| EMA/ESM longitudinal flow | PRD §4 | TRD §16; UML longitudinal sequence; logical ERD extension | ADR-0008 | External Gyeot/TEPP dependencies + Target Commons enrollment/orchestration adapter; `src/longitudinal_observation.rs` records validity, recorded, received, and ingested clocks with explicit membership shares. **Implemented persistence through merged #248** adds PostgreSQL 18 storage for immutable normalized observation records and membership shares via `migrations/0031_longitudinal_observation.sql` and `src/postgres_longitudinal_observation.rs`; enrollment persistence, HTTP, Gyeot collection, and TEPP kernels remain Target |
 | Measurement Workbench | PRD §6 | C4/component view; UML publication-evidence sequence; Measurement Governance | ADR-0001, ADR-0002, ADR-0004, ADR-0019 | Target; fast-mlsirm/Inkspan/RankWeave are External dependencies |
 | Headless replaceable clients | PRD §7 | TRD §1, §18; C4 | ADR-0001, ADR-0002 | Architecture established; public transport is Target |
 | Community/Hosted/Enterprise profiles | PRD §7, §13 | TRD deployment sections; Deployment/Operations | ADR-0011, ADR-0017 | Target deployment packaging/evidence |
@@ -99,7 +99,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 
 ## 4. Source module map
 
-Current protected-main Rust module surface on `4499d9c0889c082487ddbd7fd8d0d5d18257995d`:
+Current protected-main Rust module surface on `09534ef52c9307ce0dc559e9d908ebd715c641a1`:
 
 ```text
 src/lib.rs
@@ -114,7 +114,7 @@ src/lib.rs
 ├── deterministic_narrative.rs  # deterministic AI-independent approved style narrative fallback
 ├── health.rs         # operation-scoped liveness/readiness and capability-state contract
 ├── instrument.rs     # immutable release manifest + scientific publication-evidence gate
-├── assessment_path.rs  # Active PR #261 release-bound Quick/Deep item subset contract
+├── assessment_path.rs  # merged #261 release-bound Quick/Deep item subset contract
 ├── api_problem.rs     # safe RFC 9457 problem-details primitive
 ├── localized_result_report.rs  # exact-locale report presentation over immutable exports (merged #259)
 ├── integration.rs    # outbox/inbox/retry/quarantine domain contracts
