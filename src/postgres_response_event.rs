@@ -15,6 +15,8 @@ use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0020_response_event.sql");
+const POSTGRES_EPOCH_UNIX_MS: u64 = 946_684_800_000;
+const MAX_POSTGRES_TIMESTAMP_UNIX_MS: u64 = POSTGRES_EPOCH_UNIX_MS + (i64::MAX as u64 / 1_000);
 
 /// One accepted event plus the distinct observed and received clocks.
 ///
@@ -221,8 +223,7 @@ pub fn load_response_event_receipts(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Vec<ResponseEventReceipt>, ResponseEventPersistenceError> {
-    let (receipts, _) = load_response_event_state(transaction, session_ref)?;
-    Ok(receipts)
+    load_response_event_state(transaction, session_ref).map(|(receipts, _)| receipts)
 }
 
 fn load_response_event_state(
@@ -287,8 +288,7 @@ pub fn load_response_ledger(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<ResponseLedger, ResponseEventPersistenceError> {
-    let (_, ledger) = load_response_event_state(transaction, session_ref)?;
-    Ok(ledger)
+    load_response_event_state(transaction, session_ref).map(|(_, ledger)| ledger)
 }
 
 fn classify_existing_event(
@@ -363,14 +363,6 @@ fn response_ledger_from_receipts(
     ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)
 }
 
-#[cfg(test)]
-fn require_contiguous_receipt_history(
-    session_ref: &str,
-    receipts: &[ResponseEventReceipt],
-) -> Result<(), ResponseEventPersistenceError> {
-    response_ledger_from_receipts(session_ref, receipts).map(|_| ())
-}
-
 fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {
     match error {
         WriteError::InvalidReference | WriteError::SessionMismatch => {
@@ -428,7 +420,7 @@ fn next_contiguous_sequence(
 }
 
 fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersistenceError> {
-    if unix_ms == 0 {
+    if unix_ms == 0 || unix_ms > MAX_POSTGRES_TIMESTAMP_UNIX_MS {
         return Err(ResponseEventPersistenceError::InvalidTimestamp);
     }
     Ok(UNIX_EPOCH + Duration::from_millis(unix_ms))
@@ -472,7 +464,7 @@ mod reference_guard_tests {
         load_response_event_receipts, load_response_ledger, map_rebuild_error,
         millis_from_duration, next_contiguous_sequence, next_sequence_from_summary,
         persist_response_event, postgres_sequence, postgres_timestamptz, query_existing_event_row,
-        require_contiguous_receipt_history, require_read_committed, required_reference,
+        require_read_committed, required_reference, response_ledger_from_receipts,
         unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
     };
     use crate::response::ResponseEvent;
@@ -575,7 +567,7 @@ mod reference_guard_tests {
             received_at_unix_ms: 1_700_000_000_250,
         };
         assert!(matches!(
-            require_contiguous_receipt_history(
+            response_ledger_from_receipts(
                 "session_ipip_ko_quick",
                 &[
                     first_receipt.clone(),
@@ -589,7 +581,7 @@ mod reference_guard_tests {
             Err(ResponseEventPersistenceError::InvalidSequence)
         ));
         assert!(matches!(
-            require_contiguous_receipt_history(
+            response_ledger_from_receipts(
                 "session_ipip_ko_quick",
                 &[
                     first_receipt,
@@ -602,7 +594,7 @@ mod reference_guard_tests {
             ),
             Err(ResponseEventPersistenceError::ConflictingReplay)
         ));
-        assert!(require_contiguous_receipt_history("session_ipip_ko_quick", &[]).is_ok());
+        assert!(response_ledger_from_receipts("session_ipip_ko_quick", &[]).is_ok());
     }
 
     #[test]
@@ -795,6 +787,12 @@ mod reference_guard_tests {
             load_error,
             ResponseEventPersistenceError::UnsupportedIsolationLevel
         ));
+        let ledger_load_error = load_response_ledger(&mut serializable, "session_ipip_ko_iso")
+            .expect_err("lib ledger load must reject stronger isolation");
+        assert!(matches!(
+            ledger_load_error,
+            ResponseEventPersistenceError::UnsupportedIsolationLevel
+        ));
         assert!(matches!(
             require_read_committed(&mut serializable),
             Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
@@ -802,6 +800,14 @@ mod reference_guard_tests {
         serializable.rollback().unwrap();
         let mut committed = client.transaction().unwrap();
         assert!(require_read_committed(&mut committed).is_ok());
+        assert!(
+            load_response_event_receipts(&mut committed, "session_ipip_ko_iso")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(load_response_ledger(&mut committed, "session_ipip_ko_iso")
+            .unwrap()
+            .is_empty());
         committed.rollback().unwrap();
     }
 

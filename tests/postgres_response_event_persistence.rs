@@ -704,47 +704,7 @@ fn inverted_or_zero_event_times_and_time_rebinding_fail_closed() {
             DIGEST_N1,
         ),
     );
-    assert!(matches!(
-        persist_err_at(
-            &mut client,
-            "session_ipip_ko_time",
-            &event,
-            0,
-            RECEIVED_AT_MS
-        ),
-        ResponseEventPersistenceError::InvalidTimestamp
-    ));
-    assert!(matches!(
-        persist_err_at(
-            &mut client,
-            "session_ipip_ko_time",
-            &event,
-            RECEIVED_AT_MS + 1,
-            RECEIVED_AT_MS
-        ),
-        ResponseEventPersistenceError::InvalidTimestamp
-    ));
-    persist_ok(&mut client, "session_ipip_ko_time", &event);
-    assert!(matches!(
-        persist_err_at(
-            &mut client,
-            "session_ipip_ko_time",
-            &event,
-            OBSERVED_AT_MS + 1,
-            RECEIVED_AT_MS
-        ),
-        ResponseEventPersistenceError::ConflictingReplay
-    ));
-    assert!(matches!(
-        persist_err_at(
-            &mut client,
-            "session_ipip_ko_time",
-            &event,
-            OBSERVED_AT_MS,
-            RECEIVED_AT_MS + 1
-        ),
-        ResponseEventPersistenceError::ConflictingReplay
-    ));
+    assert_persist_time_edges(&mut client, &event);
 
     client
         .batch_execute(
@@ -786,5 +746,75 @@ fn inverted_or_zero_event_times_and_time_rebinding_fail_closed() {
     assert!(matches!(
         load_err(&mut client, "session_ipip_ko_epoch"),
         ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    assert_received_epoch_is_rejected(&mut client);
+}
+
+fn assert_received_epoch_is_rejected(client: &mut Client) {
+    client
+        .execute(
+            "INSERT INTO response_event (\
+                 response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                 payload_digest, server_sequence, observed_at, received_at\
+             ) VALUES (\
+                 'server_event_item_received_epoch', 'session_ipip_ko_received_epoch', \
+                 'client_event_item_received_epoch', 'item_version_n_received_epoch', $1, 1, \
+                 TIMESTAMPTZ '1970-01-01 00:00:00.001+00', \
+                 TIMESTAMPTZ '1970-01-01 00:00:00+00'\
+             )",
+            &[&DIGEST_N1],
+        )
+        .unwrap();
+    assert!(matches!(
+        load_err(client, "session_ipip_ko_received_epoch"),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+}
+
+fn assert_persist_time_edges(client: &mut Client, event: &ResponseEvent) {
+    assert!(matches!(
+        persist_err_at(client, "session_ipip_ko_time", event, 0, RECEIVED_AT_MS),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    assert!(matches!(
+        persist_err_at(
+            client,
+            "session_ipip_ko_time",
+            event,
+            RECEIVED_AT_MS + 1,
+            RECEIVED_AT_MS
+        ),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    assert!(matches!(
+        persist_err_at(
+            client,
+            "session_ipip_ko_time",
+            event,
+            OBSERVED_AT_MS,
+            u64::MAX
+        ),
+        ResponseEventPersistenceError::InvalidTimestamp
+    ));
+    persist_ok(client, "session_ipip_ko_time", event);
+    assert!(matches!(
+        persist_err_at(
+            client,
+            "session_ipip_ko_time",
+            event,
+            OBSERVED_AT_MS + 1,
+            RECEIVED_AT_MS
+        ),
+        ResponseEventPersistenceError::ConflictingReplay
+    ));
+    assert!(matches!(
+        persist_err_at(
+            client,
+            "session_ipip_ko_time",
+            event,
+            OBSERVED_AT_MS,
+            RECEIVED_AT_MS + 1
+        ),
+        ResponseEventPersistenceError::ConflictingReplay
     ));
 }
