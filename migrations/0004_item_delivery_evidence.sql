@@ -5,8 +5,9 @@
 -- `char::is_numeric`. PostgreSQL 18 UTF-8 and pg_unicode_fast are runtime prerequisites.
 --
 -- PostgreSQL assumes functions used by CHECK constraints are immutable. A marker derived from
--- the scalar predicate definition makes semantic upgrades recreate and validate every dependent
--- CHECK once, while ordinary idempotent migration reapplication preserves validated constraints.
+-- the scalar and array predicate definitions makes semantic upgrades recreate and validate every
+-- dependent CHECK once, while ordinary idempotent migration reapplication preserves validated
+-- constraints.
 CREATE OR REPLACE FUNCTION item_delivery_reference_is_valid(reference_value TEXT)
 RETURNS BOOLEAN
 LANGUAGE SQL
@@ -151,9 +152,15 @@ DECLARE
     );
 BEGIN
     SELECT 'psychometrics-commons:item-delivery-reference:'
-           || md5(pg_get_functiondef(
-               'item_delivery_reference_is_valid(text)'::regprocedure
-           ))
+           || md5(
+               pg_get_functiondef(
+                   'item_delivery_reference_is_valid(text)'::regprocedure
+               )
+               || E'\n'
+               || pg_get_functiondef(
+                   'item_delivery_reference_array_is_valid(text[])'::regprocedure
+               )
+           )
       INTO reference_contract_version;
 
     -- An existing table keeps same-named CHECK definitions untouched, while
