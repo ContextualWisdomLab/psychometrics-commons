@@ -60,8 +60,8 @@ paths:
       operationId: loadAssessmentSession
       summary: Reload one stored session after restart
       description: >
-        Requires a host-verified authenticated participant authority or a
-        current anonymous-session credential bound to the exact tenant,
+        Requires the host to verify network authentication or anonymous proof
+        and construct a `SessionHttpAuthority` bound to the exact tenant,
         participant, and session. The raw transport classifier has no caller
         authority and returns the same 404 as an unknown session; it must not
         be used to reload stored session data.
