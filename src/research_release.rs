@@ -266,6 +266,7 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "subject_ref",
     "assessment_session_ref",
     "session_ref",
+    "session_id",
     "result_ref",
     "response_ref",
     "item_delivery_ref",
@@ -275,6 +276,7 @@ const FORBIDDEN_PUBLIC_RELEASE_COLUMNS: &[&str] = &[
     "refresh_token",
     "api_key",
     "client_secret",
+    "jwt",
     "session_cookie",
     "cookie_header",
     "set_cookie",
@@ -355,8 +357,9 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 ///   row back to the hosted product lifecycle.
 /// - Identity, authentication, credential, and internal-location column names fail closed
 ///   even when aliases add transport prefixes, suffixes, separators, or inserted digits.
-/// - Session-cookie and HTTP cookie-header credential columns fail closed, while ordinary
-///   cookie-governance metadata is not rejected merely for containing the word `cookie`.
+/// - Generic session identifiers, JWT bearer material, session-cookie, and HTTP cookie-header
+///   credential columns fail closed, while ordinary cookie-governance metadata is not rejected
+///   merely for containing the word `cookie`.
 /// - Supply at least one published column and an effective product-authorized exact
 ///   restricted-identity inventory. A malformed nonblank inventory entry fails closed; blank
 ///   placeholders are ignored. An empty or unavailable inventory is never clean-release evidence.
