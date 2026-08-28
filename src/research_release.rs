@@ -345,8 +345,9 @@ const ALLOWED_AUTHOR_RESEARCH_NAMESPACE_PREFIXES: &[&str] =
 /// - Supply at least one published column and a product-authorized restricted-identity
 ///   inventory. An empty fixture or unavailable inventory is never clean-release evidence.
 /// - Flat cell values are checked for authorized restricted identities even when a known
-///   identity is embedded in otherwise flat text. Object and array values must be flattened
-///   or independently privacy-scanned before packaging.
+///   identity is embedded in otherwise flat text. Unicode default-ignorable formatting
+///   characters do not make an otherwise matching restricted identity publishable. Object and
+///   array values must be flattened or independently privacy-scanned before packaging.
 ///
 /// This boundary never queries Keyverse, a linkage service, or another service's application
 /// database to supplement the caller's authorized inventory.
@@ -534,11 +535,32 @@ fn structured_public_release_cell(cell: &str) -> bool {
 
 fn matches_restricted_identity(cell: &str, restricted_identities: &[&str]) -> bool {
     let cell = cell.trim();
-    !cell.is_empty()
-        && restricted_identities.iter().any(|identity| {
-            let identity = identity.trim();
-            !identity.is_empty() && cell.contains(identity)
-        })
+    if cell.is_empty() {
+        return false;
+    }
+
+    if restricted_identities.iter().any(|identity| {
+        let identity = identity.trim();
+        !identity.is_empty() && cell.contains(identity)
+    }) {
+        return true;
+    }
+
+    if !cell
+        .chars()
+        .any(is_default_ignorable_identifier_character)
+    {
+        return false;
+    }
+
+    let visible_cell: String = cell
+        .chars()
+        .filter(|character| !is_default_ignorable_identifier_character(*character))
+        .collect();
+    restricted_identities.iter().any(|identity| {
+        let identity = identity.trim();
+        !identity.is_empty() && visible_cell.contains(identity)
+    })
 }
 
 /// Fail-closed research-release gate error.
