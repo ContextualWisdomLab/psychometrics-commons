@@ -59,7 +59,9 @@ fn default_ignorable_references_match_the_rust_fail_closed_boundary() {
     );
 
     client
-        .batch_execute(&format!("SET search_path TO public; DROP SCHEMA {schema} CASCADE;"))
+        .batch_execute(&format!(
+            "SET search_path TO public; DROP SCHEMA {schema} CASCADE;"
+        ))
         .expect("isolated default-ignorable parity schema must be removable");
     let schema_was_removed: bool = client
         .query_one("SELECT to_regnamespace($1) IS NULL", &[&schema])
