@@ -60,6 +60,9 @@ DO $item_delivery_array_function$
 DECLARE
     migration_schema TEXT := current_schema();
 BEGIN
+    -- Use an SQL-standard parsed body so PostgreSQL records the scalar-validator dependency by
+    -- object identity. The array validator therefore survives schema rename without retaining a
+    -- stale schema name in its execution search_path; only pg_catalog remains runtime-searchable.
     EXECUTE format(
         $create_item_delivery_array_function$
 CREATE OR REPLACE FUNCTION %1$I.item_delivery_reference_array_is_valid(reference_values TEXT[])
@@ -67,17 +70,17 @@ RETURNS BOOLEAN
 LANGUAGE SQL
 IMMUTABLE
 PARALLEL SAFE
-SET search_path = pg_catalog, %1$I
-AS $item_delivery_reference_array$
+SET search_path = pg_catalog
+BEGIN ATOMIC
     SELECT
         reference_values IS NOT NULL
         AND COUNT(*) = COUNT(DISTINCT reference_value)
         AND COALESCE(
-            bool_and(item_delivery_reference_is_valid(reference_value)),
+            bool_and(%1$I.item_delivery_reference_is_valid(reference_value)),
             TRUE
         )
     FROM unnest(reference_values) AS allowed_reference(reference_value);
-$item_delivery_reference_array$;
+END;
         $create_item_delivery_array_function$,
         migration_schema
     );
