@@ -61,7 +61,8 @@ fn reference_constraint_oids(client: &mut Client) -> Vec<(String, String)> {
         .query(
             "SELECT conname, oid::text \
              FROM pg_constraint \
-             WHERE conname = ANY($1::text[]) \
+             WHERE conrelid = 'scoring_request'::regclass \
+               AND conname = ANY($1::text[]) \
              ORDER BY conname",
             &[&names],
         )
