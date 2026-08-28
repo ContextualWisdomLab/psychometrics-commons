@@ -7,7 +7,7 @@
 //! restricted identity, authentication, credential, or internal-location fields. It does
 //! not publish artifacts or call the external research catalog.
 
-use crate::reference::normalized_reference;
+use crate::reference::{is_default_ignorable_identifier_character, normalized_reference};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -525,7 +525,9 @@ fn normalize_public_release_column(column_name: &str) -> String {
 }
 
 fn structured_public_release_cell(cell: &str) -> bool {
-    let cell = cell.trim_start();
+    let cell = cell.trim_start_matches(|character: char| {
+        character.is_whitespace() || is_default_ignorable_identifier_character(character)
+    });
     cell.starts_with('{') || cell.starts_with('[')
 }
 
