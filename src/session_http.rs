@@ -204,8 +204,8 @@ impl SessionHttpPort for MemorySessionHttpPort {
         if let Some(error) = self.next_load_error.take() {
             return Err(error);
         }
-        if normalized_reference(session_ref).is_none()
-            || normalized_reference(participant_ref).is_none()
+        if normalized_reference(session_ref) != Some(session_ref)
+            || normalized_reference(participant_ref) != Some(participant_ref)
         {
             return Err(AssessmentSessionPersistenceError::InvalidReference);
         }
