@@ -101,6 +101,11 @@ Exit criteria:
 - unsupported/scientific failures fail closed with typed safe errors;
 - OpenAPI validation and implementation contract tests pass.
 
+The CEFR consumer is a dependency-ordered sub-slice of this phase: a Draft
+consumer may pin the exact upstream contract head for review, but release
+readiness requires a released upstream artifact, an executed validator, a
+rights-cleared English instrument, and the exact fast-mlsirm scoring evidence.
+
 ## Phase 4 — Identity, consent, and data-rights integration
 
 Deliverables:

@@ -44,6 +44,7 @@ browser -> internal fast-mlsirm kernel ABI
 | bounded real-time AI | contextual-orchestrator | task/result contracts |
 | bulk asynchronous model execution | pg-llm-batch | batch-job contracts |
 | outbound provider security | EgressWeave | egress policy/enforcement interface |
+| shared CEFR assessment schemas and validator | learning-interoperability-contracts | immutable contract commit and schema digests |
 
 No service may possess another service's normal application-database credentials.
 
@@ -194,6 +195,40 @@ Required status separation:
 A missing value must not be represented as score zero.
 
 Scientific failures such as non-identification, non-finite results, insufficient linking anchors, unsupported contract major versions, or scoreability failures must fail closed rather than silently switching model semantics.
+
+## 8.1 CEFR language-assessment consumer contract
+
+The English A1-B2 placement consumer pins the review-only upstream commit and
+the SHA-256 digests for these external schemas:
+
+```text
+assessment-blueprint.schema.json
+task-specification.schema.json
+cefr-result-snapshot.schema.json
+```
+
+The product-side boundary carries only:
+
+```text
+instrument_release_ref
+assessment_blueprint_ref
+scoring_profile_ref
+cut_score_revision_ref
+result_ref
+schema_validation_ref
+```
+
+The four initial required domains are `reading_reception`,
+`listening_reception`, `written_production`, and `spoken_production`. A result
+must use the exact profile contract version, blueprint reference, result-schema
+digest, and external validator evidence reference; all four domains must be
+measured exactly once. The consumer accepts `cefr_aligned` only and rejects an
+overall reported level until the immutable blueprint authorizes
+`overall_and_profile` reporting with complete required-domain evidence.
+
+This is a product-domain identity/evidence gate, not a replacement JSON-schema
+validator. No HTTP or event transport is claimed until an as-built machine-
+readable contract and implementation exist.
 
 ## 9. Result snapshot contract
 
