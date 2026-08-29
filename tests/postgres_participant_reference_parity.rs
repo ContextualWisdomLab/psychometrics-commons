@@ -1,4 +1,4 @@
-//! Direct PostgreSQL writes must preserve the Rust opaque-reference boundary for participants.
+//! Direct `PostgreSQL` writes must preserve the Rust opaque-reference boundary for participants.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_participant::apply_participant_base_migration;
