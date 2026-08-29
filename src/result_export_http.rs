@@ -404,19 +404,14 @@ fn single_header<'a>(
         if line.is_empty() {
             break;
         }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(HeaderError::Malformed);
-        };
-        if name.is_empty() {
-            return Err(HeaderError::Malformed);
-        }
+        let (name, value) = parse_header_line(line)?;
         if !name.eq_ignore_ascii_case(requested_name) {
             continue;
         }
         if found.is_some() {
             return Err(HeaderError::Duplicate);
         }
-        found = Some(value.trim());
+        found = Some(value);
     }
     Ok(found)
 }
@@ -428,22 +423,60 @@ fn combined_header(request: &str, requested_name: &str) -> Result<Option<String>
         if line.is_empty() {
             break;
         }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(HeaderError::Malformed);
-        };
-        if name.is_empty() {
-            return Err(HeaderError::Malformed);
-        }
+        let (name, value) = parse_header_line(line)?;
         if !name.eq_ignore_ascii_case(requested_name) {
             continue;
         }
         if found {
             combined.push_str(", ");
         }
-        combined.push_str(value.trim());
+        combined.push_str(value);
         found = true;
     }
     Ok(found.then_some(combined))
+}
+
+fn parse_header_line(line: &str) -> Result<(&str, &str), HeaderError> {
+    let Some((name, value)) = line.split_once(':') else {
+        return Err(HeaderError::Malformed);
+    };
+    if !valid_header_name(name) || !valid_header_value(value) {
+        return Err(HeaderError::Malformed);
+    }
+    Ok((
+        name,
+        value.trim_matches(|character| character == ' ' || character == '\t'),
+    ))
+}
+
+fn valid_header_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+fn valid_header_value(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|byte| byte == b'\t' || (byte >= 0x20 && byte != 0x7f))
 }
 
 fn parse_request_line(request: &str) -> Option<(&str, &str)> {
@@ -508,9 +541,10 @@ fn append_control_escape(target: &mut String, character: char) {
 mod tests {
     use super::{
         accept_representation, combined_header, exact_opaque_reference, idempotency_key,
-        json_string, parse_accept_item, parse_export_route, parse_quality, parse_request_line,
-        representation_quality, single_header, AcceptError, AcceptTarget, HeaderError,
-        IdempotencyError, Representation, RouteParse,
+        json_string, parse_accept_item, parse_export_route, parse_header_line, parse_quality,
+        parse_request_line, representation_quality, single_header, valid_header_name,
+        valid_header_value, AcceptError, AcceptTarget, HeaderError, IdempotencyError,
+        Representation, RouteParse,
     };
 
     #[test]
@@ -619,6 +653,32 @@ mod tests {
                 "accept"
             ),
             Ok(Some("application/json, text/plain".to_owned()))
+        );
+    }
+
+    #[test]
+    fn header_field_parser_enforces_http_token_and_field_value_syntax() {
+        assert!(valid_header_name("X!#$%&'*+-.^_`|~09Az"));
+        assert!(!valid_header_name(""));
+        assert!(!valid_header_name("Bad Name"));
+        assert!(!valid_header_name("Bad(Name"));
+        assert!(!valid_header_name("Námé"));
+
+        assert!(valid_header_value(""));
+        assert!(valid_header_value(" value\twith spacing "));
+        assert!(valid_header_value("café"));
+        assert!(!valid_header_value("bad\u{0000}value"));
+        assert!(!valid_header_value("bad\u{007f}value"));
+
+        assert_eq!(
+            parse_header_line("Accept:\tapplication/json "),
+            Ok(("Accept", "application/json"))
+        );
+        assert_eq!(parse_header_line("Host : example.test"), Err(HeaderError::Malformed));
+        assert_eq!(parse_header_line("Bad(Name: value"), Err(HeaderError::Malformed));
+        assert_eq!(
+            parse_header_line("X-Test: value\u{0000}suffix"),
+            Err(HeaderError::Malformed)
         );
     }
 
