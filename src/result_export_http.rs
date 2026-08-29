@@ -147,6 +147,9 @@ pub fn handle_result_export_http_request(
         Err(IdempotencyError::Duplicate) => {
             return bad_request("send exactly one Idempotency-Key header for result export");
         }
+        Err(IdempotencyError::MalformedHeader) => {
+            return bad_request("result export request contains a malformed HTTP header field");
+        }
         Err(IdempotencyError::Invalid) => {
             return bad_request(
                 "result export Idempotency-Key must be an exact opaque non-numeric value",
@@ -178,8 +181,8 @@ pub fn handle_result_export_http_request(
     match accept_representation(request) {
         Ok(Representation::Json) => ResultExportHttpResponse::json(export.json_document()),
         Ok(Representation::Text) => ResultExportHttpResponse::text(export.human_readable_report()),
-        Err(AcceptError::Duplicate) => {
-            bad_request("send at most one Accept header for result export")
+        Err(AcceptError::MalformedHeader) => {
+            bad_request("result export request contains a malformed HTTP header field")
         }
         Err(AcceptError::Unsupported) => ResultExportHttpResponse::problem(
             406,
@@ -226,13 +229,16 @@ fn exact_opaque_reference(value: &str) -> bool {
 enum IdempotencyError {
     Missing,
     Duplicate,
+    MalformedHeader,
     Invalid,
 }
 
 fn idempotency_key(request: &str) -> Result<&str, IdempotencyError> {
-    let value = single_header(request, "idempotency-key")
-        .map_err(|_| IdempotencyError::Duplicate)?
-        .ok_or(IdempotencyError::Missing)?;
+    let value = match single_header(request, "idempotency-key") {
+        Ok(value) => value.ok_or(IdempotencyError::Missing)?,
+        Err(HeaderError::Duplicate) => return Err(IdempotencyError::Duplicate),
+        Err(HeaderError::Malformed) => return Err(IdempotencyError::MalformedHeader),
+    };
     if exact_opaque_reference(value) {
         Ok(value)
     } else {
@@ -248,7 +254,7 @@ enum Representation {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AcceptError {
-    Duplicate,
+    MalformedHeader,
     Unsupported,
 }
 
@@ -271,13 +277,13 @@ impl AcceptTarget {
 }
 
 fn accept_representation(request: &str) -> Result<Representation, AcceptError> {
-    let accept = single_header(request, "accept").map_err(|_| AcceptError::Duplicate)?;
+    let accept = combined_header(request, "accept").map_err(|_| AcceptError::MalformedHeader)?;
     let Some(accept) = accept else {
         return Ok(Representation::Json);
     };
 
-    let json_quality = representation_quality(accept, Representation::Json).unwrap_or(0);
-    let text_quality = representation_quality(accept, Representation::Text).unwrap_or(0);
+    let json_quality = representation_quality(&accept, Representation::Json).unwrap_or(0);
+    let text_quality = representation_quality(&accept, Representation::Text).unwrap_or(0);
     match (json_quality, text_quality) {
         (0, 0) => Err(AcceptError::Unsupported),
         (json, text) if json >= text => Ok(Representation::Json),
@@ -346,7 +352,9 @@ fn parse_accept_item(item: &str) -> Option<(AcceptTarget, u16, u8)> {
                 return None;
             }
             saw_charset = true;
-            specificity = 3;
+            if !saw_quality {
+                specificity = 3;
+            }
         } else {
             return None;
         }
@@ -382,29 +390,60 @@ fn parse_quality(value: &str) -> Option<u16> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DuplicateHeader;
+enum HeaderError {
+    Malformed,
+    Duplicate,
+}
 
 fn single_header<'a>(
     request: &'a str,
     requested_name: &str,
-) -> Result<Option<&'a str>, DuplicateHeader> {
+) -> Result<Option<&'a str>, HeaderError> {
     let mut found = None;
     for line in request.lines().skip(1) {
         if line.is_empty() {
             break;
         }
         let Some((name, value)) = line.split_once(':') else {
-            continue;
+            return Err(HeaderError::Malformed);
         };
+        if name.is_empty() {
+            return Err(HeaderError::Malformed);
+        }
         if !name.eq_ignore_ascii_case(requested_name) {
             continue;
         }
         if found.is_some() {
-            return Err(DuplicateHeader);
+            return Err(HeaderError::Duplicate);
         }
         found = Some(value.trim());
     }
     Ok(found)
+}
+
+fn combined_header(request: &str, requested_name: &str) -> Result<Option<String>, HeaderError> {
+    let mut combined = String::new();
+    let mut found = false;
+    for line in request.lines().skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(HeaderError::Malformed);
+        };
+        if name.is_empty() {
+            return Err(HeaderError::Malformed);
+        }
+        if !name.eq_ignore_ascii_case(requested_name) {
+            continue;
+        }
+        if found {
+            combined.push_str(", ");
+        }
+        combined.push_str(value.trim());
+        found = true;
+    }
+    Ok(found.then_some(combined))
 }
 
 fn parse_request_line(request: &str) -> Option<(&str, &str)> {
@@ -468,10 +507,10 @@ fn append_control_escape(target: &mut String, character: char) {
 #[cfg(test)]
 mod tests {
     use super::{
-        accept_representation, exact_opaque_reference, idempotency_key, json_string,
-        parse_accept_item, parse_export_route, parse_quality, parse_request_line,
-        representation_quality, single_header, AcceptError, AcceptTarget, IdempotencyError,
-        Representation, RouteParse,
+        accept_representation, combined_header, exact_opaque_reference, idempotency_key,
+        json_string, parse_accept_item, parse_export_route, parse_quality, parse_request_line,
+        representation_quality, single_header, AcceptError, AcceptTarget, HeaderError,
+        IdempotencyError, Representation, RouteParse,
     };
 
     #[test]
@@ -533,6 +572,12 @@ mod tests {
             ),
             Err(IdempotencyError::Duplicate)
         );
+        assert_eq!(
+            idempotency_key(
+                "POST / HTTP/1.1\r\nIdempotency-Key: export_alpha\r\nMalformedHeader\r\n\r\n"
+            ),
+            Err(IdempotencyError::MalformedHeader)
+        );
 
         assert_eq!(
             accept_representation("POST / HTTP/1.1\r\n\r\n"),
@@ -552,17 +597,28 @@ mod tests {
         );
         assert_eq!(
             accept_representation("POST / HTTP/1.1\r\nBroken\r\nAccept: application/xml\r\n\r\n"),
-            Err(AcceptError::Unsupported)
+            Err(AcceptError::MalformedHeader)
         );
         assert_eq!(
             accept_representation(
                 "POST / HTTP/1.1\r\nAccept: application/json\r\nAccept: text/plain\r\n\r\n"
             ),
-            Err(AcceptError::Duplicate)
+            Ok(Representation::Json)
         );
         assert_eq!(
             single_header("POST / HTTP/1.1\r\nHost: example.test\r\n\r\n", "accept"),
             Ok(None)
+        );
+        assert_eq!(
+            single_header("POST / HTTP/1.1\r\nBroken\r\n\r\n", "accept"),
+            Err(HeaderError::Malformed)
+        );
+        assert_eq!(
+            combined_header(
+                "POST / HTTP/1.1\r\nAccept: application/json\r\nAccept: text/plain\r\n\r\n",
+                "accept"
+            ),
+            Ok(Some("application/json, text/plain".to_owned()))
         );
     }
 
@@ -579,6 +635,10 @@ mod tests {
         assert_eq!(
             parse_accept_item("text/plain; charset=UTF-8; q=0.75"),
             Some((AcceptTarget::Text, 750, 3))
+        );
+        assert_eq!(
+            parse_accept_item("text/plain;q=0.4;charset=utf-8"),
+            Some((AcceptTarget::Text, 400, 2))
         );
         assert_eq!(
             parse_accept_item("text/*;q=0.25"),
