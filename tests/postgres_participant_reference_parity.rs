@@ -79,8 +79,9 @@ fn migration_reapplication_fails_closed_on_historical_default_ignorable_identity
         )
         .expect("the deliberately weakened historical constraint must admit the regression row");
 
-    let error = apply_participant_base_migration(&mut client)
-        .expect_err("migration reapplication must reject historical identity Rust cannot reconstruct");
+    let error = apply_participant_base_migration(&mut client).expect_err(
+        "migration reapplication must reject historical identity Rust cannot reconstruct",
+    );
     assert_eq!(error.code(), Some(&SqlState::CHECK_VIOLATION));
 
     let preserved: i64 = client
@@ -90,5 +91,8 @@ fn migration_reapplication_fails_closed_on_historical_default_ignorable_identity
         )
         .unwrap()
         .get(0);
-    assert_eq!(preserved, 1, "migration must not silently rewrite immutable identity");
+    assert_eq!(
+        preserved, 1,
+        "migration must not silently rewrite immutable identity"
+    );
 }
