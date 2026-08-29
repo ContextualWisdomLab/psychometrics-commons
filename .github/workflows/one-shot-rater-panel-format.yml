@@ -1,0 +1,69 @@
+name: One-shot rater panel format repair
+
+on:
+  push:
+    branches:
+      - feat/rater-panel-bounded-context
+    paths:
+      - .github/workflows/one-shot-rater-panel-format.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-remove:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install repository Rust formatter
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt
+          rustup default 1.97.1
+          rustc --version
+          cargo fmt --version
+
+      - name: Apply canonical formatting
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          rm .github/workflows/one-shot-rater-panel-format.yml
+
+      - name: Refuse unrelated mutation
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+
+          allowed = {
+              ".github/workflows/one-shot-rater-panel-format.yml",
+              "src/rater_panel.rs",
+          }
+          changed = {
+              line
+              for line in subprocess.check_output(
+                  ["git", "status", "--short"], text=True
+              ).splitlines()
+              if (line := line[3:])
+          }
+          unexpected = changed - allowed
+          if unexpected:
+              raise SystemExit(f"unexpected formatter mutation: {sorted(unexpected)}")
+          if "src/rater_panel.rs" not in changed:
+              raise SystemExit("rustfmt did not produce the expected source repair")
+          PY
+
+      - name: Commit bounded repair
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/rater_panel.rs .github/workflows/one-shot-rater-panel-format.yml
+          git commit -m "fix(rater): apply canonical Rust formatting"
+          git push origin HEAD:feat/rater-panel-bounded-context
