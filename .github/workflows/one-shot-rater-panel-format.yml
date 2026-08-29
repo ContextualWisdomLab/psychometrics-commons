@@ -4,14 +4,13 @@ on:
   push:
     branches:
       - feat/rater-panel-bounded-context
-    paths:
-      - .github/workflows/one-shot-rater-panel-format.yml
 
 permissions:
   contents: write
 
 jobs:
   format-and-remove:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -46,11 +45,11 @@ jobs:
               "src/rater_panel.rs",
           }
           changed = {
-              line
+              line[3:]
               for line in subprocess.check_output(
                   ["git", "status", "--short"], text=True
               ).splitlines()
-              if (line := line[3:])
+              if line[3:]
           }
           unexpected = changed - allowed
           if unexpected:
