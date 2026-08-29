@@ -6,3 +6,5 @@
   representing them as independent raters.
 - Preserved provider failures as explicit terminal request states and kept
   adjudication resolutions separate from immutable source invocations.
+- Applied the repository's pinned Rust formatter to the new aggregate and
+  removed the temporary one-shot repair workflow before product validation.
