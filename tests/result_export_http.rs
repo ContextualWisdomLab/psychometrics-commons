@@ -284,16 +284,22 @@ fn idempotency_header_is_required_exact_and_single() {
 #[test]
 fn malformed_header_lines_fail_closed() {
     let (actor, participant, snapshot, export) = fixture();
-    let response = handle_result_export_http_request(
+    for request in [
         "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nMalformedHeader\r\nAccept: application/json\r\n\r\n",
-        &actor,
-        &participant,
-        &snapshot,
-        &export,
-    );
-
-    assert_eq!(response.status(), 400);
-    assert_eq!(response.content_type(), "application/problem+json");
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nHost : example.test\r\nAccept: application/json\r\n\r\n",
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nBad(Name: example.test\r\nAccept: application/json\r\n\r\n",
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nX-Unrelated: value\u{0000}suffix\r\nAccept: application/json\r\n\r\n",
+    ] {
+        let response = handle_result_export_http_request(
+            request,
+            &actor,
+            &participant,
+            &snapshot,
+            &export,
+        );
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.content_type(), "application/problem+json");
+    }
 }
 
 #[test]
