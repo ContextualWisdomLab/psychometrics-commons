@@ -10,8 +10,7 @@ use postgres::{Client, NoTls};
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
-    Client::connect(&connection, NoTls)
-        .expect("isolated CI PostgreSQL database must be reachable")
+    Client::connect(&connection, NoTls).expect("isolated CI PostgreSQL database must be reachable")
 }
 
 #[test]
