@@ -346,7 +346,7 @@ fn parse_accept_item(item: &str) -> Option<(AcceptTarget, u16, u8)> {
         } else if target == AcceptTarget::Text
             && specificity == 2
             && name.eq_ignore_ascii_case("charset")
-            && value.eq_ignore_ascii_case("utf-8")
+            && utf8_charset_parameter(value)
         {
             if saw_charset {
                 return None;
@@ -361,6 +361,14 @@ fn parse_accept_item(item: &str) -> Option<(AcceptTarget, u16, u8)> {
     }
 
     Some((target, quality, specificity))
+}
+
+fn utf8_charset_parameter(value: &str) -> bool {
+    value.eq_ignore_ascii_case("utf-8")
+        || value
+            .strip_prefix('"')
+            .and_then(|quoted| quoted.strip_suffix('"'))
+            .is_some_and(|quoted| quoted.eq_ignore_ascii_case("utf-8"))
 }
 
 fn parse_quality(value: &str) -> Option<u16> {
@@ -542,9 +550,9 @@ mod tests {
     use super::{
         accept_representation, combined_header, exact_opaque_reference, idempotency_key,
         json_string, parse_accept_item, parse_export_route, parse_header_line, parse_quality,
-        parse_request_line, representation_quality, single_header, valid_header_name,
-        valid_header_value, AcceptError, AcceptTarget, HeaderError, IdempotencyError,
-        Representation, RouteParse,
+        parse_request_line, representation_quality, single_header, utf8_charset_parameter,
+        valid_header_name, valid_header_value, AcceptError, AcceptTarget, HeaderError,
+        IdempotencyError, Representation, RouteParse,
     };
 
     #[test]
@@ -697,6 +705,10 @@ mod tests {
             Some((AcceptTarget::Text, 750, 3))
         );
         assert_eq!(
+            parse_accept_item("text/plain; charset=\"utf-8\""),
+            Some((AcceptTarget::Text, 1000, 3))
+        );
+        assert_eq!(
             parse_accept_item("text/plain;q=0.4;charset=utf-8"),
             Some((AcceptTarget::Text, 400, 2))
         );
@@ -718,6 +730,14 @@ mod tests {
         assert_eq!(parse_accept_item("text/plain;q=0.5;q=0.4"), None);
         assert_eq!(parse_accept_item("text/plain;broken"), None);
         assert_eq!(parse_accept_item("text/plain;q=bogus"), None);
+
+        assert!(utf8_charset_parameter("utf-8"));
+        assert!(utf8_charset_parameter("UTF-8"));
+        assert!(utf8_charset_parameter("\"utf-8\""));
+        assert!(utf8_charset_parameter("\"UTF-8\""));
+        assert!(!utf8_charset_parameter("\"utf-8"));
+        assert!(!utf8_charset_parameter("utf-8\""));
+        assert!(!utf8_charset_parameter("\"iso-8859-1\""));
 
         assert_eq!(parse_quality("0"), Some(0));
         assert_eq!(parse_quality("1"), Some(1000));
