@@ -625,10 +625,7 @@ mod tests {
     fn assignment_preserves_configuration_and_repeat_identity() {
         let assignment = assignment("assignment_alpha", "configuration_alpha", 2);
         assert_eq!(assignment.assignment_ref(), "assignment_alpha");
-        assert_eq!(
-            assignment.rater_configuration_ref(),
-            "configuration_alpha"
-        );
+        assert_eq!(assignment.rater_configuration_ref(), "configuration_alpha");
         assert_eq!(assignment.repeat_index(), 2);
         assert_eq!(assignment.blind_group_ref(), "blind_group_alpha");
         assert_eq!(
@@ -647,26 +644,15 @@ mod tests {
         .expect("valid panel");
         assert_eq!(panel.panel_ref(), "panel_alpha");
         assert_eq!(panel.panel_revision_ref(), "panel_revision_alpha");
-        assert_eq!(
-            panel.calibration_design_ref(),
-            "calibration_design_alpha"
-        );
+        assert_eq!(panel.calibration_design_ref(), "calibration_design_alpha");
         assert_eq!(panel.state(), RaterPanelState::Draft);
         assert_eq!(panel.publish(), Err(RaterWorkflowError::EmptyAssignmentSet));
 
         panel
-            .add_assignment(assignment(
-                "assignment_alpha",
-                "configuration_alpha",
-                0,
-            ))
+            .add_assignment(assignment("assignment_alpha", "configuration_alpha", 0))
             .expect("first assignment");
         panel
-            .add_assignment(assignment(
-                "assignment_beta",
-                "configuration_alpha",
-                1,
-            ))
+            .add_assignment(assignment("assignment_beta", "configuration_alpha", 1))
             .expect("repeat assignment");
         panel
             .add_anchor_response("anchor_response_alpha")
@@ -677,11 +663,7 @@ mod tests {
         panel.publish().expect("publish panel");
         assert_eq!(panel.state(), RaterPanelState::Published);
         assert_eq!(
-            panel.add_assignment(assignment(
-                "assignment_gamma",
-                "configuration_beta",
-                0,
-            )),
+            panel.add_assignment(assignment("assignment_gamma", "configuration_beta", 0,)),
             Err(RaterWorkflowError::PanelNotDraft)
         );
         assert_eq!(
@@ -702,8 +684,8 @@ mod tests {
 
     #[test]
     fn panel_rejects_duplicate_assignment_repeat_and_anchor_identities() {
-        let mut panel = RaterPanelDefinition::new("panel", "panel_revision", "design")
-            .expect("valid panel");
+        let mut panel =
+            RaterPanelDefinition::new("panel", "panel_revision", "design").expect("valid panel");
         panel
             .add_assignment(assignment("assignment_a", "configuration_a", 0))
             .expect("first assignment");
@@ -715,9 +697,7 @@ mod tests {
             panel.add_assignment(assignment("assignment_b", "configuration_a", 0)),
             Err(RaterWorkflowError::DuplicateConfigurationRepeat)
         );
-        panel
-            .add_anchor_response("anchor_a")
-            .expect("first anchor");
+        panel.add_anchor_response("anchor_a").expect("first anchor");
         assert_eq!(
             panel.add_anchor_response("anchor_a"),
             Err(RaterWorkflowError::DuplicateAnchorReference)
@@ -751,7 +731,9 @@ mod tests {
             Err(RaterWorkflowError::InvalidRequestTransition)
         );
         success.dispatch().expect("dispatch request");
-        success.receive("invocation_alpha").expect("receive invocation");
+        success
+            .receive("invocation_alpha")
+            .expect("receive invocation");
         assert_eq!(success.state(), ObservationRequestState::Received);
         assert_eq!(success.invocation_ref(), Some("invocation_alpha"));
         assert_eq!(
@@ -768,7 +750,9 @@ mod tests {
         )
         .expect("valid request");
         failure.dispatch().expect("dispatch request");
-        failure.fail("provider_timeout_alpha").expect("record failure");
+        failure
+            .fail("provider_timeout_alpha")
+            .expect("record failure");
         assert_eq!(failure.state(), ObservationRequestState::Failed);
         assert_eq!(failure.failure_ref(), Some("provider_timeout_alpha"));
         assert_eq!(
@@ -780,13 +764,7 @@ mod tests {
     #[test]
     fn observation_request_rejects_invalid_criterion_sets_and_terminal_mutation() {
         assert_eq!(
-            ObservationRequest::new(
-                "request",
-                "panel_revision",
-                "assignment",
-                "response",
-                &[],
-            ),
+            ObservationRequest::new("request", "panel_revision", "assignment", "response", &[],),
             Err(RaterWorkflowError::EmptyCriterionSet)
         );
         assert_eq!(
@@ -878,31 +856,17 @@ mod tests {
             Err(RaterWorkflowError::InsufficientAdjudicationSources)
         );
         assert_eq!(
-            AdjudicationCase::new(
-                "case",
-                "panel",
-                "reason",
-                &["invocation", "invocation"],
-            ),
+            AdjudicationCase::new("case", "panel", "reason", &["invocation", "invocation"],),
             Err(RaterWorkflowError::DuplicateSourceInvocation)
         );
         assert_eq!(
-            AdjudicationCase::new(
-                "case",
-                "panel",
-                "reason",
-                &["invocation", " unsafe "],
-            ),
+            AdjudicationCase::new("case", "panel", "reason", &["invocation", " unsafe "],),
             Err(RaterWorkflowError::InvalidReference)
         );
 
-        let mut adjudication = AdjudicationCase::new(
-            "case",
-            "panel",
-            "reason",
-            &["invocation_a", "invocation_b"],
-        )
-        .expect("valid adjudication case");
+        let mut adjudication =
+            AdjudicationCase::new("case", "panel", "reason", &["invocation_a", "invocation_b"])
+                .expect("valid adjudication case");
         assert_eq!(
             adjudication.resolve(" resolution "),
             Err(RaterWorkflowError::InvalidReference)
