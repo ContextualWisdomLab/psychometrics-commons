@@ -386,8 +386,7 @@ fn utf8_charset_parameter(value: &str) -> bool {
             }
             escaped
         } else {
-            if !matches!(byte, b'\t' | b' ' | b'!' | b'#'..=b'[' | b']'..=b'~' | 0x80..=0xff)
-            {
+            if !matches!(byte, b'\t' | b' ' | b'!' | b'#'..=b'[' | b']'..=b'~' | 0x80..=0xff) {
                 return false;
             }
             byte
