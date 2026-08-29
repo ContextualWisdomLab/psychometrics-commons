@@ -254,11 +254,101 @@ enum AcceptError {
 
 fn accept_representation(request: &str) -> Result<Representation, AcceptError> {
     let accept = single_header(request, "accept").map_err(|_| AcceptError::Duplicate)?;
-    match accept {
-        None | Some("*/*" | "application/json") => Ok(Representation::Json),
-        Some("text/plain") => Ok(Representation::Text),
-        Some(_) => Err(AcceptError::Unsupported),
+    let Some(accept) = accept else {
+        return Ok(Representation::Json);
+    };
+
+    let mut best: Option<(u16, u8, u8, Representation)> = None;
+    for item in accept.split(',') {
+        let Some((representation, quality, specificity)) = parse_accept_item(item) else {
+            continue;
+        };
+        if quality == 0 {
+            continue;
+        }
+        let server_preference = u8::from(representation == Representation::Json);
+        let rank = (quality, specificity, server_preference);
+        if best
+            .as_ref()
+            .is_none_or(|(best_quality, best_specificity, best_preference, _)| {
+                rank > (*best_quality, *best_specificity, *best_preference)
+            })
+        {
+            best = Some((quality, specificity, server_preference, representation));
+        }
     }
+
+    best.map(|(_, _, _, representation)| representation)
+        .ok_or(AcceptError::Unsupported)
+}
+
+fn parse_accept_item(item: &str) -> Option<(Representation, u16, u8)> {
+    let mut segments = item.split(';');
+    let media_range = segments.next()?.trim();
+    let (representation, specificity) = if media_range.eq_ignore_ascii_case("application/json") {
+        (Representation::Json, 2)
+    } else if media_range.eq_ignore_ascii_case("text/plain") {
+        (Representation::Text, 2)
+    } else if media_range.eq_ignore_ascii_case("application/*") {
+        (Representation::Json, 1)
+    } else if media_range.eq_ignore_ascii_case("text/*") {
+        (Representation::Text, 1)
+    } else if media_range == "*/*" {
+        (Representation::Json, 0)
+    } else {
+        return None;
+    };
+
+    let mut quality = 1000;
+    let mut saw_quality = false;
+    for parameter in segments {
+        let (name, value) = parameter.trim().split_once('=')?;
+        let name = name.trim();
+        let value = value.trim();
+        if name.eq_ignore_ascii_case("q") {
+            if saw_quality {
+                return None;
+            }
+            saw_quality = true;
+            quality = parse_quality(value)?;
+        } else if representation == Representation::Text
+            && specificity == 2
+            && name.eq_ignore_ascii_case("charset")
+            && value.eq_ignore_ascii_case("utf-8")
+        {
+            continue;
+        } else {
+            return None;
+        }
+    }
+
+    Some((representation, quality, specificity))
+}
+
+fn parse_quality(value: &str) -> Option<u16> {
+    match value {
+        "0" => return Some(0),
+        "1" => return Some(1000),
+        _ => {}
+    }
+
+    let (whole, fraction) = value.split_once('.')?;
+    if fraction.len() > 3 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if whole == "1" {
+        return fraction.bytes().all(|byte| byte == b'0').then_some(1000);
+    }
+    if whole != "0" {
+        return None;
+    }
+    let fraction_value = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<u16>().ok()?
+    };
+    let scale = 10_u16.pow(u32::try_from(3 - fraction.len()).ok()?);
+    Some(fraction_value * scale)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -349,8 +439,8 @@ fn append_control_escape(target: &mut String, character: char) {
 mod tests {
     use super::{
         accept_representation, exact_opaque_reference, idempotency_key, json_string,
-        parse_export_route, parse_request_line, single_header, AcceptError, IdempotencyError,
-        Representation, RouteParse,
+        parse_accept_item, parse_export_route, parse_quality, parse_request_line, single_header,
+        AcceptError, IdempotencyError, Representation, RouteParse,
     };
 
     #[test]
@@ -442,6 +532,63 @@ mod tests {
         assert_eq!(
             single_header("POST / HTTP/1.1\r\nHost: example.test\r\n\r\n", "accept"),
             Ok(None)
+        );
+    }
+
+    #[test]
+    fn accept_parser_covers_supported_ranges_parameters_and_quality_edges() {
+        assert_eq!(
+            parse_accept_item("application/json"),
+            Some((Representation::Json, 1000, 2))
+        );
+        assert_eq!(
+            parse_accept_item("APPLICATION/*;q=0.5"),
+            Some((Representation::Json, 500, 1))
+        );
+        assert_eq!(
+            parse_accept_item("text/plain; charset=UTF-8; q=0.75"),
+            Some((Representation::Text, 750, 2))
+        );
+        assert_eq!(
+            parse_accept_item("text/*;q=0.25"),
+            Some((Representation::Text, 250, 1))
+        );
+        assert_eq!(
+            parse_accept_item("*/*;q=0.1"),
+            Some((Representation::Json, 100, 0))
+        );
+        assert_eq!(parse_accept_item("application/xml"), None);
+        assert_eq!(parse_accept_item("application/json;profile=alpha"), None);
+        assert_eq!(parse_accept_item("text/plain;charset=iso-8859-1"), None);
+        assert_eq!(parse_accept_item("text/plain;q=0.5;q=0.4"), None);
+        assert_eq!(parse_accept_item("text/plain;broken"), None);
+        assert_eq!(parse_accept_item("text/plain;q=bogus"), None);
+
+        assert_eq!(parse_quality("0"), Some(0));
+        assert_eq!(parse_quality("1"), Some(1000));
+        assert_eq!(parse_quality("0."), Some(0));
+        assert_eq!(parse_quality("1."), Some(1000));
+        assert_eq!(parse_quality("0.7"), Some(700));
+        assert_eq!(parse_quality("0.25"), Some(250));
+        assert_eq!(parse_quality("0.125"), Some(125));
+        assert_eq!(parse_quality("1.000"), Some(1000));
+        assert_eq!(parse_quality("1.001"), None);
+        assert_eq!(parse_quality("2.0"), None);
+        assert_eq!(parse_quality("0.1234"), None);
+        assert_eq!(parse_quality("0.x"), None);
+        assert_eq!(parse_quality("bogus"), None);
+
+        assert_eq!(
+            accept_representation(
+                "POST / HTTP/1.1\r\nAccept: text/plain;q=0.5, application/json;q=0.5\r\n\r\n"
+            ),
+            Ok(Representation::Json)
+        );
+        assert_eq!(
+            accept_representation(
+                "POST / HTTP/1.1\r\nAccept: application/json;q=0, text/plain;q=0\r\n\r\n"
+            ),
+            Err(AcceptError::Unsupported)
         );
     }
 
