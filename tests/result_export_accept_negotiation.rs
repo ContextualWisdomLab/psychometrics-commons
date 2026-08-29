@@ -157,3 +157,38 @@ fn honors_quality_weights_and_rejects_zero_or_malformed_supported_ranges() {
     );
     assert_eq!(malformed.status(), 406);
 }
+
+#[test]
+fn specific_media_ranges_override_broader_wildcard_quality_for_each_representation() {
+    let (actor, participant, result, export) = fixture();
+
+    let json = handle_result_export_http_request(
+        &request("text/plain;q=0.1, text/*;q=0.9, application/json;q=0.5"),
+        &actor,
+        &participant,
+        &result,
+        &export,
+    );
+    assert_eq!(json.status(), 200);
+    assert_eq!(json.content_type(), "application/json");
+
+    let text = handle_result_export_http_request(
+        &request("application/json;q=0.1, */*;q=0.9"),
+        &actor,
+        &participant,
+        &result,
+        &export,
+    );
+    assert_eq!(text.status(), 200);
+    assert_eq!(text.content_type(), "text/plain; charset=utf-8");
+
+    let excluded_text = handle_result_export_http_request(
+        &request("text/plain;q=0, */*;q=1"),
+        &actor,
+        &participant,
+        &result,
+        &export,
+    );
+    assert_eq!(excluded_text.status(), 200);
+    assert_eq!(excluded_text.content_type(), "application/json");
+}
