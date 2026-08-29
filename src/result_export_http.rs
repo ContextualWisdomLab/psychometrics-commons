@@ -591,7 +591,10 @@ mod tests {
         assert_eq!(parse_accept_item("application/xml"), None);
         assert_eq!(parse_accept_item("application/json;profile=alpha"), None);
         assert_eq!(parse_accept_item("text/plain;charset=iso-8859-1"), None);
-        assert_eq!(parse_accept_item("text/plain;charset=utf-8;charset=utf-8"), None);
+        assert_eq!(
+            parse_accept_item("text/plain;charset=utf-8;charset=utf-8"),
+            None
+        );
         assert_eq!(parse_accept_item("text/plain;q=0.5;q=0.4"), None);
         assert_eq!(parse_accept_item("text/plain;broken"), None);
         assert_eq!(parse_accept_item("text/plain;q=bogus"), None);
@@ -618,10 +621,7 @@ mod tests {
             Some(100)
         );
         assert_eq!(
-            representation_quality(
-                "application/json;q=0.1, */*;q=0.9",
-                Representation::Text
-            ),
+            representation_quality("application/json;q=0.1, */*;q=0.9", Representation::Text),
             Some(900)
         );
         assert_eq!(
