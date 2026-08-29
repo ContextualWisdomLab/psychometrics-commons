@@ -241,14 +241,15 @@ fn unsupported_method_representation_and_query_are_explicit() {
     assert_eq!(representation.status(), 406);
     assert_eq!(representation.content_type(), "application/problem+json");
 
-    let duplicate_accept = handle_result_export_http_request(
+    let repeated_accept = handle_result_export_http_request(
         "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nAccept: application/json\r\nAccept: text/plain\r\n\r\n",
         &actor,
         &participant,
         &snapshot,
         &export,
     );
-    assert_eq!(duplicate_accept.status(), 400);
+    assert_eq!(repeated_accept.status(), 200);
+    assert_eq!(repeated_accept.content_type(), "application/json");
 
     let query = handle_result_export_http_request(
         "POST /v1/results/result_snapshot_alpha/exports?download=1 HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\n\r\n",
@@ -278,6 +279,21 @@ fn idempotency_header_is_required_exact_and_single() {
         );
         assert_eq!(response.status(), 400);
     }
+}
+
+#[test]
+fn malformed_header_lines_fail_closed() {
+    let (actor, participant, snapshot, export) = fixture();
+    let response = handle_result_export_http_request(
+        "POST /v1/results/result_snapshot_alpha/exports HTTP/1.1\r\nIdempotency-Key: result_export_alpha\r\nMalformedHeader\r\nAccept: application/json\r\n\r\n",
+        &actor,
+        &participant,
+        &snapshot,
+        &export,
+    );
+
+    assert_eq!(response.status(), 400);
+    assert_eq!(response.content_type(), "application/problem+json");
 }
 
 #[test]
