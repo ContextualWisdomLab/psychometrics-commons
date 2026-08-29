@@ -1,0 +1,464 @@
+//! Real `PostgreSQL` contract for the durable anonymous-first participant base record.
+
+use postgres::{Client, IsolationLevel, NoTls};
+use psychometrics_commons_runtime::participant::ParticipantRecord;
+use psychometrics_commons_runtime::postgres_participant::{
+    apply_participant_base_migration, load_anonymous_participant_base,
+    persist_anonymous_participant_base, ParticipantBasePersistenceDisposition,
+    ParticipantBasePersistenceError,
+};
+use std::sync::{Mutex, MutexGuard};
+
+static PARTICIPANT_BASE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn participant_base_test_guard() -> MutexGuard<'static, ()> {
+    PARTICIPANT_BASE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn test_client() -> Client {
+    let connection = std::env::var("TEST_DATABASE_URL")
+        .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
+    let mut client = Client::connect(&connection, NoTls)
+        .expect("isolated CI PostgreSQL database must be reachable");
+    client
+        .batch_execute(
+            "CREATE SCHEMA IF NOT EXISTS participant_base_persistence_test;\
+             SET search_path TO participant_base_persistence_test;",
+        )
+        .unwrap();
+    client
+}
+
+fn reset_participant_base_table(client: &mut Client) {
+    client
+        .batch_execute(
+            "DROP TABLE IF EXISTS participant_base_persistence_test.assessment_participant;",
+        )
+        .unwrap();
+}
+
+fn anonymous_participant() -> ParticipantRecord {
+    ParticipantRecord::new_anonymous("participant_public_demo", "tenant_public_demo", 40_000)
+        .unwrap()
+}
+
+#[test]
+fn anonymous_base_round_trip_is_exact_and_tenant_bound() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let participant = anonymous_participant();
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_anonymous_participant_base(&mut transaction, &participant).unwrap(),
+            ParticipantBasePersistenceDisposition::Inserted
+        );
+        transaction.commit().unwrap();
+    }
+    {
+        let mut transaction = client.transaction().unwrap();
+        assert_eq!(
+            persist_anonymous_participant_base(&mut transaction, &participant).unwrap(),
+            ParticipantBasePersistenceDisposition::Duplicate
+        );
+        transaction.commit().unwrap();
+    }
+
+    let loaded = load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .unwrap()
+    .expect("stored participant must reload");
+    assert_eq!(loaded.participant_ref(), participant.participant_ref());
+    assert_eq!(loaded.tenant_ref(), participant.tenant_ref());
+    assert_eq!(loaded.created_at_unix_ms(), participant.created_at_unix_ms());
+    assert!(loaded.link_history().is_empty());
+    assert!(loaded.link_end_history().is_empty());
+
+    assert!(load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_other_demo",
+    )
+    .unwrap()
+    .is_none());
+}
+
+#[test]
+fn participant_identity_rebinding_fails_closed_without_rewriting_the_row() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let participant = anonymous_participant();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_anonymous_participant_base(&mut transaction, &participant).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    let rebound = ParticipantRecord::new_anonymous(
+        "participant_public_demo",
+        "tenant_rebound_demo",
+        40_001,
+    )
+    .unwrap();
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_anonymous_participant_base(&mut transaction, &rebound),
+        Err(ParticipantBasePersistenceError::ConflictingReplay)
+    ));
+    transaction.rollback().unwrap();
+
+    let row = client
+        .query_one(
+            "SELECT tenant_ref, created_at_unix_ms FROM assessment_participant \
+             WHERE participant_ref = 'participant_public_demo'",
+            &[],
+        )
+        .unwrap();
+    assert_eq!(row.get::<_, String>(0), "tenant_public_demo");
+    assert_eq!(row.get::<_, i64>(1), 40_000);
+}
+
+#[test]
+fn migration_reapply_strengthens_an_earlier_participant_constraint_revision() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    client
+        .batch_execute(
+            "CREATE TABLE assessment_participant (\
+                 participant_ref TEXT PRIMARY KEY,\
+                 tenant_ref TEXT NOT NULL,\
+                 created_at_unix_ms BIGINT NOT NULL,\
+                 CONSTRAINT assessment_participant_ref_format_check CHECK (\
+                     participant_ref = btrim(participant_ref)\
+                     AND participant_ref <> ''\
+                     AND NOT (\
+                         participant_ref ~ '[[:digit:]]'\
+                         AND participant_ref ~ '^[[:digit:]+,.eE-]+$'\
+                     )\
+                 ),\
+                 CONSTRAINT assessment_participant_tenant_ref_format_check CHECK (\
+                     tenant_ref = btrim(tenant_ref)\
+                     AND tenant_ref <> ''\
+                     AND NOT (\
+                         tenant_ref ~ '[[:digit:]]'\
+                         AND tenant_ref ~ '^[[:digit:]+,.eE-]+$'\
+                     )\
+                 ),\
+                 CONSTRAINT assessment_participant_created_time_positive_check CHECK (\
+                     created_at_unix_ms > 0\
+                 )\
+             );\
+             INSERT INTO assessment_participant\
+                 (participant_ref, tenant_ref, created_at_unix_ms)\
+             VALUES ('participant_existing_demo', 'tenant_existing_demo', 39000);",
+        )
+        .unwrap();
+
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let loaded = load_anonymous_participant_base(
+        &mut client,
+        "participant_existing_demo",
+        "tenant_existing_demo",
+    )
+    .unwrap()
+    .expect("a valid row from the earlier migration revision must survive strengthening");
+    assert_eq!(loaded.created_at_unix_ms(), 39_000);
+
+    for statement in [
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('participant_nbsp_demo', U&'\\00A0tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'12\\066B3', 'tenant_public_demo', 40000)",
+    ] {
+        assert!(
+            client.batch_execute(statement).is_err(),
+            "reapplied migration must replace the earlier weaker identity constraint: {statement}"
+        );
+    }
+}
+
+#[test]
+fn participant_base_evidence_is_immutable_at_the_database_boundary() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let participant = anonymous_participant();
+    {
+        let mut transaction = client.transaction().unwrap();
+        persist_anonymous_participant_base(&mut transaction, &participant).unwrap();
+        transaction.commit().unwrap();
+    }
+
+    for statement in [
+        "UPDATE assessment_participant SET tenant_ref = 'tenant_rebound_demo' \
+         WHERE participant_ref = 'participant_public_demo'",
+        "DELETE FROM assessment_participant \
+         WHERE participant_ref = 'participant_public_demo'",
+        "TRUNCATE assessment_participant",
+    ] {
+        let error = client
+            .batch_execute(statement)
+            .expect_err("participant base evidence must reject destructive mutation");
+        assert_eq!(
+            error.code().map(postgres::error::SqlState::code),
+            Some("55000"),
+            "immutability rejection must use SQLSTATE 55000: {statement}"
+        );
+    }
+
+    let loaded = load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .unwrap()
+    .expect("rejected mutation must leave the original participant evidence intact");
+    assert_eq!(loaded.participant_ref(), "participant_public_demo");
+    assert_eq!(loaded.tenant_ref(), "tenant_public_demo");
+    assert_eq!(loaded.created_at_unix_ms(), 40_000);
+}
+
+#[test]
+fn linked_records_cannot_be_misrepresented_as_complete_base_only_state() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let mut participant = anonymous_participant();
+    participant
+        .link_account(
+            "link_event_demo",
+            "issuer_keyverse_demo",
+            "subject_keyverse_demo",
+            "proof_anonymous_demo",
+            "proof_authenticated_demo",
+            40_100,
+        )
+        .unwrap();
+
+    let mut transaction = client.transaction().unwrap();
+    assert!(matches!(
+        persist_anonymous_participant_base(&mut transaction, &participant),
+        Err(ParticipantBasePersistenceError::LinkedRecordRequiresIdentityHistory)
+    ));
+    transaction.rollback().unwrap();
+
+    let count: i64 = client
+        .query_one("SELECT COUNT(*) FROM assessment_participant", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn stronger_isolation_is_rejected_before_insert() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let participant = anonymous_participant();
+    let mut transaction = client
+        .build_transaction()
+        .isolation_level(IsolationLevel::RepeatableRead)
+        .start()
+        .unwrap();
+    assert!(matches!(
+        persist_anonymous_participant_base(&mut transaction, &participant),
+        Err(ParticipantBasePersistenceError::UnsupportedIsolationLevel)
+    ));
+    transaction.rollback().unwrap();
+}
+
+#[test]
+fn missing_participant_relation_is_a_database_failure() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+
+    let participant = anonymous_participant();
+    let mut transaction = client.transaction().unwrap();
+    let persist_error = persist_anonymous_participant_base(&mut transaction, &participant)
+        .expect_err("persist must fail closed when the participant relation is missing");
+    transaction.rollback().unwrap();
+    assert!(
+        matches!(persist_error, ParticipantBasePersistenceError::Database(_)),
+        "missing relation must be a database failure, not a reconstructed identity: {persist_error}"
+    );
+    assert_eq!(
+        persist_error.to_string(),
+        "PostgreSQL participant base persistence failed"
+    );
+    assert!(std::error::Error::source(&persist_error).is_some());
+
+    let load_error = load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .expect_err("load must fail closed when the participant relation is missing");
+    assert!(
+        matches!(load_error, ParticipantBasePersistenceError::Database(_)),
+        "missing relation must be a database failure, not absence: {load_error}"
+    );
+}
+
+#[test]
+fn schema_rejects_blank_numeric_and_nonpositive_identity_evidence() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    for statement in [
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('12', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('participant_public_demo', ' ', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('participant_public_demo', 'tenant_public_demo', 0)",
+    ] {
+        assert!(client.batch_execute(statement).is_err());
+    }
+}
+
+#[test]
+fn schema_rejects_unicode_reference_forms_rejected_by_the_domain_contract() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    for statement in [
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (E'\\tparticipant_public_demo', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES ('participant_public_demo', U&'\\00A0tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'12\\066B3', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'12\\FF0E3', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\0661\\0662\\066B\\0663', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\00BD', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\00B2', 'tenant_public_demo', 40000)",
+        "INSERT INTO assessment_participant \
+         (participant_ref, tenant_ref, created_at_unix_ms) \
+         VALUES (U&'\\2163', 'tenant_public_demo', 40000)",
+    ] {
+        assert!(
+            client.batch_execute(statement).is_err(),
+            "database constraint must reject identity spelling the Rust domain would reject: {statement}"
+        );
+    }
+
+    let count: i64 = client
+        .query_one("SELECT COUNT(*) FROM assessment_participant", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(count, 0, "invalid direct SQL must leave no corrupt identity row");
+    assert!(load_anonymous_participant_base(
+        &mut client,
+        "participant_public_demo",
+        "tenant_public_demo",
+    )
+    .unwrap()
+    .is_none());
+}
+
+#[test]
+fn database_numeric_like_predicate_matches_rust_char_is_numeric() {
+    let _guard = participant_base_test_guard();
+    let mut client = test_client();
+    reset_participant_base_table(&mut client);
+    apply_participant_base_migration(&mut client).unwrap();
+
+    let numeric_scalars: Vec<String> = (0u32..=0x0010_FFFF)
+        .filter_map(char::from_u32)
+        .filter(|character| character.is_numeric())
+        .map(String::from)
+        .collect();
+    assert!(
+        !numeric_scalars.is_empty(),
+        "rustc must expose a non-empty Unicode numeric set"
+    );
+    for chunk in numeric_scalars.chunks(256) {
+        let all_numeric: bool = client
+            .query_one(
+                "SELECT bool_and(opaque_reference_numeric_like(sample_text)) \
+                 FROM unnest($1::text[]) AS sample_text",
+                &[&chunk],
+            )
+            .unwrap()
+            .get(0);
+        assert!(
+            all_numeric,
+            "PostgreSQL must reject every Rust numeric scalar as numeric-like"
+        );
+    }
+
+    for accepted in [
+        "participant_public_demo",
+        "tenant_1_demo",
+        "Ⅳparticipant",
+        "participant½",
+    ] {
+        let numeric_like: bool = client
+            .query_one("SELECT opaque_reference_numeric_like($1)", &[&accepted])
+            .unwrap()
+            .get(0);
+        assert!(
+            !numeric_like,
+            "mixed opaque references must remain accepted: {accepted}"
+        );
+        assert!(
+            ParticipantRecord::new_anonymous(accepted, "tenant_public_demo", 40_000).is_ok(),
+            "Rust domain must accept the same mixed reference: {accepted}"
+        );
+    }
+
+    for rejected in ["½", "²", "Ⅳ", "12", "1e3"] {
+        let numeric_like: bool = client
+            .query_one("SELECT opaque_reference_numeric_like($1)", &[&rejected])
+            .unwrap()
+            .get(0);
+        assert!(
+            numeric_like,
+            "numeric-only references must be numeric-like: {rejected}"
+        );
+        assert!(
+            ParticipantRecord::new_anonymous(rejected, "tenant_public_demo", 40_000).is_err(),
+            "Rust domain must reject the same numeric-only reference: {rejected}"
+        );
+    }
+}
