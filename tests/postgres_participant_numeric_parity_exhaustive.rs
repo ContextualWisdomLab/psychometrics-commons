@@ -14,10 +14,7 @@ fn test_client() -> (Client, String) {
         .expect("TEST_DATABASE_URL must identify the isolated CI PostgreSQL database");
     let mut client = Client::connect(&connection, NoTls)
         .expect("isolated CI PostgreSQL database must be reachable");
-    let schema = format!(
-        "participant_numeric_parity_test_{}",
-        std::process::id()
-    );
+    let schema = format!("participant_numeric_parity_test_{}", std::process::id());
     client
         .batch_execute(&format!(
             "DROP SCHEMA IF EXISTS {schema} CASCADE;\
