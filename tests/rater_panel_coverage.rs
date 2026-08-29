@@ -52,6 +52,21 @@ fn every_panel_constructor_reference_position_rejects_inexact_input() {
 }
 
 #[test]
+fn draft_panel_accepts_distinct_configuration_with_same_repeat_index() {
+    let mut panel = RaterPanelDefinition::new("panel", "revision", "design").expect("panel");
+    panel
+        .add_assignment(assignment("assignment_a", "configuration_a", 0))
+        .expect("first assignment");
+    panel
+        .add_assignment(assignment("assignment_b", "configuration_b", 0))
+        .expect("distinct configuration assignment");
+
+    assert_eq!(panel.assignments().len(), 2);
+    assert_eq!(panel.assignments()[1].rater_configuration_ref(), "configuration_b");
+    assert_eq!(panel.assignments()[1].repeat_index(), 0);
+}
+
+#[test]
 fn retired_panel_remains_frozen_for_every_mutation() {
     let mut panel = RaterPanelDefinition::new("panel", "revision", "design").expect("panel");
     panel
