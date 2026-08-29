@@ -682,8 +682,14 @@ mod tests {
             parse_header_line("Accept:\tapplication/json "),
             Ok(("Accept", "application/json"))
         );
-        assert_eq!(parse_header_line("Host : example.test"), Err(HeaderError::Malformed));
-        assert_eq!(parse_header_line("Bad(Name: value"), Err(HeaderError::Malformed));
+        assert_eq!(
+            parse_header_line("Host : example.test"),
+            Err(HeaderError::Malformed)
+        );
+        assert_eq!(
+            parse_header_line("Bad(Name: value"),
+            Err(HeaderError::Malformed)
+        );
         assert_eq!(
             parse_header_line("X-Test: value\u{0000}suffix"),
             Err(HeaderError::Malformed)
