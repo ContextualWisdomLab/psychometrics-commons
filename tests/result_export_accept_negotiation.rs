@@ -104,7 +104,11 @@ fn request(accept: &str) -> String {
 fn accepts_parameterized_and_multi_value_supported_ranges() {
     let (actor, participant, result, export) = fixture();
 
-    for accept in ["text/plain; charset=utf-8", "text/plain; charset=\"utf-8\""] {
+    for accept in [
+        "text/plain; charset=utf-8",
+        "text/plain; charset=\"utf-8\"",
+        "text/plain; charset=\"utf\\-8\"",
+    ] {
         let text = handle_result_export_http_request(
             &request(accept),
             &actor,
