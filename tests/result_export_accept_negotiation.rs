@@ -192,3 +192,19 @@ fn specific_media_ranges_override_broader_wildcard_quality_for_each_representati
     assert_eq!(excluded_text.status(), 200);
     assert_eq!(excluded_text.content_type(), "application/json");
 }
+
+#[test]
+fn accept_extensions_after_quality_do_not_change_media_specificity() {
+    let (actor, participant, result, export) = fixture();
+
+    let text = handle_result_export_http_request(
+        &request("text/plain;q=0.4;charset=utf-8, text/plain;q=0.8, application/json;q=0.7"),
+        &actor,
+        &participant,
+        &result,
+        &export,
+    );
+
+    assert_eq!(text.status(), 200);
+    assert_eq!(text.content_type(), "text/plain; charset=utf-8");
+}
