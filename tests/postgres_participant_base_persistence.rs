@@ -78,7 +78,10 @@ fn anonymous_base_round_trip_is_exact_and_tenant_bound() {
     .expect("stored participant must reload");
     assert_eq!(loaded.participant_ref(), participant.participant_ref());
     assert_eq!(loaded.tenant_ref(), participant.tenant_ref());
-    assert_eq!(loaded.created_at_unix_ms(), participant.created_at_unix_ms());
+    assert_eq!(
+        loaded.created_at_unix_ms(),
+        participant.created_at_unix_ms()
+    );
     assert!(loaded.link_history().is_empty());
     assert!(loaded.link_end_history().is_empty());
 
@@ -105,12 +108,9 @@ fn participant_identity_rebinding_fails_closed_without_rewriting_the_row() {
         transaction.commit().unwrap();
     }
 
-    let rebound = ParticipantRecord::new_anonymous(
-        "participant_public_demo",
-        "tenant_rebound_demo",
-        40_001,
-    )
-    .unwrap();
+    let rebound =
+        ParticipantRecord::new_anonymous("participant_public_demo", "tenant_rebound_demo", 40_001)
+            .unwrap();
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist_anonymous_participant_base(&mut transaction, &rebound),
@@ -300,7 +300,10 @@ fn missing_participant_relation_is_a_database_failure() {
         .expect_err("persist must fail closed when the participant relation is missing");
     transaction.rollback().unwrap();
     assert!(
-        matches!(persist_error, ParticipantBasePersistenceError::Database(_)),
+        matches!(
+            persist_error,
+            ParticipantBasePersistenceError::Database(_)
+        ),
         "missing relation must be a database failure, not a reconstructed identity: {persist_error}"
     );
     assert_eq!(
@@ -386,7 +389,10 @@ fn schema_rejects_unicode_reference_forms_rejected_by_the_domain_contract() {
         .query_one("SELECT COUNT(*) FROM assessment_participant", &[])
         .unwrap()
         .get(0);
-    assert_eq!(count, 0, "invalid direct SQL must leave no corrupt identity row");
+    assert_eq!(
+        count, 0,
+        "invalid direct SQL must leave no corrupt identity row"
+    );
     assert!(load_anonymous_participant_base(
         &mut client,
         "participant_public_demo",
