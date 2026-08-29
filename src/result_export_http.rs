@@ -364,11 +364,42 @@ fn parse_accept_item(item: &str) -> Option<(AcceptTarget, u16, u8)> {
 }
 
 fn utf8_charset_parameter(value: &str) -> bool {
-    value.eq_ignore_ascii_case("utf-8")
-        || value
-            .strip_prefix('"')
-            .and_then(|quoted| quoted.strip_suffix('"'))
-            .is_some_and(|quoted| quoted.eq_ignore_ascii_case("utf-8"))
+    if value.eq_ignore_ascii_case("utf-8") {
+        return true;
+    }
+    let Some(quoted) = value
+        .strip_prefix('"')
+        .and_then(|quoted| quoted.strip_suffix('"'))
+    else {
+        return false;
+    };
+
+    let mut expected = b"utf-8".iter();
+    let mut bytes = quoted.bytes();
+    while let Some(byte) = bytes.next() {
+        let decoded = if byte == b'\\' {
+            let Some(escaped) = bytes.next() else {
+                return false;
+            };
+            if !matches!(escaped, b'\t' | b' '..=b'~' | 0x80..=0xff) {
+                return false;
+            }
+            escaped
+        } else {
+            if !matches!(byte, b'\t' | b' ' | b'!' | b'#'..=b'[' | b']'..=b'~' | 0x80..=0xff)
+            {
+                return false;
+            }
+            byte
+        };
+        let Some(expected_byte) = expected.next() else {
+            return false;
+        };
+        if !decoded.eq_ignore_ascii_case(expected_byte) {
+            return false;
+        }
+    }
+    expected.next().is_none()
 }
 
 fn parse_quality(value: &str) -> Option<u16> {
@@ -741,9 +772,15 @@ mod tests {
         assert!(utf8_charset_parameter("UTF-8"));
         assert!(utf8_charset_parameter("\"utf-8\""));
         assert!(utf8_charset_parameter("\"UTF-8\""));
+        assert!(utf8_charset_parameter("\"utf\\-8\""));
         assert!(!utf8_charset_parameter("\"utf-8"));
         assert!(!utf8_charset_parameter("utf-8\""));
         assert!(!utf8_charset_parameter("\"iso-8859-1\""));
+        assert!(!utf8_charset_parameter("\"utf-8\\\""));
+        assert!(!utf8_charset_parameter("\"utf\\\u{001f}-8\""));
+        assert!(!utf8_charset_parameter("\"utf\"-8\""));
+        assert!(!utf8_charset_parameter("\"utf-8x\""));
+        assert!(!utf8_charset_parameter("\"utf-\""));
 
         assert_eq!(parse_quality("0"), Some(0));
         assert_eq!(parse_quality("1"), Some(1000));
