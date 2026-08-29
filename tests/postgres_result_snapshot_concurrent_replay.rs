@@ -92,7 +92,7 @@ fn snapshot() -> ResultSnapshot {
 fn install_insert_pause_trigger(client: &mut Client) {
     client
         .batch_execute(&format!(
-            r#"CREATE OR REPLACE FUNCTION test_pause_result_snapshot_insert()
+            r"CREATE OR REPLACE FUNCTION test_pause_result_snapshot_insert()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -105,7 +105,7 @@ END;
 $$;
 CREATE TRIGGER result_snapshot_zz_test_pause_insert
 BEFORE INSERT ON result_snapshot
-FOR EACH ROW EXECUTE FUNCTION test_pause_result_snapshot_insert();"#
+FOR EACH ROW EXECUTE FUNCTION test_pause_result_snapshot_insert();"
         ))
         .expect("test-only result insert pause trigger must install");
 }
