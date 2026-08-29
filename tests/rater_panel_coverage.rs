@@ -1,13 +1,11 @@
+//! Coverage regressions for governed rater-panel aggregate invariants.
+
 use psychometrics_commons_runtime::rater_panel::{
     AdjudicationCase, AdjudicationState, ObservationRequest, ObservationRequestState,
     RaterAssignment, RaterPanelDefinition, RaterPanelState, RaterWorkflowError,
 };
 
-fn assignment(
-    assignment_ref: &str,
-    configuration_ref: &str,
-    repeat_index: u32,
-) -> RaterAssignment {
+fn assignment(assignment_ref: &str, configuration_ref: &str, repeat_index: u32) -> RaterAssignment {
     RaterAssignment::new(
         assignment_ref,
         configuration_ref,
@@ -163,7 +161,9 @@ fn dispatched_request_stays_dispatched_after_invalid_terminal_reference() {
     );
     assert_eq!(request.state(), ObservationRequestState::Dispatched);
     assert_eq!(request.failure_ref(), None);
-    request.receive("invocation").expect("receive after invalid failure");
+    request
+        .receive("invocation")
+        .expect("receive after invalid failure");
 }
 
 #[test]
