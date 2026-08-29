@@ -1,6 +1,6 @@
 //! Exhaustive two-way numeric classification parity for participant references.
 //!
-//! PostgreSQL `text` cannot represent U+0000, so the test covers every other
+//! `PostgreSQL` `text` cannot represent U+0000, so the test covers every other
 //! Unicode scalar value that Rust can encode as UTF-8 and compares the database
 //! predicate directly with Rust 1.97 `char::is_numeric`.
 
