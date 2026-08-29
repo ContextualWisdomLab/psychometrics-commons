@@ -36,7 +36,10 @@ fn result_export_openapi_is_pinned_to_the_implemented_operation() {
 fn result_export_openapi_constrains_request_identity_and_score_states() {
     let opaque_reference_binding = "$ref: \"#/components/schemas/OpaqueReference\"";
     assert!(
-        RESULT_EXPORT_OPENAPI.matches(opaque_reference_binding).count() >= 2,
+        RESULT_EXPORT_OPENAPI
+            .matches(opaque_reference_binding)
+            .count()
+            >= 2,
         "result_ref and Idempotency-Key must both reuse the opaque-reference schema"
     );
 
