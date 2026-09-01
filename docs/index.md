@@ -6,10 +6,10 @@ Psychometrics Commons is the ContextualWisdomLab product runtime for public psyc
 
 ## Start here
 
-- [Product overview and architecture boundary](../README.md)
+- [Product overview and architecture boundary](https://github.com/ContextualWisdomLab/psychometrics-commons#readme)
 - [Product requirements](PRD.md)
 - [Technical requirements](TRD.md)
-- [Architecture](../ARCHITECTURE.md)
+- [Architecture](https://github.com/ContextualWisdomLab/psychometrics-commons/blob/main/ARCHITECTURE.md)
 - [Architecture views](architecture/README.md)
 - [Measurement governance](MEASUREMENT_GOVERNANCE.md)
 - [Research Commons governance](RESEARCH_GOVERNANCE.md)
@@ -30,6 +30,10 @@ Repository documentation distinguishes protected-main implementation evidence fr
 ## Governance
 
 Measurement, privacy, research contribution, security, operational readiness, and release claims are governed as separate evidence boundaries. Assessment results remain tied to immutable provenance and explicit limitations; research contribution is consent-governed and does not transfer public-catalog ownership into this repository.
+
+## License
+
+Psychometrics Commons source is licensed under the [Apache License 2.0](https://github.com/ContextualWisdomLab/psychometrics-commons/blob/main/LICENSE). The runtime package metadata uses the same `Apache-2.0` identifier; third-party dependencies retain their own compatible license obligations.
 
 ## Documentation status
 
