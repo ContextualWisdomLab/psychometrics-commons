@@ -117,6 +117,7 @@ Start with the [Threat Model](docs/THREAT_MODEL.md), [Measurement Governance](do
 | Measurement publication governance | [Measurement Governance](docs/MEASUREMENT_GOVERNANCE.md) |
 | Research contribution/release governance | [Research Governance](docs/RESEARCH_GOVERNANCE.md) |
 | Security boundary | [Threat Model](docs/THREAT_MODEL.md) |
+| Vulnerability reporting | [ContextualWisdomLab Security Policy](https://github.com/ContextualWisdomLab/.github/blob/main/SECURITY.md) |
 | Testing and evidence | [Test Strategy](docs/TEST_STRATEGY.md) |
 | Release decision | [Release Acceptance](docs/RELEASE_ACCEPTANCE.md) |
 | Architecture decisions | [ADR Index](docs/adr/README.md) |
@@ -126,7 +127,7 @@ Start with the [Threat Model](docs/THREAT_MODEL.md), [Measurement Governance](do
 
 Before changing a product boundary, read [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), the relevant ADRs, and the current gap/traceability evidence. Keep product lifecycle semantics in this repository and reusable psychometric numerical work in its owning measurement library.
 
-For defects or product gaps, use this repository's GitHub issues with a reproducible failing case and the affected contract/evidence boundary. For security-sensitive defects, do not place secrets, participant data, private assessment material, or exploit details in a public issue; move sensitive evidence only through an approved private reporting channel.
+For defects or product gaps, use this repository's GitHub issues with a reproducible failing case and the affected contract/evidence boundary. For security-sensitive defects, do not place secrets, participant data, private assessment material, or exploit details in a public issue. Follow the [ContextualWisdomLab security policy](https://github.com/ContextualWisdomLab/.github/blob/main/SECURITY.md): use GitHub private vulnerability reporting when it is enabled for this repository, and otherwise contact the maintainers as that policy directs before sending sensitive evidence.
 
 ## License
 
