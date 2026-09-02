@@ -126,7 +126,7 @@ Start with the [Threat Model](docs/THREAT_MODEL.md), [Measurement Governance](do
 
 Before changing a product boundary, read [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), the relevant ADRs, and the current gap/traceability evidence. Keep product lifecycle semantics in this repository and reusable psychometric numerical work in its owning measurement library.
 
-For defects or product gaps, use this repository's GitHub issues with a reproducible failing case and the affected contract/evidence boundary. Security-sensitive reports should follow the repository's documented security process rather than include secrets or participant data in a public issue.
+For defects or product gaps, use this repository's GitHub issues with a reproducible failing case and the affected contract/evidence boundary. For security-sensitive defects, do not place secrets, participant data, private assessment material, or exploit details in a public issue; move sensitive evidence only through an approved private reporting channel.
 
 ## License
 
