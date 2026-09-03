@@ -70,6 +70,11 @@ class SbomEvidenceContract(unittest.TestCase):
             trigger_block,
             "root-directory SBOM evidence must run on every repository change",
         )
+        self.assertNotIn(
+            "paths-ignore:",
+            trigger_block,
+            "docs-only changes must not skip root-directory SBOM evidence",
+        )
         self.assertIn("branches: [main]", trigger_block)
         self.assertIn("github.event.pull_request.head.sha || github.sha", text)
         self.assertIn("persist-credentials: false", text)
