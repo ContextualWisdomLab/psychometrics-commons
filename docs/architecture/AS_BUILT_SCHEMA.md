@@ -17,6 +17,8 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `integration_inbox` | integration | Implemented subset |
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
+| `item_delivery_ledger` | item delivery | Implemented persist subset; **Active PR** restart reload |
+| `item_delivery_event` | item delivery | Implemented persist subset; **Active PR** restart reload |
 | `integration_consumption` | integration | Implemented subset |
 | `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
 

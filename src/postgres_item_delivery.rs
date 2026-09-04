@@ -3,7 +3,9 @@
 //! Item selection, calibration, and scoring remain in `fast-mlsirm`. Callers own the
 //! connection, transaction, credentials, and explicit tenant authorization context.
 
-use crate::item_delivery::{ItemDeliveryEvent, ItemDeliveryLedger};
+use crate::item_delivery::{
+    ItemDeliveryError, ItemDeliveryEvent, ItemDeliveryLedger, ItemDeliveryRequest,
+};
 use crate::reference::normalized_reference;
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
@@ -35,6 +37,8 @@ pub enum ItemDeliveryPersistenceError {
     SequenceConflict,
     /// Persistence requires `PostgreSQL` `READ COMMITTED` isolation.
     UnsupportedIsolationLevel,
+    /// Stored rows cannot reconstruct a valid item-delivery ledger.
+    CorruptHistory,
     /// `PostgreSQL` rejected or could not execute the operation.
     Database(postgres::Error),
 }
@@ -54,6 +58,9 @@ impl Display for ItemDeliveryPersistenceError {
             }
             Self::UnsupportedIsolationLevel => {
                 "item delivery persistence requires read committed isolation"
+            }
+            Self::CorruptHistory => {
+                "stored item-delivery history cannot reconstruct a valid ledger"
             }
             Self::Database(_) => "PostgreSQL item-delivery persistence failed",
         })
@@ -91,7 +98,8 @@ pub fn apply_item_delivery_migration(
 /// Exact replay under the same tenant is idempotent. Tenant, release, locale, digest,
 /// allowed-item, delivery, or event-evidence rebinding fails closed. Caller-provided
 /// references must already have their canonical spelling; persistence never trims an
-/// alias and silently binds it to another resource identity.
+/// alias and silently binds it to another resource identity. A whitespace-padded tenant
+/// or session alias fails closed before write.
 ///
 /// # Errors
 ///
@@ -118,6 +126,91 @@ pub fn persist_item_delivery_ledger(
     })
 }
 
+/// Reload one tenant-bound item-delivery ledger after process restart.
+///
+/// Events are reconstructed in stored `delivery_sequence` order. A missing
+/// session is absent rather than an empty delivery list. A header that exists
+/// for a different tenant fails closed instead of looking like a new session.
+/// A sequence gap or an item that is not in the stored allowed set fails closed
+/// so a restarted runtime cannot skip or re-present items.
+///
+/// The caller owns the `READ COMMITTED` transaction. The load takes `FOR SHARE`
+/// on the ledger header. [`persist_item_delivery_ledger`] inserts the header
+/// without `FOR UPDATE`, so the share lock does not by itself hide a concurrent
+/// persist append.
+///
+/// # Errors
+///
+/// Returns [`ItemDeliveryPersistenceError`] for an invalid tenant or session
+/// reference, [`ItemDeliveryPersistenceError::ConflictingReplay`] when the
+/// stored header belongs to another tenant, unsupported isolation, stored rows
+/// that cannot reconstruct a valid ledger, or a database failure.
+pub fn load_item_delivery_ledger(
+    transaction: &mut Transaction<'_>,
+    tenant_ref: &str,
+    session_ref: &str,
+) -> Result<Option<ItemDeliveryLedger>, ItemDeliveryPersistenceError> {
+    require_read_committed(transaction)?;
+    let tenant_ref = exact_reference(tenant_ref)?;
+    let session_ref = exact_reference(session_ref)?;
+    let Some(header) = transaction.query_opt(
+        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
+                allowed_item_version_refs \
+         FROM item_delivery_ledger WHERE session_ref = $1 FOR SHARE",
+        &[&session_ref],
+    )?
+    else {
+        return Ok(None);
+    };
+    let stored_tenant_ref: String = header.get(0);
+    if stored_tenant_ref != tenant_ref {
+        return Err(ItemDeliveryPersistenceError::ConflictingReplay);
+    }
+    let instrument_release_ref: String = header.get(1);
+    let release_content_digest: String = header.get(2);
+    let locale: String = header.get(3);
+    let allowed_item_version_refs: Vec<String> = header.get(4);
+    let allowed: Vec<&str> = allowed_item_version_refs
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let mut ledger = ItemDeliveryLedger::from_persisted(
+        session_ref,
+        instrument_release_ref.as_str(),
+        release_content_digest.as_str(),
+        locale.as_str(),
+        &allowed,
+    )
+    .map_err(reconstruct_error)?;
+    let rows = transaction.query(
+        "SELECT delivery_event_ref, item_version_ref, presentation_context_ref, \
+                selection_evidence_ref, delivery_sequence \
+         FROM item_delivery_event \
+         WHERE session_ref = $1 AND tenant_ref = $2 \
+         ORDER BY delivery_sequence ASC",
+        &[&session_ref, &tenant_ref],
+    )?;
+    for row in rows {
+        let delivery_ref: String = row.get(0);
+        let item_version_ref: String = row.get(1);
+        let presentation_context_ref: String = row.get(2);
+        let selection_evidence_ref: Option<String> = row.get(3);
+        let sequence = stored_sequence(row.get(4))?;
+        ledger
+            .restore_persisted_event(
+                ItemDeliveryRequest {
+                    delivery_ref: delivery_ref.as_str(),
+                    item_version_ref: item_version_ref.as_str(),
+                    presentation_context_ref: presentation_context_ref.as_str(),
+                    selection_evidence_ref: selection_evidence_ref.as_deref(),
+                },
+                sequence,
+            )
+            .map_err(reconstruct_error)?;
+    }
+    Ok(Some(ledger))
+}
+
 fn persist_ledger_header(
     transaction: &mut Transaction<'_>,
     tenant_ref: &str,
@@ -125,24 +218,12 @@ fn persist_ledger_header(
     session_ref: &str,
 ) -> Result<bool, ItemDeliveryPersistenceError> {
     let allowed_item_version_refs = ledger.allowed_item_version_refs().to_vec();
-    let row = transaction.query_one(
-        "WITH inserted AS (\
-             INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
-             ) VALUES ($1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (session_ref) DO NOTHING \
-             RETURNING tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                       allowed_item_version_refs, TRUE AS inserted\
-         ) \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, inserted \
-         FROM inserted \
-         UNION ALL \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, FALSE AS inserted \
-         FROM item_delivery_ledger WHERE session_ref = $2 \
-         LIMIT 1",
+    let inserted = transaction.execute(
+        "INSERT INTO item_delivery_ledger (\
+             tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
+             allowed_item_version_refs\
+         ) VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (session_ref) DO NOTHING",
         &[
             &tenant_ref,
             &session_ref,
@@ -151,13 +232,22 @@ fn persist_ledger_header(
             &ledger.locale(),
             &allowed_item_version_refs,
         ],
+    )? == 1;
+
+    // Under READ COMMITTED, each SQL statement gets a fresh snapshot. Keep the
+    // conflict insert and replay classification separate so a transaction that
+    // waited for a concurrent winning insert can see that just-committed row.
+    let row = transaction.query_one(
+        "SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
+                allowed_item_version_refs \
+         FROM item_delivery_ledger WHERE session_ref = $1",
+        &[&session_ref],
     )?;
     let stored_tenant_ref: String = row.get(0);
     let stored_release_ref: String = row.get(1);
     let stored_digest: String = row.get(2);
     let stored_locale: String = row.get(3);
     let stored_allowed: Vec<String> = row.get(4);
-    let inserted: bool = row.get(5);
     if stored_tenant_ref == tenant_ref
         && stored_release_ref == ledger.instrument_release_ref()
         && stored_digest == ledger.release_content_digest()
@@ -262,9 +352,31 @@ fn classify_unique_violation(error: postgres::Error) -> ItemDeliveryPersistenceE
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceError> {
+    exact_reference(reference)
+}
+
+fn exact_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceError> {
     match normalized_reference(reference) {
         Some(normalized) if normalized == reference => Ok(normalized),
         _ => Err(ItemDeliveryPersistenceError::InvalidReference),
+    }
+}
+
+fn stored_sequence(value: i64) -> Result<usize, ItemDeliveryPersistenceError> {
+    usize::try_from(value)
+        .ok()
+        .filter(|sequence| *sequence > 0)
+        .ok_or(ItemDeliveryPersistenceError::CorruptHistory)
+}
+
+fn reconstruct_error(error: ItemDeliveryError) -> ItemDeliveryPersistenceError {
+    match error {
+        ItemDeliveryError::InvalidReference => ItemDeliveryPersistenceError::InvalidReference,
+        ItemDeliveryError::CorruptHistory
+        | ItemDeliveryError::ItemNotInRelease
+        | ItemDeliveryError::DuplicateItemDelivery
+        | ItemDeliveryError::IdempotencyConflict
+        | ItemDeliveryError::SessionNotActive(_) => ItemDeliveryPersistenceError::CorruptHistory,
     }
 }
 
@@ -282,7 +394,12 @@ fn require_read_committed(
 
 #[cfg(test)]
 mod reference_guard_tests {
-    use super::{required_reference, ItemDeliveryPersistenceError};
+    use super::{
+        exact_reference, reconstruct_error, required_reference, stored_sequence,
+        ItemDeliveryPersistenceError,
+    };
+    use crate::item_delivery::ItemDeliveryError;
+    use crate::session::SessionState;
 
     #[test]
     fn blank_and_numeric_references_fail_closed() {
@@ -298,5 +415,62 @@ mod reference_guard_tests {
             required_reference("session_item_delivery_alpha").unwrap(),
             "session_item_delivery_alpha"
         );
+    }
+
+    #[test]
+    fn persist_rejects_padded_tenant_aliases_instead_of_trimming() {
+        assert!(matches!(
+            required_reference(" tenant_item_delivery_alpha"),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert!(matches!(
+            required_reference("tenant_item_delivery_alpha "),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert_eq!(
+            required_reference("tenant_item_delivery_alpha").unwrap(),
+            "tenant_item_delivery_alpha"
+        );
+    }
+
+    #[test]
+    fn reload_rejects_padded_aliases_and_non_positive_sequences() {
+        assert!(matches!(
+            exact_reference(" session_item_delivery_alpha"),
+            Err(ItemDeliveryPersistenceError::InvalidReference)
+        ));
+        assert_eq!(
+            exact_reference("session_item_delivery_alpha").unwrap(),
+            "session_item_delivery_alpha"
+        );
+        assert!(matches!(
+            stored_sequence(0),
+            Err(ItemDeliveryPersistenceError::CorruptHistory)
+        ));
+        assert!(matches!(
+            stored_sequence(-1),
+            Err(ItemDeliveryPersistenceError::CorruptHistory)
+        ));
+        assert_eq!(stored_sequence(2).unwrap(), 2);
+    }
+
+    #[test]
+    fn reconstruct_maps_domain_failures_to_typed_persistence_errors() {
+        assert!(matches!(
+            reconstruct_error(ItemDeliveryError::InvalidReference),
+            ItemDeliveryPersistenceError::InvalidReference
+        ));
+        for error in [
+            ItemDeliveryError::CorruptHistory,
+            ItemDeliveryError::ItemNotInRelease,
+            ItemDeliveryError::DuplicateItemDelivery,
+            ItemDeliveryError::IdempotencyConflict,
+            ItemDeliveryError::SessionNotActive(SessionState::Completed),
+        ] {
+            assert!(matches!(
+                reconstruct_error(error),
+                ItemDeliveryPersistenceError::CorruptHistory
+            ));
+        }
     }
 }

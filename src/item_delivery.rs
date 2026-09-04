@@ -82,6 +82,8 @@ pub enum ItemDeliveryError {
     ItemNotInRelease,
     /// The immutable item version had already been delivered in this session.
     DuplicateItemDelivery,
+    /// Stored header or event evidence cannot reconstruct a valid ledger.
+    CorruptHistory,
 }
 
 impl Display for ItemDeliveryError {
@@ -104,6 +106,8 @@ impl Display for ItemDeliveryError {
             Self::DuplicateItemDelivery => {
                 formatter.write_str("item version was already delivered in this session")
             }
+            Self::CorruptHistory => formatter
+                .write_str("stored item-delivery history cannot reconstruct a valid ledger"),
         }
     }
 }
@@ -152,6 +156,117 @@ impl ItemDeliveryLedger {
             allowed_item_version_refs: manifest.item_version_refs().to_vec(),
             events: Vec::new(),
         })
+    }
+
+    /// Reconstruct an empty ledger from stored header evidence after restart.
+    ///
+    /// Callers use this when the in-memory release manifest is gone and only the
+    /// durable header remains. Stored identities, digest, locale, and allowed
+    /// item set must already be exact; this constructor never trims, aliases, or
+    /// reorders them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ItemDeliveryError::InvalidReference`] when a session, release, or
+    /// item identity is blank, numeric-like, or whitespace-padded. Returns
+    /// [`ItemDeliveryError::CorruptHistory`] when the digest, locale, or allowed
+    /// item set cannot form a valid ledger.
+    pub fn from_persisted(
+        session_ref: &str,
+        instrument_release_ref: &str,
+        release_content_digest: &str,
+        locale: &str,
+        allowed_item_version_refs: &[&str],
+    ) -> Result<Self, ItemDeliveryError> {
+        let session_ref = exact_reference(session_ref)?;
+        let instrument_release_ref = exact_reference(instrument_release_ref)?;
+        if !valid_sha256_digest(release_content_digest)
+            || locale.trim() != locale
+            || !valid_locale(locale)
+            || allowed_item_version_refs.is_empty()
+        {
+            return Err(ItemDeliveryError::CorruptHistory);
+        }
+        let mut allowed = Vec::with_capacity(allowed_item_version_refs.len());
+        for item_version_ref in allowed_item_version_refs {
+            let item_version_ref = exact_reference(item_version_ref)?;
+            if allowed.iter().any(|existing| existing == item_version_ref) {
+                return Err(ItemDeliveryError::CorruptHistory);
+            }
+            allowed.push(item_version_ref.to_owned());
+        }
+        Ok(Self {
+            session_ref: session_ref.to_owned(),
+            instrument_release_ref: instrument_release_ref.to_owned(),
+            release_content_digest: release_content_digest.to_owned(),
+            locale: locale.to_owned(),
+            allowed_item_version_refs: allowed,
+            events: Vec::new(),
+        })
+    }
+
+    /// Restore one stored delivery without requiring an active session.
+    ///
+    /// Restart reconstruction must replay already-accepted evidence after the
+    /// session may have left [`SessionState::Active`]. The stored sequence must
+    /// be the next contiguous server order. A gap would let the runtime skip an
+    /// item the participant already saw, or invent a later item they did not.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ItemDeliveryError::InvalidReference`] for malformed or
+    /// whitespace-padded evidence, [`ItemDeliveryError::CorruptHistory`] when the
+    /// stored sequence is not the next contiguous value or a delivery identity is
+    /// repeated, [`ItemDeliveryError::ItemNotInRelease`] when the stored item is
+    /// not in the bound allowed set, or [`ItemDeliveryError::DuplicateItemDelivery`]
+    /// when the same item version appears under another delivery identity.
+    pub fn restore_persisted_event(
+        &mut self,
+        request: ItemDeliveryRequest<'_>,
+        sequence: usize,
+    ) -> Result<ItemDeliveryEvent, ItemDeliveryError> {
+        let delivery_ref = exact_reference(request.delivery_ref)?;
+        let item_version_ref = exact_reference(request.item_version_ref)?;
+        let presentation_context_ref = exact_reference(request.presentation_context_ref)?;
+        let selection_evidence_ref = request
+            .selection_evidence_ref
+            .map(exact_reference)
+            .transpose()?;
+
+        if sequence != self.events.len() + 1 {
+            return Err(ItemDeliveryError::CorruptHistory);
+        }
+        if self
+            .events
+            .iter()
+            .any(|event| event.delivery_ref == delivery_ref)
+        {
+            return Err(ItemDeliveryError::CorruptHistory);
+        }
+        if !self
+            .allowed_item_version_refs
+            .iter()
+            .any(|allowed| allowed == item_version_ref)
+        {
+            return Err(ItemDeliveryError::ItemNotInRelease);
+        }
+        if self
+            .events
+            .iter()
+            .any(|event| event.item_version_ref == item_version_ref)
+        {
+            return Err(ItemDeliveryError::DuplicateItemDelivery);
+        }
+
+        let event = ItemDeliveryEvent {
+            delivery_ref: delivery_ref.to_owned(),
+            item_version_ref: item_version_ref.to_owned(),
+            presentation_context_ref: presentation_context_ref.to_owned(),
+            selection_evidence_ref: selection_evidence_ref.map(str::to_owned),
+            sequence,
+        };
+        self.events.push(event.clone());
+        Ok(event)
     }
 
     /// Return the assessment-session reference bound to this ledger.
@@ -288,4 +403,33 @@ fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
         return Err(ItemDeliveryError::InvalidReference);
     }
     Ok(normalized)
+}
+
+fn exact_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(normalized),
+        _ => Err(ItemDeliveryError::InvalidReference),
+    }
+}
+
+fn valid_sha256_digest(digest: &str) -> bool {
+    let Some(hex) = digest.strip_prefix("sha256:") else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_locale(locale: &str) -> bool {
+    let mut subtags = locale.split('-');
+    let primary = subtags.next().unwrap_or_default();
+    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|byte| byte.is_ascii_alphabetic())
+    {
+        return false;
+    }
+    subtags.all(|subtag| {
+        (1..=8).contains(&subtag.len()) && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    })
 }
