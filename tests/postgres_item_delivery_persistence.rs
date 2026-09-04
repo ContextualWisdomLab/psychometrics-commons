@@ -91,6 +91,31 @@ fn manifest(release_ref: &str, digest: &str) -> InstrumentReleaseManifest {
     )
 }
 
+fn manifest_with_version(
+    release_ref: &str,
+    instrument_version_ref: &str,
+    digest: &str,
+) -> InstrumentReleaseManifest {
+    InstrumentReleaseManifest::new(
+        release_ref,
+        "instrument_big_five",
+        instrument_version_ref,
+        "construct_big_five",
+        &["item_version_001", "item_version_002"],
+        "ko-KR",
+        "assessment_spec_big_five_v1",
+        "scoring_big_five_v1",
+        "calibration_big_five_v1",
+        Some("norm_big_five_ko_v1"),
+        "narrative_big_five_v1",
+        &["consent_service_v1"],
+        "intended_use_self_reflection_v1",
+        "limitations_big_five_v1",
+        digest,
+    )
+    .unwrap()
+}
+
 fn request<'a>(
     delivery_ref: &'a str,
     item_version_ref: &'a str,
@@ -386,8 +411,9 @@ fn duplicate_item_classification_does_not_depend_on_unique_constraint_order() {
     client
         .execute(
             "INSERT INTO item_delivery_ledger (tenant_ref, session_ref, instrument_release_ref, \
-             release_content_digest, locale, allowed_item_version_refs) \
-             VALUES ($1, 'session_item_delivery_delta', 'release_big_five_ko_v1', $2, 'ko-KR', \
+             instrument_version_ref, release_content_digest, locale, allowed_item_version_refs) \
+             VALUES ($1, 'session_item_delivery_delta', 'release_big_five_ko_v1', \
+             'instrument_version_ko_v1', $2, 'ko-KR', \
              ARRAY['item_version_001', 'item_version_002'])",
             &[&TENANT_REF, &RELEASE_DIGEST],
         )
@@ -646,6 +672,27 @@ fn digest_locale_and_allowed_item_rebinding_fail_closed() {
                 "release_big_five_ko_v1",
                 &["item_version_001", "item_version_003"],
                 "ko-KR",
+                RELEASE_DIGEST,
+            ),
+        )
+        .unwrap(),
+    );
+    persist_then_conflict(
+        &mut client,
+        &ItemDeliveryLedger::from_manifest(
+            "session_version_conflict",
+            &manifest_with_version(
+                "release_big_five_ko_v1",
+                "instrument_version_ko_v1",
+                RELEASE_DIGEST,
+            ),
+        )
+        .unwrap(),
+        &ItemDeliveryLedger::from_manifest(
+            "session_version_conflict",
+            &manifest_with_version(
+                "release_big_five_ko_v1",
+                "instrument_version_ko_v2",
                 RELEASE_DIGEST,
             ),
         )

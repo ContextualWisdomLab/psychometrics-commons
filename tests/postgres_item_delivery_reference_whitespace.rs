@@ -44,13 +44,14 @@ fn database_rejects_outer_control_whitespace_in_scalar_and_array_references() {
         let error = client
             .execute(
                 "INSERT INTO item_delivery_ledger (\
-                     tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                     allowed_item_version_refs\
-                 ) VALUES ($1, $2, $3, $4, $5, $6)",
+                     tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                     release_content_digest, locale, allowed_item_version_refs\
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 &[
                     &"tenant_reference_alpha",
                     &invalid_session_ref,
                     &"release_reference_alpha",
+                    &"instrument_version_ko_v1",
                     &"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                     &"en-US",
                     &vec!["item_reference_alpha"],
@@ -68,13 +69,14 @@ fn database_rejects_outer_control_whitespace_in_scalar_and_array_references() {
         let error = client
             .execute(
                 "INSERT INTO item_delivery_ledger (\
-                     tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                     allowed_item_version_refs\
-                 ) VALUES ($1, $2, $3, $4, $5, $6)",
+                     tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                     release_content_digest, locale, allowed_item_version_refs\
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 &[
                     &"tenant_reference_alpha",
                     &session_ref,
                     &"release_reference_alpha",
+                    &"instrument_version_ko_v1",
                     &"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                     &"en-US",
                     &vec![invalid_item_ref],

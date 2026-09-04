@@ -10,6 +10,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 const ITEM_DELIVERY_MIGRATION: &str = include_str!("../migrations/0004_item_delivery_evidence.sql");
+const ITEM_DELIVERY_VERSION_MIGRATION: &str =
+    include_str!("../migrations/0032_item_delivery_instrument_version.sql");
 
 /// Outcome of persisting one item-delivery ledger snapshot.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,15 +85,17 @@ impl From<postgres::Error> for ItemDeliveryPersistenceError {
 pub fn apply_item_delivery_migration(
     client: &mut impl GenericClient,
 ) -> Result<(), postgres::Error> {
-    client.batch_execute(ITEM_DELIVERY_MIGRATION)
+    client.batch_execute(ITEM_DELIVERY_MIGRATION)?;
+    client.batch_execute(ITEM_DELIVERY_VERSION_MIGRATION)
 }
 
 /// Persist one tenant-bound item-delivery ledger and its accepted events.
 ///
-/// Exact replay under the same tenant is idempotent. Tenant, release, locale, digest,
-/// allowed-item, delivery, or event-evidence rebinding fails closed. Caller-provided
-/// references must already have their canonical spelling; persistence never trims an
-/// alias and silently binds it to another resource identity.
+/// Exact replay under the same tenant is idempotent. Tenant, release, instrument
+/// version, locale, digest, allowed-item, delivery, or event-evidence rebinding
+/// fails closed. Caller-provided references must already have their canonical
+/// spelling; persistence never trims an alias and silently binds it to another
+/// resource identity.
 ///
 /// # Errors
 ///
@@ -128,25 +132,26 @@ fn persist_ledger_header(
     let row = transaction.query_one(
         "WITH inserted AS (\
              INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
-             ) VALUES ($1, $2, $3, $4, $5, $6) \
+                 tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                 release_content_digest, locale, allowed_item_version_refs\
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7) \
              ON CONFLICT (session_ref) DO NOTHING \
-             RETURNING tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                       allowed_item_version_refs, TRUE AS inserted\
+             RETURNING tenant_ref, instrument_release_ref, instrument_version_ref, \
+                       release_content_digest, locale, allowed_item_version_refs, TRUE AS inserted\
          ) \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, inserted \
+         SELECT tenant_ref, instrument_release_ref, instrument_version_ref, \
+                release_content_digest, locale, allowed_item_version_refs, inserted \
          FROM inserted \
          UNION ALL \
-         SELECT tenant_ref, instrument_release_ref, release_content_digest, locale, \
-                allowed_item_version_refs, FALSE AS inserted \
+         SELECT tenant_ref, instrument_release_ref, instrument_version_ref, \
+                release_content_digest, locale, allowed_item_version_refs, FALSE AS inserted \
          FROM item_delivery_ledger WHERE session_ref = $2 \
          LIMIT 1",
         &[
             &tenant_ref,
             &session_ref,
             &ledger.instrument_release_ref(),
+            &ledger.instrument_version_ref(),
             &ledger.release_content_digest(),
             &ledger.locale(),
             &allowed_item_version_refs,
@@ -154,12 +159,14 @@ fn persist_ledger_header(
     )?;
     let stored_tenant_ref: String = row.get(0);
     let stored_release_ref: String = row.get(1);
-    let stored_digest: String = row.get(2);
-    let stored_locale: String = row.get(3);
-    let stored_allowed: Vec<String> = row.get(4);
-    let inserted: bool = row.get(5);
+    let stored_version_ref: Option<String> = row.get(2);
+    let stored_digest: String = row.get(3);
+    let stored_locale: String = row.get(4);
+    let stored_allowed: Vec<String> = row.get(5);
+    let inserted: bool = row.get(6);
     if stored_tenant_ref == tenant_ref
         && stored_release_ref == ledger.instrument_release_ref()
+        && stored_version_ref.as_deref() == Some(ledger.instrument_version_ref())
         && stored_digest == ledger.release_content_digest()
         && stored_locale == ledger.locale()
         && stored_allowed == allowed_item_version_refs
