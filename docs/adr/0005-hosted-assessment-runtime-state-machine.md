@@ -30,6 +30,23 @@ Terminal alternatives: `expired`, `cancelled`, `invalidated`.
 
 Only the runtime may transition session state. Clients request commands; they do not submit the target state directly.
 
+Session creation copies the published release's `instrument_release_ref`, `instrument_version_ref`, content digest, locale, and ordered `item_version_refs`. Those values are immutable session provenance. Later publication suspend/retire blocks *new* sessions and never rewrites an already-created session.
+
+### Item-delivery authority
+
+Item-delivery evidence is product-runtime state, not psychometric item-selection arithmetic. `fast-mlsirm` remains the only owner of selection, calibration, and scoring kernels.
+
+As-built domain contract in `src/item_delivery.rs` and `src/session.rs`:
+
+- `ItemDeliveryLedger::from_session(&AssessmentSession, &InstrumentReleaseManifest)` is the only constructor. Callers cannot create a ledger from a bare `session_ref` or a detached lifecycle enum.
+- The manifest must match the session's exact release reference, instrument version, content digest, locale, and ordered item-version set. Any isolated mismatch, including a reused digest with a reordered, reduced, or enlarged item set, fails closed as `SessionReleaseMismatch`.
+- Allowed item versions are copied from the session aggregate, not from the caller-supplied manifest.
+- `deliver(&AssessmentSession, ItemDeliveryRequest)` authorizes both ownership and lifecycle from the same aggregate. A caller cannot present `SessionState::Active` for a `Created` session.
+- Exact replay of an accepted `delivery_ref` remains idempotent after the session leaves `Active`. Conflicting replay fails closed. Unknown or non-active states fail closed for new logical deliveries.
+- Same `session_ref` with different published-release provenance, including a reused digest that enlarges, shrinks, or reorders the pinned item-version set, is `SessionMismatch`, not an idempotent replay.
+
+This decision is as-built for the in-process domain API. Durable PostgreSQL item-delivery persistence currently compares tenant, session, release reference, digest, locale, and allowed items; it does not yet persist `instrument_version_ref`. Until that column exists, version-only rebinding is closed in the domain ledger and remains an explicit persistence gap.
+
 ## Response-event contract
 
 Each response event contains:
@@ -92,17 +109,21 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 - concurrent header-row lock tests (`command_persist_locks_session_header_until_caller_commits`);
 - published-release start-boundary tests (`start_uses_published_release_and_never_reconstitution`, `start_rejects_unpublished_release_and_locale_mismatch`, `start_persists_published_release_and_rejects_unpublished_before_insert`, `start_from_stored_release_uses_database_publication_state`, `start_from_published_snapshot_matches_new_and_rejects_locale_mismatch`, `start_replays_exact_session_after_stored_release_is_suspended`, `exact_start_identity_matches_stored_session_and_rejects_rebind`, `persist_rejects_reconstituted_first_insert_after_stored_suspend`, `persist_replays_exact_created_row_after_stored_suspend`, `persist_rejects_first_insert_when_stored_release_is_missing`, `persist_maps_unpublished_stored_release_to_first_insert_seal`, `first_insert_seal_replays_only_publication_boundary_errors`);
 - immutable snapshot and supersession tests;
-- end-to-end scoring dispatch contract tests.
+- end-to-end scoring dispatch contract tests;
+- `tests/item_delivery_session_authority.rs` rejects detached lifecycle forgery, isolated release/version/digest/locale/item-set mismatches, same-`session_ref` / different-release delivery, and same-`session_ref` delivery after a reused digest rebinds the item set;
+- `tests/session_release_binding.rs` proves session creation copies the published item-version set.
 
 ## Alternatives rejected
 
 - **Mutable session row with arbitrary status updates:** weak auditability and race safety.
 - **Synchronous scoring inside completion transaction:** increases lock time and couples availability.
 - **Client-side canonical session state:** unsafe across devices and reconnects.
+- **Honor-system content digest without comparing the item-version set:** a caller can reuse a well-formed SHA-256 string and enlarge or reorder the administered form.
+- **Detached `SessionState` on `deliver`:** lets a caller claim `Active` while the aggregate is still `Created`, paused, or completed.
 
 ## Reversal conditions
 
-Revisit the storage implementation if event volume demands a different backend, but retain state semantics, idempotency, immutable snapshots, and outbox guarantees.
+Revisit the storage implementation if event volume demands a different backend, but retain state semantics, idempotency, immutable snapshots, and outbox guarantees. Revisit the item-delivery constructor only if a later transport still receives an authoritative `AssessmentSession` loaded by the server; never restore caller-supplied lifecycle enums or honor-system item sets.
 
 ## References
 
@@ -113,3 +134,7 @@ Hohpe, G., & Woolf, B. (2003). *Enterprise integration patterns: Designing, buil
 PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/index.html
 
 PostgreSQL Global Development Group. (2026). *Explicit locking*. In *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/explicit-locking.html
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association.
+
+International Organization for Standardization. (2022). *Information security, cybersecurity and privacy protection — Information security management systems — Requirements* (ISO/IEC 27001:2022).

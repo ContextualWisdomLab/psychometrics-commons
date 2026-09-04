@@ -5,7 +5,8 @@
 //! arbitrary target state. Accepted commands carry server-issued replay identity
 //! and ordering so an exact retransmission returns its original outcome without
 //! rewinding later state. Session creation pins the exact immutable published
-//! instrument release, content digest, and locale before lifecycle transitions begin.
+//! instrument release, version, content digest, locale, and ordered item-version
+//! set before lifecycle transitions begin.
 
 use crate::instrument::{
     valid_locale, valid_sha256_digest, InstrumentRelease, InstrumentReleaseManifest,
@@ -166,10 +167,11 @@ impl AcceptedSessionCommand {
 
 /// Immutable creation identity and current lifecycle state for one assessment session.
 ///
-/// The session copies release/version/content-digest/locale identity from an already-validated
-/// [`InstrumentRelease`]. It does not duplicate instrument publication evidence rules.
-/// Suspending or retiring the release later blocks *new* sessions but does not rewrite
-/// the provenance of a session that was validly created while the release was published.
+/// The session copies release/version/content-digest/locale/item-set identity from an
+/// already-validated [`InstrumentRelease`]. It does not duplicate instrument publication
+/// evidence rules. Suspending or retiring the release later blocks *new* sessions but does
+/// not rewrite the provenance of a session that was validly created while the release was
+/// published.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssessmentSession {
     session_ref: String,
@@ -178,6 +180,7 @@ pub struct AssessmentSession {
     instrument_version_ref: String,
     instrument_release_content_digest: String,
     locale: String,
+    item_version_refs: Vec<String>,
     created_at_unix_ms: u64,
     state: SessionState,
     accepted_commands: Vec<AcceptedSessionCommand>,
@@ -265,6 +268,7 @@ impl AssessmentSession {
             instrument_version_ref: manifest.instrument_version_ref().to_owned(),
             instrument_release_content_digest: manifest.content_digest().to_owned(),
             locale: manifest.locale().to_owned(),
+            item_version_refs: manifest.item_version_refs().to_vec(),
             created_at_unix_ms,
             state: SessionState::Created,
             accepted_commands: Vec::new(),
@@ -317,6 +321,11 @@ impl AssessmentSession {
             instrument_version_ref: instrument_version_ref.to_owned(),
             instrument_release_content_digest: instrument_release_content_digest.to_owned(),
             locale: locale.to_owned(),
+            // Stored created-session rows do not persist the creation-pinned item
+            // set. The pin is enforced on start paths (`new` /
+            // `from_currently_published_manifest`); delivery-evidence reload
+            // validates against the ledger's own stored allowed set.
+            item_version_refs: Vec::new(),
             created_at_unix_ms,
             state: SessionState::Created,
             accepted_commands: Vec::new(),
@@ -357,6 +366,15 @@ impl AssessmentSession {
     #[must_use]
     pub fn locale(&self) -> &str {
         &self.locale
+    }
+
+    /// Return the exact ordered item-version set pinned at session creation.
+    ///
+    /// Later callers cannot enlarge, shrink, or reorder this set by supplying a
+    /// different manifest that reuses the same release digest.
+    #[must_use]
+    pub fn item_version_refs(&self) -> &[String] {
+        &self.item_version_refs
     }
 
     /// Return the server-authoritative creation timestamp in Unix milliseconds.
