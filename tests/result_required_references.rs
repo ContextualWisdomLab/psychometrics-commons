@@ -1,5 +1,8 @@
 //! Coverage and fail-closed regressions for required immutable result references.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -65,11 +68,16 @@ fn result_input<'a>() -> ResultSnapshotInput<'a> {
 #[test]
 fn result_snapshot_rejects_blank_snapshot_identity() {
     let (request, result) = request_and_result();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let mut input = result_input();
     input.result_snapshot_ref = "   ";
 
     assert_eq!(
-        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshot::new(&session, &request, &result, input).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
 }
@@ -77,11 +85,16 @@ fn result_snapshot_rejects_blank_snapshot_identity() {
 #[test]
 fn result_snapshot_rejects_blank_narrative_version() {
     let (request, result) = request_and_result();
+    let session = common::assessment_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let mut input = result_input();
     input.narrative_version_ref = "\t";
 
     assert_eq!(
-        ResultSnapshot::new(&request, &result, input).unwrap_err(),
+        ResultSnapshot::new(&session, &request, &result, input).unwrap_err(),
         ResultSnapshotError::EmptyReference
     );
 }
@@ -89,13 +102,18 @@ fn result_snapshot_rejects_blank_narrative_version() {
 #[test]
 fn result_snapshot_normalizes_edge_whitespace_before_identity_becomes_durable() {
     let (request, result) = request_and_result();
+    let session = common::scoring_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let mut input = result_input();
     input.result_snapshot_ref = "  result_snapshot_ref  ";
     input.participant_ref = "\u{00a0}participant_ref\u{00a0}";
     input.narrative_version_ref = "\u{2003}narrative_version_ref\u{2003}";
     input.consent_snapshot_refs = &["\u{00a0}service_consent_ref\u{00a0}"];
 
-    let snapshot = ResultSnapshot::new(&request, &result, input).unwrap();
+    let snapshot = ResultSnapshot::new(&session, &request, &result, input).unwrap();
 
     assert_eq!(snapshot.result_snapshot_ref(), "result_snapshot_ref");
     assert_eq!(snapshot.participant_ref(), "participant_ref");

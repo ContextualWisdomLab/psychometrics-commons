@@ -7,6 +7,9 @@
 //! paralyzed by blanket masking. It does not invent a type score. HTTP
 //! `POST /v1/results/{result_ref}/exports` stays a later slice.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -75,7 +78,13 @@ fn published_big_five_snapshot() -> ResultSnapshot {
         ],
     )
     .unwrap();
+    let scoring_session = common::scoring_session(
+        request.session_ref(),
+        "participant_anonymous_ko_001",
+        request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &scoring_session,
         &request,
         &result,
         ResultSnapshotInput {
@@ -304,7 +313,13 @@ fn personal_export_keeps_failed_score_absent_and_escapes_report_quotes() {
         ],
     )
     .unwrap();
+    let scoring_session = common::scoring_session(
+        request.session_ref(),
+        "participant_account_en_001",
+        request.instrument_version_ref(),
+    );
     let snapshot = ResultSnapshot::new(
+        &scoring_session,
         &request,
         &result,
         ResultSnapshotInput {

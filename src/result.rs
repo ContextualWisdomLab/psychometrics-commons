@@ -7,6 +7,7 @@
 
 use crate::reference::normalized_reference;
 use crate::scoring::{ScoreObservation, ScoringRequest, ScoringResult};
+use crate::session::{AssessmentSession, SessionState};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -16,7 +17,11 @@ use std::fmt::{Display, Formatter};
 pub struct ResultSnapshotInput<'a> {
     /// New opaque result-snapshot reference.
     pub result_snapshot_ref: &'a str,
-    /// Product participant that owns the personal result.
+    /// Product participant expected to own the personal result.
+    ///
+    /// This value is never authoritative by itself: [`ResultSnapshot::new`]
+    /// requires it to match the participant pinned by the supplied assessment
+    /// session and copies the session value into immutable result state.
     pub participant_ref: &'a str,
     /// Exact approved narrative-rule or deterministic-template version.
     pub narrative_version_ref: &'a str,
@@ -51,17 +56,29 @@ pub struct ResultSnapshot {
 }
 
 impl ResultSnapshot {
-    /// Create a result snapshot by copying the scoring request and engine output.
+    /// Create a result snapshot bound to the authoritative assessment session.
     ///
-    /// All product-owned references are normalized before they become identity-
-    /// bearing state. Scientific provenance is copied verbatim from the already
-    /// validated scoring request/result boundary.
+    /// Result ownership, session identity, and the published instrument version
+    /// are checked against `session` before any immutable product result is
+    /// created. The session must already be [`SessionState::Scoring`] or
+    /// [`SessionState::Scored`]; a `Created`, `Active`, `Completed`, `Released`,
+    /// or terminal session cannot receive a score. Scientific provenance is
+    /// otherwise copied verbatim from the already validated scoring
+    /// request/result boundary; psychometric values are never recomputed here.
     ///
     /// # Errors
     ///
     /// Returns [`ResultSnapshotError::ScoringRequestMismatch`] when `result`
-    /// belongs to another scoring request, [`ResultSnapshotError::EmptyReference`]
-    /// for any blank required/supersession/consent reference,
+    /// belongs to another scoring request, [`ResultSnapshotError::SessionMismatch`]
+    /// when the request belongs to another assessment session,
+    /// [`ResultSnapshotError::ParticipantMismatch`] when caller-supplied product
+    /// ownership disagrees with the session owner,
+    /// [`ResultSnapshotError::InstrumentVersionMismatch`] when the scoring
+    /// request is not pinned to the session's published instrument version,
+    /// [`ResultSnapshotError::SessionNotReadyForResult`] when the session has
+    /// not begun scoring or has already released or left the scoring path,
+    /// [`ResultSnapshotError::EmptyReference`] for any blank required,
+    /// supersession, or consent reference,
     /// [`ResultSnapshotError::MissingConsentSnapshot`] when no consent evidence
     /// is supplied, [`ResultSnapshotError::DuplicateConsentSnapshot`] when the
     /// same normalized consent reference appears more than once,
@@ -69,6 +86,7 @@ impl ResultSnapshot {
     /// or [`ResultSnapshotError::SelfSupersession`] when a normalized snapshot
     /// reference claims to supersede itself.
     pub fn new(
+        session: &AssessmentSession,
         request: &ScoringRequest,
         result: &ScoringResult,
         input: ResultSnapshotInput<'_>,
@@ -76,9 +94,18 @@ impl ResultSnapshot {
         if !result.matches_request(request) {
             return Err(ResultSnapshotError::ScoringRequestMismatch);
         }
+        if request.session_ref() != session.session_ref() {
+            return Err(ResultSnapshotError::SessionMismatch);
+        }
+        if request.instrument_version_ref() != session.instrument_version_ref() {
+            return Err(ResultSnapshotError::InstrumentVersionMismatch);
+        }
 
         let snapshot_ref = required_reference(input.result_snapshot_ref)?;
         let participant_ref = required_reference(input.participant_ref)?;
+        if participant_ref != session.participant_ref() {
+            return Err(ResultSnapshotError::ParticipantMismatch);
+        }
         let narrative_version_ref = required_reference(input.narrative_version_ref)?;
         if input.consent_snapshot_refs.is_empty() {
             return Err(ResultSnapshotError::MissingConsentSnapshot);
@@ -102,15 +129,21 @@ impl ResultSnapshot {
         if supersedes_ref == Some(snapshot_ref) {
             return Err(ResultSnapshotError::SelfSupersession);
         }
+        if !matches!(
+            session.state(),
+            SessionState::Scoring | SessionState::Scored
+        ) {
+            return Err(ResultSnapshotError::SessionNotReadyForResult);
+        }
 
         Ok(Self {
             snapshot_ref: snapshot_ref.to_owned(),
-            participant_ref: participant_ref.to_owned(),
+            participant_ref: session.participant_ref().to_owned(),
             scoring_result_ref: result.scoring_result_ref().to_owned(),
-            session_ref: request.session_ref().to_owned(),
+            session_ref: session.session_ref().to_owned(),
             response_snapshot_ref: request.response_snapshot_ref().to_owned(),
             assessment_spec_ref: request.assessment_spec_ref().to_owned(),
-            instrument_version_ref: request.instrument_version_ref().to_owned(),
+            instrument_version_ref: session.instrument_version_ref().to_owned(),
             scoring_version_ref: request.scoring_version_ref().to_owned(),
             calibration_reference: request.calibration_reference().to_owned(),
             norm_version_ref: request.norm_version_ref().map(str::to_owned),
@@ -243,6 +276,14 @@ pub enum ResultSnapshotError {
     SelfSupersession,
     /// The scoring result belongs to a different scoring request.
     ScoringRequestMismatch,
+    /// The scoring request belongs to a different assessment session.
+    SessionMismatch,
+    /// Caller-supplied result ownership disagrees with the session participant.
+    ParticipantMismatch,
+    /// The scoring request uses an instrument version other than the session's.
+    InstrumentVersionMismatch,
+    /// The assessment session has not begun scoring, so no result may be published.
+    SessionNotReadyForResult,
 }
 
 impl Display for ResultSnapshotError {
@@ -263,6 +304,16 @@ impl Display for ResultSnapshotError {
             }
             Self::ScoringRequestMismatch => formatter
                 .write_str("scoring result does not belong to the supplied scoring request"),
+            Self::SessionMismatch => formatter
+                .write_str("scoring request does not belong to the supplied assessment session"),
+            Self::ParticipantMismatch => formatter
+                .write_str("result participant does not match the assessment session owner"),
+            Self::InstrumentVersionMismatch => formatter.write_str(
+                "scoring request instrument version does not match the assessment session",
+            ),
+            Self::SessionNotReadyForResult => formatter.write_str(
+                "result snapshots can be created only after scoring has begun for the assessment session",
+            ),
         }
     }
 }
