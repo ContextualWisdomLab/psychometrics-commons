@@ -308,6 +308,7 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
         "item_delivery_event",
         "participant_identity_link",
         "longitudinal_enrollment",
+        "enrollment_membership_context",
         "longitudinal_observation_record",
         "temporal_analysis_submission",
     ] {

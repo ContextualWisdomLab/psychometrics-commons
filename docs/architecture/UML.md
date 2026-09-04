@@ -404,7 +404,7 @@ sequenceDiagram
 
     loop each EMA/ESM observation
         G->>A: normalized candidate observation + source identity/time/context
-        A->>A: validate participant/program/consent/version + exact source identity
+        A->>A: validate tenant-owned participant + current longitudinal ledger + program/version + exact source identity
         A->>DB: append LongitudinalObservationRecord(validity/recorded/received/ingested time, membership context)
         DB-->>A: idempotent observation evidence
     end
@@ -415,7 +415,7 @@ sequenceDiagram
     A->>DB: record artifact/failure evidence without copying TEPP analytical state
 ```
 
-Gyeot remains the collection owner and TEPP remains the temporal/event/multilevel/multiple-membership analytical owner. Psychometrics Commons owns consented enrollment, normalized ingestion evidence, exact observation-set identity, and orchestration. Validity-time, source-recorded time, platform-received time, platform-ingested time, and membership context are preserved so temporal leakage and atomistic flattening can be detected rather than silently introduced.
+Gyeot remains the collection owner and TEPP remains the temporal/event/multilevel/multiple-membership analytical owner. Psychometrics Commons owns consented enrollment, normalized ingestion evidence, exact observation-set identity, and orchestration. Enrollment state and the enroll-time consent snapshot do not authorize collection; each observation re-checks the current longitudinal ledger and the tenant-owned participant record. Validity-time, source-recorded time, platform-received time, platform-ingested time, and membership context are preserved so temporal leakage and atomistic flattening can be detected rather than silently introduced.
 
 ## 10. Measurement Workbench publication-evidence sequence
 

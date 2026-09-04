@@ -50,7 +50,9 @@ erDiagram
     dataset_snapshot ||--o{ dataset_snapshot_member : contains
     dataset_snapshot ||--o{ research_release : released_as
 
+    tenant_account ||--o{ longitudinal_enrollment : scopes
     assessment_participant ||--o{ longitudinal_enrollment : enrolls
+    longitudinal_enrollment ||--o{ enrollment_membership_context : declares
     longitudinal_enrollment ||--o{ longitudinal_observation_record : ingests
     longitudinal_enrollment ||--o{ temporal_analysis_submission : submits
 
@@ -319,6 +321,7 @@ erDiagram
 
     longitudinal_enrollment {
       string enrollment_ref PK
+      string tenant_ref FK
       string participant_ref FK
       string program_ref
       string consent_snapshot_ref
@@ -326,6 +329,13 @@ erDiagram
       string enrollment_state
       timestamp enrolled_at
       timestamp latest_event_at
+    }
+
+    enrollment_membership_context {
+      string membership_assignment_ref PK
+      string enrollment_ref FK
+      string membership_context_ref
+      int declaration_order
     }
 
     longitudinal_observation_record {
@@ -448,13 +458,13 @@ erDiagram
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
-- `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Protected main persists requested-state identity plus local propagation and processing evidence. **Active PR #77** adds terminal `completion_evidence_ref` / `completed_at_unix_ms` fields and immutable `data_rights_retained_scope_evidence` child rows for deletion scopes that must remain retained; this is not protected-main truth until #77 is integrated. Dependent-system execution remains Target.
-- Physical `assessment_session` exists only on Active PR #218 (`migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path. Protected main still has the `src/session.rs` aggregate only.
+- `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Protected main persists requested-state identity plus local propagation and processing evidence. Merged #77 adds protected-main terminal `completion_evidence_ref` / `completed_at_unix_ms` fields and immutable `data_rights_retained_scope_evidence` child rows for deletion scopes that must remain retained. Dependent-system execution remains Target.
+- Protected main persists physical `assessment_session` (merged #218; `migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path through protected-main `src/session_http.rs`.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
-- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is carried by Active PR #49 (`migrations/0005_consent_lifecycle.sql`); HTTP consent transport and derived snapshot tables remain Target.
-- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persist remains Active PR #52; it is not protected-main truth until integrated. Do not name closed #158, #147, #133, #114, or #124 as the current persist landing.
-- `longitudinal_enrollment`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. No TEPP analytical kernel is duplicated here.
-- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables are on protected main. Exclusive outbox delivery-lease columns (`lease_worker_ref`, `lease_ref`, `lease_fencing_token`, `lease_expires_at`, `delivery_lease_generation`) and database-clock expiry recovery exist only on Active PR #60 until merged. `integration_consumption` pending/processing/completed/quarantined persistence is already on protected main.
+- `consent_ledger` and `consent_event` persist the already-merged `src/consent.rs` append-only ledger. Physical persistence is protected-main truth (`migrations/0005_consent_lifecycle.sql`; merged #49); HTTP consent transport and derived snapshot tables remain Target.
+- `participant_identity_link` is the persistence target accepted by ADR-0020. The current `src/participant.rs` `keyverse_subject_ref` field is an application-domain first-link projection, not the future mutable persistence source of truth. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persistence remains a later slice; it is not protected-main truth until integrated. Do not name closed #158, #147, #133, #114, or #124 as the current persist landing.
+- `longitudinal_enrollment`, `enrollment_membership_context`, `longitudinal_observation_record`, and `temporal_analysis_submission` make the ADR-0008 Commons-owned Gyeot/TEPP orchestration boundary explicit. Membership contexts stay in a child table so work and home are not flattened onto the enrollment row (**Active PR** #226); no TEPP analytical kernel is duplicated here.
+- `integration_outbox`, `integration_delivery_attempt`, `integration_inbox`, and `integration_consumption` reflect `src/integration.rs` domain semantics. Outbox/inbox/delivery-attempt tables, exclusive delivery-lease columns (`lease_worker_ref`, `lease_ref`, `lease_fencing_token`, `lease_expires_at`, `delivery_lease_generation`) with database-clock expiry recovery, and `integration_consumption` pending/processing/completed/quarantined persistence are all protected-main truth.
 
 This section is a maturity guard: a logical entity may be architecture-complete without being as-built database evidence.
 
@@ -535,7 +545,8 @@ Requirements:
 
 The Commons longitudinal tables are orchestration/evidence records only:
 
-- `longitudinal_enrollment` binds product participant, program, consent, and collection-system references;
+- `longitudinal_enrollment` binds tenant, product participant, program, consent, and collection-system references;
+- `enrollment_membership_context` stores each declared membership once, in declaration order, so later TEPP analysis is not forced into one primary group;
 - `longitudinal_observation_record` stores normalized observation identity/time/construct/version/context references required to reproduce a submission, not a duplicate Gyeot application database;
 - `temporal_analysis_submission` records exact observation-set digest, TEPP analysis specification, lifecycle, and returned artifact reference.
 
