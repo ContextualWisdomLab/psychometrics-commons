@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,6 +37,48 @@ class CoverageContractTests(unittest.TestCase):
             ),
             "lines coverage: PASS (7/7, 100%)",
         )
+
+    def test_lcov_line_records_use_merged_source_counts(self) -> None:
+        """Accept complete LCOV line records."""
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage-lines.lcov"
+            report.write_text("SF:src/example.rs\nDA:7,1\nend_of_record\n", encoding="utf-8")
+            self.assertEqual(
+                CHECK_COVERAGE.validate_report(report, ["lines"]),
+                ["lines coverage: PASS (1/1, 100%)"],
+            )
+
+    def test_lcov_line_records_reject_zero_source_line(self) -> None:
+        """A synthetic line zero must never count as covered production code."""
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage-lines.lcov"
+            report.write_text("SF:src/example.rs\nDA:0,1\nend_of_record\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "LCOV line numbers must be positive"):
+                CHECK_COVERAGE.validate_report(report, ["lines"])
+
+    def test_lcov_branch_records_reject_uncovered_branches(self) -> None:
+        """Reject zero and not-taken LCOV branch records."""
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage-branches.lcov"
+            report.write_text(
+                "SF:src/example.rs\nBRDA:7,0,0,1\nBRDA:7,0,1,-\nend_of_record\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "branches coverage is incomplete: 1/2"):
+                CHECK_COVERAGE.validate_report(report, ["branches"])
+
+    def test_lcov_branch_records_reject_zero_source_line(self) -> None:
+        """A synthetic line zero must never count as covered production code."""
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "coverage-branches.lcov"
+            report.write_text(
+                "SF:src/example.rs\nBRDA:0,0,0,1\nend_of_record\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ValueError, "LCOV branch line numbers must be positive"
+            ):
+                CHECK_COVERAGE.validate_report(report, ["branches"])
 
 
 if __name__ == "__main__":

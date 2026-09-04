@@ -1,0 +1,945 @@
+//! `PostgreSQL` 18 persistence for accepted response events.
+//!
+//! This adapter stores the mid-session ledger so a process restart can rebuild
+//! the same accepted prefix before snapshot freeze. It does not store response
+//! bodies and does not compute scores. The caller owns the connection,
+//! credentials, and transaction boundary. Writes and replay classification
+//! require `READ COMMITTED` so a concurrent insert that wins a unique-key race
+//! is visible to the exact-replay classifier. Read-only reconstruction accepts
+//! the caller's stronger transaction snapshot because it does not perform that
+//! race-sensitive write/classify sequence.
+
+use crate::reference::normalized_reference;
+use crate::response::{ResponseEvent, ResponseLedger, WriteError};
+use postgres::{Error as PgError, GenericClient, Transaction};
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const RESPONSE_EVENT_MIGRATION: &str = include_str!("../migrations/0020_response_event.sql");
+const POSTGRES_EPOCH_UNIX_MS: u64 = 946_684_800_000;
+// PostgreSQL's END_TIMESTAMP is the exclusive 294277-01-01 boundary,
+// 9_223_371_331_200_000 whole milliseconds after its 2000-01-01 epoch.
+const POSTGRES_TIMESTAMP_END_MS_FROM_POSTGRES_EPOCH: u64 = 9_223_371_331_200_000;
+const MAX_POSTGRES_TIMESTAMP_UNIX_MS: u64 =
+    POSTGRES_EPOCH_UNIX_MS + POSTGRES_TIMESTAMP_END_MS_FROM_POSTGRES_EPOCH - 1;
+
+/// One accepted event plus the distinct observed and received clocks.
+///
+/// `observed_at_unix_ms` is source-valid time. `received_at_unix_ms` is
+/// platform receipt time. Reload keeps both so a Korean IPIP Quick restart
+/// can hand the same temporal prefix to later TEPP or scoring composition
+/// without inventing an answer or a score.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseEventReceipt {
+    event: ResponseEvent,
+    observed_at_unix_ms: u64,
+    received_at_unix_ms: u64,
+}
+
+impl ResponseEventReceipt {
+    /// Return the accepted response-event identity and evidence.
+    #[must_use]
+    pub const fn event(&self) -> &ResponseEvent {
+        &self.event
+    }
+
+    /// Return source-valid observed time in Unix milliseconds.
+    #[must_use]
+    pub const fn observed_at_unix_ms(&self) -> u64 {
+        self.observed_at_unix_ms
+    }
+
+    /// Return platform receipt time in Unix milliseconds.
+    #[must_use]
+    pub const fn received_at_unix_ms(&self) -> u64 {
+        self.received_at_unix_ms
+    }
+}
+
+/// Outcome of persisting one accepted response event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ResponseEventPersistenceDisposition {
+    /// A new accepted event row was inserted.
+    Inserted,
+    /// The same immutable event identity and evidence already existed.
+    Duplicate,
+}
+
+/// Fail-closed error for durable response-event persistence.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ResponseEventPersistenceError {
+    /// A session or event identity was blank, numeric-like, or unbound.
+    InvalidReference,
+    /// Event identity was replayed with different immutable evidence.
+    ConflictingReplay,
+    /// Stored response-event evidence was malformed or otherwise corrupt.
+    CorruptStoredEvidence,
+    /// A server sequence was reused by another event identity in the session.
+    SequenceConflict,
+    /// A sequence cannot be represented by the bounded database column.
+    InvalidSequence,
+    /// Observed time was zero, inverted after received time, or out of range.
+    InvalidTimestamp,
+    /// Response-event persistence requires `PostgreSQL` `READ COMMITTED` isolation.
+    UnsupportedIsolationLevel,
+    /// `PostgreSQL` rejected or could not execute the persistence operation.
+    Database(postgres::Error),
+}
+
+impl Display for ResponseEventPersistenceError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidReference => {
+                "response event persistence references must be opaque durable values"
+            }
+            Self::ConflictingReplay => {
+                "response event identity was replayed with conflicting evidence"
+            }
+            Self::CorruptStoredEvidence => {
+                "stored response event evidence is not valid immutable evidence"
+            }
+            Self::SequenceConflict => {
+                "response event sequence was reused by a different event identity"
+            }
+            Self::InvalidSequence => {
+                "response event sequence is missing, gapped, or outside the PostgreSQL bigint range"
+            }
+            Self::InvalidTimestamp => {
+                "response event observed time must be positive and not after received time"
+            }
+            Self::UnsupportedIsolationLevel => {
+                "response event persistence requires read committed isolation"
+            }
+            Self::Database(_) => "PostgreSQL response-event persistence failed",
+        })
+    }
+}
+
+impl Error for ResponseEventPersistenceError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<postgres::Error> for ResponseEventPersistenceError {
+    fn from(error: postgres::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+/// Apply the idempotent response-event migration to a `PostgreSQL` connection.
+///
+/// # Errors
+///
+/// Returns the `PostgreSQL` error if the migration cannot be applied.
+pub fn apply_response_event_migration(client: &mut impl GenericClient) -> Result<(), PgError> {
+    client.batch_execute(RESPONSE_EVENT_MIGRATION)
+}
+
+/// Persist one accepted response event for a session.
+///
+/// Exact replay of the same event identity, session binding, item version,
+/// payload digest, server sequence, and observed/received times is idempotent.
+/// Rebinding any of those values fails closed. Historical accepted answers are
+/// never updated. `observed_at_unix_ms` is source-valid time; `received_at_unix_ms`
+/// is platform receipt time.
+///
+/// # Errors
+///
+/// Returns [`ResponseEventPersistenceError`] for an unbound identity,
+/// unsupported isolation, conflicting replay, a sequence conflict, a gapped
+/// or out-of-range sequence, an invalid timestamp, or a database failure.
+pub fn persist_response_event(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    event: &ResponseEvent,
+    observed_at_unix_ms: u64,
+    received_at_unix_ms: u64,
+) -> Result<ResponseEventPersistenceDisposition, ResponseEventPersistenceError> {
+    require_read_committed(transaction)?;
+    let session_ref = required_reference(session_ref)?;
+    let server_event_ref = required_reference(event.server_event_ref())?;
+    let client_event_ref = required_reference(event.client_event_ref())?;
+    let item_version_ref = required_reference(event.item_version_ref())?;
+    let server_sequence = postgres_sequence(event.sequence())?;
+    let observed_at = postgres_timestamptz(observed_at_unix_ms)?;
+    let received_at = postgres_timestamptz(received_at_unix_ms)?;
+    if observed_at_unix_ms > received_at_unix_ms {
+        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
+    let next_sequence = next_contiguous_sequence(transaction, session_ref)?;
+    if server_sequence > next_sequence {
+        return Err(ResponseEventPersistenceError::InvalidSequence);
+    }
+
+    let inserted = match transaction.execute(
+        "INSERT INTO response_event (\
+             response_event_ref, session_ref, client_event_ref, item_version_ref, \
+             payload_digest, server_sequence, observed_at, received_at\
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
+         ON CONFLICT (response_event_ref) DO NOTHING",
+        &[
+            &server_event_ref,
+            &session_ref,
+            &client_event_ref,
+            &item_version_ref,
+            &event.payload_digest(),
+            &server_sequence,
+            &observed_at,
+            &received_at,
+        ],
+    ) {
+        Ok(count) => count,
+        Err(error) => return Err(classify_unique_violation(error)),
+    };
+    if inserted == 1 {
+        return Ok(ResponseEventPersistenceDisposition::Inserted);
+    }
+    classify_existing_event(
+        transaction,
+        session_ref,
+        event,
+        server_event_ref,
+        server_sequence,
+        observed_at,
+        received_at,
+    )
+}
+
+/// Rebuild accepted events and their observed/received clocks after restart.
+///
+/// Rows are read in `server_sequence` order. A missing session returns an empty
+/// list. Gapped, reordered, conflicting identities, inverted, or zero stored
+/// times fail closed before any receipt is returned. Observed time stays
+/// distinct from platform receipt time. Because this path is read-only, it can
+/// use the caller's `READ COMMITTED`, `REPEATABLE READ`, or `SERIALIZABLE`
+/// transaction snapshot without weakening replay classification on writes.
+///
+/// # Errors
+///
+/// Returns [`ResponseEventPersistenceError`] for an unbound session, corrupt
+/// stored history, invalid stored time, or a database failure.
+pub fn load_response_event_receipts(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<Vec<ResponseEventReceipt>, ResponseEventPersistenceError> {
+    load_response_event_state(transaction, session_ref).map(|(receipts, _)| receipts)
+}
+
+fn load_response_event_state(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<(Vec<ResponseEventReceipt>, ResponseLedger), ResponseEventPersistenceError> {
+    let session_ref = required_reference(session_ref)?;
+    let rows = transaction.query(
+        "SELECT response_event_ref, client_event_ref, item_version_ref, \
+                payload_digest, server_sequence, observed_at, received_at \
+         FROM response_event \
+         WHERE session_ref = $1 \
+         ORDER BY server_sequence",
+        &[&session_ref],
+    )?;
+    let mut receipts = Vec::with_capacity(rows.len());
+    for row in rows {
+        let server_event_ref: String = row.get(0);
+        let client_event_ref: String = row.get(1);
+        let item_version_ref: String = row.get(2);
+        let payload_digest: String = row.get(3);
+        let server_sequence: i64 = row.get(4);
+        let observed_at: SystemTime = row.get(5);
+        let received_at: SystemTime = row.get(6);
+        let sequence = usize::try_from(server_sequence)
+            .map_err(|_| ResponseEventPersistenceError::InvalidSequence)?;
+        let observed_at_unix_ms = unix_ms_from_system_time(observed_at)?;
+        let received_at_unix_ms = unix_ms_from_system_time(received_at)?;
+        if observed_at_unix_ms > received_at_unix_ms {
+            return Err(ResponseEventPersistenceError::InvalidTimestamp);
+        }
+        let event = ResponseEvent::from_persisted(
+            server_event_ref,
+            client_event_ref,
+            item_version_ref,
+            payload_digest,
+            sequence,
+        )
+        .map_err(map_rebuild_error)?;
+        receipts.push(ResponseEventReceipt {
+            event,
+            observed_at_unix_ms,
+            received_at_unix_ms,
+        });
+    }
+    let ledger = response_ledger_from_receipts(session_ref, &receipts)?;
+    Ok((receipts, ledger))
+}
+
+/// Rebuild the accepted response ledger for one session after restart.
+///
+/// Rows are read in `server_sequence` order. A missing session returns an empty
+/// ledger. Gapped, reordered, conflicting identities, or invalid stored times
+/// fail closed. This read-only path preserves the caller's transaction
+/// isolation snapshot and does not impose the write-only `READ COMMITTED` gate.
+///
+/// # Errors
+///
+/// Returns [`ResponseEventPersistenceError`] for an unbound session, corrupt
+/// stored history, or a database failure.
+pub fn load_response_ledger(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<ResponseLedger, ResponseEventPersistenceError> {
+    load_response_event_state(transaction, session_ref).map(|(_, ledger)| ledger)
+}
+
+fn classify_existing_event(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    event: &ResponseEvent,
+    server_event_ref: &str,
+    server_sequence: i64,
+    observed_at: SystemTime,
+    received_at: SystemTime,
+) -> Result<ResponseEventPersistenceDisposition, ResponseEventPersistenceError> {
+    let row = query_existing_event_row(transaction, server_event_ref)?;
+    let stored_session: String = row.get(0);
+    let stored_client: String = row.get(1);
+    let stored_item: String = row.get(2);
+    let stored_digest: String = row.get(3);
+    let stored_sequence: i64 = row.get(4);
+    let stored_observed: SystemTime = row.get(5);
+    let stored_received: SystemTime = row.get(6);
+    if stored_session == session_ref
+        && stored_client == event.client_event_ref()
+        && stored_item == event.item_version_ref()
+        && stored_digest == event.payload_digest()
+        && stored_sequence == server_sequence
+        && stored_observed == observed_at
+        && stored_received == received_at
+    {
+        Ok(ResponseEventPersistenceDisposition::Duplicate)
+    } else {
+        Err(ResponseEventPersistenceError::ConflictingReplay)
+    }
+}
+
+fn query_existing_event_row(
+    transaction: &mut Transaction<'_>,
+    server_event_ref: &str,
+) -> Result<postgres::Row, ResponseEventPersistenceError> {
+    match transaction.query_one(
+        "SELECT session_ref, client_event_ref, item_version_ref, payload_digest, \
+                server_sequence, observed_at, received_at \
+         FROM response_event WHERE response_event_ref = $1",
+        &[&server_event_ref],
+    ) {
+        Ok(row) => Ok(row),
+        Err(error) => Err(ResponseEventPersistenceError::from(error)),
+    }
+}
+
+fn classify_unique_violation(error: postgres::Error) -> ResponseEventPersistenceError {
+    match error
+        .as_db_error()
+        .and_then(postgres::error::DbError::constraint)
+    {
+        Some("response_event_session_client_unique") => {
+            ResponseEventPersistenceError::ConflictingReplay
+        }
+        Some("response_event_session_sequence_unique") => {
+            ResponseEventPersistenceError::SequenceConflict
+        }
+        _ => ResponseEventPersistenceError::Database(error),
+    }
+}
+
+fn response_ledger_from_receipts(
+    session_ref: &str,
+    receipts: &[ResponseEventReceipt],
+) -> Result<ResponseLedger, ResponseEventPersistenceError> {
+    let events = receipts
+        .iter()
+        .map(|receipt| receipt.event.clone())
+        .collect();
+    ResponseLedger::from_persisted(session_ref, events).map_err(map_rebuild_error)
+}
+
+fn map_rebuild_error(error: WriteError) -> ResponseEventPersistenceError {
+    match error {
+        WriteError::InvalidReference | WriteError::SessionMismatch => {
+            ResponseEventPersistenceError::InvalidReference
+        }
+        WriteError::InvalidSequence => ResponseEventPersistenceError::InvalidSequence,
+        WriteError::EmptyReference | WriteError::InvalidPayloadDigest => {
+            ResponseEventPersistenceError::CorruptStoredEvidence
+        }
+        WriteError::IdempotencyConflict
+        | WriteError::ServerReferenceConflict
+        | WriteError::SessionNotActive(_)
+        | WriteError::SnapshotRequiresCompleted(_) => {
+            ResponseEventPersistenceError::ConflictingReplay
+        }
+    }
+}
+
+fn required_reference(reference: &str) -> Result<&str, ResponseEventPersistenceError> {
+    match normalized_reference(reference) {
+        Some(normalized) if normalized == reference => Ok(reference),
+        _ => Err(ResponseEventPersistenceError::InvalidReference),
+    }
+}
+
+fn postgres_sequence(value: usize) -> Result<i64, ResponseEventPersistenceError> {
+    i64::try_from(value).map_err(|_| ResponseEventPersistenceError::InvalidSequence)
+}
+
+fn next_sequence_from_summary(
+    count: i64,
+    highest: Option<i64>,
+) -> Result<i64, ResponseEventPersistenceError> {
+    match (count, highest) {
+        (0, None) => Ok(1),
+        (count, Some(value)) if count > 0 && value > 0 && count == value => value
+            .checked_add(1)
+            .ok_or(ResponseEventPersistenceError::InvalidSequence),
+        _ => Err(ResponseEventPersistenceError::InvalidSequence),
+    }
+}
+
+fn next_contiguous_sequence(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+) -> Result<i64, ResponseEventPersistenceError> {
+    let row = transaction.query_one(
+        "SELECT COUNT(*), MAX(server_sequence) \
+         FROM response_event WHERE session_ref = $1",
+        &[&session_ref],
+    )?;
+    let count: i64 = row.get(0);
+    let highest: Option<i64> = row.get(1);
+    next_sequence_from_summary(count, highest)
+}
+
+fn postgres_timestamptz(unix_ms: u64) -> Result<SystemTime, ResponseEventPersistenceError> {
+    if unix_ms == 0 || unix_ms > MAX_POSTGRES_TIMESTAMP_UNIX_MS {
+        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
+    Ok(UNIX_EPOCH + Duration::from_millis(unix_ms))
+}
+
+fn unix_ms_from_system_time(time: SystemTime) -> Result<u64, ResponseEventPersistenceError> {
+    let duration = time
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ResponseEventPersistenceError::InvalidTimestamp)?;
+    millis_from_duration(duration)
+}
+
+fn millis_from_duration(duration: Duration) -> Result<u64, ResponseEventPersistenceError> {
+    let unix_ms = duration
+        .as_secs()
+        .checked_mul(1_000)
+        .and_then(|value| value.checked_add(u64::from(duration.subsec_millis())))
+        .ok_or(ResponseEventPersistenceError::InvalidTimestamp)?;
+    if unix_ms == 0 {
+        return Err(ResponseEventPersistenceError::InvalidTimestamp);
+    }
+    Ok(unix_ms)
+}
+
+fn require_read_committed(
+    transaction: &mut Transaction<'_>,
+) -> Result<(), ResponseEventPersistenceError> {
+    let row = transaction.query_one("SHOW transaction_isolation", &[])?;
+    let isolation: String = row.get(0);
+    if isolation == "read committed" {
+        Ok(())
+    } else {
+        Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
+    }
+}
+
+#[cfg(test)]
+mod reference_guard_tests {
+    use super::{
+        apply_response_event_migration, classify_existing_event, classify_unique_violation,
+        load_response_event_receipts, load_response_ledger, map_rebuild_error,
+        millis_from_duration, next_contiguous_sequence, next_sequence_from_summary,
+        persist_response_event, postgres_sequence, postgres_timestamptz, query_existing_event_row,
+        require_read_committed, required_reference, response_ledger_from_receipts,
+        unix_ms_from_system_time, ResponseEventPersistenceError, ResponseEventReceipt,
+    };
+    use crate::response::ResponseEvent;
+    use crate::response::WriteError;
+    use crate::session::SessionState;
+    use postgres::{Client, IsolationLevel, NoTls};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    const INVALID_SEQUENCE_ERROR: &str =
+        "response event sequence is missing, gapped, or outside the PostgreSQL bigint range";
+
+    #[test]
+    fn blank_numeric_and_overflow_sequences_fail_closed() {
+        assert!(matches!(
+            required_reference(" "),
+            Err(ResponseEventPersistenceError::InvalidReference)
+        ));
+        assert!(matches!(
+            required_reference("12"),
+            Err(ResponseEventPersistenceError::InvalidReference)
+        ));
+        assert_eq!(
+            required_reference("session_ipip_ko_quick").unwrap(),
+            "session_ipip_ko_quick"
+        );
+        assert_eq!(postgres_sequence(1).unwrap(), 1);
+        assert!(matches!(
+            postgres_sequence(usize::MAX),
+            Err(ResponseEventPersistenceError::InvalidSequence)
+        ));
+        assert!(matches!(
+            postgres_timestamptz(0),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert!(postgres_timestamptz(1_700_000_000_000).is_ok());
+        assert!(matches!(
+            unix_ms_from_system_time(UNIX_EPOCH),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert!(matches!(
+            unix_ms_from_system_time(UNIX_EPOCH - Duration::from_millis(1)),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert_eq!(
+            unix_ms_from_system_time(UNIX_EPOCH + Duration::from_secs(1_700_000_000)).unwrap(),
+            1_700_000_000_000
+        );
+        assert!(matches!(
+            millis_from_duration(Duration::from_secs(u64::MAX / 1_000 + 1)),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+        assert!(matches!(
+            millis_from_duration(Duration::from_millis(0)),
+            Err(ResponseEventPersistenceError::InvalidTimestamp)
+        ));
+    }
+
+    #[test]
+    fn sequence_summary_requires_an_exact_positive_prefix() {
+        assert_eq!(next_sequence_from_summary(0, None).unwrap(), 1);
+        assert_eq!(next_sequence_from_summary(2, Some(2)).unwrap(), 3);
+        for (count, highest) in [(1, Some(2)), (1, Some(0)), (-1, Some(-1)), (1, None)] {
+            assert!(matches!(
+                next_sequence_from_summary(count, highest),
+                Err(ResponseEventPersistenceError::InvalidSequence)
+            ));
+        }
+        assert!(matches!(
+            next_sequence_from_summary(i64::MAX, Some(i64::MAX)),
+            Err(ResponseEventPersistenceError::InvalidSequence)
+        ));
+    }
+
+    fn receipt(
+        event: ResponseEvent,
+        observed_at_unix_ms: u64,
+        received_at_unix_ms: u64,
+    ) -> ResponseEventReceipt {
+        ResponseEventReceipt {
+            event,
+            observed_at_unix_ms,
+            received_at_unix_ms,
+        }
+    }
+
+    fn persisted_event(
+        server_event_ref: &str,
+        client_event_ref: &str,
+        item_version_ref: &str,
+        payload_digest: &str,
+        sequence: usize,
+    ) -> ResponseEvent {
+        ResponseEvent::from_persisted(
+            server_event_ref,
+            client_event_ref,
+            item_version_ref,
+            payload_digest,
+            sequence,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn gapped_or_duplicate_receipt_history_fails_closed() {
+        let first = persisted_event(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        );
+        let gapped = persisted_event(
+            "server_event_item_03",
+            "client_event_item_03",
+            "item_version_n3_ko",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            3,
+        );
+        let duplicate_server = persisted_event(
+            "server_event_item_01",
+            "client_event_item_02",
+            "item_version_n2_ko",
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            2,
+        );
+        let first_receipt = receipt(first.clone(), 1_700_000_000_000, 1_700_000_000_250);
+        let gapped_receipts = [
+            first_receipt,
+            receipt(gapped, 1_700_000_000_500, 1_700_000_000_750),
+        ];
+        let gapped_error = response_ledger_from_receipts("session_ipip_ko_quick", &gapped_receipts)
+            .expect_err("gapped receipt history must fail closed");
+        assert_eq!(gapped_error.to_string(), INVALID_SEQUENCE_ERROR);
+        let duplicate_receipts = [
+            receipt(first, 1_700_000_000_000, 1_700_000_000_250),
+            receipt(duplicate_server, 1_700_000_000_500, 1_700_000_000_750),
+        ];
+        let duplicate_result =
+            response_ledger_from_receipts("session_ipip_ko_quick", &duplicate_receipts);
+        let duplicate_error =
+            duplicate_result.expect_err("duplicate receipt history must fail closed");
+        assert_eq!(
+            duplicate_error.to_string(),
+            "response event identity was replayed with conflicting evidence"
+        );
+        assert!(response_ledger_from_receipts("session_ipip_ko_quick", &[]).is_ok());
+    }
+
+    #[test]
+    fn receipt_keeps_distinct_observed_and_received_times() {
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let receipt = ResponseEventReceipt {
+            event: event.clone(),
+            observed_at_unix_ms: 1_700_000_000_000,
+            received_at_unix_ms: 1_700_000_000_250,
+        };
+        assert_eq!(receipt.event(), &event);
+        assert_eq!(receipt.observed_at_unix_ms(), 1_700_000_000_000);
+        assert_eq!(receipt.received_at_unix_ms(), 1_700_000_000_250);
+    }
+
+    #[test]
+    fn existing_event_lookup_maps_missing_relation_to_database_error() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO response_event_query_helper_missing;")
+            .unwrap();
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            query_existing_event_row(&mut transaction, "server_event_item_01"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        let observed_at = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert!(matches!(
+            classify_existing_event(
+                &mut transaction,
+                "session_ipip_ko_quick",
+                &event,
+                "server_event_item_01",
+                1,
+                observed_at,
+                observed_at + Duration::from_millis(250),
+            ),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn next_contiguous_sequence_instantiates_empty_prefix_and_missing_relation() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS response_event_next_sequence_test;\
+                 SET search_path TO response_event_next_sequence_test;\
+                 DROP TABLE IF EXISTS response_event;",
+            )
+            .unwrap();
+        let mut missing = client.transaction().unwrap();
+        let missing_error = next_contiguous_sequence(&mut missing, "session_ipip_ko_quick")
+            .expect_err("missing relation must fail closed");
+        assert!(matches!(
+            missing_error,
+            ResponseEventPersistenceError::Database(_)
+        ));
+        assert_eq!(
+            missing_error.to_string(),
+            "PostgreSQL response-event persistence failed"
+        );
+        missing.rollback().unwrap();
+
+        apply_response_event_migration(&mut client).unwrap();
+        let mut empty = client.transaction().unwrap();
+        assert_eq!(
+            next_contiguous_sequence(&mut empty, "session_ipip_ko_quick").unwrap(),
+            1
+        );
+        empty
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_01', 'session_ipip_ko_quick', 'client_event_item_01', \
+                     'item_version_n1_ko', \
+                     'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', \
+                     1, TIMESTAMPTZ '2023-11-14 22:13:20+00', TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap();
+        assert_eq!(
+            next_contiguous_sequence(&mut empty, "session_ipip_ko_quick").unwrap(),
+            2
+        );
+        empty.rollback().unwrap();
+    }
+
+    #[test]
+    fn persist_and_load_instantiate_library_copies_on_missing_relation() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute("SET search_path TO response_event_persist_load_missing;")
+            .unwrap();
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_01",
+            "client_event_item_01",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let mut transaction = client.transaction().unwrap();
+        assert!(matches!(
+            persist_response_event(
+                &mut transaction,
+                "session_ipip_ko_quick",
+                &event,
+                1_700_000_000_000,
+                1_700_000_000_250,
+            ),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            load_response_event_receipts(&mut transaction, "session_ipip_ko_quick"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        assert!(matches!(
+            load_response_ledger(&mut transaction, "session_ipip_ko_quick"),
+            Err(ResponseEventPersistenceError::Database(_))
+        ));
+        transaction.rollback().unwrap();
+    }
+
+    #[test]
+    fn persist_requires_read_committed_but_loads_accept_stronger_isolation() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS response_event_isolation_lib_test;\
+                 SET search_path TO response_event_isolation_lib_test;",
+            )
+            .unwrap();
+        apply_response_event_migration(&mut client).unwrap();
+        let event = ResponseEvent::from_persisted(
+            "server_event_item_iso",
+            "client_event_item_iso",
+            "item_version_n1_ko",
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            1,
+        )
+        .unwrap();
+        let mut stronger = client
+            .build_transaction()
+            .isolation_level(IsolationLevel::RepeatableRead)
+            .start()
+            .unwrap();
+        let persist_error = persist_response_event(
+            &mut stronger,
+            "session_ipip_ko_iso",
+            &event,
+            1_700_000_000_000,
+            1_700_000_000_250,
+        )
+        .expect_err("lib persist must reject stronger isolation");
+        assert!(matches!(
+            persist_error,
+            ResponseEventPersistenceError::UnsupportedIsolationLevel
+        ));
+        assert_eq!(
+            persist_error.to_string(),
+            "response event persistence requires read committed isolation"
+        );
+        assert!(
+            load_response_event_receipts(&mut stronger, "session_ipip_ko_iso")
+                .expect("read-only receipt load must accept stronger isolation")
+                .is_empty()
+        );
+        assert!(load_response_ledger(&mut stronger, "session_ipip_ko_iso")
+            .expect("read-only ledger load must accept stronger isolation")
+            .is_empty());
+        assert!(matches!(
+            require_read_committed(&mut stronger),
+            Err(ResponseEventPersistenceError::UnsupportedIsolationLevel)
+        ));
+        stronger.rollback().unwrap();
+        let mut committed = client.transaction().unwrap();
+        assert!(require_read_committed(&mut committed).is_ok());
+        assert!(
+            load_response_event_receipts(&mut committed, "session_ipip_ko_iso")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(load_response_ledger(&mut committed, "session_ipip_ko_iso")
+            .unwrap()
+            .is_empty());
+        committed.rollback().unwrap();
+    }
+
+    #[test]
+    fn rebuild_errors_map_to_typed_persistence_failures() {
+        assert!(matches!(
+            map_rebuild_error(WriteError::InvalidReference),
+            ResponseEventPersistenceError::InvalidReference
+        ));
+        assert!(matches!(
+            map_rebuild_error(WriteError::InvalidSequence),
+            ResponseEventPersistenceError::InvalidSequence
+        ));
+        for error in [WriteError::EmptyReference, WriteError::InvalidPayloadDigest] {
+            assert!(matches!(
+                map_rebuild_error(error),
+                ResponseEventPersistenceError::CorruptStoredEvidence
+            ));
+        }
+        for error in [
+            WriteError::IdempotencyConflict,
+            WriteError::ServerReferenceConflict,
+            WriteError::SessionNotActive(SessionState::Paused),
+            WriteError::SnapshotRequiresCompleted(SessionState::Active),
+        ] {
+            assert!(matches!(
+                map_rebuild_error(error),
+                ResponseEventPersistenceError::ConflictingReplay
+            ));
+        }
+    }
+
+    #[test]
+    fn unique_violation_classifier_is_instantiated_in_the_library() {
+        let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL is required");
+        let mut client = Client::connect(&url, NoTls).expect("CI PostgreSQL must be reachable");
+        client
+            .batch_execute(
+                "CREATE SCHEMA IF NOT EXISTS response_event_unique_classify_lib;\
+                 SET search_path TO response_event_unique_classify_lib;\
+                 DROP TABLE IF EXISTS response_event;",
+            )
+            .unwrap();
+        apply_response_event_migration(&mut client).unwrap();
+        client
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_01', 'session_ipip_ko_quick', 'client_event_item_01', \
+                     'item_version_n1_ko', \
+                     'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', \
+                     1, TIMESTAMPTZ '2023-11-14 22:13:20+00', TIMESTAMPTZ '2023-11-14 22:13:20.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap();
+        let client_conflict = client
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_02', 'session_ipip_ko_quick', 'client_event_item_01', \
+                     'item_version_n1_ko', \
+                     'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', \
+                     2, TIMESTAMPTZ '2023-11-14 22:13:21+00', TIMESTAMPTZ '2023-11-14 22:13:21.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            classify_unique_violation(client_conflict),
+            ResponseEventPersistenceError::ConflictingReplay
+        ));
+        let sequence_conflict = client
+            .execute(
+                "INSERT INTO response_event (\
+                     response_event_ref, session_ref, client_event_ref, item_version_ref, \
+                     payload_digest, server_sequence, observed_at, received_at\
+                 ) VALUES (\
+                     'server_event_item_03', 'session_ipip_ko_quick', 'client_event_item_03', \
+                     'item_version_n1_ko', \
+                     'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', \
+                     1, TIMESTAMPTZ '2023-11-14 22:13:21+00', TIMESTAMPTZ '2023-11-14 22:13:21.250+00'\
+                 )",
+                &[],
+            )
+            .unwrap_err();
+        assert!(matches!(
+            classify_unique_violation(sequence_conflict),
+            ResponseEventPersistenceError::SequenceConflict
+        ));
+        let missing = client
+            .query_one("SELECT * FROM response_event_unique_classify_missing", &[])
+            .unwrap_err();
+        let database = classify_unique_violation(missing);
+        assert!(matches!(
+            database,
+            ResponseEventPersistenceError::Database(_)
+        ));
+        assert!(std::error::Error::source(&database).is_some());
+        for error in [
+            ResponseEventPersistenceError::InvalidReference,
+            ResponseEventPersistenceError::ConflictingReplay,
+            ResponseEventPersistenceError::CorruptStoredEvidence,
+            ResponseEventPersistenceError::SequenceConflict,
+            ResponseEventPersistenceError::InvalidSequence,
+            ResponseEventPersistenceError::InvalidTimestamp,
+            ResponseEventPersistenceError::UnsupportedIsolationLevel,
+        ] {
+            assert!(!error.to_string().is_empty());
+            assert!(std::error::Error::source(&error).is_none());
+        }
+    }
+}
