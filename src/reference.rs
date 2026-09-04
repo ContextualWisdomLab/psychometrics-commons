@@ -43,7 +43,7 @@ pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
 /// These code points are normally invisible or formatting-only. Keeping the Unicode 17.0
 /// ranges explicit makes an upgrade deliberate instead of silently changing which external
 /// identifiers the product accepts when the Rust toolchain changes Unicode tables.
-const fn is_default_ignorable_identifier_character(character: char) -> bool {
+pub(crate) const fn is_default_ignorable_identifier_character(character: char) -> bool {
     matches!(
         character,
         '\u{00AD}'
