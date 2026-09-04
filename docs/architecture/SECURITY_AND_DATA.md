@@ -169,7 +169,7 @@ PII/sensitive content may be sent to a model only when the exact task purpose, a
 
 | Threat | Example | Required prevention/detection |
 |---|---|---|
-| Cross-tenant IDOR | valid user guesses another tenant's `result_ref` | server-side tenant/resource authorization + negative tests |
+| Cross-tenant IDOR | valid user guesses another tenant's `result_ref` or persists another participant's consent ledger | server-side tenant/resource authorization; `persist_authorized_consent_ledger` refuses foreign participant/tenant writes; `persist_authorized_anonymous_consent_ledger` refuses expired or foreign anonymous sessions; HTTP negative tests remain Target |
 | Session hijack/replay | stolen anonymous token or repeated client event | short-lived audience-bound credential; idempotency/conflict checks; rotation policy |
 | Account-link takeover | attacker links another anonymous history | proof of control for both anonymous session and authenticated subject; audited mapping |
 | Response/result tampering | mutable historical response or score | immutable snapshots, content digests, supersession, restricted writes |

@@ -463,7 +463,9 @@ sequenceDiagram
     participant S as semantic-data-portal
 
     P->>A: explicit research opt-in for versioned scope
+    A->>A: ManageOwnConsent on the participant ledger
     A->>DB: append consent evidence + research contribution
+    Note over A,DB: persist_authorized_consent_ledger or persist_authorized_anonymous_consent_ledger authorizes then inserts. Expired anonymous sessions insert no row. Outbox tail remains #142. HTTP POST /v1/consents remains Target.
     DB-->>A: contribution_ref
     A->>L: create/reuse scoped research pseudonym
     L-->>A: research_participant_ref
