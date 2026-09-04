@@ -11,7 +11,7 @@ use crate::postgres_integration::{enqueue_outbox_event, PersistenceDisposition, 
 use crate::postgres_scoring_job::{
     persist_scoring_job, ScoringJobPersistenceDisposition, ScoringJobPersistenceError,
 };
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::scoring::ScoringRequest;
 use crate::scoring_job::ScoringJob;
 use postgres::Transaction;
@@ -300,7 +300,7 @@ fn classify_existing_request(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ScoringRequestPersistenceError> {
-    normalized_reference(reference).ok_or(ScoringRequestPersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ScoringRequestPersistenceError::InvalidReference)
 }
 
 fn require_read_committed(

@@ -34,15 +34,12 @@ fn style_assignment_key_matches_the_adr_sha256_test_vector() {
 }
 
 #[test]
-fn normalized_equivalent_identity_has_the_same_key() {
-    let canonical = input(ScoreIdentity::ScoreProfileRef("score_profile_alpha"))
-        .assignment_key()
-        .unwrap();
-    let normalized = input(ScoreIdentity::ScoreProfileRef(" score_profile_alpha "))
-        .assignment_key()
-        .unwrap();
-
-    assert_eq!(normalized, canonical);
+fn whitespace_padded_score_identity_fails_closed() {
+    assert!(
+        input(ScoreIdentity::ScoreProfileRef(" score_profile_alpha "))
+            .assignment_key()
+            .is_err()
+    );
 }
 
 #[test]

@@ -246,6 +246,14 @@ fn exact_lifecycle_replays_are_idempotent_and_conflicts_are_rejected() {
         .complete("completion_ref", &["legal_retention_scope"], 6_300)
         .unwrap();
     assert_eq!(
+        request.complete(" completion_ref ", &["legal_retention_scope"], 6_300),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        request.complete("completion_ref", &[" legal_retention_scope "], 6_300),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
         request.complete("completion_ref", &["different_retention_scope"], 6_300,),
         Err(DataRightsError::ConflictingReplay)
     );

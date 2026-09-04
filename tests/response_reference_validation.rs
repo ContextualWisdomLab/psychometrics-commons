@@ -24,7 +24,16 @@ fn write<'a>(
 
 #[test]
 fn response_ledger_session_reference_must_be_opaque() {
-    for session_ref in ["", "   ", "12345", "1.25e3", "１２３４５"] {
+    for session_ref in [
+        "",
+        "   ",
+        "12345",
+        "1.25e3",
+        "１２３４５",
+        " session_ref",
+        "session_ref ",
+        "session\nref",
+    ] {
         assert_eq!(
             ResponseLedger::new(session_ref),
             Err(WriteError::InvalidReference)
@@ -77,6 +86,7 @@ fn response_identity_references_reject_surrounding_whitespace_aliases() {
             "client_event_a",
             "\u{2003}item_version_a\u{2003}",
         ),
+        write("server\nevent_a", "client_event_a", "item_version_a"),
     ] {
         let mut ledger = ResponseLedger::from_session(&session).unwrap();
         assert_eq!(

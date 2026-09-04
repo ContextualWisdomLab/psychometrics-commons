@@ -5,7 +5,7 @@
 //! versioned `fast-mlsirm`-compatible scoring implementation and to accept a
 //! typed immutable result without collapsing missing outcomes into numeric zero.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::response::ResponseSnapshot;
 use std::collections::HashSet;
 use std::error::Error;
@@ -433,7 +433,8 @@ impl Display for ScoringContractError {
 impl Error for ScoringContractError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
-    let validated = normalized_reference(reference).ok_or(ScoringContractError::EmptyReference)?;
+    let validated =
+        canonical_opaque_reference(reference).ok_or(ScoringContractError::EmptyReference)?;
     if validated == reference {
         Ok(validated)
     } else {

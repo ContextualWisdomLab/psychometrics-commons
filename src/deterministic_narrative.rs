@@ -6,7 +6,7 @@
 //! localized interpretation units selected by an approved, separately versioned mapping.
 
 use crate::narrative::{StyleAssignmentIdentity, StyleAssignmentKey};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -114,7 +114,7 @@ pub enum NarrativeFallbackError {
 impl Display for NarrativeFallbackError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "narrative references must be opaque non-numeric values",
+            Self::InvalidReference => "narrative references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::InvalidText => "narrative text must be nonblank canonical display text",
             Self::InvalidDigest => "narrative rule digest must be canonical lowercase SHA-256",
             Self::InvalidIdentity => "style-assignment identity is invalid",
@@ -178,7 +178,7 @@ impl DeterministicNarrativeBundle<'_> {
                 .units
                 .iter()
                 .find(|unit| {
-                    normalized_reference(unit.interpretation_unit_ref) == Some(selected_ref)
+                    canonical_opaque_reference(unit.interpretation_unit_ref) == Some(selected_ref)
                 })
                 .ok_or(NarrativeFallbackError::MissingInterpretationUnit)?;
             sections.push(RenderedNarrativeSection {
@@ -266,7 +266,7 @@ fn validate_interpretation_selection(
 }
 
 fn required_reference(reference: &str) -> Result<&str, NarrativeFallbackError> {
-    normalized_reference(reference).ok_or(NarrativeFallbackError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(NarrativeFallbackError::InvalidReference)
 }
 
 fn required_canonical_reference(reference: &str) -> Result<&str, NarrativeFallbackError> {

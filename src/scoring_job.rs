@@ -5,7 +5,7 @@
 //! Persistence adapters must preserve these state, attempt, time-bound lease,
 //! and fencing invariants with real database concurrency evidence.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -450,11 +450,7 @@ impl Display for ScoringJobError {
 impl Error for ScoringJobError {}
 
 fn required_reference(reference: &str) -> Result<&str, ScoringJobError> {
-    let normalized = normalized_reference(reference).ok_or(ScoringJobError::InvalidReference)?;
-    if normalized != reference {
-        return Err(ScoringJobError::InvalidReference);
-    }
-    Ok(normalized)
+    canonical_opaque_reference(reference).ok_or(ScoringJobError::InvalidReference)
 }
 
 const fn require_timestamp(timestamp: u64) -> Result<(), ScoringJobError> {

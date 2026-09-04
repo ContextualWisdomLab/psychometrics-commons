@@ -6,7 +6,7 @@
 //! score, or mask the owner `participant_ref`. Blanket masking would prevent
 //! the owner from using their own result. HTTP transport remains a later slice.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::result::ResultSnapshot;
 use crate::scoring::{ObservationDisposition, ScoreObservation};
 use std::error::Error;
@@ -435,7 +435,7 @@ fn required_reference(reference: &str) -> Result<&str, ResultExportError> {
     if reference.trim() != reference {
         return Err(ResultExportError::InvalidReference);
     }
-    normalized_reference(reference).ok_or(ResultExportError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ResultExportError::InvalidReference)
 }
 
 fn required_text(text: &str) -> Result<&str, ResultExportError> {

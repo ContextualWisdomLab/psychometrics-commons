@@ -10,12 +10,12 @@
 use crate::instrument::{
     valid_locale, valid_sha256_digest, InstrumentRelease, InstrumentReleaseManifest,
 };
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 fn exact_reference(value: &str) -> Option<&str> {
-    normalized_reference(value).filter(|normalized| *normalized == value)
+    canonical_opaque_reference(value)
 }
 
 /// Server-authoritative lifecycle state for one assessment session.
@@ -206,10 +206,10 @@ impl AssessmentSession {
         requested_locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionCreationError> {
-        let session_ref =
-            exact_reference(session_ref).ok_or(SessionCreationError::InvalidReference)?;
-        let participant_ref =
-            exact_reference(participant_ref).ok_or(SessionCreationError::InvalidReference)?;
+        let session_ref = canonical_opaque_reference(session_ref)
+            .ok_or(SessionCreationError::InvalidReference)?;
+        let participant_ref = canonical_opaque_reference(participant_ref)
+            .ok_or(SessionCreationError::InvalidReference)?;
         if created_at_unix_ms == 0 {
             return Err(SessionCreationError::InvalidTimestamp);
         }
@@ -292,13 +292,13 @@ impl AssessmentSession {
         locale: &str,
         created_at_unix_ms: u64,
     ) -> Result<Self, SessionReconstitutionError> {
-        let session_ref = normalized_reference(session_ref)
+        let session_ref = canonical_opaque_reference(session_ref)
             .ok_or(SessionReconstitutionError::InvalidReference)?;
-        let participant_ref = normalized_reference(participant_ref)
+        let participant_ref = canonical_opaque_reference(participant_ref)
             .ok_or(SessionReconstitutionError::InvalidReference)?;
-        let instrument_release_ref = normalized_reference(instrument_release_ref)
+        let instrument_release_ref = canonical_opaque_reference(instrument_release_ref)
             .ok_or(SessionReconstitutionError::InvalidReference)?;
-        let instrument_version_ref = normalized_reference(instrument_version_ref)
+        let instrument_version_ref = canonical_opaque_reference(instrument_version_ref)
             .ok_or(SessionReconstitutionError::InvalidReference)?;
         if created_at_unix_ms == 0 {
             return Err(SessionReconstitutionError::InvalidTimestamp);
@@ -398,7 +398,7 @@ impl AssessmentSession {
         sequence: u64,
         command: SessionCommand,
     ) -> Result<SessionState, TransitionError> {
-        let command_ref = normalized_reference(command_ref).ok_or_else(|| {
+        let command_ref = canonical_opaque_reference(command_ref).ok_or_else(|| {
             TransitionError::new(self.state, command, TransitionErrorKind::InvalidReference)
         })?;
 

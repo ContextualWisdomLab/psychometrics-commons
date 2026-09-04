@@ -13,7 +13,7 @@
 //! silently widen anonymous-session authority.
 
 use crate::anonymous_session::AnonymousSessionContext;
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -335,14 +335,14 @@ impl AnonymousCredential {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousCredentialError> {
-    match normalized_reference(reference) {
+    match canonical_opaque_reference(reference) {
         Some(normalized) if normalized == reference => Ok(reference),
         _ => Err(AnonymousCredentialError::InvalidReference),
     }
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
-    normalized_reference(candidate) == Some(candidate) && stored == candidate
+    canonical_opaque_reference(candidate) == Some(candidate) && stored == candidate
 }
 
 fn canonical_sha256_digest(digest: &str) -> Option<&str> {

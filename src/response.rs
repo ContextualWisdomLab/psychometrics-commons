@@ -8,7 +8,7 @@
 //! plus monotonic sequences preserve a stable audit order. Completing a session
 //! freezes the accepted response prefix into an immutable snapshot value.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::session::{AssessmentSession, SessionState};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -392,11 +392,7 @@ impl ResponseLedger {
 }
 
 fn exact_reference(reference: &str) -> Result<&str, WriteError> {
-    let normalized = normalized_reference(reference).ok_or(WriteError::InvalidReference)?;
-    if normalized != reference {
-        return Err(WriteError::InvalidReference);
-    }
-    Ok(normalized)
+    canonical_opaque_reference(reference).ok_or(WriteError::InvalidReference)
 }
 
 fn is_canonical_sha256(digest: &str) -> bool {

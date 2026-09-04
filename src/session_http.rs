@@ -12,7 +12,7 @@ use crate::postgres_assessment_session::{
     AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
     AssessmentSessionStartError,
 };
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::session::AssessmentSession;
 use postgres::Transaction;
 use std::collections::HashMap;
@@ -148,7 +148,7 @@ impl SessionHttpPort for MemorySessionHttpPort {
         if let Some(error) = self.next_load_error.take() {
             return Err(error);
         }
-        if normalized_reference(session_ref).is_none() {
+        if canonical_opaque_reference(session_ref).is_none() {
             return Err(AssessmentSessionPersistenceError::InvalidReference);
         }
         Ok(self.sessions.get(session_ref).cloned())
@@ -519,7 +519,7 @@ fn session_body(session: &AssessmentSession) -> String {
 }
 
 fn valid_idempotency_key(value: &str) -> Option<&str> {
-    normalized_reference(value.trim())
+    canonical_opaque_reference(value.trim())
 }
 
 fn header_value<'a>(request: &'a str, name: &str) -> Option<&'a str> {

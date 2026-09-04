@@ -144,6 +144,10 @@ fn terminal_evidence_rejects_invalid_references_and_non_monotonic_time() {
         Err(DataRightsError::InvalidReference)
     );
     assert_eq!(
+        rejection.reject(" rejection_ref ", 17_100),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
         rejection.reject("rejection_ref", 0),
         Err(DataRightsError::InvalidTimestamp)
     );
@@ -157,6 +161,10 @@ fn terminal_evidence_rejects_invalid_references_and_non_monotonic_time() {
     failure.start_processing("operation_ref", 18_100).unwrap();
     assert_eq!(
         failure.fail("12345", 18_200),
+        Err(DataRightsError::InvalidReference)
+    );
+    assert_eq!(
+        failure.fail(" failure_ref ", 18_200),
         Err(DataRightsError::InvalidReference)
     );
     assert_eq!(

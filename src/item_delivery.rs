@@ -8,7 +8,7 @@
 //! previously accepted delivery identities remain idempotent after lifecycle advance.
 
 use crate::instrument::InstrumentReleaseManifest;
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::session::SessionState;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -88,7 +88,7 @@ impl Display for ItemDeliveryError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidReference => {
-                formatter.write_str("item delivery references must be opaque non-numeric values")
+                formatter.write_str("item delivery references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters")
             }
             Self::SessionNotActive(state) => {
                 write!(
@@ -283,9 +283,5 @@ impl ItemDeliveryLedger {
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryError> {
-    let normalized = normalized_reference(reference).ok_or(ItemDeliveryError::InvalidReference)?;
-    if normalized != reference {
-        return Err(ItemDeliveryError::InvalidReference);
-    }
-    Ok(normalized)
+    canonical_opaque_reference(reference).ok_or(ItemDeliveryError::InvalidReference)
 }

@@ -8,7 +8,7 @@
 use crate::data_rights::{DataRightsRequest, DataRightsRequestKind, DataRightsState};
 use crate::integration::IntegrationEvent;
 use crate::postgres_integration::{enqueue_outbox_event, PersistenceError};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{Client, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -89,7 +89,7 @@ impl Display for DataRightsPersistenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "data-rights propagation references must be opaque non-numeric values"
+                "data-rights propagation references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidRequestState => {
                 "data-rights persistence received a request in a state this operation does not accept"
@@ -436,7 +436,7 @@ fn validate_targets(
 }
 
 fn exact_reference(reference: &str) -> Option<&str> {
-    let normalized = normalized_reference(reference)?;
+    let normalized = canonical_opaque_reference(reference)?;
     (normalized == reference).then_some(normalized)
 }
 

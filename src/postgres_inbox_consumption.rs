@@ -5,7 +5,7 @@
 //! completes, or quarantines that row under `READ COMMITTED` with fencing.
 
 use crate::integration::{ConsumptionState, InboxConsumption};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -589,7 +589,7 @@ fn parse_consumption_state(
 }
 
 fn required_reference(reference: &str) -> Result<&str, InboxConsumptionPersistenceError> {
-    normalized_reference(reference).ok_or(InboxConsumptionPersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(InboxConsumptionPersistenceError::InvalidReference)
 }
 
 fn require_timestamp(timestamp: u64) -> Result<i64, InboxConsumptionPersistenceError> {

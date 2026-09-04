@@ -37,6 +37,20 @@ fn scoring_input(response_snapshot_ref: &str) -> ScoringRequestInput<'_> {
     }
 }
 
+fn scoring_result_fixture() -> (ScoringRequest, ScoringResult) {
+    let snapshot = frozen_snapshot("session_ref", "response_snapshot_ref", &one_response());
+    let request =
+        ScoringRequest::from_snapshot(&snapshot, scoring_input("response_snapshot_ref")).unwrap();
+    let result = ScoringResult::new(
+        "scoring_result_ref",
+        &request,
+        ENGINE_DIGEST,
+        vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
+    )
+    .unwrap();
+    (request, result)
+}
+
 #[test]
 fn scoring_dispatch_requires_a_durably_bound_nonempty_snapshot() {
     let unbound = unbound_frozen_snapshot("session_ref", &one_response());
@@ -103,14 +117,81 @@ fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].construct_ref(), "construct_ref");
 
+    assert_eq!(
+        ScoringResult::new(
+            " scoring_result_ref ",
+            &request,
+            ENGINE_DIGEST,
+            vec![ScoreObservation::scored("construct_ref_2", 1.0, None).unwrap()],
+        ),
+        Err(ScoringContractError::EmptyReference)
+    );
+    assert_eq!(
+        ScoreObservation::scored(" construct_ref ", 1.0, None),
+        Err(ScoringContractError::EmptyReference)
+    );
+}
+
+#[test]
+fn result_identity_and_consent_comparisons_require_canonical_references() {
+    let (request, result) = scoring_result_fixture();
+
+    for input in [
+        ResultSnapshotInput {
+            result_snapshot_ref: " result_snapshot_ref ",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: " participant_ref ",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: " narrative_version_ref ",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &[" consent_ref "],
+            created_at_unix_ms: 1,
+            supersedes_ref: None,
+        },
+        ResultSnapshotInput {
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
+            created_at_unix_ms: 1,
+            supersedes_ref: Some(" prior_result_ref "),
+        },
+    ] {
+        assert_eq!(
+            ResultSnapshot::new(&request, &result, input),
+            Err(ResultSnapshotError::EmptyReference)
+        );
+    }
+
     let duplicate = ResultSnapshot::new(
         &request,
         &result,
         ResultSnapshotInput {
-            result_snapshot_ref: " result_snapshot_ref ",
-            participant_ref: " participant_ref ",
-            narrative_version_ref: " narrative_version_ref ",
-            consent_snapshot_refs: &["consent_ref", " consent_ref "],
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref", "consent_ref"],
             created_at_unix_ms: 1,
             supersedes_ref: None,
         },
@@ -122,10 +203,10 @@ fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract
         &request,
         &result,
         ResultSnapshotInput {
-            result_snapshot_ref: " result_snapshot_ref ",
-            participant_ref: " participant_ref ",
-            narrative_version_ref: " narrative_version_ref ",
-            consent_snapshot_refs: &[" consent_ref "],
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
             created_at_unix_ms: 1,
             supersedes_ref: Some("result_snapshot_ref"),
         },
@@ -133,22 +214,22 @@ fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract
     .unwrap_err();
     assert_eq!(self_supersession, ResultSnapshotError::SelfSupersession);
 
-    let normalized = ResultSnapshot::new(
+    let canonical = ResultSnapshot::new(
         &request,
         &result,
         ResultSnapshotInput {
-            result_snapshot_ref: " result_snapshot_ref ",
-            participant_ref: " participant_ref ",
-            narrative_version_ref: " narrative_version_ref ",
-            consent_snapshot_refs: &[" consent_ref "],
+            result_snapshot_ref: "result_snapshot_ref",
+            participant_ref: "participant_ref",
+            narrative_version_ref: "narrative_version_ref",
+            consent_snapshot_refs: &["consent_ref"],
             created_at_unix_ms: 1,
-            supersedes_ref: Some(" prior_result_ref "),
+            supersedes_ref: Some("prior_result_ref"),
         },
     )
     .unwrap();
-    assert_eq!(normalized.result_snapshot_ref(), "result_snapshot_ref");
-    assert_eq!(normalized.participant_ref(), "participant_ref");
-    assert_eq!(normalized.narrative_version_ref(), "narrative_version_ref");
-    assert_eq!(normalized.consent_snapshot_refs(), ["consent_ref"]);
-    assert_eq!(normalized.supersedes_ref(), Some("prior_result_ref"));
+    assert_eq!(canonical.result_snapshot_ref(), "result_snapshot_ref");
+    assert_eq!(canonical.participant_ref(), "participant_ref");
+    assert_eq!(canonical.narrative_version_ref(), "narrative_version_ref");
+    assert_eq!(canonical.consent_snapshot_refs(), ["consent_ref"]);
+    assert_eq!(canonical.supersedes_ref(), Some("prior_result_ref"));
 }

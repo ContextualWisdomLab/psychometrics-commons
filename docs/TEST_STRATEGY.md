@@ -139,6 +139,7 @@ For every product resource family test:
 - valid subject, wrong tenant;
 - valid tenant, wrong resource ownership;
 - guessed opaque references;
+- whitespace-padded, control-bearing, and Unicode default-ignorable public-reference aliases;
 - role confusion between Keyverse administration, instrument publishing, research approval, tenant administration, and participant ownership;
 - no implicit/default tenant on writes;
 - sharing token audience/resource mismatch;
