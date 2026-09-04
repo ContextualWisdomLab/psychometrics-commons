@@ -111,9 +111,9 @@ fn branch_coverage_failure_diagnostic_uses_lcov_branch_records() {
 #[test]
 fn rust_toolchains_are_exact_and_reviewably_updated() {
     const STABLE_QUALITY_INSTALL: &str =
-        "rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt";
+        "rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt";
     const STABLE_COVERAGE_INSTALL: &str =
-        "rustup toolchain install 1.97.1 --profile minimal --component llvm-tools-preview";
+        "rustup toolchain install 1.98.0 --profile minimal --component llvm-tools-preview";
     const NIGHTLY_COVERAGE_INSTALL: &str =
         "rustup toolchain install nightly-2026-08-18 --profile minimal --component llvm-tools-preview";
     const NIGHTLY_LLVM_COV_INSTALL: &str =
@@ -123,7 +123,7 @@ fn rust_toolchains_are_exact_and_reviewably_updated() {
     const NIGHTLY_BRANCH_JSON: &str =
         "cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json";
 
-    assert!(RUST_TOOLCHAIN.contains("channel = \"1.97.1\""));
+    assert!(RUST_TOOLCHAIN.contains("channel = \"1.98.0\""));
     assert!(!RUST_TOOLCHAIN.contains("channel = \"stable\""));
     assert!(CI_WORKFLOW.contains(STABLE_QUALITY_INSTALL));
     assert!(CI_WORKFLOW.contains(STABLE_COVERAGE_INSTALL));

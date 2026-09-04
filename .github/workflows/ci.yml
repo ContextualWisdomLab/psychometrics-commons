@@ -81,7 +81,7 @@ jobs:
           printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.97.1 --profile minimal --component clippy --component rustfmt
+        run: rustup toolchain install 1.98.0 --profile minimal --component clippy --component rustfmt
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Compile all targets
@@ -143,7 +143,7 @@ jobs:
           printf 'TEST_DATABASE_URL=host=localhost user=postgres password=ci_%s_%s dbname=psychometrics_commons_test\n' \
             "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned Rust toolchain with LLVM tools
-        run: rustup toolchain install 1.97.1 --profile minimal --component llvm-tools-preview
+        run: rustup toolchain install 1.98.0 --profile minimal --component llvm-tools-preview
       - name: Install pinned cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --version "$CARGO_LLVM_COV_VERSION"
       - name: Verify cargo-llvm-cov version
