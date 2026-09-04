@@ -1,8 +1,8 @@
 //! Durable response-snapshot references must match the Rust opaque-reference boundary.
 //!
-//! Response collection normalizes Unicode whitespace and rejects embedded control characters and
-//! numeric-like spellings under Rust `char::is_numeric`. Direct SQL and migration reapplication
-//! must not persist response identities the domain would reject or normalize.
+//! Response collection normalizes Unicode whitespace and rejects embedded control/default-ignorable
+//! characters and numeric-like spellings under Rust `char::is_numeric`. Direct SQL and migration
+//! reapplication must not persist response identities the domain would reject or normalize.
 
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::postgres_response_snapshot::apply_response_snapshot_migration;
@@ -119,6 +119,13 @@ fn snapshot_and_session_references_reject_rust_invalid_aliases() {
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -152,6 +159,13 @@ fn entry_event_and_item_references_reject_rust_invalid_aliases() {
         "Ⅳ",
         "\u{00a0}opaque_alpha",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -217,7 +231,11 @@ fn migration_reapplication_replaces_a_weakened_snapshot_reference_constraint() {
 
     apply_response_snapshot_migration(&mut client).unwrap();
 
-    let error = insert_header(&mut client, "½", "session_upgrade_reference_guard")
-        .expect_err("migration reapplication must repair the weaker reference constraint");
+    let error = insert_header(
+        &mut client,
+        "response_\u{200b}_snapshot_upgrade",
+        "session_upgrade_reference_guard",
+    )
+    .expect_err("migration reapplication must repair the weaker reference constraint");
     assert_check(&error, "response_snapshot_snapshot_ref_format_check");
 }
