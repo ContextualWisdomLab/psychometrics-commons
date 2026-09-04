@@ -37,7 +37,16 @@ The mapping between operational and research identities is stored in a restricte
 
 Keyverse claims establish authenticated subject and coarse scopes. Psychometrics Commons performs resource-level decisions for instrument administration, result ownership, research roles, data export, deletion, and release approval. A Keyverse administrator is not automatically a Psychometrics Commons research data steward.
 
-Anonymous session commands are a product-owned gate after the short-lived proof has already been verified. This slice is an as-built library: `authorize_anonymous_session_command` / `apply_anonymous_session_command` compare the verified actor to the supplied `ParticipantRecord` and `AssessmentSession`. They do not accept a caller-built `ResourceScope`. They do not prove those records were loaded from the store. Persist/reload of `assessment_participant` remains Target. HTTP transport remains Target.
+Anonymous session commands are a product-owned gate after the short-lived proof has been verified.
+This as-built library compares the verified actor with the supplied `ParticipantRecord` and
+`AssessmentSession` in `authorize_anonymous_session_command` and
+`apply_anonymous_session_command`.
+
+The command gate does not accept a caller-built `ResourceScope`. It also does not prove that the
+supplied records came from storage. Persist/reload of `assessment_participant` remains Target.
+HTTP transport remains Target on protected main. Active PR #438 adds a host-verified authority
+boundary and a participant-bound session reload lookup. That PR is not protected-main evidence
+until it is merged and the protected branch is refetched.
 
 Fail-closed classification order is a product contract: trusted server time, exclusive expiry, supplied-participant tenant, session/participant ownership, actor participant, then session identity. Named tests: `anonymous_command_authorization_fails_closed_for_zero_or_expired_server_time`, `anonymous_command_authorization_rejects_compound_foreign_tenant_and_inconsistent_supplied_pair_as_cross_tenant`, and `anonymous_command_authorization_rejects_actor_when_supplied_participant_and_session_agree`.
 

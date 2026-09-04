@@ -1,16 +1,25 @@
 //! Public HTTP transport for persist-backed assessment-session start and reload.
 //!
-//! This slice exposes `POST /v1/sessions` and `GET /v1/sessions/{session_ref}`
-//! over HTTP/1.1. `Idempotency-Key` is the durable session reference. Create
-//! calls [`start_created_assessment_session_from_stored_release`] so a stale
+//! This slice exposes `POST /v1/sessions` and an authority-gated
+//! `GET /v1/sessions/{session_ref}` over HTTP/1.1. `Idempotency-Key` is the
+//! durable session reference. Create calls
+//! [`start_created_assessment_session_from_stored_release`] so a stale
 //! in-memory catalog cannot mint a session after persist Suspend or Retire.
 //! Exact replay after that later persist returns the original session. Errors
-//! use RFC 9457 problem details and never echo raw request bodies or SQL.
+//! use RFC 9457 problem details and never echo raw request bodies or SQL. The
+//! raw handler is safe for public routing and creation, but cannot reload data
+//! without a host-verified authority and server-owned participant record.
 
+use crate::anonymous_credential::AnonymousCredential;
+use crate::anonymous_session::AnonymousSessionContext;
+use crate::authorization::{
+    authorize, AuthorizationContext, ProductPermission, ResourceKind, ResourceScope,
+};
+use crate::participant::ParticipantRecord;
 use crate::postgres_assessment_session::{
-    load_assessment_session, start_created_assessment_session_from_stored_release,
-    AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
-    AssessmentSessionStartError,
+    load_assessment_session, load_assessment_session_for_participant,
+    start_created_assessment_session_from_stored_release, AssessmentSessionPersistenceDisposition,
+    AssessmentSessionPersistenceError, AssessmentSessionStartError,
 };
 use crate::reference::normalized_reference;
 use crate::session::AssessmentSession;
@@ -29,6 +38,27 @@ pub const SESSION_HTTP_MAX_REQUEST_BYTES: usize = 8_192;
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const VERSION: &str = "instrument_version_big_five_ko_v1";
+
+/// Server-verified authority required to reload a participant-owned session.
+///
+/// The embedding host validates network authentication or the anonymous proof
+/// before constructing one of these variants. Raw bearer material never enters
+/// this transport boundary.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum SessionHttpAuthority<'a> {
+    /// Authenticated product context already verified by the host identity boundary.
+    Authenticated(&'a AuthorizationContext),
+    /// Verified anonymous-session snapshot plus its current credential record.
+    Anonymous {
+        /// Previously verified anonymous-session context.
+        context: &'a AnonymousSessionContext,
+        /// Current server-side credential evidence, including revocation state.
+        credential: &'a AnonymousCredential,
+        /// Positive current time from the trusted server clock.
+        now_unix_ms: u64,
+    },
+}
 
 /// Store used by session HTTP to start and reload created sessions.
 pub trait SessionHttpPort {
@@ -59,6 +89,18 @@ pub trait SessionHttpPort {
     fn load(
         &mut self,
         session_ref: &str,
+    ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError>;
+
+    /// Load one stored session only when it belongs to the supplied participant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AssessmentSessionPersistenceError`] when the reference or store
+    /// state is invalid.
+    fn load_for_participant(
+        &mut self,
+        session_ref: &str,
+        participant_ref: &str,
     ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError>;
 }
 
@@ -148,10 +190,27 @@ impl SessionHttpPort for MemorySessionHttpPort {
         if let Some(error) = self.next_load_error.take() {
             return Err(error);
         }
-        if normalized_reference(session_ref).is_none() {
+        let session_ref = normalized_reference(session_ref)
+            .ok_or(AssessmentSessionPersistenceError::InvalidReference)?;
+        Ok(self.sessions.get(session_ref).cloned())
+    }
+
+    fn load_for_participant(
+        &mut self,
+        session_ref: &str,
+        participant_ref: &str,
+    ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
+        if let Some(error) = self.next_load_error.take() {
+            return Err(error);
+        }
+        let session_ref = normalized_reference(session_ref)
+            .ok_or(AssessmentSessionPersistenceError::InvalidReference)?;
+        if normalized_reference(participant_ref) != Some(participant_ref) {
             return Err(AssessmentSessionPersistenceError::InvalidReference);
         }
-        Ok(self.sessions.get(session_ref).cloned())
+        Ok(self.sessions.get(session_ref).and_then(|session| {
+            (session.participant_ref() == participant_ref).then(|| session.clone())
+        }))
     }
 }
 
@@ -194,6 +253,14 @@ impl SessionHttpPort for PostgresSessionHttpPort<'_, '_> {
         session_ref: &str,
     ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
         load_assessment_session(self.transaction, session_ref)
+    }
+
+    fn load_for_participant(
+        &mut self,
+        session_ref: &str,
+        participant_ref: &str,
+    ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
+        load_assessment_session_for_participant(self.transaction, session_ref, participant_ref)
     }
 }
 
@@ -264,7 +331,7 @@ pub fn handle_session_http_request<P: SessionHttpPort>(
     let path = split_target(target).0;
     match (method, path) {
         ("POST", SESSION_COLLECTION_PATH) => handle_create(request, port, created_at_unix_ms),
-        ("GET", path) => handle_get(path, port),
+        ("GET", path) => handle_get_without_authority(path),
         (_, SESSION_COLLECTION_PATH) => method_not_allowed(),
         (_, path) if path.starts_with("/v1/sessions/") => method_not_allowed(),
         _ => SessionHttpResponse::problem(
@@ -273,6 +340,32 @@ pub fn handle_session_http_request<P: SessionHttpPort>(
             "Not Found",
             "session routes accept POST /v1/sessions and GET /v1/sessions/{session_ref} only",
         ),
+    }
+}
+
+/// Reload one participant-owned session after the host verifies its authority.
+///
+/// The supplied participant is a server-owned record. Authenticated authority
+/// must authorize that participant in its tenant; anonymous authority must match
+/// the exact tenant, participant, session, current credential, and server time.
+/// A missing, foreign, expired, or revoked authority receives the same 404 as an
+/// unknown session, so the route is not a session-existence oracle.
+#[must_use]
+pub fn handle_authorized_session_http_request<P: SessionHttpPort>(
+    request: &str,
+    authority: &SessionHttpAuthority<'_>,
+    participant: &ParticipantRecord,
+    port: &mut P,
+    created_at_unix_ms: u64,
+) -> SessionHttpResponse {
+    let Some((method, target)) = parse_request_line(request) else {
+        return handle_session_http_request(request, port, created_at_unix_ms);
+    };
+    let path = split_target(target).0;
+    if method == "GET" {
+        handle_get_authorized(path, authority, participant, port)
+    } else {
+        handle_session_http_request(request, port, created_at_unix_ms)
     }
 }
 
@@ -345,7 +438,7 @@ fn handle_create<P: SessionHttpPort>(
     }
 }
 
-fn handle_get<P: SessionHttpPort>(path: &str, port: &mut P) -> SessionHttpResponse {
+fn handle_get_without_authority(path: &str) -> SessionHttpResponse {
     let Some(session_ref) = path
         .strip_prefix("/v1/sessions/")
         .filter(|value| !value.is_empty() && !value.contains('/'))
@@ -360,14 +453,41 @@ fn handle_get<P: SessionHttpPort>(path: &str, port: &mut P) -> SessionHttpRespon
             "session routes accept POST /v1/sessions and GET /v1/sessions/{session_ref} only",
         );
     };
-    match port.load(session_ref) {
-        Ok(Some(session)) => SessionHttpResponse::json(200, session_body(&session)),
-        Ok(None) => SessionHttpResponse::problem(
+    let _ = session_ref;
+    SessionHttpResponse::problem(
+        404,
+        "urn:psychometrics-commons:problem:session-not-found",
+        "Session Not Found",
+        "session authority is required to load a stored session",
+    )
+}
+
+fn handle_get_authorized<P: SessionHttpPort>(
+    path: &str,
+    authority: &SessionHttpAuthority<'_>,
+    participant: &ParticipantRecord,
+    port: &mut P,
+) -> SessionHttpResponse {
+    let Some(session_ref) = path
+        .strip_prefix("/v1/sessions/")
+        .filter(|value| !value.is_empty() && !value.contains('/'))
+    else {
+        if path == SESSION_COLLECTION_PATH {
+            return method_not_allowed();
+        }
+        return SessionHttpResponse::problem(
             404,
-            "urn:psychometrics-commons:problem:session-not-found",
-            "Session Not Found",
-            "Use POST /v1/sessions with the same Idempotency-Key to start the session",
-        ),
+            "urn:psychometrics-commons:problem:not-found",
+            "Not Found",
+            "session routes accept POST /v1/sessions and GET /v1/sessions/{session_ref} only",
+        );
+    };
+    if !session_read_authorized(authority, participant, session_ref) {
+        return unauthorized_session_read();
+    }
+    match port.load_for_participant(session_ref, participant.participant_ref()) {
+        Ok(Some(session)) => SessionHttpResponse::json(200, session_body(&session)),
+        Ok(None) => unauthorized_session_read(),
         Err(AssessmentSessionPersistenceError::InvalidReference) => SessionHttpResponse::problem(
             400,
             "urn:psychometrics-commons:problem:invalid-reference",
@@ -378,9 +498,51 @@ fn handle_get<P: SessionHttpPort>(path: &str, port: &mut P) -> SessionHttpRespon
             500,
             "urn:psychometrics-commons:problem:session-store-unavailable",
             "Session Store Unavailable",
-            "retry GET /v1/sessions/{session_ref} after the session store is repaired",
+            "the session store could not reload the requested session",
         ),
     }
+}
+
+fn session_read_authorized(
+    authority: &SessionHttpAuthority<'_>,
+    participant: &ParticipantRecord,
+    session_ref: &str,
+) -> bool {
+    let Ok(resource) = ResourceScope::participant_owned(
+        ResourceKind::AssessmentSession,
+        participant.tenant_ref(),
+        participant.participant_ref(),
+        session_ref,
+    ) else {
+        return false;
+    };
+    match authority {
+        SessionHttpAuthority::Authenticated(actor) => {
+            authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
+        }
+        SessionHttpAuthority::Anonymous {
+            context,
+            credential,
+            now_unix_ms,
+        } => {
+            credential.authorizes_session_context_at(context, *now_unix_ms)
+                && context.is_valid_for_binding_at(
+                    participant.tenant_ref(),
+                    participant.participant_ref(),
+                    session_ref,
+                    *now_unix_ms,
+                )
+        }
+    }
+}
+
+fn unauthorized_session_read() -> SessionHttpResponse {
+    SessionHttpResponse::problem(
+        404,
+        "urn:psychometrics-commons:problem:session-not-found",
+        "Session Not Found",
+        "session authority is required to load a stored session",
+    )
 }
 
 fn start_problem(error: &AssessmentSessionStartError) -> SessionHttpResponse {
@@ -690,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn listener_rejects_invalid_header_utf8_and_reloads_over_get() {
+    fn listener_rejects_invalid_header_utf8_and_requires_authority_for_get() {
         use crate::session_http::{
             accept_one_session_http, handle_session_http_request, MemorySessionHttpPort,
             SESSION_COLLECTION_PATH,
@@ -741,10 +903,7 @@ mod tests {
         });
         accept_one_session_http(&listener, &mut port, 20_000).unwrap();
         let response = worker.join().unwrap();
-        assert!(
-            response.starts_with("HTTP/1.1 200 OK\r\n"),
-            "library accept must dispatch GET after a created start: {response}"
-        );
+        assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
     }
 
     #[test]
@@ -781,6 +940,37 @@ mod tests {
              \"participant_ref\":\"ptc_eb1b318917d24ca0ac5153c37ff696c7\",\
              \"instrument_release_ref\":\"release_big_five_ko_v1\",\
              \"locale\":\"{locale}\"}}"
+        )
+    }
+
+    fn authorized_get<P: crate::session_http::SessionHttpPort>(
+        port: &mut P,
+        session_ref: &str,
+    ) -> crate::session_http::SessionHttpResponse {
+        use crate::authorization::{AuthorizationContext, ProductRole};
+        use crate::participant::ParticipantRecord;
+        use crate::session_http::{handle_authorized_session_http_request, SessionHttpAuthority};
+
+        let participant = ParticipantRecord::new_anonymous(
+            "ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            "tenant_session_http",
+            1,
+        )
+        .unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_session_http",
+            "subject_session_http",
+            Some("ptc_eb1b318917d24ca0ac5153c37ff696c7"),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let authority = SessionHttpAuthority::Authenticated(&actor);
+        handle_authorized_session_http_request(
+            &format!("GET /v1/sessions/{session_ref} HTTP/1.1\r\n\r\n"),
+            &authority,
+            &participant,
+            port,
+            20_000,
         )
     }
 
@@ -957,18 +1147,10 @@ mod tests {
         assert_eq!(
             handle_session_http_request("GET /v1/sessions/12 HTTP/1.1\r\n\r\n", &mut port, 20_000)
                 .status(),
-            400
+            404
         );
         port.next_load_error = Some(AssessmentSessionPersistenceError::InvalidStoredIdentity);
-        assert_eq!(
-            handle_session_http_request(
-                "GET /v1/sessions/ses_broken HTTP/1.1\r\n\r\n",
-                &mut port,
-                20_000
-            )
-            .status(),
-            500
-        );
+        assert_eq!(authorized_get(&mut port, "ses_broken").status(), 500);
     }
 
     #[test]
@@ -1027,7 +1209,7 @@ mod tests {
     }
 
     #[test]
-    fn library_create_reloads_over_get_and_rejects_numeric_start_identity() {
+    fn library_create_requires_authority_for_get_and_rejects_numeric_start_identity() {
         let mut port = MemorySessionHttpPort::published();
         let created = handle_session_http_request(
             &create_request("ses_lib_reload", "ko-KR"),
@@ -1036,11 +1218,7 @@ mod tests {
         );
         assert_eq!(created.status(), 201);
         assert_eq!(created.content_type(), "application/json");
-        let loaded = handle_session_http_request(
-            "GET /v1/sessions/ses_lib_reload HTTP/1.1\r\n\r\n",
-            &mut port,
-            20_000,
-        );
+        let loaded = authorized_get(&mut port, "ses_lib_reload");
         assert_eq!(loaded.status(), 200);
         assert_eq!(loaded.content_type(), "application/json");
         assert_eq!(loaded.body(), created.body());
@@ -1171,11 +1349,7 @@ mod tests {
         let mut transaction = client.transaction().unwrap();
         let loaded = {
             let mut port = PostgresSessionHttpPort::new(&mut transaction);
-            handle_session_http_request(
-                "GET /v1/sessions/ses_port_library HTTP/1.1\r\n\r\n",
-                &mut port,
-                20_000,
-            )
+            authorized_get(&mut port, "ses_port_library")
         };
         assert_eq!(loaded.status(), 200);
         assert_eq!(loaded.content_type(), "application/json");

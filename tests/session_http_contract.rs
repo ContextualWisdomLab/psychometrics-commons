@@ -1,12 +1,16 @@
 //! Public session HTTP maps create and reload onto the sealed persist start path.
 
+use psychometrics_commons_runtime::anonymous_credential::AnonymousCredential;
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_assessment_session::{
     AssessmentSessionPersistenceDisposition, AssessmentSessionPersistenceError,
     AssessmentSessionStartError,
 };
 use psychometrics_commons_runtime::session::AssessmentSession;
 use psychometrics_commons_runtime::session_http::{
-    handle_session_http_request, MemorySessionHttpPort, SessionHttpPort, SESSION_COLLECTION_PATH,
+    handle_authorized_session_http_request, handle_session_http_request, MemorySessionHttpPort,
+    SessionHttpAuthority, SessionHttpPort, SESSION_COLLECTION_PATH,
 };
 
 const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -40,8 +44,146 @@ fn create_request(idempotency: &str, locale: &str) -> String {
     )
 }
 
+fn authorized_request<P: SessionHttpPort>(
+    port: &mut P,
+    request: &str,
+) -> psychometrics_commons_runtime::session_http::SessionHttpResponse {
+    let participant =
+        ParticipantRecord::new_anonymous(PARTICIPANT, "tenant_session_http", 1).unwrap();
+    let actor = AuthorizationContext::new(
+        "tenant_session_http",
+        "subject_session_http",
+        Some(PARTICIPANT),
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let authority = SessionHttpAuthority::Authenticated(&actor);
+    handle_authorized_session_http_request(request, &authority, &participant, port, 20_000)
+}
+
+fn authorized_get<P: SessionHttpPort>(
+    port: &mut P,
+    session_ref: &str,
+) -> psychometrics_commons_runtime::session_http::SessionHttpResponse {
+    authorized_request(
+        port,
+        &format!("GET /v1/sessions/{session_ref} HTTP/1.1\r\nHost: assessment.example\r\n\r\n"),
+    )
+}
+
 #[test]
-fn post_creates_from_stored_release_and_get_reloads_the_same_identity() {
+fn authorized_handler_classifies_malformed_methods_and_paths_before_loading() {
+    let mut port = MemorySessionHttpPort::published();
+    assert_eq!(authorized_request(&mut port, "NOT-A-REQUEST").status(), 400);
+    assert_eq!(
+        authorized_request(&mut port, "GET /v1/sessions HTTP/1.1\r\n\r\n").status(),
+        405
+    );
+    assert_eq!(
+        authorized_request(&mut port, "GET /v1/sessions/ HTTP/1.1\r\n\r\n").status(),
+        404
+    );
+    assert_eq!(
+        authorized_request(&mut port, "GET /v1/sessions/12 HTTP/1.1\r\n\r\n").status(),
+        404
+    );
+    assert_eq!(
+        authorized_request(&mut port, &create_request("ses_authorized_post", "ko-KR")).status(),
+        201
+    );
+}
+
+#[test]
+fn authorized_session_read_cannot_cross_participant_ownership() {
+    let mut port = MemorySessionHttpPort::published();
+    let created = handle_session_http_request(&create_request(SESSION, "ko-KR"), &mut port, 20_000);
+    assert_eq!(created.status(), 201);
+
+    let participant =
+        ParticipantRecord::new_anonymous("ptc_foreign_session_http", "tenant_session_http", 1)
+            .unwrap();
+    let actor = AuthorizationContext::new(
+        "tenant_session_http",
+        "subject_foreign_session_http",
+        Some("ptc_foreign_session_http"),
+        &[ProductRole::Participant],
+    )
+    .unwrap();
+    let authority = SessionHttpAuthority::Authenticated(&actor);
+    let response = handle_authorized_session_http_request(
+        &format!("GET /v1/sessions/{SESSION} HTTP/1.1\r\n\r\n"),
+        &authority,
+        &participant,
+        &mut port,
+        20_000,
+    );
+    assert_eq!(response.status(), 404);
+    assert!(!response.body().contains(PARTICIPANT));
+}
+
+#[test]
+fn anonymous_session_read_requires_current_credential_evidence() {
+    let mut port = MemorySessionHttpPort::published();
+    let created = handle_session_http_request(&create_request(SESSION, "ko-KR"), &mut port, 20_000);
+    assert_eq!(created.status(), 201);
+    let participant =
+        ParticipantRecord::new_anonymous(PARTICIPANT, "tenant_session_http", 1).unwrap();
+    let mut credential = AnonymousCredential::new(
+        "anonymous_credential_session_http",
+        "tenant_session_http",
+        PARTICIPANT,
+        SESSION,
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        1_000,
+        2_000,
+    )
+    .unwrap();
+    let context = credential
+        .session_context(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "tenant_session_http",
+            PARTICIPANT,
+            SESSION,
+            1_500,
+        )
+        .unwrap();
+    let authority = SessionHttpAuthority::Anonymous {
+        context: &context,
+        credential: &credential,
+        now_unix_ms: 1_500,
+    };
+    assert_eq!(
+        handle_authorized_session_http_request(
+            &format!("GET /v1/sessions/{SESSION} HTTP/1.1\r\n\r\n"),
+            &authority,
+            &participant,
+            &mut port,
+            20_000,
+        )
+        .status(),
+        200
+    );
+    credential.revoke(1_600).unwrap();
+    let revoked_authority = SessionHttpAuthority::Anonymous {
+        context: &context,
+        credential: &credential,
+        now_unix_ms: 1_600,
+    };
+    assert_eq!(
+        handle_authorized_session_http_request(
+            &format!("GET /v1/sessions/{SESSION} HTTP/1.1\r\n\r\n"),
+            &revoked_authority,
+            &participant,
+            &mut port,
+            20_000,
+        )
+        .status(),
+        404
+    );
+}
+
+#[test]
+fn post_creates_from_stored_release_and_public_get_requires_authority() {
     let mut port = MemorySessionHttpPort::published();
     let created = handle_session_http_request(&create_request(SESSION, "ko-KR"), &mut port, 20_000);
     assert_eq!(created.status(), 201);
@@ -61,8 +203,9 @@ fn post_creates_from_stored_release_and_get_reloads_the_same_identity() {
         &mut port,
         20_000,
     );
-    assert_eq!(loaded.status(), 200);
-    assert_eq!(loaded.body(), created.body());
+    assert_eq!(loaded.status(), 404);
+    assert!(loaded.body().contains("session authority is required"));
+    assert_eq!(authorized_get(&mut port, SESSION).body(), created.body());
 }
 
 #[test]
@@ -145,7 +288,7 @@ fn http_routing_failures_name_the_allowed_session_routes() {
         20_000,
     )
     .body()
-    .contains("Use POST /v1/sessions with the same Idempotency-Key to start the session"));
+    .contains("session authority is required to load a stored session"));
 }
 
 #[test]
@@ -199,17 +342,10 @@ fn start_and_load_errors_map_to_buyer_actions() {
     );
     assert_eq!(
         status(&mut port, "GET /v1/sessions/12 HTTP/1.1\r\n\r\n", 20_000),
-        400
+        404
     );
     port.next_load_error = Some(AssessmentSessionPersistenceError::InvalidStoredIdentity);
-    assert_eq!(
-        status(
-            &mut port,
-            "GET /v1/sessions/ses_broken HTTP/1.1\r\n\r\n",
-            20_000
-        ),
-        500
-    );
+    assert_eq!(authorized_get(&mut port, "ses_broken").status(), 500);
 }
 
 #[test]
@@ -260,8 +396,33 @@ fn memory_port_records_exact_replay_disposition() {
             AssessmentSessionPersistenceError::ConflictingReplay
         ))
     ));
+    port.next_load_error = Some(AssessmentSessionPersistenceError::InvalidStoredIdentity);
+    assert!(port.load(SESSION).is_err());
+    assert!(matches!(
+        port.load("12"),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        port.load_for_participant("12", PARTICIPANT),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        port.load_for_participant(SESSION, "12"),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    assert!(matches!(
+        port.load_for_participant(SESSION, " ptc_eb1b318917d24ca0ac5153c37ff696c7 "),
+        Err(AssessmentSessionPersistenceError::InvalidReference)
+    ));
+    assert!(port
+        .load_for_participant(&format!(" {SESSION} "), PARTICIPANT)
+        .unwrap()
+        .is_some());
     assert!(port.load(SESSION).unwrap().is_some());
+    assert!(port.load(&format!(" {SESSION} ")).unwrap().is_some());
     assert!(port.load("ses_missing").unwrap().is_none());
+    port.next_load_error = Some(AssessmentSessionPersistenceError::InvalidReference);
+    assert_eq!(authorized_get(&mut port, SESSION).status(), 400);
 }
 
 #[test]

@@ -13,10 +13,13 @@
 mod implementation;
 
 pub use implementation::{
-    bind_session_http, handle_session_http_request, MemorySessionHttpPort, PostgresSessionHttpPort,
-    SessionHttpPort, SessionHttpResponse, SESSION_COLLECTION_PATH, SESSION_HTTP_IO_TIMEOUT,
+    bind_session_http, handle_authorized_session_http_request, handle_session_http_request,
+    MemorySessionHttpPort, PostgresSessionHttpPort, SessionHttpAuthority, SessionHttpPort,
+    SessionHttpResponse, SESSION_COLLECTION_PATH, SESSION_HTTP_IO_TIMEOUT,
     SESSION_HTTP_MAX_REQUEST_BYTES,
 };
+
+use crate::participant::ParticipantRecord;
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -49,6 +52,36 @@ pub fn accept_one_session_http<P: SessionHttpPort>(
     stream.set_write_timeout(Some(SESSION_HTTP_IO_TIMEOUT))?;
     let request = read_http_request(&mut stream, deadline)?;
     let response = handle_session_http_request(&request, port, created_at_unix_ms);
+    write_http_response(&mut stream, &response)
+}
+
+/// Accept one TCP connection and serve it with a server-verified session authority.
+///
+/// The participant is a server-owned record, not a value copied from the request. GET
+/// reloads are bound to that participant in both authorization and persistence. POST keeps
+/// the existing idempotent session-start behavior.
+///
+/// # Errors
+///
+/// Returns the same framing and underlying I/O errors as [`accept_one_session_http`].
+pub fn accept_one_authorized_session_http<P: SessionHttpPort>(
+    listener: &TcpListener,
+    authority: &SessionHttpAuthority<'_>,
+    participant: &ParticipantRecord,
+    port: &mut P,
+    created_at_unix_ms: u64,
+) -> io::Result<()> {
+    let (mut stream, _) = listener.accept()?;
+    let deadline = Instant::now() + SESSION_HTTP_IO_TIMEOUT;
+    stream.set_write_timeout(Some(SESSION_HTTP_IO_TIMEOUT))?;
+    let request = read_http_request(&mut stream, deadline)?;
+    let response = handle_authorized_session_http_request(
+        &request,
+        authority,
+        participant,
+        port,
+        created_at_unix_ms,
+    );
     write_http_response(&mut stream, &response)
 }
 
