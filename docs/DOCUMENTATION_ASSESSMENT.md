@@ -31,7 +31,7 @@ This reconciliation closes those architecture-definition gaps without promoting 
 | Quality / risk / compliance readiness | **Sufficient as assurance baseline** | Evidence scenarios and risk state are explicit; readiness is not certification. |
 | Traceability | **Repaired in this reconciliation** | Baseline now names exact protected-main `4499d9c…`, reconciles merged result/session/anonymous-authorization/scoring-adapter slices, and isolates still-open PRs from shipped truth. Must be updated after every material merge. |
 | Roadmap / agent guidance / changelog | **Sufficient for continued delivery** | Must remain code-current; documentation completion is not a terminal condition for the execution loop. |
-| Machine-readable OpenAPI / AsyncAPI | **Not yet applicable as as-built evidence** | Add and validate with the first implemented HTTP/event transport. Do not publish aspirational operations as deployed. |
+| Machine-readable OpenAPI / AsyncAPI | **Active PR for operator health probes only** | `openapi/health-probes.yaml` lists GET `/live` and GET `/ready`. Public/admin product routes and AsyncAPI remain unimplemented and must not be listed as deployed. |
 | Physical schema / as-built topology | **Partial / implementation-gated** | Logical ERD is authoritative target semantics. Actual migrations/topology/rollback/restore evidence must be compared to it as those artifacts land. |
 | Instrument-release evidence bundles | **Target** | Every publishable consumer instrument needs immutable rights, locale/translation, scoring/calibration/norm, DIF/invariance/linking where claimed, scoreability, intended-use and narrative-rule evidence. |
 
