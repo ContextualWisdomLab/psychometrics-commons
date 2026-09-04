@@ -73,6 +73,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Active PR #279 strengthens the existing PostgreSQL assessment-session and accepted-command opaque-reference CHECKs so durable rows reject boundary-whitespace aliases, control/default-ignorable characters, and numeric-like spellings that the shared Rust boundary would not persist. The logical entities, ownership, cardinalities, session state machine, and public API contract are unchanged; this remains active-PR evidence only until the unchanged exact head reaches protected main.
 - Stale shorter assessment-session command history now fails closed instead of rewinding the current-state projection, so a later Pause/Resume still reloads after a rejected Activate-only persist.
 - Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.
