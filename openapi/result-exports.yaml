@@ -1,0 +1,272 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons personal result-export API
+  version: 0.1.0
+  description: >
+    As-built in-process POST transport for one already-authorized immutable result
+    export. The host runtime supplies stored participant/result/export records and
+    an authenticated authorization context; request values never establish tenant
+    or owner authority. The handler authorizes stored records before comparing the
+    route result identity or Idempotency-Key with those records. Query parameters
+    are undefined and fail closed.
+paths:
+  /v1/results/{result_ref}/exports:
+    post:
+      operationId: deliverPersonalResultExport
+      summary: Return one authorized immutable personal result export
+      description: >
+        Returns the exact JSON export by default, or the exact human-readable
+        report when Accept is text/plain. Idempotency-Key is the opaque export
+        identity already bound to the server-owned ResultExport. Reusing another
+        export identity for the authorized result fails closed as a conflict. The
+        HTTP adapter never recomputes scores, standard errors, norms, calibration,
+        dispositions, or narrative evidence.
+      x-authorization-contract: >
+        The embedding host supplies an authenticated AuthorizationContext plus the
+        server-owned ParticipantRecord, ResultSnapshot, and ResultExport. The
+        handler authorizes those stored records before checking route/export
+        binding details so unauthorized callers cannot use mismatches as an
+        existence oracle. No caller-supplied ownership record is trusted.
+      parameters:
+        - name: result_ref
+          in: path
+          required: true
+          description: >
+            Exact opaque, non-numeric immutable result-snapshot reference.
+            URL-encoded, fragment-bearing, padded, numeric-like, empty, and
+            slash-containing aliases are rejected rather than canonicalized.
+          schema:
+            $ref: "#/components/schemas/OpaqueReference"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Opaque immutable personal-export reference.
+          schema:
+            $ref: "#/components/schemas/OpaqueReference"
+        - name: Accept
+          in: header
+          required: false
+          description: application/json, text/plain, or */*. Defaults to application/json.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Authorized personal export bound to the exact immutable result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResultExport"
+            text/plain:
+              schema:
+                type: string
+                description: Exact human-readable ResultExport report.
+        "400":
+          description: Malformed request, invalid identity, duplicate header, or undefined query semantics.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:bad-request
+            - urn:psychometrics-commons:problem:unsupported-query
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: Authenticated context is not authorized for the server-owned export records.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:result-export-forbidden
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: Route is not the export operation or no authorized result matches the route binding.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:not-found
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "405":
+          description: The personal result-export operation only implements POST.
+          headers:
+            Allow:
+              required: true
+              schema:
+                type: string
+                const: POST
+          x-problem-types:
+            - urn:psychometrics-commons:problem:method-not-allowed
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "406":
+          description: Requested representation is not application/json, text/plain, or */*.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:not-acceptable
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: Idempotency-Key is bound to different personal export evidence.
+          x-problem-types:
+            - urn:psychometrics-commons:problem:idempotency-conflict
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    OpaqueReference:
+      type: string
+      minLength: 1
+      x-runtime-validator: exact_opaque_reference
+      description: >
+        Request-facing opaque reference. Portable schema constraints reject
+        leading/trailing whitespace, request-target encoding markers, fragments,
+        controls, and ASCII numeric-like aliases. The authoritative in-process
+        exact_opaque_reference validator additionally rejects every Unicode
+        numeric-like or Default_Ignorable alias accepted by neither product
+        identity nor authorization boundaries.
+      allOf:
+        - pattern: '^\S(?:.*\S)?$'
+        - pattern: '^[^%#\u0000-\u001F\u007F]+$'
+        - not:
+            pattern: '^(?=.*[0-9])[+\-0-9.,eE\u066B\u066C\uFF0E\uFF0C]+$'
+    ResultExport:
+      type: object
+      additionalProperties: false
+      required:
+        - export_ref
+        - result_snapshot_ref
+        - participant_ref
+        - session_ref
+        - response_snapshot_ref
+        - assessment_spec_ref
+        - instrument_version_ref
+        - scoring_version_ref
+        - calibration_reference
+        - norm_version_ref
+        - narrative_version_ref
+        - engine_artifact_digest
+        - requested_output_schema_version
+        - locale
+        - created_at_unix_ms
+        - exported_at_unix_ms
+        - consent_snapshot_refs
+        - score_observations
+        - limitations
+      properties:
+        export_ref:
+          type: string
+        result_snapshot_ref:
+          type: string
+        participant_ref:
+          type: string
+        session_ref:
+          type: string
+        response_snapshot_ref:
+          type: string
+        assessment_spec_ref:
+          type: string
+        instrument_version_ref:
+          type: string
+        scoring_version_ref:
+          type: string
+        calibration_reference:
+          type: string
+        norm_version_ref:
+          type:
+            - string
+            - "null"
+        narrative_version_ref:
+          type: string
+        engine_artifact_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        requested_output_schema_version:
+          type: integer
+          minimum: 1
+        locale:
+          type: string
+        created_at_unix_ms:
+          type: integer
+          minimum: 1
+        exported_at_unix_ms:
+          type: integer
+          minimum: 1
+        consent_snapshot_refs:
+          type: array
+          items:
+            type: string
+        score_observations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScoreObservation"
+        limitations:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    ScoreObservation:
+      type: object
+      additionalProperties: false
+      required:
+        - construct_ref
+        - disposition
+        - score
+        - standard_error
+      properties:
+        construct_ref:
+          type: string
+        disposition:
+          type: string
+          enum:
+            - scored
+            - abstained
+            - failed
+            - excluded
+        score:
+          description: Finite numeric score only for a scored observation; otherwise null.
+        standard_error:
+          description: Optional non-negative finite uncertainty for a scored observation; otherwise null.
+      oneOf:
+        - title: Scored observation
+          properties:
+            disposition:
+              const: scored
+            score:
+              type: number
+            standard_error:
+              type:
+                - number
+                - "null"
+              minimum: 0
+        - title: Non-scored observation
+          properties:
+            disposition:
+              enum:
+                - abstained
+                - failed
+                - excluded
+            score:
+              type: "null"
+            standard_error:
+              type: "null"
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - detail
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
