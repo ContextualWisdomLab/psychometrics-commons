@@ -37,7 +37,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Immutable instrument release/version lifecycle | PRD §6, §9 | TRD §7; UML publication state | ADR-0005, ADR-0010 | **Implemented** in `src/instrument.rs` plus `migrations/0006_instrument_release.sql` and `src/postgres_instrument_release.rs`: immutable release manifest, exact version/digest/locale/item set, fail-closed Draft/Review/Published/Suspended/Retired lifecycle, idempotent publication events, and new-session eligibility |
 | Quick and Deep assessment paths | PRD §3.1, §9 | TRD §5–7; immutable release/item-delivery boundary | ADR-0005, ADR-0010 | **Active PR #261** binds ordered Quick/Deep item subsets to one immutable release and copies release locale/provenance; path persistence, item-delivery transport, conversion, and scoring integration remain Target |
 | Instrument publication requires intended-use scientific/right/locale evidence | PRD §6, §9, §10 | Measurement Governance; publication evidence gate | ADR-0004, ADR-0013, ADR-0019 | **Implemented** policy gate and immutable evidence provenance in `src/instrument.rs`; each real instrument still requires its own rights/locale/scientific evidence artifacts before publication |
-| Optional Keyverse account linking | PRD §3.1, §9.7 | TRD §10; UML identity-link lifecycle | ADR-0003, ADR-0020 | **Partially implemented**: issuer-scoped first-link fail-closed domain primitive in `src/participant.rs`; append-only unlink/relink/recovery history, persistence, audit, and transport remain Target |
+| Optional Keyverse account linking | PRD §3.1, §9.7 | TRD §10; UML identity-link lifecycle | ADR-0003, ADR-0020 | **Partially implemented**: issuer-scoped first-link fail-closed domain primitive in `src/participant.rs`; **Active PR** #206 adds hosted dual-proof write/recover/unlink commands in `src/account_link_write.rs`, keeps a recovered participant only when the current tenant/issuer/subject still match the proof, and ends that binding from a still-valid current proof; **Active PR** #158 remains the store-wide restore-reconcile vehicle. Both include #147 persist.; HTTP/Keyverse token verification remain Target |
 | Cross-cutting tenant/task authorization | PRD §7, §9 | TRD §11; Security/Data | ADR-0001, ADR-0003 | **Implemented** fail-closed domain gate in `src/authorization.rs` binds consent operations to participant-owned `ConsentLedger` / `ManageOwnConsent`; persistence/policy-adapter/public-transport integration remains Target |
 | Purpose-specific consent | PRD §5, §9.6 | TRD §12 | ADR-0006 | **Implemented** domain contract in `src/consent.rs` plus `migrations/0005_consent_lifecycle.sql` / `src/postgres_consent.rs` purpose-specific ledgers; HTTP transport remains Target |
 | Explicit research contribution + withdrawal | PRD §5 | TRD §12, §14–15 | ADR-0006, ADR-0007 | **Implemented** product-domain lifecycle in `src/consent.rs`; dataset snapshot/release integration is Target |
@@ -76,7 +76,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 | Only Published release accepts new sessions | TRD §7 | `PublicationState::accepts_new_sessions` in `src/instrument.rs`; protected-main `start_created_assessment_session_from_stored_release` locks publication evidence and persists HTTP create/reload; load still restores created identity without re-checking current eligibility | Command HTTP and the rest of the assessment transport remain missing |
 | Publication event replay is idempotent/conflicting reuse fails closed | TRD §7 | `src/instrument.rs` | durable DB uniqueness/concurrency test |
 | Published instrument requires exact-version scientific evidence | Measurement Governance; ADR-0019 | `src/instrument.rs` binds approved evidence status, provenance/scope, mandatory evidence references, validity window, and immutable release identity before publication/reactivation | persistence/API publication integration and real instrument-specific evidence artifacts |
-| Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID | append-only identity-link persistence + unlink/relink/recovery audit tests |
+| Optional account linking does not rewrite historical participant/result identity | ADR-0003, ADR-0020 | `src/participant.rs` issuer-scoped first-link primitive preserves stable participant ID; **Active PR** #206 `src/postgres_participant_identity_link.rs` persists and reloads that history without rewriting `participant_ref`; `src/account_link_write.rs` authorizes both proofs before persist, recovers from a still-valid account proof, drops a loaded participant whose current binding no longer matches that proof, and ends a matching current binding from a still-valid account proof | HTTP unlink/relink transport, live Keyverse verification, and backup/restore evidence |
 | Sensitive authorization is tenant- and task-bound | TRD §11; Security/Data | `src/authorization.rs` fail-closed authorization context/gates bind consent operations to participant ownership | policy adapter + route/repository integration + cross-tenant E2E tests |
 | Research consent separate from service consent | TRD §12; Research Governance | `src/consent.rs` | public API/UI negative test |
 | Research withdrawal preserves evidence | TRD §12–15; Research Governance | `src/consent.rs` | release-pipeline exclusion test |
@@ -123,8 +123,11 @@ src/lib.rs
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
 ├── longitudinal_observation.rs  # longitudinal clocks, identity, and membership-share evidence
 ├── narrative.rs      # deterministic Personality Style identity/key
+├── account_link.rs   # dual-proof authorization before participant identity mutation
+├── account_link_write.rs  # Active PR dual-proof persist/recover/unlink commands (not protected-main truth)
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
 ├── postgres_consent.rs  # PostgreSQL purpose-specific consent ledger persistence
+├── postgres_participant_identity_link.rs  # Active PR append-only identity-link persist/reload (not protected-main truth)
 ├── postgres_data_rights.rs  # PostgreSQL data-rights request and local propagation persistence
 ├── postgres_data_rights_processing.rs  # PostgreSQL identity-verified data-rights operation persistence
 ├── postgres_health.rs  # PostgreSQL major/write-readiness and relation-integrity probe
@@ -158,7 +161,7 @@ migrations/
 └── 0019_inbox_claim_expiry_guard.sql
 ```
 
-Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
+Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
 
@@ -178,6 +181,8 @@ Closed-unmerged #220 public research-fixture identity-column rejection is no lon
 Merged #231 personal result export is protected-main domain evidence. `ResultExport::from_snapshot` copies the stored construct scores, standard errors, dispositions, owner `participant_ref`, and version provenance into a JSON document and a human-readable report. Approved limitation text is required so the report cannot imply diagnosis, employment fitness, or a type score. Padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains. The snapshot is not mutated. HTTP `POST /v1/results/{result_ref}/exports` remains Target/active #256. Do not fold unrelated persistence into this domain slice.
 
 Merged #225 anonymous-session resource authorization compares the verified actor to the supplied participant tenant/owner and session and applies a lifecycle command only after that check. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persistence remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
+
+**Active PR** #206 hosted dual-proof account-link write/recover/unlink persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated; it supersedes the closed-unmerged predecessor lanes (#176 recover binding, #160 write path, #147, #133, #124, #114, and #202 inspect-line unlink), while **Active PR** #158 store-wide restore reconcile remains a separate lane sharing persist files. `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs` persist `assessment_participant`, append-only `participant_identity_link` / `participant_identity_link_end` evidence, and a derived `current_participant_identity_link` projection. `src/account_link_write.rs` authorizes both current proofs, persists that history, recovers the same `participant_ref` from a still-valid authenticated account proof, keeps that participant only when the current tenant/issuer/subject still match the proof, and ends a matching current binding from a still-valid account proof so recover then returns `None`. Persist applies each link and then its matching ends so a complete unlink+relink aggregate can be written in one transaction. Exact replay then restores or clears that derived projection. Unterminated issuer-scoped subjects are the lookup and uniqueness source of truth, so a returning account still recovers the same `participant_ref` when the derived projection is missing. HTTP account-link transport and live Keyverse token verification remain outside this slice. Migration `0021` remains reserved for #113 scoring-job health indexes.
 
 ## 5. ADR traceability by concern
 
@@ -265,6 +270,10 @@ A PR that materially changes any of the following must update this document or p
 CI should validate linked documentation paths and status/name consistency now and, when machine-readable contracts/migrations exist, validate that documented references map to real contract/schema artifacts.
 
 ## 10. References
+
+International Organization for Standardization & International Electrotechnical Commission. (2019). *IT security and privacy—A framework for identity management—Part 1: Terminology and concepts* (ISO/IEC 24760-1:2019).
+
+National Institute of Standards and Technology. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). https://doi.org/10.6028/NIST.SP.800-63-4
 
 Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
 
