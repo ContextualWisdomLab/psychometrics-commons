@@ -2,9 +2,11 @@
 //!
 //! A purchaser who finished an assessment can copy the same continuous scores,
 //! uncertainty, and version provenance into a personal archive. This module
-//! does not recompute psychometric values, invent a Personality Style or type
-//! score, or mask the owner `participant_ref`. Blanket masking would prevent
-//! the owner from using their own result. HTTP transport remains a later slice.
+//! does not recompute psychometric values or invent a Personality Style or type
+//! score. The machine-readable JSON and typed accessors retain exact owner and
+//! version provenance; the human-readable copy omits internal identifiers so a
+//! participant does not need implementation terminology to understand the report.
+//! HTTP transport remains a later slice.
 
 use crate::reference::normalized_reference;
 use crate::result::ResultSnapshot;
@@ -34,6 +36,7 @@ pub struct ResultExport {
     result_snapshot_ref: String,
     participant_ref: String,
     locale: String,
+    exported_at_unix_ms: u64,
     instrument_version_ref: String,
     scoring_version_ref: String,
     engine_artifact_digest: String,
@@ -87,10 +90,11 @@ impl ResultExport {
     ///
     /// Both artifacts repeat the stored construct scores and standard errors. An
     /// abstained, failed, or excluded observation keeps its disposition and does
-    /// not receive an invented number. The owner participant reference is copied
-    /// so authorized personal work can continue. The snapshot is not mutated.
-    /// A report locale is a BCP 47-style tag such as `ko-KR`. Export timestamps
-    /// are milliseconds since the Unix epoch (1970-01-01T00:00:00Z).
+    /// not receive an invented number. Exact owner/version provenance remains in
+    /// the machine-readable document and typed fields while the human-readable
+    /// report omits internal identifiers. The snapshot is not mutated. A report
+    /// locale is a BCP 47-style tag such as `ko-KR`. Export timestamps are
+    /// milliseconds since the Unix epoch (1970-01-01T00:00:00Z).
     ///
     /// # Errors
     ///
@@ -125,14 +129,14 @@ impl ResultExport {
             input.exported_at_unix_ms,
             &limitations,
         );
-        let human_readable_report =
-            render_human_readable_report(snapshot, export_ref, input.locale, &limitations);
+        let human_readable_report = render_human_readable_report(snapshot, &limitations);
 
         Ok(Self {
             export_ref: export_ref.to_owned(),
             result_snapshot_ref: snapshot.result_snapshot_ref().to_owned(),
             participant_ref: snapshot.participant_ref().to_owned(),
             locale: input.locale.to_owned(),
+            exported_at_unix_ms: input.exported_at_unix_ms,
             instrument_version_ref: snapshot.instrument_version_ref().to_owned(),
             scoring_version_ref: snapshot.scoring_version_ref().to_owned(),
             engine_artifact_digest: snapshot.engine_artifact_digest().to_owned(),
@@ -164,6 +168,12 @@ impl ResultExport {
     #[must_use]
     pub fn locale(&self) -> &str {
         &self.locale
+    }
+
+    /// Return the server-authoritative time recorded for this export.
+    #[must_use]
+    pub const fn exported_at_unix_ms(&self) -> u64 {
+        self.exported_at_unix_ms
     }
 
     /// Return the published instrument version copied from the snapshot.
@@ -345,37 +355,9 @@ fn append_json_observation(json: &mut String, observation: &ScoreObservation) {
     json.push('}');
 }
 
-fn render_human_readable_report(
-    snapshot: &ResultSnapshot,
-    export_ref: &str,
-    locale: &str,
-    limitations: &[&str],
-) -> String {
+fn render_human_readable_report(snapshot: &ResultSnapshot, limitations: &[&str]) -> String {
     let mut report = String::from("Personal result export\n");
-    report.push_str("export_ref: ");
-    report.push_str(export_ref);
-    report.push('\n');
-    report.push_str("result_snapshot_ref: ");
-    report.push_str(snapshot.result_snapshot_ref());
-    report.push('\n');
-    report.push_str("participant_ref: ");
-    report.push_str(snapshot.participant_ref());
-    report.push('\n');
-    report.push_str("locale: ");
-    report.push_str(locale);
-    report.push('\n');
-    report.push_str("instrument_version_ref: ");
-    report.push_str(snapshot.instrument_version_ref());
-    report.push('\n');
-    report.push_str("scoring_version_ref: ");
-    report.push_str(snapshot.scoring_version_ref());
-    report.push('\n');
-    report.push_str("engine_artifact_digest: ");
-    report.push_str(snapshot.engine_artifact_digest());
-    report.push('\n');
-    report.push_str("norm_version_ref: ");
-    report.push_str(snapshot.norm_version_ref().unwrap_or("none"));
-    report.push_str("\n\nScores\n");
+    report.push_str("Exact versions, time, ownership, and scoring evidence are retained in the machine-readable data export. Internal identifiers are omitted from this human-readable copy.\n\nScores\n");
     for observation in snapshot.score_observations() {
         report.push_str("- ");
         report.push_str(observation.construct_ref());
