@@ -6,9 +6,9 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`) exists on Active PR #232 and is not protected-main truth; remaining public/admin families and durable external event transport are still unimplemented on protected main
+- Current/as-built status: protected main implements persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`) through merged #232, authorized immutable result read through merged #257, and authorized personal result export HTTP through merged #256; response-event write HTTP (`POST /v1/sessions/{session_ref}/responses`, `openapi/responses.yaml`) is IMPLEMENTED_ON_ACTIVE_PR #415 and is not protected-main truth; durable external event transport remains incomplete
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
-- Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
+- Migration status: protected-main HTTP families already carry their as-built contract evidence; active PR #415 must keep response-write implementation and `openapi/responses.yaml` synchronized before merge; the first durable external event transport still requires its machine-readable contract in the same or prerequisite PR
 
 ## Context
 
@@ -103,7 +103,7 @@ When durable event transport is implemented, the AsyncAPI/schema artifact must e
 
 ## Data and persistence impact
 
-No transport persistence exists yet on protected main. The target logical model requires outbox event identity, tenant/subject binding, schema/canonicalization version, payload digest, delivery attempts, inbox deduplication identity, processing state, side-effect evidence, and quarantine/reconciliation evidence. `docs/architecture/ERD.md` defines the logical target; physical migrations must preserve these semantics when introduced.
+Protected main already contains product-owned integration persistence for outbox/inbox identity, delivery attempts, and inbox-consumption state. That persistence is implementation evidence for local transaction/replay semantics, but it does not by itself prove a deployed external broker/channel or complete side-effect worker. The remaining target external transport model requires versioned message schemas, canonicalization/digest validation, tenant/subject binding, delivery/retry evidence, processing state, side-effect evidence, and quarantine/reconciliation evidence. `docs/architecture/ERD.md` defines the logical target; every physical migration and adapter must preserve these semantics.
 
 ## Invariants
 
@@ -153,7 +153,7 @@ Transport/broker choice is deployment-specific, but health and reconciliation mu
 
 ## Migration and rollout
 
-The first implemented HTTP transport must introduce its OpenAPI document in the same PR or an accepted prerequisite PR. The first durable event transport must do the same for AsyncAPI plus the canonicalization/digest implementation and persistence constraints.
+Every newly implemented HTTP family must introduce or update its exact OpenAPI document in the same PR or an accepted prerequisite PR. Active PR #415 follows that rule for response-event writes with `openapi/responses.yaml`. The first durable external event transport must do the same for AsyncAPI plus the canonicalization/digest implementation and persistence constraints.
 
 Contract changes are validated before deployment. During compatibility windows, old and new versions may be served/consumed concurrently only when the implementation has explicit routing/adapter tests.
 
@@ -165,7 +165,7 @@ Rollback must restore an application version that still understands any messages
 - `docs/architecture/UML.md` must not model receipt as equivalent to externally visible side-effect completion.
 - `docs/architecture/SECURITY_AND_DATA.md` must preserve tenant/purpose boundaries for event payloads and quarantine.
 - `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md` must include replay/quarantine/recovery evidence when event transport is implemented.
-- `docs/TRACEABILITY.md` remains target until as-built OpenAPI/AsyncAPI and transport tests exist.
+- `docs/TRACEABILITY.md` must distinguish protected-main HTTP families from active-PR transport such as #415 and from still-target event transport; no active PR may be promoted to shipped truth before merge.
 
 ## Validation and release evidence
 
@@ -186,7 +186,7 @@ Release gates for an implemented transport include:
 - client/consumer compatibility tests for the supported window;
 - security tests that verify examples/errors/quarantine evidence do not disclose prohibited data.
 
-Until the transport exists, these are explicit target acceptance requirements rather than fabricated passing evidence.
+An active implementation may satisfy only the gates supported by its exact scope. Pending, queued, stale, predecessor, synthetic, or unrelated evidence does not establish release readiness.
 
 ## Alternatives considered
 
@@ -233,8 +233,9 @@ Costs:
 
 ## Follow-up work
 
-- when the first HTTP transport lands, add the exact OpenAPI document and route/problem contract tests;
-- when the first durable event transport lands, add AsyncAPI plus canonicalization/digest test vectors and tenant-bound outbox/inbox migrations;
+- keep each protected-main HTTP family and its exact OpenAPI document synchronized through implementation-to-contract tests;
+- complete active PR #415 response-write contract verification without promoting it to protected-main status before merge;
+- when the first durable external event transport lands, add AsyncAPI plus canonicalization/digest test vectors and tenant-bound outbox/inbox migration/adapter evidence;
 - add consumer crash/replay/quarantine integration tests against the selected persistence/broker adapters;
 - link deployment-specific deduplication-retention policy to backup/restore and broker retention evidence.
 
@@ -244,7 +245,7 @@ Costs:
 - Technical requirements: `docs/TRD.md` API, event, transactional integration, version compatibility, security, and validation sections.
 - Architecture: `ARCHITECTURE.md`, `docs/architecture/ERD.md`, `docs/architecture/UML.md`, `docs/architecture/DEPLOYMENT_AND_OPERATIONS.md`.
 - Decisions: ADR-0015 for persistence/transaction boundaries.
-- Delivery evidence: `docs/TRACEABILITY.md`, `docs/ROADMAP.md`, `tests/documentation_architecture_contract.rs` until as-built transport tests replace documentation-only fitness evidence.
+- Delivery evidence: `docs/TRACEABILITY.md`, `docs/ROADMAP.md`, implementation-to-contract tests for shipped HTTP families, and active-PR contract tests for not-yet-shipped families such as #415.
 
 ## Reversal conditions
 
