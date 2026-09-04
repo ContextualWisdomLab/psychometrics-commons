@@ -86,6 +86,15 @@ fn coverage_failures_identify_the_incomplete_source_files() {
 }
 
 #[test]
+fn coverage_contract_validates_merged_lcov_records() {
+    assert!(
+        CI_WORKFLOW.contains("python3 scripts/check_coverage.py coverage-lines.lcov --kind lines")
+    );
+    assert!(CI_WORKFLOW
+        .contains("python3 scripts/check_coverage.py coverage-branches.lcov --kind branches"));
+}
+
+#[test]
 fn line_coverage_failure_diagnostic_exposes_instantiation_gaps() {
     assert!(CI_WORKFLOW
         .contains("cargo llvm-cov report --text --show-missing-lines --show-instantiations"));
@@ -121,7 +130,7 @@ fn rust_toolchains_are_exact_and_reviewably_updated() {
     const NIGHTLY_LLVM_COV_VERSION: &str =
         "cargo +nightly-2026-08-18 llvm-cov --version | grep -F \"$CARGO_LLVM_COV_VERSION\"";
     const NIGHTLY_BRANCH_JSON: &str =
-        "cargo +nightly-2026-08-18 llvm-cov --branch --json --summary-only --output-path coverage-branches.json";
+        "cargo +nightly-2026-08-18 llvm-cov --branch --all-targets --json --summary-only --output-path coverage-branches.json";
 
     assert!(RUST_TOOLCHAIN.contains("channel = \"1.97.1\""));
     assert!(!RUST_TOOLCHAIN.contains("channel = \"stable\""));
