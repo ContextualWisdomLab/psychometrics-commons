@@ -137,6 +137,24 @@ Product consequences:
 - missing sessions return 404 that tells the buyer to POST the same
   Idempotency-Key.
 
+## PostgreSQL transaction isolation
+
+PostgreSQL 18 documents `READ COMMITTED` as the default isolation level in which
+each statement sees only rows committed before that statement began (PostgreSQL
+Global Development Group, 2026b). Product persist and restart-reload adapters that
+classify unique-key races or reconstruct immutable identities therefore require
+`READ COMMITTED` and fail closed on a stronger isolation level that can hide a
+concurrent committed insert from the classifier.
+
+Product consequences:
+
+- scoring-request reload reconstructs the version-pinned dispatch identity under
+  `READ COMMITTED` after a share lock on the request row;
+- a missing request is absent rather than an invented scoring pin;
+- unsupported stored schema versions fail closed as unsupported stored schema
+  instead of being coerced into the current output contract or quarantined as
+  corrupt history;
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
