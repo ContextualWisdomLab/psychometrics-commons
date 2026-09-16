@@ -1,5 +1,7 @@
 # Psychometrics Commons
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ContextualWisdomLab/psychometrics-commons)
+
 CWL Psychometrics Commons is the headless product repository for public psychometric assessment, reflective self-understanding, longitudinal observation, and consent-governed research data contribution.
 
 ```text

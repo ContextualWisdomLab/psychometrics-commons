@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: psychometrics-commons-sbom-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.repository }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   generate:

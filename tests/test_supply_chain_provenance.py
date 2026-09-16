@@ -56,6 +56,11 @@ class SupplyChainProvenanceContract(unittest.TestCase):
             trigger_block,
             "provenance must run for every repository change because Cargo's default package set is VCS-derived",
         )
+        self.assertNotIn(
+            "paths-ignore:",
+            trigger_block,
+            "docs-only changes still change the VCS-derived package Cargo attests, so provenance must not skip them",
+        )
         self.assertIn(
             "actions/checkout@631c942040754b6e095e929c1677c07e10ed4f87", text
         )
