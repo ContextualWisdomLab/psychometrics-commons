@@ -43,6 +43,7 @@ pub mod postgres_response_snapshot;
 pub mod postgres_result_snapshot;
 pub mod postgres_scoring_job;
 pub mod postgres_scoring_request;
+pub mod rater_panel;
 mod reference;
 pub mod research_release;
 pub mod response;
