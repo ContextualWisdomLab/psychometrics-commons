@@ -1,4 +1,4 @@
-//! Real PostgreSQL regression for account-link write atomicity at the caller boundary.
+//! Real `PostgreSQL` regression for account-link write atomicity at the caller boundary.
 //!
 //! A durable uniqueness failure must not leave the caller-owned participant
 //! aggregate linked in memory when the database rejected that link.
