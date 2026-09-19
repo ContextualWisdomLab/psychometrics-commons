@@ -217,6 +217,59 @@ fn projection_is_participant_free_and_rejects_invalid_unscored_or_unknown_constr
 }
 
 #[test]
+fn canonical_measurement_coordinate_round_trips_without_aliases() {
+    let snapshot = result_snapshot();
+    let coordinate = coordinate(&snapshot, "construct_predictor");
+    let encoded = coordinate.canonical_bytes();
+    let decoded = MeasurementCoordinateProvenance::from_canonical_bytes(&encoded)
+        .expect("canonical measurement-coordinate bytes must decode");
+
+    assert_eq!(decoded, coordinate);
+    assert_eq!(decoded.canonical_bytes(), encoded);
+}
+
+#[test]
+fn canonical_decoder_fails_closed_on_aliases_and_malformed_owner_provenance() {
+    let snapshot = result_snapshot();
+    let encoded = String::from_utf8(coordinate(&snapshot, "construct_predictor").canonical_bytes())
+        .expect("canonical provenance is UTF-8-safe");
+
+    let version_alias = encoded.replace("contract_version=1:1", "contract_version=2:01");
+    assert_eq!(
+        MeasurementCoordinateProvenance::from_canonical_bytes(version_alias.as_bytes())
+            .unwrap_err(),
+        MeasurementCoordinateProvenanceError::NonCanonicalEncoding
+    );
+
+    let padded_construct = encoded.replace(
+        "construct_ref=19:construct_predictor",
+        "construct_ref=21: construct_predictor ",
+    );
+    assert_eq!(
+        MeasurementCoordinateProvenance::from_canonical_bytes(padded_construct.as_bytes())
+            .unwrap_err(),
+        MeasurementCoordinateProvenanceError::InvalidProvenanceReference
+    );
+
+    let invalid_engine = encoded.replace(
+        ENGINE_DIGEST,
+        "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    );
+    assert_eq!(
+        MeasurementCoordinateProvenance::from_canonical_bytes(invalid_engine.as_bytes())
+            .unwrap_err(),
+        MeasurementCoordinateProvenanceError::InvalidEngineArtifactDigest
+    );
+
+    let mut trailing = encoded.into_bytes();
+    trailing.extend_from_slice(b"unexpected=true\n");
+    assert_eq!(
+        MeasurementCoordinateProvenance::from_canonical_bytes(&trailing).unwrap_err(),
+        MeasurementCoordinateProvenanceError::InvalidCanonicalEncoding
+    );
+}
+
+#[test]
 fn error_messages_preserve_distinct_operator_causes() {
     assert!(MeasurementCoordinateProvenanceError::InvalidConstructReference
         .to_string()
