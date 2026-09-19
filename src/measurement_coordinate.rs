@@ -8,9 +8,7 @@
 
 use crate::reference::normalized_reference;
 use crate::result::ResultSnapshot;
-use crate::scoring::{
-    required_sha256_digest, ObservationDisposition, SUPPORTED_OUTPUT_SCHEMA_VERSION,
-};
+use crate::scoring::ObservationDisposition;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -18,6 +16,9 @@ use std::fmt::{Display, Formatter};
 pub const MEASUREMENT_COORDINATE_CONTRACT_VERSION: u16 = 1;
 
 const CANONICAL_DOMAIN: &str = "psychometrics-commons.measurement-coordinate-provenance.v1";
+const SUPPORTED_OUTPUT_SCHEMA_VERSION: u16 = 1;
+const SHA256_PREFIX: &str = "sha256:";
+const SHA256_HEX_LENGTH: usize = 64;
 
 /// Immutable, participant-free authority for one scored construct coordinate.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -44,7 +45,7 @@ impl MeasurementCoordinateProvenance {
         construct_ref: &str,
     ) -> Result<Self, MeasurementCoordinateProvenanceError> {
         let validated_construct_ref = exact_reference(construct_ref)
-            .map_err(|_| MeasurementCoordinateProvenanceError::InvalidConstructReference)?;
+            .ok_or(MeasurementCoordinateProvenanceError::InvalidConstructReference)?;
         let observation = snapshot
             .score_observations()
             .iter()
@@ -130,8 +131,9 @@ impl MeasurementCoordinateProvenance {
         }
 
         let engine_artifact_digest = parse_field(&mut lines, "engine_artifact_digest")?;
-        required_sha256_digest(engine_artifact_digest)
-            .map_err(|_| MeasurementCoordinateProvenanceError::InvalidEngineArtifactDigest)?;
+        if !is_canonical_sha256_digest(engine_artifact_digest) {
+            return Err(MeasurementCoordinateProvenanceError::InvalidEngineArtifactDigest);
+        }
         let construct_ref = validated_owned_reference(parse_field(&mut lines, "construct_ref")?)?;
 
         if lines.next().is_some() {
@@ -307,10 +309,8 @@ impl Display for MeasurementCoordinateProvenanceError {
 
 impl Error for MeasurementCoordinateProvenanceError {}
 
-fn exact_reference(reference: &str) -> Result<&str, ()> {
-    normalized_reference(reference)
-        .filter(|validated| *validated == reference)
-        .ok_or(())
+fn exact_reference(reference: &str) -> Option<&str> {
+    normalized_reference(reference).filter(|validated| *validated == reference)
 }
 
 fn validated_owned_reference(
@@ -318,7 +318,18 @@ fn validated_owned_reference(
 ) -> Result<String, MeasurementCoordinateProvenanceError> {
     exact_reference(reference)
         .map(str::to_owned)
-        .map_err(|_| MeasurementCoordinateProvenanceError::InvalidProvenanceReference)
+        .ok_or(MeasurementCoordinateProvenanceError::InvalidProvenanceReference)
+}
+
+fn is_canonical_sha256_digest(digest: &str) -> bool {
+    digest
+        .strip_prefix(SHA256_PREFIX)
+        .is_some_and(|hex| {
+            hex.len() == SHA256_HEX_LENGTH
+                && hex
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
 }
 
 fn parse_field<'a, I>(
