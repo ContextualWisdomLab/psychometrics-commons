@@ -14,6 +14,12 @@ use std::fmt::{Display, Formatter};
 
 /// Semantic version of the measurement-coordinate provenance contract.
 pub const MEASUREMENT_COORDINATE_CONTRACT_VERSION: u16 = 1;
+/// Maximum accepted canonical wire size for one released coordinate authority.
+///
+/// The v1 cross-repository contract is deliberately bounded so malformed or
+/// attacker-controlled provenance cannot trigger unbounded decode, copy, or
+/// re-encoding work at a consumer boundary.
+pub const MEASUREMENT_COORDINATE_MAX_CANONICAL_BYTES: usize = 8_192;
 
 const CANONICAL_DOMAIN: &str = "psychometrics-commons.measurement-coordinate-provenance.v1";
 const SUPPORTED_OUTPUT_SCHEMA_VERSION: u16 = 1;
@@ -39,7 +45,8 @@ impl MeasurementCoordinateProvenance {
     /// # Errors
     ///
     /// Returns a typed error when the construct reference is not exact, absent,
-    /// or not a scored observation.
+    /// or not a scored observation, or when the released canonical projection
+    /// would exceed the v1 cross-repository payload bound.
     pub fn from_result_snapshot(
         snapshot: &ResultSnapshot,
         construct_ref: &str,
@@ -53,6 +60,23 @@ impl MeasurementCoordinateProvenance {
             .ok_or(MeasurementCoordinateProvenanceError::UnknownConstruct)?;
         if observation.disposition() != ObservationDisposition::Scored {
             return Err(MeasurementCoordinateProvenanceError::UnscoredConstruct);
+        }
+
+        let canonical_len = canonical_encoded_len(
+            snapshot.assessment_spec_ref(),
+            snapshot.instrument_version_ref(),
+            snapshot.scoring_version_ref(),
+            snapshot.calibration_reference(),
+            snapshot.norm_version_ref(),
+            snapshot.requested_output_schema_version(),
+            snapshot.engine_artifact_digest(),
+            validated_construct_ref,
+        );
+        if !matches!(
+            canonical_len,
+            Some(length) if length <= MEASUREMENT_COORDINATE_MAX_CANONICAL_BYTES
+        ) {
+            return Err(MeasurementCoordinateProvenanceError::CanonicalPayloadTooLarge);
         }
 
         Ok(Self {
@@ -72,16 +96,22 @@ impl MeasurementCoordinateProvenance {
     /// The decoder is intentionally strict: it accepts one field order and one
     /// spelling for lengths, option presence, supported schema version, digest,
     /// and opaque references. This prevents aliases from becoming distinct
-    /// cross-repository identities for the same authority.
+    /// cross-repository identities for the same authority. The total canonical
+    /// byte payload is rejected before UTF-8 parsing when it exceeds the v1
+    /// resource bound.
     ///
     /// # Errors
     ///
-    /// Returns a typed error for malformed or non-canonical bytes, unsupported
-    /// contract/schema versions, invalid provenance references, or a malformed
-    /// scoring-engine artifact digest.
+    /// Returns a typed error for oversized, malformed or non-canonical bytes,
+    /// unsupported contract/schema versions, invalid provenance references, or
+    /// a malformed scoring-engine artifact digest.
     pub fn from_canonical_bytes(
         bytes: &[u8],
     ) -> Result<Self, MeasurementCoordinateProvenanceError> {
+        if bytes.len() > MEASUREMENT_COORDINATE_MAX_CANONICAL_BYTES {
+            return Err(MeasurementCoordinateProvenanceError::CanonicalPayloadTooLarge);
+        }
+
         let text = std::str::from_utf8(bytes)
             .map_err(|_| MeasurementCoordinateProvenanceError::InvalidCanonicalEncoding)?;
         if !text.ends_with('\n') {
@@ -259,6 +289,8 @@ pub enum MeasurementCoordinateProvenanceError {
     UnknownConstruct,
     /// The requested construct exists but has no scored numeric observation.
     UnscoredConstruct,
+    /// The canonical byte contract exceeds the bounded cross-repository v1 payload size.
+    CanonicalPayloadTooLarge,
     /// The canonical byte contract is malformed or contains unexpected fields.
     InvalidCanonicalEncoding,
     /// The byte contract is semantically valid but not in its unique canonical spelling.
@@ -284,6 +316,9 @@ impl Display for MeasurementCoordinateProvenanceError {
             }
             Self::UnscoredConstruct => {
                 "measurement-coordinate provenance requires a scored construct observation"
+            }
+            Self::CanonicalPayloadTooLarge => {
+                "measurement-coordinate provenance must not exceed 8192 bytes"
             }
             Self::InvalidCanonicalEncoding => {
                 "measurement-coordinate provenance bytes are malformed or contain unexpected fields"
@@ -330,6 +365,101 @@ fn is_canonical_sha256_digest(digest: &str) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         })
+}
+
+fn canonical_encoded_len(
+    assessment_spec_ref: &str,
+    instrument_version_ref: &str,
+    scoring_version_ref: &str,
+    calibration_reference: &str,
+    norm_version_ref: Option<&str>,
+    requested_output_schema_version: u16,
+    engine_artifact_digest: &str,
+    construct_ref: &str,
+) -> Option<usize> {
+    let mut total = CANONICAL_DOMAIN.len().checked_add(1)?;
+    total = total.checked_add(field_encoded_len(
+        "contract_version",
+        decimal_len(usize::from(MEASUREMENT_COORDINATE_CONTRACT_VERSION)),
+        decimal_len(usize::from(MEASUREMENT_COORDINATE_CONTRACT_VERSION)),
+    )?)?;
+    total = total.checked_add(field_encoded_len(
+        "assessment_spec_ref",
+        decimal_len(assessment_spec_ref.len()),
+        assessment_spec_ref.len(),
+    )?)?;
+    total = total.checked_add(field_encoded_len(
+        "instrument_version_ref",
+        decimal_len(instrument_version_ref.len()),
+        instrument_version_ref.len(),
+    )?)?;
+    total = total.checked_add(field_encoded_len(
+        "scoring_version_ref",
+        decimal_len(scoring_version_ref.len()),
+        scoring_version_ref.len(),
+    )?)?;
+    total = total.checked_add(field_encoded_len(
+        "calibration_reference",
+        decimal_len(calibration_reference.len()),
+        calibration_reference.len(),
+    )?)?;
+    total = total.checked_add(optional_field_encoded_len(
+        "norm_version_ref",
+        norm_version_ref,
+    )?)?;
+    let schema_value_len = decimal_len(usize::from(requested_output_schema_version));
+    total = total.checked_add(field_encoded_len(
+        "requested_output_schema_version",
+        decimal_len(schema_value_len),
+        schema_value_len,
+    )?)?;
+    total = total.checked_add(field_encoded_len(
+        "engine_artifact_digest",
+        decimal_len(engine_artifact_digest.len()),
+        engine_artifact_digest.len(),
+    )?)?;
+    total = total.checked_add(field_encoded_len(
+        "construct_ref",
+        decimal_len(construct_ref.len()),
+        construct_ref.len(),
+    )?)?;
+    Some(total)
+}
+
+fn field_encoded_len(name: &str, length_digits: usize, value_len: usize) -> Option<usize> {
+    name.len()
+        .checked_add(1)?
+        .checked_add(length_digits)?
+        .checked_add(1)?
+        .checked_add(value_len)?
+        .checked_add(1)
+}
+
+fn optional_field_encoded_len(name: &str, value: Option<&str>) -> Option<usize> {
+    match value {
+        Some(value) => name
+            .len()
+            .checked_add(1)?
+            .checked_add("some:".len())?
+            .checked_add(decimal_len(value.len()))?
+            .checked_add(1)?
+            .checked_add(value.len())?
+            .checked_add(1),
+        None => name
+            .len()
+            .checked_add(1)?
+            .checked_add("none".len())?
+            .checked_add(1),
+    }
+}
+
+fn decimal_len(mut value: usize) -> usize {
+    let mut digits = 1;
+    while value >= 10 {
+        value /= 10;
+        digits += 1;
+    }
+    digits
 }
 
 fn parse_field<'a, I>(
