@@ -162,6 +162,7 @@ fn every_public_decoder_error_has_operator_distinguishable_text() {
         MeasurementCoordinateProvenanceError::InvalidConstructReference,
         MeasurementCoordinateProvenanceError::UnknownConstruct,
         MeasurementCoordinateProvenanceError::UnscoredConstruct,
+        MeasurementCoordinateProvenanceError::CanonicalPayloadTooLarge,
         MeasurementCoordinateProvenanceError::InvalidCanonicalEncoding,
         MeasurementCoordinateProvenanceError::NonCanonicalEncoding,
         MeasurementCoordinateProvenanceError::UnsupportedContractVersion,
