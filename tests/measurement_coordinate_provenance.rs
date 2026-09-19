@@ -4,8 +4,8 @@
 mod response_support;
 
 use psychometrics_commons_runtime::measurement_coordinate::{
-    MEASUREMENT_COORDINATE_CONTRACT_VERSION, MeasurementCoordinateProvenance,
-    MeasurementCoordinateProvenanceError,
+    MEASUREMENT_COORDINATE_CONTRACT_VERSION, MEASUREMENT_COORDINATE_MAX_CANONICAL_BYTES,
+    MeasurementCoordinateProvenance, MeasurementCoordinateProvenanceError,
 };
 use psychometrics_commons_runtime::response::ResponseWrite;
 use psychometrics_commons_runtime::result::{ResultSnapshot, ResultSnapshotInput};
@@ -270,6 +270,36 @@ fn canonical_decoder_fails_closed_on_aliases_and_malformed_owner_provenance() {
 }
 
 #[test]
+fn cross_repository_coordinate_payloads_are_bounded_before_decode_or_publication() {
+    let oversized_wire = vec![b'x'; MEASUREMENT_COORDINATE_MAX_CANONICAL_BYTES + 1];
+    assert_eq!(
+        MeasurementCoordinateProvenance::from_canonical_bytes(&oversized_wire).unwrap_err(),
+        MeasurementCoordinateProvenanceError::CanonicalPayloadTooLarge
+    );
+
+    let oversized_assessment_ref = format!(
+        "assessment_spec_{}",
+        "x".repeat(MEASUREMENT_COORDINATE_MAX_CANONICAL_BYTES)
+    );
+    let snapshot = result_snapshot_with(
+        &oversized_assessment_ref,
+        "instrument_measurement_coordinate_v1",
+        "scoring_measurement_coordinate_v1",
+        "calibration_measurement_coordinate_v1",
+        Some("norm_measurement_coordinate_v1"),
+        ENGINE_DIGEST,
+    );
+    assert_eq!(
+        MeasurementCoordinateProvenance::from_result_snapshot(
+            &snapshot,
+            "construct_predictor"
+        )
+        .unwrap_err(),
+        MeasurementCoordinateProvenanceError::CanonicalPayloadTooLarge
+    );
+}
+
+#[test]
 fn error_messages_preserve_distinct_operator_causes() {
     assert!(MeasurementCoordinateProvenanceError::InvalidConstructReference
         .to_string()
@@ -280,4 +310,7 @@ fn error_messages_preserve_distinct_operator_causes() {
     assert!(MeasurementCoordinateProvenanceError::UnscoredConstruct
         .to_string()
         .contains("scored construct"));
+    assert!(MeasurementCoordinateProvenanceError::CanonicalPayloadTooLarge
+        .to_string()
+        .contains("8192 bytes"));
 }
