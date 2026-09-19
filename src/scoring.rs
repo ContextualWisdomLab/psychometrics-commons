@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
-pub(crate) const SUPPORTED_OUTPUT_SCHEMA_VERSION: u16 = 1;
+const SUPPORTED_OUTPUT_SCHEMA_VERSION: u16 = 1;
 const SHA256_PREFIX: &str = "sha256:";
 const SHA256_HEX_LENGTH: usize = 64;
 
@@ -180,21 +180,31 @@ pub enum ObservationDisposition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoreObservation {
     construct_ref: String,
+    disposition: ObservationDisposition,
     score: Option<f64>,
     standard_error: Option<f64>,
-    disposition: ObservationDisposition,
 }
 
 impl ScoreObservation {
-    /// Build a scored observation with an optional finite non-negative standard error.
+    /// Create a finite numeric scored observation.
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for an invalid construct
-    /// reference, [`ScoringContractError::InvalidScore`] for a non-finite score,
-    /// or [`ScoringContractError::InvalidStandardError`] for a non-finite or
-    /// negative standard error.
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or
+    /// non-exact construct reference,
+    /// [`ScoringContractError::InvalidScore`] for a non-finite score, or
+    /// [`ScoringContractError::InvalidStandardError`] for a supplied standard
+    /// error that is negative or non-finite.
     pub fn scored(
+        construct_ref: impl Into<String>,
+        score: f64,
+        standard_error: Option<f64>,
+    ) -> Result<Self, ScoringContractError> {
+        let construct_ref = construct_ref.into();
+        Self::scored_from_reference(&construct_ref, score, standard_error)
+    }
+
+    fn scored_from_reference(
         construct_ref: &str,
         score: f64,
         standard_error: Option<f64>,
@@ -203,187 +213,220 @@ impl ScoreObservation {
         if !score.is_finite() {
             return Err(ScoringContractError::InvalidScore);
         }
-        if standard_error.is_some_and(|value| !value.is_finite() || value < 0.0) {
-            return Err(ScoringContractError::InvalidStandardError);
+        if let Some(value) = standard_error {
+            if !value.is_finite() || value < 0.0 {
+                return Err(ScoringContractError::InvalidStandardError);
+            }
         }
         Ok(Self {
             construct_ref: construct_ref.to_owned(),
+            disposition: ObservationDisposition::Scored,
             score: Some(score),
             standard_error,
-            disposition: ObservationDisposition::Scored,
         })
     }
 
-    /// Build a non-scored observation with an explicit non-success disposition.
+    /// Create an abstained, failed, or excluded observation with no numeric score.
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] for an invalid construct
-    /// reference or [`ScoringContractError::InvalidDisposition`] when `Scored`
-    /// is supplied without a numeric score.
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or
+    /// non-exact construct reference or
+    /// [`ScoringContractError::ScoredDispositionRequiresScore`] if `Scored` is
+    /// supplied without a numeric score.
     pub fn without_score(
-        construct_ref: &str,
+        construct_ref: impl Into<String>,
         disposition: ObservationDisposition,
     ) -> Result<Self, ScoringContractError> {
-        let construct_ref = required_reference(construct_ref)?;
+        let construct_ref = construct_ref.into();
+        let construct_ref = required_reference(&construct_ref)?;
         if disposition == ObservationDisposition::Scored {
-            return Err(ScoringContractError::InvalidDisposition);
+            return Err(ScoringContractError::ScoredDispositionRequiresScore);
         }
         Ok(Self {
             construct_ref: construct_ref.to_owned(),
+            disposition,
             score: None,
             standard_error: None,
-            disposition,
         })
     }
 
-    /// Return the exact construct reference.
+    /// Return the construct measured by this observation.
     #[must_use]
     pub fn construct_ref(&self) -> &str {
         &self.construct_ref
     }
 
-    /// Return the numeric score when the observation is scored.
+    /// Return whether this observation was scored, abstained, failed, or excluded.
+    #[must_use]
+    pub const fn disposition(&self) -> ObservationDisposition {
+        self.disposition
+    }
+
+    /// Return the numeric score only for a scored observation.
     #[must_use]
     pub const fn score(&self) -> Option<f64> {
         self.score
     }
 
-    /// Return the optional standard error for a scored observation.
+    /// Return the optional finite non-negative standard error.
     #[must_use]
     pub const fn standard_error(&self) -> Option<f64> {
         self.standard_error
     }
-
-    /// Return the explicit observation disposition.
-    #[must_use]
-    pub const fn disposition(&self) -> ObservationDisposition {
-        self.disposition
-    }
 }
 
-/// Immutable output from one scoring request.
+/// Immutable accepted scoring result bound to one scoring request.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoringResult {
     result_ref: String,
-    request_ref: String,
-    response_snapshot_ref: String,
+    request: ScoringRequest,
     engine_artifact_digest: String,
     observations: Vec<ScoreObservation>,
 }
 
 impl ScoringResult {
-    /// Build an immutable scoring result for one request.
+    /// Create an immutable scoring result without recomputing product-side scores.
+    ///
+    /// The engine artifact is immutable provenance, not a display label. ADR-0010 requires
+    /// published artifacts to be content-addressed by cryptographic digest, so this boundary
+    /// accepts the canonical `sha256:` prefix followed by exactly 64 lowercase hexadecimal bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`ScoringContractError::EmptyReference`] when the result reference
-    /// is invalid, [`ScoringContractError::InvalidEngineArtifactDigest`] when the
-    /// engine artifact digest is not canonical `sha256:<64-lowerhex>`,
-    /// [`ScoringContractError::EmptyScoreObservations`] when no construct-level
-    /// observations are present, or
-    /// [`ScoringContractError::DuplicateConstructObservation`] when one construct
+    /// Returns [`ScoringContractError::EmptyReference`] for a blank or non-exact result identity,
+    /// [`ScoringContractError::InvalidEngineArtifactDigest`] when engine provenance is not a
+    /// canonical SHA-256 digest, [`ScoringContractError::EmptyObservationSet`] when no construct
+    /// observation exists, or [`ScoringContractError::DuplicateConstruct`] when a construct
     /// appears more than once.
     pub fn new(
-        result_ref: &str,
+        scoring_result_ref: impl Into<String>,
         request: &ScoringRequest,
-        engine_artifact_digest: &str,
+        engine_artifact_digest: impl Into<String>,
         observations: Vec<ScoreObservation>,
     ) -> Result<Self, ScoringContractError> {
-        let result_ref = required_reference(result_ref)?;
-        let engine_artifact_digest = required_sha256_digest(engine_artifact_digest)?;
+        let scoring_result_ref = scoring_result_ref.into();
+        let scoring_result_ref = required_reference(&scoring_result_ref)?;
+        let engine_artifact_digest = engine_artifact_digest.into();
+        let engine_artifact_digest = required_sha256_digest(&engine_artifact_digest)?;
         if observations.is_empty() {
-            return Err(ScoringContractError::EmptyScoreObservations);
+            return Err(ScoringContractError::EmptyObservationSet);
         }
+
         let mut constructs = HashSet::with_capacity(observations.len());
-        for observation in &observations {
-            if !constructs.insert(observation.construct_ref()) {
-                return Err(ScoringContractError::DuplicateConstructObservation);
-            }
+        if observations
+            .iter()
+            .any(|observation| !constructs.insert(observation.construct_ref()))
+        {
+            return Err(ScoringContractError::DuplicateConstruct);
         }
+
         Ok(Self {
-            result_ref: result_ref.to_owned(),
-            request_ref: request.scoring_request_ref().to_owned(),
-            response_snapshot_ref: request.response_snapshot_ref().to_owned(),
+            result_ref: scoring_result_ref.to_owned(),
+            request: request.clone(),
             engine_artifact_digest: engine_artifact_digest.to_owned(),
             observations,
         })
     }
 
-    /// Return the immutable result reference.
+    /// Return the opaque scoring-result reference.
     #[must_use]
-    pub fn result_ref(&self) -> &str {
+    pub fn scoring_result_ref(&self) -> &str {
         &self.result_ref
     }
 
-    /// Return the scoring request reference bound to the result.
+    /// Return the scoring request that produced this result.
     #[must_use]
     pub fn scoring_request_ref(&self) -> &str {
-        &self.request_ref
+        self.request.scoring_request_ref()
     }
 
-    /// Return the response snapshot reference bound to the result.
+    /// Return the response snapshot scored by the engine.
     #[must_use]
     pub fn response_snapshot_ref(&self) -> &str {
-        &self.response_snapshot_ref
+        self.request.response_snapshot_ref()
     }
 
-    /// Return the canonical scoring-engine artifact digest.
+    /// Return the exact scoring-engine artifact digest.
     #[must_use]
     pub fn engine_artifact_digest(&self) -> &str {
         &self.engine_artifact_digest
     }
 
-    /// Return all construct-level score observations in contract order.
+    /// Return immutable construct-level score observations.
     #[must_use]
-    pub fn score_observations(&self) -> &[ScoreObservation] {
+    pub fn observations(&self) -> &[ScoreObservation] {
         &self.observations
+    }
+
+    /// Return whether this result is bound to the complete supplied request.
+    #[must_use]
+    pub(crate) fn matches_request(&self, request: &ScoringRequest) -> bool {
+        &self.request == request
     }
 }
 
-/// Scoring-contract validation errors.
+/// Fail-closed validation error at the scoring-dispatch boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ScoringContractError {
-    /// A required identity-bearing reference was absent or invalid.
+    /// A required or supplied optional reference is blank, unsafe, numeric-like, or non-exact.
     EmptyReference,
-    /// The supplied response snapshot has not been assigned a durable identity.
+    /// The response snapshot has not been assigned durable identity.
     UnboundResponseSnapshot,
-    /// The supplied response snapshot has no response events to score.
+    /// The response snapshot contains no accepted response event.
     EmptyResponseSnapshot,
-    /// The supplied response-snapshot reference does not match the snapshot.
+    /// The supplied snapshot reference does not identify the supplied snapshot.
     ResponseSnapshotMismatch,
-    /// The requested output schema is not supported by this runtime.
+    /// The requested output schema major is not supported by this runtime.
     UnsupportedOutputSchemaVersion,
-    /// A scored observation contains a non-finite numeric score.
-    InvalidScore,
-    /// A scored observation contains a non-finite or negative standard error.
-    InvalidStandardError,
-    /// `Scored` was used for an observation without a numeric score.
-    InvalidDisposition,
-    /// The scoring result contains no construct-level observations.
-    EmptyScoreObservations,
-    /// The scoring result repeats a construct reference.
-    DuplicateConstructObservation,
-    /// The engine artifact digest is not canonical `sha256:<64-lowerhex>`.
+    /// Engine provenance is not canonical lowercase SHA-256 evidence.
     InvalidEngineArtifactDigest,
+    /// A numeric score is NaN or infinite.
+    InvalidScore,
+    /// A score standard error is negative, NaN, or infinite.
+    InvalidStandardError,
+    /// A `Scored` disposition was requested without a numeric score.
+    ScoredDispositionRequiresScore,
+    /// A scoring result has no construct observations.
+    EmptyObservationSet,
+    /// More than one observation targets the same construct reference.
+    DuplicateConstruct,
 }
 
 impl Display for ScoringContractError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::EmptyReference => "required scoring reference is absent or invalid",
-            Self::UnboundResponseSnapshot => "response snapshot is not durably bound",
-            Self::EmptyResponseSnapshot => "response snapshot has no scorable response events",
-            Self::ResponseSnapshotMismatch => "scoring request response-snapshot reference does not match the durable snapshot",
-            Self::UnsupportedOutputSchemaVersion => "requested scoring output schema is unsupported",
-            Self::InvalidScore => "scored observation must contain a finite score",
-            Self::InvalidStandardError => "scored observation standard error must be finite and non-negative",
-            Self::InvalidDisposition => "scored disposition requires a numeric score",
-            Self::EmptyScoreObservations => "scoring result must contain at least one construct observation",
-            Self::DuplicateConstructObservation => "scoring result contains duplicate construct observations",
-            Self::InvalidEngineArtifactDigest => "scoring engine artifact digest must be canonical sha256 lower-hex",
-        })
+        match self {
+            Self::EmptyReference => formatter.write_str(
+                "scoring contract references must use exact non-empty opaque spellings; numeric-like values, surrounding whitespace, and unsafe control characters are not allowed",
+            ),
+            Self::UnboundResponseSnapshot => {
+                formatter.write_str("scoring requires a durable response snapshot reference")
+            }
+            Self::EmptyResponseSnapshot => {
+                formatter.write_str("scoring requires at least one response event")
+            }
+            Self::ResponseSnapshotMismatch => formatter
+                .write_str("scoring response snapshot reference does not match supplied snapshot"),
+            Self::UnsupportedOutputSchemaVersion => {
+                formatter.write_str("requested scoring output schema version is unsupported")
+            }
+            Self::InvalidEngineArtifactDigest => formatter.write_str(
+                "scoring engine artifact digest must be sha256: followed by 64 lowercase hexadecimal characters",
+            ),
+            Self::InvalidScore => formatter.write_str("score values must be finite"),
+            Self::InvalidStandardError => {
+                formatter.write_str("score standard errors must be finite and non-negative")
+            }
+            Self::ScoredDispositionRequiresScore => {
+                formatter.write_str("scored observations require a numeric score")
+            }
+            Self::EmptyObservationSet => {
+                formatter.write_str("scoring results must contain at least one observation")
+            }
+            Self::DuplicateConstruct => formatter
+                .write_str("scoring results must not contain duplicate construct references"),
+        }
     }
 }
 
@@ -398,7 +441,7 @@ fn required_reference(reference: &str) -> Result<&str, ScoringContractError> {
     }
 }
 
-pub(crate) fn required_sha256_digest(digest: &str) -> Result<&str, ScoringContractError> {
+fn required_sha256_digest(digest: &str) -> Result<&str, ScoringContractError> {
     let Some(hex) = digest.strip_prefix(SHA256_PREFIX) else {
         return Err(ScoringContractError::InvalidEngineArtifactDigest);
     };
