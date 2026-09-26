@@ -98,6 +98,8 @@ draft -> review -> published -> suspended -> retired
 
 Published content is immutable. Any semantic content change creates a new instrument version. Suspension prevents new sessions without erasing historical result provenance. Retirement is permanent for that version. ADR-0019 additionally requires exact-version scientific/content/rights evidence before review can transition to publication.
 
+Instrument catalog discovery is an advisory read of product-owned persisted publication evidence. It does not add a publication lifecycle state and does not itself authorize or create a session. Because discovery is non-locking and publication can change after a page is read, session start locks and revalidates the exact persisted release immediately before minting a session. This preserves the existing TRD/ADR mappings: catalog persistence does not change bounded-context ownership, public HTTP operation families, logical ERD cardinalities, scientific publication gates, or cross-service database boundaries.
+
 ### Assessment session
 
 ```text

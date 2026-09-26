@@ -325,6 +325,14 @@ impl StoredInstrumentReleaseRow {
     }
 }
 
+pub(crate) fn published_instrument_release_snapshot_from_row(
+    row: &Row,
+) -> Result<PublishedInstrumentReleaseSnapshot, InstrumentReleaseQueryError> {
+    let stored = StoredInstrumentReleaseRow::from_row(row);
+    let locale = stored.locale.clone();
+    stored.into_published_snapshot(&locale)
+}
+
 /// Load one exact published release and lock it for session start.
 ///
 /// The caller must provide the canonical release reference and the exact requested
