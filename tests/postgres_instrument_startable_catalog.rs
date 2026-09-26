@@ -4,6 +4,9 @@
 //! reload and lock the exact persisted release before minting a session because
 //! publication state may change after this list is read.
 
+#[path = "postgres_instrument_startable_catalog/catalog_pagination.rs"]
+mod catalog_pagination;
+
 use postgres::{Client, NoTls};
 use psychometrics_commons_runtime::instrument::{
     InstrumentRelease, InstrumentReleaseManifest, PublicationCommand,
