@@ -285,6 +285,19 @@ fn invalid_paths_and_methods_fail_closed_without_leaking_catalog_rows() {
 
     let malformed = handle_instrument_http_request("not-an-http-request", &runtime);
     assert_eq!(malformed.status(), 400);
+
+    let truncated = handle_instrument_http_request(
+        "GET /v1/instruments HTTP/1.1\r\n\r\n",
+        &runtime,
+    );
+    assert_eq!(truncated.status(), 200);
+
+    let missing_version = handle_instrument_http_request(
+        "GET /v1/instruments\r\n\r\n",
+        &runtime,
+    );
+    assert_eq!(missing_version.status(), 400);
+
     assert_eq!(runtime.catalog_count(), 1);
 }
 
