@@ -1,7 +1,7 @@
 //! Machine-readable contract gate for the persist-backed session HTTP boundary.
 //!
 //! ADR-0014 requires every implemented HTTP operation to carry an exact
-//! OpenAPI 3.2.x as-built contract. This test includes the session contract at
+//! `OpenAPI` 3.2.x as-built contract. This test includes the session contract at
 //! compile time and checks the implemented collection path, methods, response
 //! families, and durable session representation so contract drift fails CI.
 
