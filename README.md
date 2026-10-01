@@ -120,6 +120,10 @@ Start with the [Threat Model](docs/THREAT_MODEL.md), [Measurement Governance](do
 | Security boundary | [Threat Model](docs/THREAT_MODEL.md) |
 | Vulnerability reporting | [ContextualWisdomLab Security Policy](https://github.com/ContextualWisdomLab/.github/blob/main/SECURITY.md) |
 | Testing and evidence | [Test Strategy](docs/TEST_STRATEGY.md) |
+| Quality attributes | [Quality Attributes](docs/QUALITY_ATTRIBUTES.md) |
+| Compliance readiness | [Compliance Readiness](docs/COMPLIANCE_READINESS.md) |
+| Risk ownership | [Risk Register](docs/RISK_REGISTER.md) |
+| Shared vocabulary | [Glossary](docs/GLOSSARY.md) |
 | Release decision | [Release Acceptance](docs/RELEASE_ACCEPTANCE.md) |
 | Architecture decisions | [ADR Index](docs/adr/README.md) |
 | Public documentation landing | [docs/index.md](docs/index.md) |
