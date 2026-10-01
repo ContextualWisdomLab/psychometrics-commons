@@ -44,7 +44,7 @@ Integration happens through explicit, versioned boundaries rather than cross-ser
 
 This repository is an **implementation-stage headless runtime**, not a published end-user application release. `Cargo.toml` currently identifies source version `0.1.0` and `publish = false`, and there is currently no GitHub release for this repository.
 
-Protected `main` is the shipped-source authority. PRDs, ADRs, diagrams, gap ledgers, and open pull requests can describe target or candidate behavior, but they are not release evidence on their own. Use the [traceability map](docs/TRACEABILITY.md), [product/technical gap baseline](docs/product-technical-gap-baseline.md), and [release acceptance contract](docs/RELEASE_ACCEPTANCE.md) when deciding whether a capability is implemented, candidate, or still planned.
+Protected `main` is the shipped-source authority. PRDs, ADRs, diagrams, gap ledgers, and open pull requests can describe target or candidate behavior, but they are not release evidence on their own. Use the [documentation assessment](docs/DOCUMENTATION_ASSESSMENT.md), [traceability map](docs/TRACEABILITY.md), [product/technical gap baseline](docs/product-technical-gap-baseline.md), and [release acceptance contract](docs/RELEASE_ACCEPTANCE.md) when deciding whether a capability is implemented, candidate, or still planned.
 
 ## Evaluate the source
 
