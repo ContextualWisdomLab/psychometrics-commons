@@ -116,6 +116,7 @@ Start with the [Threat Model](docs/THREAT_MODEL.md), [Measurement Governance](do
 | Requirement-to-implementation evidence | [Traceability](docs/TRACEABILITY.md) |
 | Measurement publication governance | [Measurement Governance](docs/MEASUREMENT_GOVERNANCE.md) |
 | Research contribution/release governance | [Research Governance](docs/RESEARCH_GOVERNANCE.md) |
+| AI-assisted workflow governance | [AI Governance](docs/AI_GOVERNANCE.md) |
 | Security boundary | [Threat Model](docs/THREAT_MODEL.md) |
 | Vulnerability reporting | [ContextualWisdomLab Security Policy](https://github.com/ContextualWisdomLab/.github/blob/main/SECURITY.md) |
 | Testing and evidence | [Test Strategy](docs/TEST_STRATEGY.md) |
