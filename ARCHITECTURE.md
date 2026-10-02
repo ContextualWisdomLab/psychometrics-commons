@@ -53,6 +53,7 @@ The arrow direction is dependency direction. `fast-mlsirm` never imports or depe
 |---|---|---|
 | Authentication, federation, passkeys, account linking | Keyverse | Validate identity claims; make product resource-authorization decisions |
 | AssessmentSpec, RubricSpecification, scoring contracts, psychometric numerics | fast-mlsirm | Pin versions, dispatch work, persist immutable result provenance |
+| Shared CEFR assessment profile schemas and validator | learning-interoperability-contracts | Pin immutable commit/schema digests and validate product-side bindings; do not copy schemas or descriptor content |
 | Participant/session lifecycle, response events, consent, data rights | psychometrics-commons | Full source of truth |
 | EMA/ESM participant collection | Gyeot | Enrollment/consent and normalized ingestion |
 | Temporal, event, relationship, multilevel and multiple-membership analysis | TEPP | Submit immutable input snapshots and consume versioned artifacts |

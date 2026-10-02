@@ -14,6 +14,7 @@ pub mod anonymous_session;
 pub mod api_problem;
 pub mod assessment_path;
 pub mod authorization;
+pub mod cefr_language_assessment;
 pub mod consent;
 pub mod data_rights;
 pub mod data_rights_authorization;

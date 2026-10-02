@@ -51,6 +51,7 @@ A statement such as “use Keyverse” or “make it headless” is not sufficie
 | [0018](0018-continuous-scores-and-narrative-separation.md) | Continuous psychometric scores and narrative-style separation | Accepted |
 | [0019](0019-scientific-publication-evidence-gates.md) | Scientific publication and score-interpretation evidence gates | Accepted |
 | [0020](0020-append-only-participant-identity-link-history.md) | Append-only participant identity-link history | Accepted |
+| [0021](0021-cefr-language-assessment-contract-consumer.md) | CEFR language-assessment contract consumer boundary | Proposed |
 
 Use [0000-template.md](0000-template.md) for new decisions.
 

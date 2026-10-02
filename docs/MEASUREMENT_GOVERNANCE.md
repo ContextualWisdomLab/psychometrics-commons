@@ -322,7 +322,34 @@ The governing principles are preserved:
 
 Domain-specific adapters remain outside the hosted core unless separately accepted as product scope.
 
-## 18. Publication decision record
+## 18. CEFR claim and result boundary
+
+The English A1-B2 placement consumer treats the CEFR Companion Volume as the
+external framework authority and keeps descriptor prose, translations, authored
+tasks, raw responses, audio, and model payloads outside the shared product
+contract. The consumer pins the exact upstream contract commit and schema
+digests, then requires an external executable-validator evidence reference
+before accepting a result envelope. The profile namespace is
+`cwl_cefr_language_assessment/v1`; the result envelope uses the exact
+`cwl_cefr_language_assessment/result_snapshot/v1` version.
+
+`cefr_aligned` means that the exact CEFR construct/profile references are bound;
+it is not an empirical linking or certification claim. `cefr_linked` additionally
+requires exact standard-setting and empirical linking/classification-validation
+evidence. `certification_decision` additionally requires the governed authority
+and policy. The initial profile permits only `cefr_aligned`, reports domain
+profiles first, and does not authorize an overall level without an exact
+blueprint policy and complete measured required domains.
+
+The initial required domains are reading reception, listening reception, written
+production, and spoken production. Profile-only results may expose a unique
+measured subset while retaining explicit insufficient/unmeasured domain status;
+all required domains must be measured only for an authorized overall report.
+Domain probability, uncertainty, and level interpretation values remain outputs
+of the versioned measurement authority; this repository validates their
+contract identity and evidence binding but does not calculate them.
+
+## 19. Publication decision record
 
 Every published instrument/scoring/norm combination must have a durable evidence record that answers:
 
@@ -338,7 +365,7 @@ Every published instrument/scoring/norm combination must have a durable evidence
 
 The product operator cannot override a failed mandatory scientific gate by editing a narrative or publication label.
 
-## 19. Monitoring and drift
+## 20. Monitoring and drift
 
 Operational monitoring separates:
 
@@ -352,7 +379,7 @@ Operational monitoring separates:
 
 A drift alert is evidence for investigation, not automatic proof that a construct changed. Remediation can include recalibration, linking, subgroup-specific parameters, suspension, new version publication, or retirement according to the governing evidence.
 
-## 20. Key references
+## 21. Key references
 
 Bland, J. M., & Altman, D. G. (1986). Statistical methods for assessing agreement between two methods of clinical measurement. *The Lancet, 327*(8476), 307–310. https://doi.org/10.1016/S0140-6736(86)90837-8
 
@@ -367,3 +394,7 @@ Rodriguez, A., Reise, S. P., & Haviland, M. G. (2016). Evaluating bifactor model
 Schneider, L., Chalmers, R. P., Debelak, R., & Merkle, E. C. (2020). Model selection of nested and non-nested item response models using Vuong tests. *Multivariate Behavioral Research, 55*(5), 664–684.
 
 Svetina, D., Valdivia, A., Underhill, S., Dai, S., & Wang, X. (2017). Parameter recovery in multidimensional item response theory models under complexity and nonnormality. *Applied Psychological Measurement, 41*(7), 530–544. https://doi.org/10.1177/0146621617707507
+
+Council of Europe. (2020). *Common European framework of reference for
+languages: Learning, teaching, assessment—Companion volume*. Council of Europe.
+https://rm.coe.int/cefr-companion-volume-with-new-descriptors-2020/16809ea0d4

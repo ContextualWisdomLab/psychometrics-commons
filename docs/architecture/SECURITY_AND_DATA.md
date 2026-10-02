@@ -22,6 +22,7 @@ flowchart LR
 
     keyverse[(Keyverse)]
     fast[(fast-mlsirm)]
+    cefr[(learning-interoperability-contracts)]
     tepp[(TEPP)]
     portal[(semantic-data-portal)]
     ai[(contextual-orchestrator)]
@@ -32,6 +33,7 @@ flowchart LR
     api --> store
     api --> keyverse
     worker --> fast
+    api -->|contract metadata/evidence references only| cefr
     worker --> tepp
     store -->|explicit research opt-in only| linkage
     linkage --> staging
@@ -45,6 +47,7 @@ Boundary rules:
 - Keyverse establishes authenticated identity/federation claims; it does not decide Psychometrics Commons resource authorization.
 - The operational store and restricted research linkage have separate privileged-access paths.
 - `fast-mlsirm` receives only the response/scoring evidence required by the pinned measurement contract.
+- `learning-interoperability-contracts` supplies shared CEFR schema/validator artifacts; the product exchanges immutable contract metadata and validation evidence references, never descriptor prose, task payloads, raw responses, audio, or PII.
 - AI providers receive only purpose-approved projections under a provider/privacy policy; denial by the egress policy is not bypassed.
 - Public/controlled research release registration never grants the portal direct access to operational participant tables.
 
