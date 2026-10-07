@@ -480,6 +480,8 @@ mod unit_tests {
         assert_eq!(would_block.kind(), ErrorKind::WouldBlock);
         assert!(apply_request_read(&mut Vec::new(), b"", Err(io::Error::other("boom"))).is_err());
         assert!(parse_request_line("GET /v1/instruments SMTP/1.0\r\n\r\n").is_none());
+        assert!(parse_request_line("GET /v1/instruments SMTP/1.0 extra\r\n\r\n").is_none());
+        assert!(parse_request_line("GET /v1/instruments HTTP/1.1\r\n\r\n").is_some());
         assert!(parse_request_line("GET /v1/instruments HTTP/1.1 leftover\r\n\r\n").is_none());
     }
 }

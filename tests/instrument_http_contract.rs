@@ -11,7 +11,7 @@ use psychometrics_commons_runtime::instrument::{
 };
 use psychometrics_commons_runtime::instrument_http::{
     accept_one_instrument_http, bind_instrument_http, handle_instrument_http_request,
-    InstrumentHttpRuntime, INSTRUMENT_COLLECTION_PATH,
+    InstrumentHttpRuntime, INSTRUMENT_COLLECTION_PATH, INSTRUMENT_HTTP_MAX_REQUEST_BYTES,
 };
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -277,6 +277,14 @@ fn invalid_paths_and_methods_fail_closed_without_leaking_catalog_rows() {
     );
     assert_eq!(nested.status(), 404);
 
+    let missing_family = handle_instrument_http_request(&get_request("/v1/instruments/"), &runtime);
+    assert_eq!(missing_family.status(), 404);
+    assert_eq!(missing_family.content_type(), "application/problem+json");
+    assert!(missing_family
+        .body()
+        .contains("urn:psychometrics-commons:problem:not-found"));
+    assert!(!missing_family.body().contains("release_big_five_ko_v1"));
+
     let put_family = handle_instrument_http_request(
         "PUT /v1/instruments/instrument_big_five HTTP/1.1\r\nHost: localhost\r\n\r\n",
         &runtime,
@@ -286,16 +294,11 @@ fn invalid_paths_and_methods_fail_closed_without_leaking_catalog_rows() {
     let malformed = handle_instrument_http_request("not-an-http-request", &runtime);
     assert_eq!(malformed.status(), 400);
 
-    let truncated = handle_instrument_http_request(
-        "GET /v1/instruments HTTP/1.1\r\n\r\n",
-        &runtime,
-    );
+    let truncated =
+        handle_instrument_http_request("GET /v1/instruments HTTP/1.1\r\n\r\n", &runtime);
     assert_eq!(truncated.status(), 200);
 
-    let missing_version = handle_instrument_http_request(
-        "GET /v1/instruments\r\n\r\n",
-        &runtime,
-    );
+    let missing_version = handle_instrument_http_request("GET /v1/instruments\r\n\r\n", &runtime);
     assert_eq!(missing_version.status(), 400);
 
     assert_eq!(runtime.catalog_count(), 1);
@@ -344,6 +347,37 @@ fn listener_serves_one_published_catalog_request() {
     assert!(body.starts_with("HTTP/1.1 200 OK"));
     assert!(body.contains("release_big_five_ko_v1"));
     assert!(body.contains("application/json"));
+}
+
+#[test]
+fn listener_rejects_oversized_unterminated_request_without_catalog_rows() {
+    let runtime = InstrumentHttpRuntime::new(vec![published_korean()]);
+    let listener = bind_instrument_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || accept_one_instrument_http(&listener, &runtime));
+
+    let mut client = TcpStream::connect(address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    client
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut request = b"GET /v1/instruments HTTP/1.1\r\nHost: localhost\r\nX-Padding: ".to_vec();
+    request.resize(INSTRUMENT_HTTP_MAX_REQUEST_BYTES + 1, b'x');
+    client.write_all(&request).unwrap();
+
+    let mut response = String::new();
+    client.read_to_string(&mut response).unwrap();
+    server.join().unwrap().unwrap();
+
+    assert!(
+        response.starts_with("HTTP/1.1 400 Bad Request"),
+        "{response}"
+    );
+    assert!(response.contains("application/problem+json"));
+    assert!(response.contains("urn:psychometrics-commons:problem:bad-request"));
+    assert!(!response.contains("release_big_five_ko_v1"));
 }
 
 #[test]
