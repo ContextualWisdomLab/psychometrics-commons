@@ -2,7 +2,16 @@
 
 const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
 const RUST_TOOLCHAIN: &str = include_str!("../rust-toolchain.toml");
-const DEPENDABOT: &str = include_str!("../.github/dependabot.yml");
+fn dependabot_version_updates_stopped(root: &std::path::Path) -> bool {
+    [".github/dependabot.yml", ".github/dependabot.yaml"]
+        .iter()
+        .all(
+            |relative| match std::fs::symlink_metadata(root.join(relative)) {
+                Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+                Ok(_) => false,
+            },
+        )
+}
 
 #[test]
 fn every_checkout_is_bound_to_the_pull_request_head() {
@@ -133,7 +142,38 @@ fn rust_toolchains_are_exact_and_reviewably_updated() {
     assert!(CI_WORKFLOW.contains(NIGHTLY_BRANCH_JSON));
     assert!(!CI_WORKFLOW.contains("nightly-2026-08-01"));
 
-    assert!(DEPENDABOT.contains("package-ecosystem: \"rust-toolchain\""));
-    assert!(DEPENDABOT.contains("directory: \"/\""));
-    assert!(DEPENDABOT.contains("interval: \"weekly\""));
+    let repository_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(dependabot_version_updates_stopped(repository_root));
+}
+
+#[test]
+fn stopped_dependabot_policy_rejects_config_reappearance() {
+    let root = std::env::temp_dir().join(format!(
+        "psychometrics-dependabot-policy-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let result = std::panic::catch_unwind(|| {
+        assert!(dependabot_version_updates_stopped(&root));
+        std::fs::create_dir(root.join(".github")).unwrap();
+        assert!(dependabot_version_updates_stopped(&root));
+        for name in ["dependabot.yml", "dependabot.yaml"] {
+            let config = root.join(".github").join(name);
+            for content in [
+                "",
+                "# stopped version updates\n",
+                "version: 2\nupdates: []\n",
+            ] {
+                std::fs::write(&config, content).unwrap();
+                assert!(!dependabot_version_updates_stopped(&root));
+                std::fs::remove_file(&config).unwrap();
+            }
+            std::fs::create_dir(&config).unwrap();
+            assert!(!dependabot_version_updates_stopped(&root));
+            std::fs::remove_dir(&config).unwrap();
+        }
+        assert!(dependabot_version_updates_stopped(&root));
+    });
+    std::fs::remove_dir_all(&root).unwrap();
+    result.unwrap();
 }
