@@ -137,6 +137,16 @@ Product consequences:
 - missing sessions return 404 that tells the buyer to POST the same
   Idempotency-Key.
 
+## Public HTTP contracts
+
+Implemented public HTTP families are described by an exact OpenAPI 3.2.0 as-built document and return RFC 9457 problem details. HTTP semantics, including method and target parsing, follow RFC 9110. A catalog or session operation that is not in the as-built document is not available to a purchaser.
+
+Product consequences:
+
+- `GET /v1/instruments` and `GET /v1/instruments/{instrument_ref}` are the first as-built catalog family; use a listed `release_ref` and `locale` with `POST /v1/sessions` when that family is available;
+- problem details use stable URNs and never echo raw request bodies, SQL, or provider text;
+- unpublished instrument rows stay hidden so a purchaser cannot discover draft work through the public catalog.
+
 ## Evidence maintenance rules
 
 1. Review this baseline when a referenced standard is revised, withdrawn, superseded, or materially amended.
