@@ -80,9 +80,10 @@ class SupplyChainProvenanceContract(unittest.TestCase):
         concurrency = mapping_block(text, "concurrency", 0)
         self.assertEqual(
             mapping_scalar(concurrency, "group", 2),
-            "psychometrics-commons-provenance-${{ github.event.pull_request.number || github.sha }}",
+            "${{ github.workflow }}-${{ github.repository }}-${{ github.run_id }}",
         )
-        self.assertEqual(mapping_scalar(concurrency, "cancel-in-progress", 2), "true")
+        self.assertEqual(mapping_scalar(concurrency, "cancel-in-progress", 2), "false")
+        self.assertNotIn("github.event.pull_request.number", concurrency)
         self.assertNotIn("github.ref", concurrency)
 
     def test_package_job_preserves_exact_source_and_checksum_evidence(self) -> None:
