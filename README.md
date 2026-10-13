@@ -10,6 +10,16 @@ Measure -> Understand -> Reflect -> Observe Over Time -> Contribute to Science
 
 This repository owns the hosted product runtime and integration composition. It consumes reusable measurement contracts and numerical capabilities from `ContextualWisdomLab/fast-mlsirm`; identity and federation from Keyverse; temporal/event analysis from TEPP; and research release/catalog capabilities from `semantic-data-portal`.
 
+## Start with a published instrument
+
+When the instrument catalog HTTP family is running in this process:
+
+1. Call `GET /v1/instruments` to list startable published locale-specific releases.
+2. Copy one `release_ref` and its exact `locale`.
+3. Call `POST /v1/sessions` with those values when the session family is available.
+
+Draft, suspended, and retired releases are omitted. The as-built contract is [`openapi/instruments.yaml`](openapi/instruments.yaml).
+
 ## Architecture boundary
 
 Psychometrics Commons owns product APIs, instrument publication, participant/session lifecycle, response events, consent and data-rights workflows, scoring dispatch, immutable result snapshots, product persistence, resource authorization, reference-client composition, deployment profiles, research-contribution handoff, observability, and service integration.

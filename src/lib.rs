@@ -20,6 +20,7 @@ pub mod data_rights_authorization;
 pub mod deterministic_narrative;
 pub mod health;
 pub mod instrument;
+pub mod instrument_http;
 pub mod integration;
 pub mod integration_delivery;
 pub mod integration_publisher;

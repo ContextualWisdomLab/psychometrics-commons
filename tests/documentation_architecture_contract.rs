@@ -337,6 +337,37 @@ fn erd_covers_current_delivery_identity_and_longitudinal_boundaries() {
 }
 
 #[test]
+fn instrument_catalog_http_contract_is_mapped() {
+    let root = repository_root();
+    let openapi = read_required(&root.join("openapi/instruments.yaml"));
+    let traceability = read_required(&root.join("docs/TRACEABILITY.md"));
+    let changelog = read_required(&root.join("CHANGELOG.md"));
+
+    for marker in [
+        "openapi: 3.2.0",
+        "/v1/instruments",
+        "/v1/instruments/{instrument_ref}",
+        "listStartableInstruments",
+        "getStartableInstrumentFamily",
+        "application/problem+json",
+    ] {
+        assert!(
+            openapi.contains(marker),
+            "instrument OpenAPI must name as-built marker {marker}"
+        );
+    }
+    assert!(
+        traceability.contains("GET /v1/instruments")
+            && traceability.contains("not protected-main truth"),
+        "traceability must keep instrument catalog HTTP off protected main until integrated"
+    );
+    assert!(
+        changelog.contains("GET /v1/instruments"),
+        "changelog must tell a purchaser the catalog list path"
+    );
+}
+
+#[test]
 fn anonymous_command_docs_do_not_claim_store_load() {
     let root = repository_root();
     let authorization = read_required(&root.join("src/anonymous_authorization.rs"));
