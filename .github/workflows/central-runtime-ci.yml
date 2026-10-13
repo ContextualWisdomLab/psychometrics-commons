@@ -1,0 +1,19 @@
+name: Central Runtime CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: central-runtime-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    # Enable only after the isolated runner operator accepts this repository.
+    # An unset flag is an execution gap, never a passing Runtime CI result.
+    if: vars.PSYCHOMETRICS_ISOLATED_CI_ADMITTED == 'true' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.repo.full_name == github.repository && github.event.pull_request.base.ref == 'main'
+    uses: ContextualWisdomLab/.github/.github/workflows/psychometrics-commons-ci.yml@29c14c67fd2a49e3719bfc0d3c1b9cad9531e33f
