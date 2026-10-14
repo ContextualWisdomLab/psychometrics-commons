@@ -317,6 +317,10 @@ fn write_errors_have_stable_human_readable_context() {
         "response snapshot requires Completed session state, found Active"
     );
     assert_eq!(
+        WriteError::InvalidSequence.to_string(),
+        "persisted response events must use contiguous positive server sequences"
+    );
+    assert_eq!(
         WriteError::SessionMismatch.to_string(),
         "response ledger does not belong to the supplied assessment session"
     );
