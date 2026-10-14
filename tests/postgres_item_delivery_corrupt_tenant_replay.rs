@@ -1,14 +1,14 @@
 //! Corruption regression for fail-closed item-delivery replay classification.
 
+mod item_delivery_support;
+
+use item_delivery_support::{published_release, session_with_ref_in_state};
 use postgres::{Client, NoTls};
-use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{ItemDeliveryLedger, ItemDeliveryRequest};
 use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger, ItemDeliveryPersistenceError,
 };
 use psychometrics_commons_runtime::session::SessionState;
-
-const DIGEST: &str = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn test_client() -> Client {
     let connection = std::env::var("TEST_DATABASE_URL")
@@ -27,29 +27,16 @@ fn test_client() -> Client {
 }
 
 fn delivered_ledger() -> ItemDeliveryLedger {
-    let manifest = InstrumentReleaseManifest::new(
-        "release_big_five_ko_v1",
-        "instrument_big_five",
-        "instrument_version_ko_v1",
-        "construct_big_five",
-        &["item_version_001"],
-        "ko-KR",
-        "assessment_spec_big_five_v1",
-        "scoring_big_five_v1",
-        "calibration_big_five_v1",
-        Some("norm_big_five_ko_v1"),
-        "narrative_big_five_v1",
-        &["consent_service_v1"],
-        "intended_use_self_reflection_v1",
-        "limitations_big_five_v1",
-        DIGEST,
-    )
-    .unwrap();
-    let mut ledger =
-        ItemDeliveryLedger::from_manifest("session_corrupt_tenant_replay", &manifest).unwrap();
+    let release = published_release();
+    let session = session_with_ref_in_state(
+        &release,
+        "session_corrupt_tenant_replay",
+        SessionState::Active,
+    );
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
     ledger
         .deliver(
-            SessionState::Active,
+            &session,
             ItemDeliveryRequest {
                 delivery_ref: "delivery_corrupt_tenant_replay",
                 item_version_ref: "item_version_001",

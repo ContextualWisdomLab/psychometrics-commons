@@ -1,5 +1,8 @@
 //! Real `PostgreSQL` contract for durable tenant-bound item-delivery evidence.
 
+mod item_delivery_support;
+
+use item_delivery_support::{published_release_from_manifest, session_with_ref_in_state};
 use postgres::{Client, IsolationLevel, NoTls, Transaction};
 use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::{ItemDeliveryLedger, ItemDeliveryRequest};
@@ -105,20 +108,27 @@ fn request<'a>(
     }
 }
 
+fn empty_ledger(session_ref: &str, manifest: &InstrumentReleaseManifest) -> ItemDeliveryLedger {
+    let release = published_release_from_manifest(manifest);
+    let session = session_with_ref_in_state(&release, session_ref, SessionState::Active);
+    ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap()
+}
+
 fn delivered_ledger(
     session_ref: &str,
     release_ref: &str,
     digest: &str,
     deliveries: &[(&str, &str, &str, Option<&str>)],
 ) -> ItemDeliveryLedger {
-    let mut ledger =
-        ItemDeliveryLedger::from_manifest(session_ref, &manifest(release_ref, digest)).unwrap();
+    let release = published_release_from_manifest(&manifest(release_ref, digest));
+    let session = session_with_ref_in_state(&release, session_ref, SessionState::Active);
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
     for (delivery_ref, item_version_ref, presentation_context_ref, selection_evidence_ref) in
         deliveries
     {
         ledger
             .deliver(
-                SessionState::Active,
+                &session,
                 request(
                     delivery_ref,
                     item_version_ref,
@@ -175,11 +185,10 @@ fn empty_ledger_persist_is_exactly_idempotent_and_release_rebinding_fails_closed
     reset_item_delivery_tables(&mut client);
     apply_item_delivery_migration(&mut client).unwrap();
 
-    let ledger = ItemDeliveryLedger::from_manifest(
+    let ledger = empty_ledger(
         "session_item_delivery_alpha",
         &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-    )
-    .unwrap();
+    );
     {
         let mut transaction = client.transaction().unwrap();
         assert_eq!(
@@ -197,11 +206,10 @@ fn empty_ledger_persist_is_exactly_idempotent_and_release_rebinding_fails_closed
         transaction.commit().unwrap();
     }
 
-    let rebound = ItemDeliveryLedger::from_manifest(
+    let rebound = empty_ledger(
         "session_item_delivery_alpha",
         &manifest("release_big_five_en_v1", OTHER_DIGEST),
-    )
-    .unwrap();
+    );
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(
         persist(&mut transaction, &rebound),
@@ -216,11 +224,10 @@ fn tenant_rebinding_fails_closed() {
     let mut client = test_client();
     reset_item_delivery_tables(&mut client);
     apply_item_delivery_migration(&mut client).unwrap();
-    let ledger = ItemDeliveryLedger::from_manifest(
+    let ledger = empty_ledger(
         "session_item_delivery_tenant_rebind",
         &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-    )
-    .unwrap();
+    );
 
     {
         let mut transaction = client.transaction().unwrap();
@@ -470,11 +477,10 @@ fn item_delivery_persistence_requires_read_committed() {
     let mut client = test_client();
     reset_item_delivery_tables(&mut client);
     apply_item_delivery_migration(&mut client).unwrap();
-    let ledger = ItemDeliveryLedger::from_manifest(
+    let ledger = empty_ledger(
         "session_item_delivery_serializable",
         &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-    )
-    .unwrap();
+    );
     let mut transaction = client
         .build_transaction()
         .isolation_level(IsolationLevel::Serializable)
@@ -492,11 +498,10 @@ fn missing_relations_are_database_failures() {
     let _guard = item_delivery_test_guard();
     let mut client = test_client();
     reset_item_delivery_tables(&mut client);
-    let empty = ItemDeliveryLedger::from_manifest(
+    let empty = empty_ledger(
         "session_item_delivery_missing_ledger",
         &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-    )
-    .unwrap();
+    );
     {
         let mut transaction = client.transaction().unwrap();
         assert!(matches!(
@@ -604,25 +609,22 @@ fn digest_locale_and_allowed_item_rebinding_fail_closed() {
 
     persist_then_conflict(
         &mut client,
-        &ItemDeliveryLedger::from_manifest(
+        &empty_ledger(
             "session_digest_conflict",
             &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-        )
-        .unwrap(),
-        &ItemDeliveryLedger::from_manifest(
+        ),
+        &empty_ledger(
             "session_digest_conflict",
             &manifest("release_big_five_ko_v1", OTHER_DIGEST),
-        )
-        .unwrap(),
+        ),
     );
     persist_then_conflict(
         &mut client,
-        &ItemDeliveryLedger::from_manifest(
+        &empty_ledger(
             "session_locale_conflict",
             &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-        )
-        .unwrap(),
-        &ItemDeliveryLedger::from_manifest(
+        ),
+        &empty_ledger(
             "session_locale_conflict",
             &manifest_parts(
                 "release_big_five_ko_v1",
@@ -630,17 +632,15 @@ fn digest_locale_and_allowed_item_rebinding_fail_closed() {
                 "en-US",
                 RELEASE_DIGEST,
             ),
-        )
-        .unwrap(),
+        ),
     );
     persist_then_conflict(
         &mut client,
-        &ItemDeliveryLedger::from_manifest(
+        &empty_ledger(
             "session_allowed_conflict",
             &manifest("release_big_five_ko_v1", RELEASE_DIGEST),
-        )
-        .unwrap(),
-        &ItemDeliveryLedger::from_manifest(
+        ),
+        &empty_ledger(
             "session_allowed_conflict",
             &manifest_parts(
                 "release_big_five_ko_v1",
@@ -648,8 +648,7 @@ fn digest_locale_and_allowed_item_rebinding_fail_closed() {
                 "ko-KR",
                 RELEASE_DIGEST,
             ),
-        )
-        .unwrap(),
+        ),
     );
 }
 

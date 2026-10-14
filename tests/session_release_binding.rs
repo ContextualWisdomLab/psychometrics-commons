@@ -113,6 +113,10 @@ fn published_release_binds_created_session_to_exact_release_and_locale() {
     );
     assert_eq!(session.instrument_release_content_digest(), VALID_DIGEST);
     assert_eq!(session.locale(), "ko-KR");
+    assert_eq!(
+        session.item_version_refs(),
+        release.manifest().item_version_refs()
+    );
     assert_eq!(session.created_at_unix_ms(), 20_000);
     assert_eq!(session.state(), SessionState::Created);
 }

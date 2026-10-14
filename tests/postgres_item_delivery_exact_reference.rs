@@ -4,12 +4,16 @@
 //! a padded spelling to the canonical tenant. Database constraints cannot catch
 //! this defect after Rust has already normalized the value.
 
+mod item_delivery_support;
+
+use item_delivery_support::{published_release_from_manifest, session_with_ref_in_state};
 use postgres::{error::SqlState, Client, NoTls};
 use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::ItemDeliveryLedger;
 use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger, ItemDeliveryPersistenceError,
 };
+use psychometrics_commons_runtime::session::SessionState;
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4954_444C_4558_4C4B;
 const RELEASE_DIGEST: &str =
@@ -75,7 +79,13 @@ fn ledger() -> ItemDeliveryLedger {
         RELEASE_DIGEST,
     )
     .unwrap();
-    ItemDeliveryLedger::from_manifest("session_item_delivery_exact_ref", &manifest).unwrap()
+    let release = published_release_from_manifest(&manifest);
+    let session = session_with_ref_in_state(
+        &release,
+        "session_item_delivery_exact_ref",
+        SessionState::Active,
+    );
+    ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap()
 }
 
 #[test]

@@ -1,16 +1,17 @@
 //! Tenant-bound adapter contract for item-delivery persistence.
 
+mod item_delivery_support;
+
+use item_delivery_support::{published_release, session_with_ref_in_state};
 use postgres::{error::SqlState, Client, NoTls};
-use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
 use psychometrics_commons_runtime::item_delivery::ItemDeliveryLedger;
 use psychometrics_commons_runtime::postgres_item_delivery::{
     apply_item_delivery_migration, persist_item_delivery_ledger,
     ItemDeliveryPersistenceDisposition, ItemDeliveryPersistenceError,
 };
+use psychometrics_commons_runtime::session::SessionState;
 
 const DATABASE_TEST_LOCK_KEY: i64 = 0x4954_444C_5652_4C4B;
-const RELEASE_DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn acquire_database_lock(
     client: &mut Client,
@@ -51,25 +52,10 @@ fn test_client() -> Client {
     client
 }
 
-fn manifest() -> InstrumentReleaseManifest {
-    InstrumentReleaseManifest::new(
-        "release_big_five_ko_v1",
-        "instrument_big_five",
-        "instrument_version_ko_v1",
-        "construct_big_five",
-        &["item_version_001"],
-        "ko-KR",
-        "assessment_spec_big_five_v1",
-        "scoring_big_five_v1",
-        "calibration_big_five_v1",
-        Some("norm_big_five_ko_v1"),
-        "narrative_big_five_v1",
-        &["consent_service_v1"],
-        "intended_use_self_reflection_v1",
-        "limitations_big_five_v1",
-        RELEASE_DIGEST,
-    )
-    .unwrap()
+fn empty_ledger(session_ref: &str) -> ItemDeliveryLedger {
+    let release = published_release();
+    let session = session_with_ref_in_state(&release, session_ref, SessionState::Active);
+    ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap()
 }
 
 #[test]
@@ -146,7 +132,7 @@ fn adapter_requires_and_persists_explicit_tenant_scope() {
     let _guard = test_guard();
     let mut client = test_client();
     apply_item_delivery_migration(&mut client).unwrap();
-    let ledger = ItemDeliveryLedger::from_manifest("session_tenant_bound", &manifest()).unwrap();
+    let ledger = empty_ledger("session_tenant_bound");
 
     {
         let mut transaction = client.transaction().unwrap();
@@ -179,7 +165,7 @@ fn numeric_tenant_reference_fails_closed_before_write() {
     let _guard = test_guard();
     let mut client = test_client();
     apply_item_delivery_migration(&mut client).unwrap();
-    let ledger = ItemDeliveryLedger::from_manifest("session_numeric_tenant", &manifest()).unwrap();
+    let ledger = empty_ledger("session_numeric_tenant");
 
     let mut transaction = client.transaction().unwrap();
     assert!(matches!(

@@ -1,34 +1,13 @@
 //! Regression tests for item-delivery replay after collection stops accepting new items.
 
-use psychometrics_commons_runtime::instrument::InstrumentReleaseManifest;
+mod item_delivery_support;
+
+use item_delivery_support::{published_release, session_in_state};
+use psychometrics_commons_runtime::instrument::InstrumentRelease;
 use psychometrics_commons_runtime::item_delivery::{
     ItemDeliveryError, ItemDeliveryLedger, ItemDeliveryRequest,
 };
 use psychometrics_commons_runtime::session::SessionState;
-
-const RELEASE_DIGEST: &str =
-    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-fn manifest() -> InstrumentReleaseManifest {
-    InstrumentReleaseManifest::new(
-        "release_big_five_ko_v1",
-        "instrument_big_five",
-        "instrument_version_ko_v1",
-        "construct_big_five",
-        &["item_version_001", "item_version_002"],
-        "ko-KR",
-        "assessment_spec_big_five_v1",
-        "scoring_big_five_v1",
-        "calibration_big_five_v1",
-        Some("norm_big_five_ko_v1"),
-        "narrative_big_five_v1",
-        &["consent_service_v1"],
-        "intended_use_self_reflection_v1",
-        "limitations_big_five_v1",
-        RELEASE_DIGEST,
-    )
-    .unwrap()
-}
 
 fn request<'a>(
     item_version_ref: &'a str,
@@ -42,16 +21,17 @@ fn request<'a>(
     }
 }
 
-fn ledger_with_delivery() -> ItemDeliveryLedger {
-    let mut ledger =
-        ItemDeliveryLedger::from_manifest("session_big_five_001", &manifest()).unwrap();
+fn ledger_with_delivery() -> (InstrumentRelease, ItemDeliveryLedger) {
+    let release = published_release();
+    let session = session_in_state(&release, SessionState::Active);
+    let mut ledger = ItemDeliveryLedger::from_session(&session, release.manifest()).unwrap();
     ledger
         .deliver(
-            SessionState::Active,
+            &session,
             request("item_version_001", "presentation_standard_v1"),
         )
         .unwrap();
-    ledger
+    (release, ledger)
 }
 
 #[test]
@@ -66,10 +46,11 @@ fn conflicting_replay_after_collection_closes_is_not_misclassified_as_new_delive
         SessionState::Cancelled,
         SessionState::Invalidated,
     ] {
-        let mut ledger = ledger_with_delivery();
+        let (release, mut ledger) = ledger_with_delivery();
+        let closed_session = session_in_state(&release, state);
         assert_eq!(
             ledger.deliver(
-                state,
+                &closed_session,
                 request("item_version_002", "presentation_standard_v1")
             ),
             Err(ItemDeliveryError::IdempotencyConflict),
@@ -81,7 +62,8 @@ fn conflicting_replay_after_collection_closes_is_not_misclassified_as_new_delive
 
 #[test]
 fn genuinely_new_delivery_after_collection_closes_is_still_rejected_by_session_state() {
-    let mut ledger = ledger_with_delivery();
+    let (release, mut ledger) = ledger_with_delivery();
+    let completed_session = session_in_state(&release, SessionState::Completed);
     let new_delivery = ItemDeliveryRequest {
         delivery_ref: "delivery_event_002",
         item_version_ref: "item_version_002",
@@ -90,7 +72,7 @@ fn genuinely_new_delivery_after_collection_closes_is_still_rejected_by_session_s
     };
 
     assert_eq!(
-        ledger.deliver(SessionState::Completed, new_delivery),
+        ledger.deliver(&completed_session, new_delivery),
         Err(ItemDeliveryError::SessionNotActive(SessionState::Completed))
     );
     assert_eq!(ledger.len(), 1);

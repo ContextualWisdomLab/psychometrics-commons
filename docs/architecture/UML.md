@@ -47,8 +47,12 @@ classDiagram
     }
     class AssessmentSession {
       +session_ref
+      +instrument_release_ref
       +instrument_version_ref
+      +instrument_release_content_digest
+      +item_version_refs
       +participant_ref
+      +locale
       +state
       +created_at
     }
@@ -305,6 +309,7 @@ sequenceDiagram
     A-->>C: activation accepted
 
     loop each presented item / response
+        Note over A,DB: deliver compares session_ref, release, version, digest, locale, and the ordered item-version set before appending
         A->>DB: append ItemDeliveryEvent(sequence, item version, payload digest)
         P->>C: answer presented item
         C->>A: submit response(client_event_ref)
