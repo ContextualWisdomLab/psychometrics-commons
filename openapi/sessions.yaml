@@ -4,20 +4,20 @@ info:
   version: 0.1.0
   description: >
     As-built public create and reload of one created assessment session.
-    POST /v1/sessions starts from the stored published instrument release
-    locked in the same transaction. Idempotency-Key is the durable session
-    reference. Exact replay after later persist Suspend or Retire returns
-    the original session. A new session after that later persist fails
-    closed.
+    POST /v1/sessions starts from the currently published instrument
+    release. Idempotency-Key is the durable session reference. Exact replay
+    returns the original session even after the release is later suspended
+    or retired. A brand-new session against a suspended or retired release
+    fails closed.
 paths:
   /v1/sessions:
     post:
       operationId: startAssessmentSession
-      summary: Start one created session from a stored published release
+      summary: Start one created session from the currently published release
       description: >
         Send participant_ref, instrument_release_ref, and locale. Reuse the
-        same opaque Idempotency-Key to resume the same session after restart
-        or after the catalog is later suspended or retired.
+        same opaque Idempotency-Key to resume the same session later,
+        including after the release is suspended or retired.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -33,13 +33,13 @@ paths:
               $ref: "#/components/schemas/SessionCreate"
       responses:
         "200":
-          description: Exact idempotent replay of an already stored start.
+          description: Exact idempotent replay of an earlier identical start.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreatedSession"
         "201":
-          description: Newly persisted created session.
+          description: Newly created session.
           content:
             application/json:
               schema:
@@ -55,7 +55,7 @@ paths:
   /v1/sessions/{session_ref}:
     get:
       operationId: loadAssessmentSession
-      summary: Reload one stored session after restart
+      summary: Reload one previously started session
       parameters:
         - name: session_ref
           in: path
@@ -65,7 +65,7 @@ paths:
           description: Opaque assessment-session reference from Idempotency-Key.
       responses:
         "200":
-          description: Stored created session identity.
+          description: Identity of the previously started session.
           content:
             application/json:
               schema:

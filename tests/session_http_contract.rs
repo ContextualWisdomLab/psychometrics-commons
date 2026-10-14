@@ -284,7 +284,7 @@ fn reused_idempotency_key_with_a_different_participant_is_conflict() {
     assert!(conflict.body().contains("idempotency-conflict"));
     assert!(conflict
         .body()
-        .contains("Idempotency-Key was reused with a different session create body"));
+        .contains("Replay this Idempotency-Key with the exact original create body, or send a new Idempotency-Key to start a different session"));
 }
 
 #[test]

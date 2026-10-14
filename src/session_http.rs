@@ -258,7 +258,7 @@ pub fn handle_session_http_request<P: SessionHttpPort>(
             400,
             "urn:psychometrics-commons:problem:bad-request",
             "Bad Request",
-            "session request must include an HTTP method and target",
+            "Resend the request with an HTTP method and a request target",
         );
     };
     let path = split_target(target).0;
@@ -271,7 +271,7 @@ pub fn handle_session_http_request<P: SessionHttpPort>(
             404,
             "urn:psychometrics-commons:problem:not-found",
             "Not Found",
-            "session routes accept POST /v1/sessions and GET /v1/sessions/{session_ref} only",
+            "Use POST /v1/sessions or GET /v1/sessions/{session_ref}",
         ),
     }
 }
@@ -293,7 +293,7 @@ fn method_not_allowed() -> SessionHttpResponse {
         405,
         "urn:psychometrics-commons:problem:method-not-allowed",
         "Method Not Allowed",
-        "session routes accept POST /v1/sessions and GET /v1/sessions/{session_ref} only",
+        "Use POST /v1/sessions or GET /v1/sessions/{session_ref}",
     )
 }
 
@@ -309,7 +309,7 @@ fn handle_create<P: SessionHttpPort>(
             400,
             "urn:psychometrics-commons:problem:missing-idempotency-key",
             "Missing Idempotency Key",
-            "POST /v1/sessions requires an opaque Idempotency-Key header; reuse it to resume the same session",
+            "Send an opaque Idempotency-Key header with POST /v1/sessions, and reuse the same key to resume the same session",
         );
     };
     let Some(body) = request_body(request) else {
@@ -317,7 +317,7 @@ fn handle_create<P: SessionHttpPort>(
             400,
             "urn:psychometrics-commons:problem:bad-request",
             "Bad Request",
-            "session create requires a JSON object body",
+            "Resend POST /v1/sessions with a JSON object body",
         );
     };
     let Some(create) = parse_create_body(body) else {
@@ -325,7 +325,7 @@ fn handle_create<P: SessionHttpPort>(
             400,
             "urn:psychometrics-commons:problem:bad-request",
             "Bad Request",
-            "session create requires participant_ref, instrument_release_ref, and locale strings",
+            "Resend the create body with participant_ref, instrument_release_ref, and locale string values",
         );
     };
     match port.start_from_stored_release(
@@ -357,7 +357,7 @@ fn handle_get<P: SessionHttpPort>(path: &str, port: &mut P) -> SessionHttpRespon
             404,
             "urn:psychometrics-commons:problem:not-found",
             "Not Found",
-            "session routes accept POST /v1/sessions and GET /v1/sessions/{session_ref} only",
+            "Use POST /v1/sessions or GET /v1/sessions/{session_ref}",
         );
     };
     match port.load(session_ref) {
@@ -372,13 +372,13 @@ fn handle_get<P: SessionHttpPort>(path: &str, port: &mut P) -> SessionHttpRespon
             400,
             "urn:psychometrics-commons:problem:invalid-reference",
             "Invalid Reference",
-            "use an opaque non-numeric session reference to load a stored session",
+            "use an opaque non-numeric session reference to load an existing session",
         ),
         Err(_) => SessionHttpResponse::problem(
             500,
             "urn:psychometrics-commons:problem:session-store-unavailable",
-            "Session Store Unavailable",
-            "retry GET /v1/sessions/{session_ref} after the session store is repaired",
+            "Session Service Unavailable",
+            "Retry GET /v1/sessions/{session_ref} after the service recovers",
         ),
     }
 }
@@ -395,7 +395,7 @@ fn start_problem(error: &AssessmentSessionStartError) -> SessionHttpResponse {
             500,
             "urn:psychometrics-commons:problem:invalid-server-timestamp",
             "Invalid Server Timestamp",
-            "session create requires a positive server clock",
+            "Retry the exact POST /v1/sessions after the server clock is corrected",
         ),
         AssessmentSessionStartError::InstrumentReleaseUnavailable
         | AssessmentSessionStartError::Persistence(
@@ -418,8 +418,8 @@ fn start_problem(error: &AssessmentSessionStartError) -> SessionHttpResponse {
         ) => SessionHttpResponse::problem(
             409,
             "urn:psychometrics-commons:problem:invalid-stored-release",
-            "Invalid Stored Release",
-            "repair the stored instrument release before starting a new session",
+            "Invalid Instrument Release",
+            "Repair the referenced instrument release before starting a new session",
         ),
         AssessmentSessionStartError::Persistence(
             AssessmentSessionPersistenceError::ConflictingReplay,
@@ -427,13 +427,13 @@ fn start_problem(error: &AssessmentSessionStartError) -> SessionHttpResponse {
             409,
             "urn:psychometrics-commons:problem:idempotency-conflict",
             "Idempotency Conflict",
-            "Idempotency-Key was reused with a different session create body",
+            "Replay this Idempotency-Key with the exact original create body, or send a new Idempotency-Key to start a different session",
         ),
         AssessmentSessionStartError::Persistence(_) => SessionHttpResponse::problem(
             500,
             "urn:psychometrics-commons:problem:session-store-unavailable",
-            "Session Store Unavailable",
-            "retry the exact POST /v1/sessions after the session store is repaired",
+            "Session Service Unavailable",
+            "Retry the exact POST /v1/sessions after the service recovers",
         ),
     }
 }
