@@ -284,7 +284,7 @@ fn tenant_and_source_rebinding_fail_closed_without_cross_tenant_aliasing() {
     ));
     assert!(matches!(
         persist(&mut client, "tenant_clinic_busan", &first),
-        Err(LongitudinalObservationPersistenceError::ConflictingReplay)
+        Err(LongitudinalObservationPersistenceError::ObservationIdentityConflict)
     ));
 
     let rebound = observation(
