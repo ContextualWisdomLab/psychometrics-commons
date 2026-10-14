@@ -17,6 +17,8 @@ mod response_support;
 
 const ENGINE_DIGEST: &str =
     "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+const EN_PROVENANCE_NOTE: &str = "Your scores are copied from the saved assessment result. A separate data export keeps the exact versions, time, and scoring evidence needed to check how this result was produced. Internal identifiers are not shown here.";
+const KO_PROVENANCE_NOTE: &str = "이 점수는 저장된 검사 결과에서 그대로 가져왔습니다. 별도의 데이터 내보내기에는 결과가 어떻게 만들어졌는지 확인할 수 있도록 정확한 버전, 시점, 채점 근거가 보관됩니다. 내부 식별자는 여기에는 표시하지 않습니다.";
 
 fn result_snapshot() -> ResultSnapshot {
     let mut session = response_support::active_session("session_big_five_locale_v1");
@@ -112,25 +114,9 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
     assert_eq!(report.participant_ref(), "participant_locale_alpha");
     assert_eq!(report.locale(), "ko-KR");
     assert_eq!(report.result_snapshot_ref(), "result_snapshot_locale_v1");
+    assert_eq!(report.rendered_at_unix_ms(), 1_700_000_100_000);
     assert!(report.text().starts_with("개인 결과 보고서\n"));
-    assert!(report
-        .text()
-        .contains("보고서 참조값: localized_report_ko_v1\n"));
-    assert!(report
-        .text()
-        .contains("결과 스냅샷 참조값: result_snapshot_locale_v1\n"));
-    assert!(report
-        .text()
-        .contains("참가자 참조값: participant_locale_alpha\n"));
-    assert!(report.text().contains("로케일: ko-KR\n"));
-    assert!(report
-        .text()
-        .contains("검사 버전 참조값: instrument_version_big_five_locale_v1\n"));
-    assert!(report
-        .text()
-        .contains("채점 버전 참조값: scoring_version_big_five_v1\n"));
-    let expected_engine_digest = format!("채점 엔진 산출물 해시: {ENGINE_DIGEST}\n");
-    assert!(report.text().contains(&expected_engine_digest));
+    assert!(report.text().contains(KO_PROVENANCE_NOTE));
     assert!(report.text().contains("\n점수\n"));
     assert!(report.text().contains("\n제한사항\n"));
     assert!(report
@@ -149,7 +135,7 @@ fn korean_report_uses_korean_structure_without_mutating_scores() {
 }
 
 #[test]
-fn localized_report_preserves_auditable_result_provenance() {
+fn localized_report_keeps_auditable_provenance_outside_human_readable_copy() {
     let snapshot = result_snapshot();
     let report = LocalizedResultReport::from_snapshot(
         &snapshot,
@@ -162,19 +148,34 @@ fn localized_report_preserves_auditable_result_provenance() {
     )
     .unwrap();
 
-    for expected in [
-        "세션 참조값: session_big_five_locale_v1\n",
-        "응답 스냅샷 참조값: response_snapshot_locale_v1\n",
-        "평가 명세 참조값: assessment_spec_big_five_v1\n",
-        "교정 참조값: calibration_big_five_locale_v1\n",
-        "규준 버전 참조값: 없음\n",
-        "서술 버전 참조값: narrative_version_big_five_v1\n",
-        "출력 스키마 버전: 1\n",
-        "동의 스냅샷 참조값: consent_service_locale_v1\n",
-        "결과 생성 시각(Unix ms): 1700000000000\n",
-        "보고서 생성 시각(Unix ms): 1700000100004\n",
+    assert_eq!(report.report_ref(), "localized_report_provenance_v1");
+    assert_eq!(report.result_snapshot_ref(), "result_snapshot_locale_v1");
+    assert_eq!(report.participant_ref(), "participant_locale_alpha");
+    assert_eq!(report.locale(), "ko-KR");
+    assert_eq!(report.rendered_at_unix_ms(), 1_700_000_100_004);
+
+    for internal in [
+        "localized_report_provenance_v1",
+        "result_snapshot_locale_v1",
+        "participant_locale_alpha",
+        "session_big_five_locale_v1",
+        "response_snapshot_locale_v1",
+        "assessment_spec_big_five_v1",
+        "instrument_version_big_five_locale_v1",
+        "scoring_version_big_five_v1",
+        "calibration_big_five_locale_v1",
+        "narrative_version_big_five_v1",
+        "consent_service_locale_v1",
+        ENGINE_DIGEST,
+        "출력 스키마 버전",
+        "Unix ms",
+        "참조값:",
     ] {
-        assert!(report.text().contains(expected), "missing {expected:?}");
+        assert!(
+            !report.text().contains(internal),
+            "participant copy leaked internal provenance {internal:?}: {}",
+            report.text()
+        );
     }
 }
 
@@ -193,6 +194,7 @@ fn english_report_remains_explicitly_english() {
     .unwrap();
 
     assert!(report.text().starts_with("Personal result report\n"));
+    assert!(report.text().contains(EN_PROVENANCE_NOTE));
     assert!(report.text().contains("\nScores\n"));
     assert!(report.text().contains("\nLimitations\n"));
     assert!(report

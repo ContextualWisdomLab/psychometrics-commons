@@ -1,18 +1,22 @@
 //! Exact-locale participant-facing reports derived from immutable result exports.
 //!
-//! Psychometrics Commons already stores continuous scores and uncertainty in an
-//! immutable result snapshot. A continuous score is a numeric estimate on a
-//! measurement scale, while uncertainty describes how precise that estimate is.
+//! Psychometrics Commons stores continuous scores, uncertainty, and scientific
+//! provenance in immutable result evidence. A continuous score is a numeric estimate
+//! on a measurement scale, while uncertainty describes how precise that estimate is.
 //! Calibration links responses to the approved scoring model. A norm is a reviewed
 //! comparison reference. Differential item functioning (DIF) checks whether an item
 //! behaves differently across groups after accounting for the measured construct.
 //! A scientific gate is a required evidence check that must pass before a result may
 //! be published or compared.
 //!
-//! This module changes only presentation labels: it reuses
+//! This module changes only participant-facing presentation. It reuses
 //! [`crate::result_export::ResultExport`] for validation and score copying, supports
 //! only the explicitly reviewed `ko-KR` and `en-US` locales, and fails closed for
-//! every other locale. It never recomputes any of those scientific values or gates.
+//! every other locale. The human-readable text deliberately does not embed opaque
+//! participant, session, scoring, consent, engine, or other technical provenance
+//! identifiers. Exact provenance remains available through the immutable result
+//! export and the typed report identity and render-time fields. No scientific value
+//! or gate is recomputed here.
 
 use crate::result::ResultSnapshot;
 use crate::result_export::{ResultExport, ResultExportError, ResultExportInput};
@@ -40,6 +44,7 @@ pub struct LocalizedResultReport {
     result_snapshot_ref: String,
     participant_ref: String,
     locale: String,
+    rendered_at_unix_ms: u64,
     text: String,
 }
 
@@ -76,10 +81,10 @@ impl Error for LocalizedResultReportError {
 impl LocalizedResultReport {
     /// Render one immutable result using a reviewed exact-locale label bundle.
     ///
-    /// Numeric scores, standard errors, construct references, participant
-    /// identity, and scientific provenance are copied from the existing result
-    /// snapshot/export boundary. Only report labels and disposition words vary by
-    /// locale.
+    /// Numeric scores, standard errors, and dispositions are copied from the
+    /// existing immutable result/export boundary. Opaque provenance remains
+    /// inspectable through the machine-readable export and typed report fields, but
+    /// is intentionally omitted from participant-facing text.
     ///
     /// # Errors
     ///
@@ -103,19 +108,14 @@ impl LocalizedResultReport {
             },
         )
         .map_err(LocalizedResultReportError::InvalidExport)?;
-        let text = render_report(
-            &export,
-            snapshot,
-            input.rendered_at_unix_ms,
-            input.limitations,
-            labels,
-        );
+        let text = render_report(&export, input.limitations, labels);
 
         Ok(Self {
             report_ref: export.export_ref().to_owned(),
             result_snapshot_ref: export.result_snapshot_ref().to_owned(),
             participant_ref: export.participant_ref().to_owned(),
             locale: export.locale().to_owned(),
+            rendered_at_unix_ms: export.exported_at_unix_ms(),
             text,
         })
     }
@@ -137,10 +137,17 @@ impl LocalizedResultReport {
     pub fn participant_ref(&self) -> &str {
         &self.participant_ref
     }
+
     /// Return the exact reviewed report locale.
     #[must_use]
     pub fn locale(&self) -> &str {
         &self.locale
+    }
+
+    /// Return the server-authoritative time retained for this rendered report.
+    #[must_use]
+    pub const fn rendered_at_unix_ms(&self) -> u64 {
+        self.rendered_at_unix_ms
     }
 
     /// Return the localized human-readable report text.
@@ -150,29 +157,11 @@ impl LocalizedResultReport {
     }
 }
 
+/// Reviewed participant-facing labels for one exact supported locale.
 #[derive(Clone, Copy)]
 struct ReportLabels {
     title: &'static str,
-    report_ref: &'static str,
-    result_snapshot_ref: &'static str,
-    participant_ref: &'static str,
-    locale: &'static str,
-    scoring_result_ref: &'static str,
-    session_ref: &'static str,
-    response_snapshot_ref: &'static str,
-    assessment_spec_ref: &'static str,
-    instrument_version_ref: &'static str,
-    scoring_version_ref: &'static str,
-    calibration_reference: &'static str,
-    norm_version_ref: &'static str,
-    narrative_version_ref: &'static str,
-    requested_output_schema_version: &'static str,
-    consent_snapshot_refs: &'static str,
-    engine_artifact_digest: &'static str,
-    result_created_at_unix_ms: &'static str,
-    report_rendered_at_unix_ms: &'static str,
-    supersedes_ref: &'static str,
-    none: &'static str,
+    provenance_note: &'static str,
     scores: &'static str,
     limitations: &'static str,
     scored: &'static str,
@@ -184,26 +173,7 @@ struct ReportLabels {
 
 const EN_US: ReportLabels = ReportLabels {
     title: "Personal result report",
-    report_ref: "report_ref",
-    result_snapshot_ref: "result_snapshot_ref",
-    participant_ref: "participant_ref",
-    locale: "locale",
-    scoring_result_ref: "scoring_result_ref",
-    session_ref: "session_ref",
-    response_snapshot_ref: "response_snapshot_ref",
-    assessment_spec_ref: "assessment_spec_ref",
-    instrument_version_ref: "instrument_version_ref",
-    scoring_version_ref: "scoring_version_ref",
-    calibration_reference: "calibration_reference",
-    norm_version_ref: "norm_version_ref",
-    narrative_version_ref: "narrative_version_ref",
-    requested_output_schema_version: "requested_output_schema_version",
-    consent_snapshot_refs: "consent_snapshot_refs",
-    engine_artifact_digest: "engine_artifact_digest",
-    result_created_at_unix_ms: "result_created_at_unix_ms",
-    report_rendered_at_unix_ms: "report_rendered_at_unix_ms",
-    supersedes_ref: "supersedes_ref",
-    none: "none",
+    provenance_note: "Your scores are copied from the saved assessment result. A separate data export keeps the exact versions, time, and scoring evidence needed to check how this result was produced. Internal identifiers are not shown here.",
     scores: "Scores",
     limitations: "Limitations",
     scored: "scored",
@@ -215,26 +185,7 @@ const EN_US: ReportLabels = ReportLabels {
 
 const KO_KR: ReportLabels = ReportLabels {
     title: "개인 결과 보고서",
-    report_ref: "보고서 참조값",
-    result_snapshot_ref: "결과 스냅샷 참조값",
-    participant_ref: "참가자 참조값",
-    locale: "로케일",
-    scoring_result_ref: "채점 결과 참조값",
-    session_ref: "세션 참조값",
-    response_snapshot_ref: "응답 스냅샷 참조값",
-    assessment_spec_ref: "평가 명세 참조값",
-    instrument_version_ref: "검사 버전 참조값",
-    scoring_version_ref: "채점 버전 참조값",
-    calibration_reference: "교정 참조값",
-    norm_version_ref: "규준 버전 참조값",
-    narrative_version_ref: "서술 버전 참조값",
-    requested_output_schema_version: "출력 스키마 버전",
-    consent_snapshot_refs: "동의 스냅샷 참조값",
-    engine_artifact_digest: "채점 엔진 산출물 해시",
-    result_created_at_unix_ms: "결과 생성 시각(Unix ms)",
-    report_rendered_at_unix_ms: "보고서 생성 시각(Unix ms)",
-    supersedes_ref: "대체 이전 결과 참조값",
-    none: "없음",
+    provenance_note: "이 점수는 저장된 검사 결과에서 그대로 가져왔습니다. 별도의 데이터 내보내기에는 결과가 어떻게 만들어졌는지 확인할 수 있도록 정확한 버전, 시점, 채점 근거가 보관됩니다. 내부 식별자는 여기에는 표시하지 않습니다.",
     scores: "점수",
     limitations: "제한사항",
     scored: "채점됨",
@@ -244,6 +195,7 @@ const KO_KR: ReportLabels = ReportLabels {
     standard_error: "표준오차",
 };
 
+/// Resolve only an exact locale for which the runtime has reviewed report labels.
 fn labels_for_locale(locale: &str) -> Option<&'static ReportLabels> {
     match locale {
         "en-US" => Some(&EN_US),
@@ -252,17 +204,13 @@ fn labels_for_locale(locale: &str) -> Option<&'static ReportLabels> {
     }
 }
 
-fn render_report(
-    export: &ResultExport,
-    snapshot: &ResultSnapshot,
-    rendered_at_unix_ms: u64,
-    limitations: &[&str],
-    labels: &ReportLabels,
-) -> String {
+/// Assemble participant-facing text from copied result evidence and reviewed labels.
+fn render_report(export: &ResultExport, limitations: &[&str], labels: &ReportLabels) -> String {
     let mut report = String::new();
     report.push_str(labels.title);
     report.push('\n');
-    append_report_metadata(&mut report, export, snapshot, rendered_at_unix_ms, labels);
+    report.push_str(labels.provenance_note);
+    report.push('\n');
     report.push('\n');
     append_score_section(&mut report, export, labels);
     report.push('\n');
@@ -270,113 +218,7 @@ fn render_report(
     report
 }
 
-fn append_report_metadata(
-    report: &mut String,
-    export: &ResultExport,
-    snapshot: &ResultSnapshot,
-    rendered_at_unix_ms: u64,
-    labels: &ReportLabels,
-) {
-    append_identity_metadata(report, export, snapshot, labels);
-    append_scientific_metadata(report, export, snapshot, rendered_at_unix_ms, labels);
-}
-
-fn append_identity_metadata(
-    report: &mut String,
-    export: &ResultExport,
-    snapshot: &ResultSnapshot,
-    labels: &ReportLabels,
-) {
-    append_metadata(report, labels.report_ref, export.export_ref());
-    append_metadata(
-        report,
-        labels.result_snapshot_ref,
-        export.result_snapshot_ref(),
-    );
-    append_metadata(report, labels.participant_ref, export.participant_ref());
-    append_metadata(report, labels.locale, export.locale());
-    append_metadata(
-        report,
-        labels.scoring_result_ref,
-        snapshot.scoring_result_ref(),
-    );
-    append_metadata(report, labels.session_ref, snapshot.session_ref());
-    append_metadata(
-        report,
-        labels.response_snapshot_ref,
-        snapshot.response_snapshot_ref(),
-    );
-    append_metadata(
-        report,
-        labels.assessment_spec_ref,
-        snapshot.assessment_spec_ref(),
-    );
-}
-
-fn append_scientific_metadata(
-    report: &mut String,
-    export: &ResultExport,
-    snapshot: &ResultSnapshot,
-    rendered_at_unix_ms: u64,
-    labels: &ReportLabels,
-) {
-    append_metadata(
-        report,
-        labels.instrument_version_ref,
-        export.instrument_version_ref(),
-    );
-    append_metadata(
-        report,
-        labels.scoring_version_ref,
-        export.scoring_version_ref(),
-    );
-    append_metadata(
-        report,
-        labels.calibration_reference,
-        snapshot.calibration_reference(),
-    );
-    append_metadata(
-        report,
-        labels.norm_version_ref,
-        snapshot.norm_version_ref().unwrap_or(labels.none),
-    );
-    append_metadata(
-        report,
-        labels.narrative_version_ref,
-        snapshot.narrative_version_ref(),
-    );
-    append_metadata(
-        report,
-        labels.requested_output_schema_version,
-        &snapshot.requested_output_schema_version().to_string(),
-    );
-    append_metadata(
-        report,
-        labels.consent_snapshot_refs,
-        &snapshot.consent_snapshot_refs().join(", "),
-    );
-    append_metadata(
-        report,
-        labels.engine_artifact_digest,
-        export.engine_artifact_digest(),
-    );
-    append_metadata(
-        report,
-        labels.result_created_at_unix_ms,
-        &snapshot.created_at_unix_ms().to_string(),
-    );
-    append_metadata(
-        report,
-        labels.report_rendered_at_unix_ms,
-        &rendered_at_unix_ms.to_string(),
-    );
-    append_metadata(
-        report,
-        labels.supersedes_ref,
-        snapshot.supersedes_ref().unwrap_or(labels.none),
-    );
-}
-
+/// Append copied score observations without recalculating any scientific value.
 fn append_score_section(report: &mut String, export: &ResultExport, labels: &ReportLabels) {
     report.push_str(labels.scores);
     report.push('\n');
@@ -400,6 +242,7 @@ fn append_score_section(report: &mut String, export: &ResultExport, labels: &Rep
     }
 }
 
+/// Append the already-approved participant limitations without changing their text.
 fn append_limitations_section(report: &mut String, limitations: &[&str], labels: &ReportLabels) {
     report.push_str(labels.limitations);
     report.push('\n');
@@ -410,13 +253,7 @@ fn append_limitations_section(report: &mut String, limitations: &[&str], labels:
     }
 }
 
-fn append_metadata(report: &mut String, label: &str, value: &str) {
-    report.push_str(label);
-    report.push_str(": ");
-    report.push_str(value);
-    report.push('\n');
-}
-
+/// Map a stored score disposition to its reviewed participant-facing locale label.
 const fn disposition_label(
     disposition: ObservationDisposition,
     labels: &ReportLabels,
