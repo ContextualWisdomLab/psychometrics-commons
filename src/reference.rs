@@ -1,19 +1,29 @@
-//! Internal normalization for opaque product references.
+//! Internal validation for opaque product references.
 
-/// Return a trimmed opaque reference or `None` when the input is blank, numeric-like, or unsafe.
+/// Return an opaque reference only when the supplied spelling is already canonical.
 ///
 /// Public references must contain meaningful nonnumeric identity material. The guard
-/// rejects ordinary numbers as well as signed, decimal, scientific-notation, and
-/// Unicode-numeric spellings instead of accepting them as opaque identifiers. Embedded
-/// control characters are rejected. Unicode `Default_Ignorable_Code_Point` characters
-/// are also rejected because they can be invisible or change display behavior while
-/// leaving a byte-distinct identifier, which is unsafe for authorization, replay, audit,
-/// and participant-facing artifacts. Ordinary visible multilingual characters remain valid.
+/// rejects leading or trailing Unicode whitespace rather than silently normalizing a
+/// byte-distinct external identity, and rejects control characters plus Unicode 17.0
+/// `Default_Ignorable_Code_Point` characters anywhere so public identifiers cannot carry
+/// line breaks, NULs, escape sequences, hidden joiners, variation selectors, tag characters,
+/// or bidirectional display controls into audit and transport surfaces. Unicode UTS #39 treats
+/// default-ignorable identifier characters as restricted for security profiles. The guard also
+/// rejects ordinary numbers as well as signed, decimal, scientific-notation, and Unicode-numeric
+/// spellings instead of accepting them as opaque identifiers.
 #[must_use]
-pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
+pub(crate) fn canonical_opaque_reference(reference: &str) -> Option<&str> {
     let normalized = reference.trim();
-    let numeric_like = normalized.chars().any(char::is_numeric)
-        && normalized.chars().all(|character| {
+    if normalized != reference
+        || reference.chars().any(|character| {
+            character.is_control() || is_default_ignorable_identifier_character(character)
+        })
+    {
+        return None;
+    }
+
+    let numeric_like = reference.chars().any(char::is_numeric)
+        && reference.chars().all(|character| {
             character.is_numeric()
                 || matches!(
                     character,
@@ -28,21 +38,20 @@ pub(crate) fn normalized_reference(reference: &str) -> Option<&str> {
                         | '\u{FF0C}'
                 )
         });
-    let contains_unsafe_character = normalized.chars().any(|character| {
-        character.is_control() || is_default_ignorable_identifier_character(character)
-    });
-    if normalized.is_empty() || numeric_like || contains_unsafe_character {
+    if reference.is_empty() || numeric_like {
         None
     } else {
-        Some(normalized)
+        Some(reference)
     }
 }
 
-/// Return whether a character is Unicode 17.0 default-ignorable identifier evidence.
+/// Return whether a character is Unicode 17.0 `Default_Ignorable_Code_Point` evidence.
 ///
-/// These code points are normally invisible or formatting-only. Keeping the Unicode 17.0
-/// ranges explicit makes an upgrade deliberate instead of silently changing which external
-/// identifiers the product accepts when the Rust toolchain changes Unicode tables.
+/// The ranges mirror the normative Unicode Character Database derived property used by UTS #39
+/// security profiles. Keeping the list explicit avoids silently accepting newly invisible aliases
+/// when the Rust toolchain changes its Unicode tables; a Unicode-version update therefore requires
+/// an intentional source and regression-test change. This does not restrict ordinary visible
+/// scripts used by upstream issuers.
 const fn is_default_ignorable_identifier_character(character: char) -> bool {
     matches!(
         character,
@@ -65,21 +74,23 @@ const fn is_default_ignorable_identifier_character(character: char) -> bool {
             | '\u{E0000}'..='\u{E0FFF}'
     )
 }
-
 #[cfg(test)]
 mod tests {
-    use super::normalized_reference;
+    use super::canonical_opaque_reference;
 
     #[test]
     fn opaque_references_reject_embedded_control_characters() {
-        assert_eq!(normalized_reference("participant_\u{0001}_account"), None);
         assert_eq!(
-            normalized_reference("construct_\u{001f}_extraversion"),
+            canonical_opaque_reference("participant_\u{0001}_account"),
             None
         );
         assert_eq!(
-            normalized_reference("  construct_extraversion  "),
-            Some("construct_extraversion")
+            canonical_opaque_reference("construct_\u{001f}_extraversion"),
+            None
+        );
+        assert_eq!(
+            canonical_opaque_reference("  construct_extraversion  "),
+            None
         );
     }
 
@@ -93,14 +104,14 @@ mod tests {
             "participant\u{fe0f}_account",
             "participant\u{e0001}_account",
         ] {
-            assert_eq!(normalized_reference(reference), None, "{reference:?}");
+            assert_eq!(canonical_opaque_reference(reference), None, "{reference:?}");
         }
     }
 
     #[test]
     fn opaque_references_preserve_visible_multilingual_material() {
         assert_eq!(
-            normalized_reference("participant_ref_가나다_東京_éclair"),
+            canonical_opaque_reference("participant_ref_가나다_東京_éclair"),
             Some("participant_ref_가나다_東京_éclair")
         );
     }

@@ -87,18 +87,35 @@ fn result_snapshot_rejects_blank_narrative_version() {
 }
 
 #[test]
-fn result_snapshot_normalizes_edge_whitespace_before_identity_becomes_durable() {
+fn result_snapshot_rejects_edge_whitespace_instead_of_normalizing_identity() {
     let (request, result) = request_and_result();
+
+    for (field, alias) in [
+        ("result_snapshot_ref", "  result_snapshot_ref  "),
+        ("participant_ref", "\u{00a0}participant_ref\u{00a0}"),
+        (
+            "narrative_version_ref",
+            "\u{2003}narrative_version_ref\u{2003}",
+        ),
+    ] {
+        let mut input = result_input();
+        match field {
+            "result_snapshot_ref" => input.result_snapshot_ref = alias,
+            "participant_ref" => input.participant_ref = alias,
+            _ => input.narrative_version_ref = alias,
+        }
+        assert_eq!(
+            ResultSnapshot::new(&request, &result, input),
+            Err(ResultSnapshotError::EmptyReference),
+            "{field} must reject non-canonical spelling instead of trimming into another identity",
+        );
+    }
+
     let mut input = result_input();
-    input.result_snapshot_ref = "  result_snapshot_ref  ";
-    input.participant_ref = "\u{00a0}participant_ref\u{00a0}";
-    input.narrative_version_ref = "\u{2003}narrative_version_ref\u{2003}";
     input.consent_snapshot_refs = &["\u{00a0}service_consent_ref\u{00a0}"];
-
-    let snapshot = ResultSnapshot::new(&request, &result, input).unwrap();
-
-    assert_eq!(snapshot.result_snapshot_ref(), "result_snapshot_ref");
-    assert_eq!(snapshot.participant_ref(), "participant_ref");
-    assert_eq!(snapshot.narrative_version_ref(), "narrative_version_ref");
-    assert_eq!(snapshot.consent_snapshot_refs(), &["service_consent_ref"]);
+    assert_eq!(
+        ResultSnapshot::new(&request, &result, input),
+        Err(ResultSnapshotError::EmptyReference),
+        "consent snapshot references must reject non-canonical spelling",
+    );
 }

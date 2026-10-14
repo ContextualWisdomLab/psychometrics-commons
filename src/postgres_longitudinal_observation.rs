@@ -9,7 +9,7 @@ use crate::longitudinal_observation::{
     ClockAnomaly, LongitudinalObservationInput, LongitudinalObservationRecord,
     LongitudinalObservationSet, MembershipShareInput, ObservationTimeInput,
 };
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -336,7 +336,7 @@ fn classify_existing(
 }
 
 fn required_reference(reference: &str) -> Result<&str, LongitudinalObservationPersistenceError> {
-    match normalized_reference(reference) {
+    match canonical_opaque_reference(reference) {
         Some(normalized) if normalized == reference => Ok(reference),
         _ => Err(LongitudinalObservationPersistenceError::InvalidReference),
     }

@@ -325,9 +325,9 @@ fn malformed_or_numeric_references_fail_closed() {
 #[test]
 fn context_and_resource_metadata_are_auditable_without_identity_role_confusion() {
     let actor = AuthorizationContext::new(
-        " tenant_alpha ",
-        " subject_alpha ",
-        Some(" participant_alpha "),
+        "tenant_alpha",
+        "subject_alpha",
+        Some("participant_alpha"),
         &[
             ProductRole::Participant,
             ProductRole::Participant,
@@ -337,9 +337,9 @@ fn context_and_resource_metadata_are_auditable_without_identity_role_confusion()
     .unwrap();
     let resource = ResourceScope::participant_owned(
         ResourceKind::Result,
-        " tenant_alpha ",
-        " participant_alpha ",
-        " result_alpha ",
+        "tenant_alpha",
+        "participant_alpha",
+        "result_alpha",
     )
     .unwrap();
 
@@ -361,7 +361,7 @@ fn authorization_errors_have_stable_safe_messages() {
     let cases = [
         (
             AuthorizationError::InvalidReference,
-            "authorization references must be opaque non-numeric values",
+            "authorization references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             AuthorizationError::CrossTenantDenied,

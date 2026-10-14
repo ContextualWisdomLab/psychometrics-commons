@@ -5,7 +5,7 @@
 //! not make unrelated work unavailable, while unknown integrity or a stalled durable
 //! backlog fails closed for new state-changing work.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -118,11 +118,8 @@ impl CapabilityHealth {
         state: CapabilityState,
         accepts_new_work: bool,
     ) -> Result<Self, HealthContractError> {
-        let normalized =
-            normalized_reference(capability_ref).ok_or(HealthContractError::InvalidReference)?;
-        if normalized != capability_ref {
-            return Err(HealthContractError::InvalidReference);
-        }
+        let capability_ref = canonical_opaque_reference(capability_ref)
+            .ok_or(HealthContractError::InvalidReference)?;
         if accepts_new_work
             && matches!(
                 state,
@@ -132,7 +129,7 @@ impl CapabilityHealth {
             return Err(HealthContractError::InconsistentCapabilityReadiness);
         }
         Ok(Self {
-            capability_ref: normalized.to_owned(),
+            capability_ref: capability_ref.to_owned(),
             state,
             accepts_new_work,
         })

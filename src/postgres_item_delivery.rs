@@ -4,7 +4,7 @@
 //! connection, transaction, credentials, and explicit tenant authorization context.
 
 use crate::item_delivery::{ItemDeliveryEvent, ItemDeliveryLedger};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{GenericClient, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -262,10 +262,7 @@ fn classify_unique_violation(error: postgres::Error) -> ItemDeliveryPersistenceE
 }
 
 fn required_reference(reference: &str) -> Result<&str, ItemDeliveryPersistenceError> {
-    match normalized_reference(reference) {
-        Some(normalized) if normalized == reference => Ok(normalized),
-        _ => Err(ItemDeliveryPersistenceError::InvalidReference),
-    }
+    canonical_opaque_reference(reference).ok_or(ItemDeliveryPersistenceError::InvalidReference)
 }
 
 fn require_read_committed(

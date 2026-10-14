@@ -18,7 +18,7 @@
 //! resurrect an ended link or revoke a newer current link. Server-authoritative lifecycle time may
 //! stay equal between events but must never move backwards.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -50,7 +50,7 @@ impl Display for AccountLinkError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "participant account-link references must be opaque non-numeric values"
+                "participant account-link references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidTimestamp => {
                 "participant account-link timestamps must be greater than zero"
@@ -435,8 +435,5 @@ impl ParticipantRecord {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AccountLinkError> {
-    match normalized_reference(reference) {
-        Some(normalized) if normalized == reference => Ok(reference),
-        Some(_) | None => Err(AccountLinkError::InvalidReference),
-    }
+    canonical_opaque_reference(reference).ok_or(AccountLinkError::InvalidReference)
 }

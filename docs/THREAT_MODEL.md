@@ -67,6 +67,7 @@ No line in this diagram authorizes direct database access across bounded context
 | Threat | Attack/failure path | Required control | Evidence before GA |
 |---|---|---|---|
 | cross-tenant IDOR/BOLA | valid user guesses an opaque reference belonging to another tenant | server-derived tenant context, resource authorization before read/write, no default tenant | negative API/persistence tests across every tenant-scoped resource |
+| public-reference alias collapse | whitespace, controls, or default-ignorable characters make a distinct external spelling share authorization, idempotency, or audit identity | fail-closed exact opaque-reference validation; no silent trim; UTS #39 default-ignorable rejection | constructor-slot and Display-contract tests for padded/invisible aliases |
 | account-link takeover | attacker links anonymous history to a Keyverse account using only one side of proof | proof of anonymous-session control + authenticated subject control; append-only mapping; replay/conflict rejection | linking replay, conflict, unlink/recovery and cross-tenant tests |
 | historical identity rewrite | account merge/unlink silently changes past session/result ownership provenance | ADR-0020 append-only identity-link events; historical participant/result refs immutable | persistence migration + supersession/audit tests |
 | response replay/tampering | client reuses event/idempotency key with changed content | canonical digest, unique tenant/session-scoped keys, conflicting replay fail closed | property/concurrency tests plus physical uniqueness constraints |

@@ -9,7 +9,7 @@
 //! snapshot authority. If the evidence reference points to a revocable credential, the adapter
 //! must also load that current credential record before forwarding a protected command.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -17,7 +17,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AnonymousSessionContextError {
-    /// A tenant, participant, session, or evidence reference was blank or numeric-only.
+    /// A reference was blank, numeric-only, whitespace-padded, or control/default-ignorable.
     InvalidReference,
     /// The server-authoritative validity boundary was zero.
     InvalidValidityBoundary,
@@ -27,7 +27,7 @@ impl Display for AnonymousSessionContextError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::InvalidReference => {
-                "anonymous-session references must be opaque non-numeric values"
+                "anonymous-session references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
             }
             Self::InvalidValidityBoundary => {
                 "anonymous-session validity boundary must be greater than zero"
@@ -168,15 +168,9 @@ impl AnonymousSessionContext {
 }
 
 fn required_reference(reference: &str) -> Result<&str, AnonymousSessionContextError> {
-    let normalized =
-        normalized_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)?;
-    if normalized == reference {
-        Ok(reference)
-    } else {
-        Err(AnonymousSessionContextError::InvalidReference)
-    }
+    canonical_opaque_reference(reference).ok_or(AnonymousSessionContextError::InvalidReference)
 }
 
 fn exact_reference_match(stored: &str, candidate: &str) -> bool {
-    normalized_reference(candidate) == Some(candidate) && stored == candidate
+    canonical_opaque_reference(candidate) == Some(candidate) && stored == candidate
 }

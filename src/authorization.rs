@@ -8,7 +8,7 @@
 //! a valid role or participant identity cannot be reused against a different domain
 //! resource through an incorrectly constructed generic scope.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -97,7 +97,7 @@ impl ProductPermission {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum AuthorizationError {
-    /// A required resource or identity reference was blank or numeric-only.
+    /// A required resource or identity reference was blank, noncanonical, or numeric-only.
     InvalidReference,
     /// The requested resource belongs to a different tenant.
     CrossTenantDenied,
@@ -116,7 +116,7 @@ pub enum AuthorizationError {
 impl Display for AuthorizationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "authorization references must be opaque non-numeric values",
+            Self::InvalidReference => "authorization references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::CrossTenantDenied => "resource tenant does not match the authenticated tenant",
             Self::ResourceOwnershipMismatch => {
                 "resource kind is not valid for this ownership scope"
@@ -148,14 +148,14 @@ pub struct AuthorizationContext {
 }
 
 impl AuthorizationContext {
-    /// Create a normalized authenticated product context.
+    /// Create a canonical authenticated product context.
     ///
     /// Duplicate product roles are collapsed without changing role semantics.
     ///
     /// # Errors
     ///
     /// Returns [`AuthorizationError::InvalidReference`] when tenant, subject, or
-    /// participant identity is blank or numeric-only.
+    /// participant identity is blank, whitespace-padded, control-bearing, or numeric-only.
     pub fn new(
         tenant_ref: &str,
         subject_ref: &str,
@@ -369,5 +369,5 @@ fn require_role(actor: &AuthorizationContext, role: ProductRole) -> Result<(), A
 }
 
 fn required_reference(reference: &str) -> Result<&str, AuthorizationError> {
-    normalized_reference(reference).ok_or(AuthorizationError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(AuthorizationError::InvalidReference)
 }

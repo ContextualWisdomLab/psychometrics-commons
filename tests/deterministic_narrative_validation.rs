@@ -245,7 +245,7 @@ fn every_fallback_error_has_stable_beginner_readable_display_text() {
     let cases = [
         (
             NarrativeFallbackError::InvalidReference,
-            "narrative references must be opaque non-numeric values",
+            "narrative references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             NarrativeFallbackError::InvalidText,

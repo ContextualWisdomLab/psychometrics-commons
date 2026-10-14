@@ -30,7 +30,7 @@ use crate::postgres_instrument_release::{
     load_published_instrument_release, InstrumentReleaseQueryError,
     PublishedInstrumentReleaseSnapshot,
 };
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::session::{
     AcceptedSessionCommand, AssessmentSession, SessionCommand, SessionCreationError, SessionState,
 };
@@ -476,8 +476,8 @@ fn replay_started_session_after_publication_block(
     request: &StartedSessionReplayRequest<'_>,
 ) -> Result<(AssessmentSession, AssessmentSessionPersistenceDisposition), AssessmentSessionStartError>
 {
-    if normalized_reference(request.session_ref) != Some(request.session_ref)
-        || normalized_reference(request.participant_ref) != Some(request.participant_ref)
+    if canonical_opaque_reference(request.session_ref) != Some(request.session_ref)
+        || canonical_opaque_reference(request.participant_ref) != Some(request.participant_ref)
     {
         return Err(AssessmentSessionStartError::InvalidReference);
     }
@@ -498,13 +498,14 @@ fn stored_start_identity_matches(
     stored: &AssessmentSession,
     request: &StartedSessionReplayRequest<'_>,
 ) -> bool {
-    let Some(session_ref) = normalized_reference(request.session_ref) else {
+    let Some(session_ref) = canonical_opaque_reference(request.session_ref) else {
         return false;
     };
-    let Some(participant_ref) = normalized_reference(request.participant_ref) else {
+    let Some(participant_ref) = canonical_opaque_reference(request.participant_ref) else {
         return false;
     };
-    let Some(instrument_release_ref) = normalized_reference(request.instrument_release_ref) else {
+    let Some(instrument_release_ref) = canonical_opaque_reference(request.instrument_release_ref)
+    else {
         return false;
     };
     stored.session_ref() == session_ref
@@ -741,7 +742,7 @@ pub fn load_assessment_session(
     session_ref: &str,
 ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
     require_read_committed(transaction)?;
-    let session_ref = normalized_reference(session_ref)
+    let session_ref = canonical_opaque_reference(session_ref)
         .ok_or(AssessmentSessionPersistenceError::InvalidReference)?;
     let row = match transaction.query_opt(
         "SELECT participant_ref, instrument_release_ref, instrument_version_ref,

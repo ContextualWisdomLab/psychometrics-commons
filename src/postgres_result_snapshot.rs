@@ -6,7 +6,7 @@
 //! requires `READ COMMITTED` so a concurrent insert that wins a unique-key race
 //! is visible to the exact-replay classifier.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::result::ResultSnapshot;
 use crate::scoring::ObservationDisposition;
 use postgres::Transaction;
@@ -297,7 +297,7 @@ fn observation_disposition_name(disposition: ObservationDisposition) -> &'static
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResultSnapshotPersistenceError> {
-    normalized_reference(reference).ok_or(ResultSnapshotPersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ResultSnapshotPersistenceError::InvalidReference)
 }
 
 fn postgres_timestamp(timestamp: u64) -> Result<i64, ResultSnapshotPersistenceError> {

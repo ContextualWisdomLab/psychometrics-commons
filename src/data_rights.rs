@@ -7,7 +7,7 @@
 //! requests preserve durable terminal evidence, and exact lifecycle command replays
 //! remain idempotent while conflicting evidence fails closed.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -497,9 +497,5 @@ impl DataRightsRequest {
 }
 
 fn required_reference(reference: &str) -> Result<&str, DataRightsError> {
-    let normalized = normalized_reference(reference).ok_or(DataRightsError::InvalidReference)?;
-    if normalized != reference {
-        return Err(DataRightsError::InvalidReference);
-    }
-    Ok(reference)
+    canonical_opaque_reference(reference).ok_or(DataRightsError::InvalidReference)
 }

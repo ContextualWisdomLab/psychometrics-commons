@@ -374,7 +374,7 @@ fn delivery_errors_have_stable_safe_text() {
     let cases = [
         (
             ItemDeliveryError::InvalidReference,
-            "item delivery references must be opaque non-numeric values",
+            "item delivery references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             ItemDeliveryError::SessionNotActive(SessionState::Paused),

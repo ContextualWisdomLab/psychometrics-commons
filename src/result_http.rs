@@ -9,7 +9,7 @@
 
 use crate::authorization::AuthorizationContext;
 use crate::participant::ParticipantRecord;
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use crate::result::ResultSnapshot;
 use crate::result_authorization::authorize_result_read;
 use crate::scoring::{ObservationDisposition, ScoreObservation};
@@ -158,7 +158,7 @@ fn parse_request_line(request: &str) -> Option<(&str, &str)> {
 fn canonical_route_reference(reference: &str) -> bool {
     !reference.contains('%')
         && !reference.contains('#')
-        && normalized_reference(reference).is_some_and(|normalized| normalized == reference)
+        && canonical_opaque_reference(reference).is_some_and(|normalized| normalized == reference)
 }
 
 fn result_body(result: &ResultSnapshot) -> String {

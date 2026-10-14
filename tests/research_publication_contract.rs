@@ -81,6 +81,17 @@ fn every_required_reference_fails_closed_when_missing_or_nonopaque() {
 }
 
 #[test]
+fn research_release_references_reject_noncanonical_spelling() {
+    let mut value = candidate();
+    value.release_approver_ref = " research_release_approver_alpha ";
+
+    assert_eq!(
+        approve_research_release(value),
+        Err(ResearchReleaseGateError::InvalidReference)
+    );
+}
+
+#[test]
 fn manifest_digest_must_be_exact_lowercase_sha256_evidence() {
     for invalid in [
         "manifest-alpha",

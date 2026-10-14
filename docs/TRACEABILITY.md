@@ -140,7 +140,7 @@ src/lib.rs
 ├── result_authorization.rs       # personal result resource authorization
 ├── result_export.rs              # immutable personal result export domain copy
 ├── session_http.rs               # persist-backed session HTTP transport
-├── reference.rs      # internal opaque-reference normalization
+├── reference.rs      # internal exact opaque-reference validation
 ├── research_release.rs  # product-side Research Commons release-evidence gate
 ├── response.rs       # idempotent response ledger + immutable response snapshots
 ├── result.rs         # immutable result provenance/supersession

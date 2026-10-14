@@ -387,7 +387,7 @@ fn integration_errors_have_stable_safe_messages() {
     let cases = [
         (
             IntegrationError::InvalidReference,
-            "integration references must be opaque non-numeric values",
+            "integration references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             IntegrationError::InvalidEventType,

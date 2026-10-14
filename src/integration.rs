@@ -6,7 +6,7 @@
 //! assessment payload is required here: routine integration identity is expressed as
 //! opaque tenant/resource references and canonical payload digests.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -52,7 +52,7 @@ pub enum IntegrationError {
 impl Display for IntegrationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
-            Self::InvalidReference => "integration references must be opaque non-numeric values",
+            Self::InvalidReference => "integration references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
             Self::InvalidEventType => {
                 "integration event type must be non-empty, bounded, and canonical"
             }
@@ -941,7 +941,7 @@ fn bounded_label(
 }
 
 fn required_reference(reference: &str) -> Result<&str, IntegrationError> {
-    normalized_reference(reference).ok_or(IntegrationError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(IntegrationError::InvalidReference)
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {

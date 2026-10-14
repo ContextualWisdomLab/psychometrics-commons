@@ -5,7 +5,7 @@
 //! research contribution can begin only from a snapshot containing an explicit
 //! active research grant with a versioned research scope.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -539,18 +539,21 @@ impl Display for ResearchContributionError {
 impl Error for ResearchContributionError {}
 
 fn required_reference(reference: &str) -> Result<&str, ConsentWriteError> {
-    let normalized = normalized_reference(reference).ok_or(ConsentWriteError::EmptyReference)?;
-    if normalized != reference {
-        return Err(ConsentWriteError::InvalidReference);
+    match canonical_opaque_reference(reference) {
+        Some(canonical) => Ok(canonical),
+        None if canonical_opaque_reference(reference.trim()).is_none() => {
+            Err(ConsentWriteError::EmptyReference)
+        }
+        None => Err(ConsentWriteError::InvalidReference),
     }
-    Ok(normalized)
 }
 
 fn research_reference(reference: &str) -> Result<&str, ResearchContributionError> {
-    let normalized =
-        normalized_reference(reference).ok_or(ResearchContributionError::EmptyReference)?;
-    if normalized != reference {
-        return Err(ResearchContributionError::InvalidReference);
+    match canonical_opaque_reference(reference) {
+        Some(canonical) => Ok(canonical),
+        None if canonical_opaque_reference(reference.trim()).is_none() => {
+            Err(ResearchContributionError::EmptyReference)
+        }
+        None => Err(ResearchContributionError::InvalidReference),
     }
-    Ok(normalized)
 }

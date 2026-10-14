@@ -300,7 +300,7 @@ fn account_link_errors_have_stable_safe_messages() {
     let cases = [
         (
             AccountLinkError::InvalidReference,
-            "participant account-link references must be opaque non-numeric values",
+            "participant account-link references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters",
         ),
         (
             AccountLinkError::InvalidTimestamp,

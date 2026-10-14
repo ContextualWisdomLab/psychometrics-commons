@@ -134,7 +134,7 @@ fn zero_validity_boundary_is_rejected() {
 fn error_messages_are_stable() {
     assert_eq!(
         AnonymousSessionContextError::InvalidReference.to_string(),
-        "anonymous-session references must be opaque non-numeric values"
+        "anonymous-session references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
     assert_eq!(
         AnonymousSessionContextError::InvalidValidityBoundary.to_string(),

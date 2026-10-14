@@ -6,7 +6,7 @@
 //! durable-ingest times distinct, and it keeps every declared membership weight
 //! visible so a later analysis cannot flatten the row into one primary group.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -427,8 +427,8 @@ fn unique_memberships(
 }
 
 fn required_reference(reference: &str) -> Result<&str, LongitudinalObservationError> {
-    let canonical =
-        normalized_reference(reference).ok_or(LongitudinalObservationError::InvalidReference)?;
+    let canonical = canonical_opaque_reference(reference)
+        .ok_or(LongitudinalObservationError::InvalidReference)?;
     if canonical != reference {
         return Err(LongitudinalObservationError::InvalidReference);
     }

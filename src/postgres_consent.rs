@@ -7,7 +7,7 @@
 //! classifier.
 
 use crate::consent::{ConsentDecision, ConsentEvent, ConsentLedger, ConsentPurpose};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::Transaction;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -198,7 +198,7 @@ fn decision_name(decision: ConsentDecision) -> &'static str {
 }
 
 fn required_reference(reference: &str) -> Result<&str, ConsentPersistenceError> {
-    normalized_reference(reference).ok_or(ConsentPersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(ConsentPersistenceError::InvalidReference)
 }
 
 fn require_read_committed(

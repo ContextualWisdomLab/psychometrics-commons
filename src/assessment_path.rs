@@ -7,7 +7,7 @@
 //! scores, or replace scientific evidence owned by the release or `fast-mlsirm`.
 
 use crate::instrument::InstrumentReleaseManifest;
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -95,7 +95,7 @@ impl AssessmentPathDefinition {
         release: &InstrumentReleaseManifest,
         item_version_refs: &[&str],
     ) -> Result<Self, AssessmentPathError> {
-        let Some(normalized_policy_ref) = normalized_reference(policy_version_ref) else {
+        let Some(normalized_policy_ref) = canonical_opaque_reference(policy_version_ref) else {
             return Err(AssessmentPathError::InvalidReference);
         };
         if normalized_policy_ref != policy_version_ref {

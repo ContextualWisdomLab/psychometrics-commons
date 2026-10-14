@@ -333,7 +333,7 @@ fn verify_transaction_isolation_contract(client: &mut Client, tenant_alpha: &Int
 fn verify_persistence_error_messages() {
     assert_eq!(
         PersistenceError::InvalidReference.to_string(),
-        "persistence references must be opaque non-numeric values"
+        "persistence references must be exact opaque non-numeric values without surrounding whitespace or unsafe control characters"
     );
     assert!(std::error::Error::source(&PersistenceError::InvalidReference).is_none());
     assert_eq!(

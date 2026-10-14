@@ -7,7 +7,7 @@
 
 use crate::data_rights::{DataRightsRequest, DataRightsRequestKind, DataRightsState};
 use crate::postgres_data_rights::DataRightsPersistenceError;
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{Client, Transaction};
 
 const DATA_RIGHTS_COMPLETION_MIGRATION: &str =
@@ -135,13 +135,13 @@ fn completion_evidence(
         request.state(),
         request
             .completion_evidence_ref()
-            .and_then(normalized_reference),
+            .and_then(canonical_opaque_reference),
         request.completed_at_unix_ms(),
         request
             .verification_evidence_ref()
-            .and_then(normalized_reference),
+            .and_then(canonical_opaque_reference),
         request.verified_at_unix_ms(),
-        request.operation_ref().and_then(normalized_reference),
+        request.operation_ref().and_then(canonical_opaque_reference),
         request.processing_started_at_unix_ms(),
         request.retained_scope_refs().is_empty(),
     ) {

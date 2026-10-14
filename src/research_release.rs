@@ -6,7 +6,7 @@
 //! This module validates those references only. It does not publish artifacts or call the
 //! external research catalog.
 
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
@@ -251,12 +251,7 @@ pub fn approve_research_release(
 }
 
 fn required_reference(reference: &str) -> Result<&str, ResearchReleaseGateError> {
-    let normalized =
-        normalized_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)?;
-    if normalized != reference {
-        return Err(ResearchReleaseGateError::InvalidReference);
-    }
-    Ok(normalized)
+    canonical_opaque_reference(reference).ok_or(ResearchReleaseGateError::InvalidReference)
 }
 
 fn valid_sha256_digest(digest: &str) -> bool {

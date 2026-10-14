@@ -7,7 +7,7 @@
 //! to the exact-replay classifier.
 
 use crate::instrument::{InstrumentRelease, InstrumentReleaseManifest, PublicationState};
-use crate::reference::normalized_reference;
+use crate::reference::canonical_opaque_reference;
 use postgres::{GenericClient, Row, Transaction};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -347,8 +347,8 @@ pub fn load_published_instrument_release(
     release_ref: &str,
     locale: &str,
 ) -> Result<PublishedInstrumentReleaseSnapshot, InstrumentReleaseQueryError> {
-    let canonical_release_ref =
-        normalized_reference(release_ref).ok_or(InstrumentReleaseQueryError::InvalidReference)?;
+    let canonical_release_ref = canonical_opaque_reference(release_ref)
+        .ok_or(InstrumentReleaseQueryError::InvalidReference)?;
     if canonical_release_ref != release_ref {
         return Err(InstrumentReleaseQueryError::InvalidReference);
     }
@@ -553,7 +553,7 @@ fn publication_state_name(state: PublicationState) -> &'static str {
 }
 
 fn required_reference(reference: &str) -> Result<&str, InstrumentReleasePersistenceError> {
-    normalized_reference(reference).ok_or(InstrumentReleasePersistenceError::InvalidReference)
+    canonical_opaque_reference(reference).ok_or(InstrumentReleasePersistenceError::InvalidReference)
 }
 
 fn valid_exact_locale(locale: &str) -> bool {
