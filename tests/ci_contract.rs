@@ -5,6 +5,16 @@ const RUST_TOOLCHAIN: &str = include_str!("../rust-toolchain.toml");
 const DEPENDABOT: &str = include_str!("../.github/dependabot.yml");
 
 #[test]
+fn runtime_ci_preserves_check_identities_and_limits_peak_fanout() {
+    assert_eq!(CI_WORKFLOW.matches("runs-on: ubuntu-latest").count(), 3);
+    assert!(CI_WORKFLOW.contains("\n  line-coverage:\n    name: Production line coverage\n"));
+    assert!(CI_WORKFLOW.contains(
+        "\n  branch-coverage:\n    name: Production branch coverage\n    needs: line-coverage\n    if: ${{ always() && !cancelled() }}\n"
+    ));
+    assert!(!CI_WORKFLOW.contains("\n  coverage:\n"));
+}
+
+#[test]
 fn every_checkout_is_bound_to_the_pull_request_head() {
     let exact_head_ref = "ref: ${{ github.event.pull_request.head.sha || github.sha }}";
     assert_eq!(CI_WORKFLOW.matches(exact_head_ref).count(), 3);
@@ -75,6 +85,22 @@ fn lockfile_failure_evidence_is_scoped_to_the_lock_gate() {
             .matches("if: failure() && steps.cargo_lock_gate.outcome == 'failure'")
             .count(),
         2
+    );
+}
+
+#[test]
+fn coverage_jobs_preserve_both_exact_gates() {
+    assert!(CI_WORKFLOW.contains("id: line_coverage_gate"));
+    assert!(CI_WORKFLOW.contains("id: branch_coverage_gate"));
+    assert!(CI_WORKFLOW.contains("if: failure() && steps.line_coverage_gate.outcome == 'failure'"));
+    assert!(
+        CI_WORKFLOW.contains("if: failure() && steps.branch_coverage_gate.outcome == 'failure'")
+    );
+    assert_eq!(
+        CI_WORKFLOW
+            .matches("cargo install cargo-llvm-cov --locked --version \"$CARGO_LLVM_COV_VERSION\"")
+            .count(),
+        1
     );
 }
 
