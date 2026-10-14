@@ -53,21 +53,23 @@ pub struct ResultSnapshot {
 impl ResultSnapshot {
     /// Create a result snapshot by copying the scoring request and engine output.
     ///
-    /// All product-owned references are normalized before they become identity-
-    /// bearing state. Scientific provenance is copied verbatim from the already
-    /// validated scoring request/result boundary.
+    /// Product-owned references must already use their exact accepted opaque
+    /// spelling before they become identity-bearing state. Scientific provenance
+    /// is copied verbatim from the already validated scoring request/result boundary.
     ///
     /// # Errors
     ///
     /// Returns [`ResultSnapshotError::ScoringRequestMismatch`] when `result`
     /// belongs to another scoring request, [`ResultSnapshotError::EmptyReference`]
-    /// for any blank required/supersession/consent reference,
+    /// when a supplied reference has no accepted opaque identity material,
+    /// [`ResultSnapshotError::InvalidReference`] when a reference would only become
+    /// acceptable after trimming surrounding whitespace,
     /// [`ResultSnapshotError::MissingConsentSnapshot`] when no consent evidence
     /// is supplied, [`ResultSnapshotError::DuplicateConsentSnapshot`] when the
-    /// same normalized consent reference appears more than once,
+    /// same exact consent reference appears more than once,
     /// [`ResultSnapshotError::InvalidCreationTime`] when creation time is zero,
-    /// or [`ResultSnapshotError::SelfSupersession`] when a normalized snapshot
-    /// reference claims to supersede itself.
+    /// or [`ResultSnapshotError::SelfSupersession`] when an exact snapshot reference
+    /// claims to supersede itself.
     pub fn new(
         request: &ScoringRequest,
         result: &ScoringResult,
@@ -85,13 +87,13 @@ impl ResultSnapshot {
         }
 
         let mut consent_refs = HashSet::with_capacity(input.consent_snapshot_refs.len());
-        let mut normalized_consents = Vec::with_capacity(input.consent_snapshot_refs.len());
+        let mut exact_consents = Vec::with_capacity(input.consent_snapshot_refs.len());
         for consent_ref in input.consent_snapshot_refs {
             let consent_ref = required_reference(consent_ref)?;
             if !consent_refs.insert(consent_ref.to_owned()) {
                 return Err(ResultSnapshotError::DuplicateConsentSnapshot);
             }
-            normalized_consents.push(consent_ref.to_owned());
+            exact_consents.push(consent_ref.to_owned());
         }
 
         if input.created_at_unix_ms == 0 {
@@ -116,7 +118,7 @@ impl ResultSnapshot {
             norm_version_ref: request.norm_version_ref().map(str::to_owned),
             requested_output_schema_version: request.requested_output_schema_version(),
             narrative_version_ref: narrative_version_ref.to_owned(),
-            consent_snapshot_refs: normalized_consents,
+            consent_snapshot_refs: exact_consents,
             engine_artifact_digest: result.engine_artifact_digest().to_owned(),
             score_observations: result.observations().to_vec(),
             created_at_unix_ms: input.created_at_unix_ms,
@@ -231,8 +233,10 @@ impl ResultSnapshot {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ResultSnapshotError {
-    /// A required or supplied optional reference is blank.
+    /// A supplied reference is blank, numeric-like, or contains unsafe control characters.
     EmptyReference,
+    /// A supplied reference does not use the exact accepted opaque spelling.
+    InvalidReference,
     /// Result publication was attempted without any consent snapshot evidence.
     MissingConsentSnapshot,
     /// The same consent snapshot reference appears more than once.
@@ -251,6 +255,9 @@ impl Display for ResultSnapshotError {
             Self::EmptyReference => {
                 formatter.write_str("result snapshot references must not be empty")
             }
+            Self::InvalidReference => formatter.write_str(
+                "result snapshot references must use their exact accepted opaque spelling",
+            ),
             Self::MissingConsentSnapshot => formatter
                 .write_str("result snapshots require at least one consent snapshot reference"),
             Self::DuplicateConsentSnapshot => formatter
@@ -270,5 +277,9 @@ impl Display for ResultSnapshotError {
 impl Error for ResultSnapshotError {}
 
 fn required_reference(reference: &str) -> Result<&str, ResultSnapshotError> {
-    normalized_reference(reference).ok_or(ResultSnapshotError::EmptyReference)
+    let normalized = normalized_reference(reference).ok_or(ResultSnapshotError::EmptyReference)?;
+    if normalized != reference {
+        return Err(ResultSnapshotError::InvalidReference);
+    }
+    Ok(normalized)
 }
