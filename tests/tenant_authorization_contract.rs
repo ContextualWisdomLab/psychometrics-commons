@@ -323,11 +323,90 @@ fn malformed_or_numeric_references_fail_closed() {
 }
 
 #[test]
+fn authorization_context_and_resource_refs_require_exact_spelling() {
+    let actor_cases = [
+        (" tenant_alpha ", "subject_alpha", Some("participant_alpha")),
+        ("tenant_alpha", " subject_alpha ", Some("participant_alpha")),
+        ("tenant_alpha", "subject_alpha", Some(" participant_alpha ")),
+    ];
+    for (tenant_ref, subject_ref, participant_ref) in actor_cases {
+        assert_eq!(
+            AuthorizationContext::new(
+                tenant_ref,
+                subject_ref,
+                participant_ref,
+                &[ProductRole::Participant],
+            ),
+            Err(AuthorizationError::InvalidReference)
+        );
+    }
+
+    assert_eq!(
+        ResourceScope::participant_owned(
+            ResourceKind::Result,
+            " tenant_alpha ",
+            "participant_alpha",
+            "result_alpha",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
+    assert_eq!(
+        ResourceScope::participant_owned(
+            ResourceKind::Result,
+            "tenant_alpha",
+            " participant_alpha ",
+            "result_alpha",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
+    assert_eq!(
+        ResourceScope::participant_owned(
+            ResourceKind::Result,
+            "tenant_alpha",
+            "participant_alpha",
+            " result_alpha ",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
+    assert_eq!(
+        ResourceScope::tenant_scoped(
+            ResourceKind::InstrumentRelease,
+            " tenant_alpha ",
+            "instrument_release_alpha",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
+    assert_eq!(
+        ResourceScope::tenant_scoped(
+            ResourceKind::InstrumentRelease,
+            "tenant_alpha",
+            " instrument_release_alpha ",
+        ),
+        Err(AuthorizationError::InvalidReference)
+    );
+
+    let actor = participant_context();
+    let resource = ResourceScope::participant_owned(
+        ResourceKind::Result,
+        "tenant_alpha",
+        "participant_alpha",
+        "result_alpha",
+    )
+    .unwrap();
+    assert_eq!(actor.tenant_ref(), "tenant_alpha");
+    assert_eq!(actor.subject_ref(), "subject_alpha");
+    assert_eq!(actor.participant_ref(), Some("participant_alpha"));
+    assert_eq!(resource.tenant_ref(), "tenant_alpha");
+    assert_eq!(resource.resource_ref(), "result_alpha");
+    assert_eq!(resource.owner_participant_ref(), Some("participant_alpha"));
+}
+
+#[test]
 fn context_and_resource_metadata_are_auditable_without_identity_role_confusion() {
     let actor = AuthorizationContext::new(
-        " tenant_alpha ",
-        " subject_alpha ",
-        Some(" participant_alpha "),
+        "tenant_alpha",
+        "subject_alpha",
+        Some("participant_alpha"),
         &[
             ProductRole::Participant,
             ProductRole::Participant,
@@ -337,9 +416,9 @@ fn context_and_resource_metadata_are_auditable_without_identity_role_confusion()
     .unwrap();
     let resource = ResourceScope::participant_owned(
         ResourceKind::Result,
-        " tenant_alpha ",
-        " participant_alpha ",
-        " result_alpha ",
+        "tenant_alpha",
+        "participant_alpha",
+        "result_alpha",
     )
     .unwrap();
 
