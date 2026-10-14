@@ -1,0 +1,894 @@
+//! Public HTTP transport for recording response events on an active session.
+//!
+//! This slice exposes `POST /v1/sessions/{session_ref}/responses` over HTTP/1.1.
+//! The server accepts one answer only while the injected session is Active and
+//! the `item_version_ref` belongs to that session's published release. The
+//! `Idempotency-Key` header is the client event reference. State-changing writes
+//! additionally require server-verified authenticated or anonymous session
+//! authority supplied by the embedding host. Sessions are not created here;
+//! catalog list, session create, commands, and persistence remain other families.
+//! Errors use RFC 9457 problem details and never echo raw request bodies or
+//! payload bytes.
+
+use crate::anonymous_authorization::authorize_anonymous_session_command;
+use crate::anonymous_credential::AnonymousCredential;
+use crate::anonymous_session::AnonymousSessionContext;
+use crate::authorization::{
+    authorize, AuthorizationContext, ProductPermission, ResourceKind, ResourceScope,
+};
+use crate::instrument::InstrumentRelease;
+use crate::participant::ParticipantRecord;
+use crate::reference::normalized_reference;
+use crate::response::{ResponseEvent, ResponseLedger, ResponseWrite, WriteError};
+use crate::session::AssessmentSession;
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
+use std::io;
+use std::net::{SocketAddr, TcpListener};
+use std::time::Duration;
+
+const HTTP_FIELD_NAME_BYTES: &[u8] =
+    b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
+
+/// Bounded read/write timeout for one accepted response HTTP connection.
+pub const RESPONSE_HTTP_IO_TIMEOUT: Duration = Duration::from_secs(2);
+/// Maximum accepted response HTTP request size, including headers and body.
+pub const RESPONSE_HTTP_MAX_REQUEST_BYTES: usize = 8_192;
+
+/// Server-verified authority allowed to attempt one response write.
+///
+/// The embedding host verifies network authentication or an anonymous bearer
+/// proof before constructing one of these variants. The HTTP application layer
+/// then rechecks exact tenant, participant, session, expiry, and current anonymous
+/// credential evidence against server-owned records before mutating the ledger.
+/// Raw bearer secrets never enter this type.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum ResponseWriteAuthority<'a> {
+    /// Authenticated product context already verified by the host identity boundary.
+    Authenticated(&'a AuthorizationContext),
+    /// Verified anonymous-session snapshot plus its current credential record.
+    Anonymous {
+        /// Previously verified anonymous-session context.
+        context: &'a AnonymousSessionContext,
+        /// Current server-side credential evidence, including revocation state.
+        credential: &'a AnonymousCredential,
+        /// Positive current time from the trusted server clock.
+        now_unix_ms: u64,
+    },
+}
+
+/// In-process sessions, bound releases, and response ledgers.
+pub struct ResponseHttpRuntime {
+    sessions: HashMap<String, AssessmentSession>,
+    releases: HashMap<String, InstrumentRelease>,
+    ledgers: HashMap<String, ResponseLedger>,
+    used_server_event_refs: HashSet<String>,
+    next_server_event_ref: String,
+}
+
+impl ResponseHttpRuntime {
+    /// Create a runtime from injected sessions and their bound releases.
+    ///
+    /// `next_server_event_ref` is the opaque identity the next successful new
+    /// response will mint. Unpublished or inactive sessions may be supplied for
+    /// operator tests; the handler still rejects new answers on those rows.
+    #[must_use]
+    pub fn new(
+        sessions: Vec<AssessmentSession>,
+        releases: Vec<InstrumentRelease>,
+        next_server_event_ref: impl Into<String>,
+    ) -> Self {
+        let sessions = sessions
+            .into_iter()
+            .map(|session| (session.session_ref().to_owned(), session))
+            .collect();
+        let releases = releases
+            .into_iter()
+            .map(|release| (release.manifest().release_ref().to_owned(), release))
+            .collect();
+        Self {
+            sessions,
+            releases,
+            ledgers: HashMap::new(),
+            used_server_event_refs: HashSet::new(),
+            next_server_event_ref: next_server_event_ref.into(),
+        }
+    }
+
+    /// Replace the next minted server event reference after a successful write.
+    pub fn replace_next_server_event_ref(&mut self, next_server_event_ref: impl Into<String>) {
+        self.next_server_event_ref = next_server_event_ref.into();
+    }
+
+    /// Return how many accepted response events this process holds for a session.
+    #[must_use]
+    pub fn event_count(&self, session_ref: &str) -> usize {
+        self.ledgers.get(session_ref).map_or(0, ResponseLedger::len)
+    }
+
+    fn total_event_count(&self) -> usize {
+        self.ledgers.values().map(ResponseLedger::len).sum()
+    }
+
+    fn advance_generated_server_event_ref(&mut self) {
+        let mut candidate_index = self.total_event_count() + 1;
+        loop {
+            let candidate = format!("evt_response_{candidate_index}");
+            if !self.used_server_event_refs.contains(&candidate) {
+                self.next_server_event_ref = candidate;
+                return;
+            }
+            candidate_index += 1;
+        }
+    }
+}
+
+/// HTTP response produced by a public response-event request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponseHttpResponse {
+    status: u16,
+    content_type: &'static str,
+    body: String,
+}
+
+impl ResponseHttpResponse {
+    fn json(status: u16, body: String) -> Self {
+        Self {
+            status,
+            content_type: "application/json",
+            body,
+        }
+    }
+
+    fn problem(status: u16, type_uri: &str, title: &str, detail: &str) -> Self {
+        Self {
+            status,
+            content_type: "application/problem+json",
+            body: format!(
+                "{{\"type\":{},\"title\":{},\"status\":{status},\"detail\":{}}}",
+                json_string(type_uri),
+                json_string(title),
+                json_string(detail)
+            ),
+        }
+    }
+
+    /// Return the HTTP status code.
+    #[must_use]
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+
+    /// Return the response content type.
+    #[must_use]
+    pub const fn content_type(&self) -> &'static str {
+        self.content_type
+    }
+
+    /// Return the response body.
+    #[must_use]
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+}
+
+/// Translate one raw HTTP/1.1 request without verified authority.
+///
+/// Syntax and route errors are still classified, but a syntactically valid POST
+/// can never mutate state through this function. It receives the same 404
+/// response as an unknown session. Embedding hosts must call
+/// [`handle_authorized_response_http_request`] after authenticating the caller or
+/// verifying a current anonymous-session proof.
+#[must_use]
+pub fn handle_response_http_request(
+    request: &str,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    dispatch_response_http_request(request, None, runtime)
+}
+
+/// Translate one raw HTTP/1.1 request with server-verified response authority.
+///
+/// `participant` must be the server-owned participant record corresponding to
+/// the request. Authenticated authority is checked with
+/// [`ProductPermission::ManageOwnSession`]. Anonymous authority must match both
+/// its current credential record and the exact participant/session binding.
+/// Missing, foreign, expired, or revoked authority is deliberately mapped to the
+/// same 404 problem as an unknown session so the write route is not a session
+/// existence oracle.
+#[must_use]
+pub fn handle_authorized_response_http_request(
+    request: &str,
+    authority: &ResponseWriteAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    dispatch_response_http_request(request, Some((authority, participant)), runtime)
+}
+
+fn dispatch_response_http_request(
+    request: &str,
+    authority: Option<(&ResponseWriteAuthority<'_>, &ParticipantRecord)>,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    let Some((method, target)) = parse_request_line(request) else {
+        return ResponseHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:bad-request",
+            "Bad Request",
+            "response request must include an HTTP method and target",
+        );
+    };
+    let path = split_target(target).0;
+    match (method, response_collection_session_ref(path)) {
+        ("POST", Some(session_ref)) => handle_post(request, session_ref, authority, runtime),
+        (_, Some(_)) => method_not_allowed(),
+        _ => ResponseHttpResponse::problem(
+            404,
+            "urn:psychometrics-commons:problem:not-found",
+            "Not Found",
+            "response routes accept POST /v1/sessions/{session_ref}/responses only",
+        ),
+    }
+}
+
+/// Bind a blocking TCP listener for public response HTTP.
+///
+/// Tests and local operators typically bind `127.0.0.1:0`. Hosted processes bind
+/// `0.0.0.0:$PORT`. This function does not start accepting connections. The
+/// hardened accept/read/write loop is owned by `response_http_boundary.rs`.
+///
+/// # Errors
+///
+/// Returns the I/O error if the operating system cannot bind the address.
+pub fn bind_response_http(addr: SocketAddr) -> io::Result<TcpListener> {
+    TcpListener::bind(addr)
+}
+
+fn method_not_allowed() -> ResponseHttpResponse {
+    ResponseHttpResponse::problem(
+        405,
+        "urn:psychometrics-commons:problem:method-not-allowed",
+        "Method Not Allowed",
+        "response routes accept POST /v1/sessions/{session_ref}/responses only",
+    )
+}
+
+fn handle_post(
+    request: &str,
+    session_ref: &str,
+    authority: Option<(&ResponseWriteAuthority<'_>, &ParticipantRecord)>,
+    runtime: &mut ResponseHttpRuntime,
+) -> ResponseHttpResponse {
+    if !response_session_ref_is_transport_safe(session_ref) {
+        return ResponseHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:bad-request",
+            "Bad Request",
+            "session_ref must be an exact opaque non-numeric session identity",
+        );
+    }
+    let idempotency_key = match single_header_value(request, "idempotency-key") {
+        Err(()) => {
+            return ResponseHttpResponse::problem(
+                400,
+                "urn:psychometrics-commons:problem:bad-request",
+                "Bad Request",
+                "response request headers must be well formed and contain exactly one Idempotency-Key header",
+            );
+        }
+        Ok(Some(value)) => match valid_idempotency_key(value) {
+            Some(value) => value,
+            None => {
+                return ResponseHttpResponse::problem(
+                    400,
+                    "urn:psychometrics-commons:problem:invalid-reference",
+                    "Invalid Reference",
+                    "Idempotency-Key must be an exact opaque non-numeric response-event identity",
+                );
+            }
+        },
+        Ok(None) => {
+            return ResponseHttpResponse::problem(
+                400,
+                "urn:psychometrics-commons:problem:missing-idempotency-key",
+                "Missing Idempotency Key",
+                "POST /v1/sessions/{session_ref}/responses requires an opaque Idempotency-Key header",
+            );
+        }
+    };
+    let Some(body) = request_body(request) else {
+        return ResponseHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:bad-request",
+            "Bad Request",
+            "response write requires a JSON object body",
+        );
+    };
+    let Some(write) = parse_write_body(body) else {
+        return ResponseHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:bad-request",
+            "Bad Request",
+            "response write requires item_version_ref and payload_digest strings only",
+        );
+    };
+    record_response(runtime, session_ref, idempotency_key, &write, authority)
+}
+
+fn record_response(
+    runtime: &mut ResponseHttpRuntime,
+    session_ref: &str,
+    client_event_ref: &str,
+    write: &ResponseWriteBody,
+    authority: Option<(&ResponseWriteAuthority<'_>, &ParticipantRecord)>,
+) -> ResponseHttpResponse {
+    let Some(session) = runtime.sessions.get(session_ref) else {
+        return session_not_found_problem();
+    };
+    let Some((authority, participant)) = authority else {
+        return session_not_found_problem();
+    };
+    if !response_session_authorized(authority, participant, session) {
+        return session_not_found_problem();
+    }
+
+    let release_ref = session.instrument_release_ref().to_owned();
+    let Some(release) = runtime.releases.get(&release_ref) else {
+        return ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:instrument-release-not-found",
+            "Instrument Release Not Found",
+            "response write requires the session's bound instrument release in this process catalog",
+        );
+    };
+    if !release
+        .manifest()
+        .item_version_refs()
+        .iter()
+        .any(|item| item == &write.item_version_ref)
+    {
+        return ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:item-not-in-release",
+            "Item Not In Release",
+            "Use an item_version_ref from the session's published instrument release",
+        );
+    }
+    let server_event_ref = runtime.next_server_event_ref.clone();
+    let prior_len = runtime.event_count(session_ref);
+
+    if runtime.used_server_event_refs.contains(&server_event_ref) {
+        let mut candidate = runtime
+            .ledgers
+            .get(session_ref)
+            .cloned()
+            .unwrap_or_else(|| {
+                ResponseLedger::from_session(session)
+                    .expect("stored session already passed product identity validation")
+            });
+        let classified = candidate.record(
+            session,
+            ResponseWrite {
+                server_event_ref: &server_event_ref,
+                client_event_ref,
+                item_version_ref: &write.item_version_ref,
+                payload_digest: &write.payload_digest,
+            },
+        );
+        return match classified {
+            Ok(event) if candidate.len() == prior_len => {
+                ResponseHttpResponse::json(200, event_body(session_ref, &event))
+            }
+            Ok(_) => write_problem(WriteError::ServerReferenceConflict),
+            Err(error) => write_problem(error),
+        };
+    }
+
+    let recorded = {
+        let ledger = runtime
+            .ledgers
+            .entry(session_ref.to_owned())
+            .or_insert_with(|| {
+                ResponseLedger::from_session(session)
+                    .expect("stored session already passed product identity validation")
+            });
+        ledger.record(
+            session,
+            ResponseWrite {
+                server_event_ref: &server_event_ref,
+                client_event_ref,
+                item_version_ref: &write.item_version_ref,
+                payload_digest: &write.payload_digest,
+            },
+        )
+    };
+    match recorded {
+        Ok(event) => {
+            let created = runtime.event_count(session_ref) > prior_len;
+            if created {
+                runtime.used_server_event_refs.insert(server_event_ref);
+                runtime.advance_generated_server_event_ref();
+            }
+            ResponseHttpResponse::json(
+                if created { 201 } else { 200 },
+                event_body(session_ref, &event),
+            )
+        }
+        Err(error) => write_problem(error),
+    }
+}
+
+fn response_session_authorized(
+    authority: &ResponseWriteAuthority<'_>,
+    participant: &ParticipantRecord,
+    session: &AssessmentSession,
+) -> bool {
+    if participant.participant_ref() != session.participant_ref() {
+        return false;
+    }
+    ResourceScope::participant_owned(
+        ResourceKind::AssessmentSession,
+        participant.tenant_ref(),
+        participant.participant_ref(),
+        session.session_ref(),
+    )
+    .is_ok_and(|resource| match authority {
+        ResponseWriteAuthority::Authenticated(actor) => {
+            authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
+        }
+        ResponseWriteAuthority::Anonymous {
+            context,
+            credential,
+            now_unix_ms,
+        } => {
+            credential.authorizes_session_context_at(context, *now_unix_ms)
+                && authorize_anonymous_session_command(context, participant, session, *now_unix_ms)
+                    .is_ok()
+        }
+    })
+}
+
+fn session_not_found_problem() -> ResponseHttpResponse {
+    ResponseHttpResponse::problem(
+        404,
+        "urn:psychometrics-commons:problem:session-not-found",
+        "Session Not Found",
+        "Use GET /v1/sessions/{session_ref} to confirm the session exists in this process, then POST /v1/sessions/{session_ref}/responses",
+    )
+}
+
+fn write_problem(error: WriteError) -> ResponseHttpResponse {
+    match error {
+        WriteError::SessionNotActive(_) => ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:session-not-active",
+            "Session Not Active",
+            "Activate the session before posting responses",
+        ),
+        WriteError::InvalidReference => ResponseHttpResponse::problem(
+            400,
+            "urn:psychometrics-commons:problem:invalid-reference",
+            "Invalid Reference",
+            "response identity references must use exact opaque non-numeric spelling",
+        ),
+        WriteError::EmptyReference | WriteError::InvalidPayloadDigest => {
+            ResponseHttpResponse::problem(
+                400,
+                "urn:psychometrics-commons:problem:invalid-payload-digest",
+                "Invalid Payload Digest",
+                "payload_digest must be canonical lowercase sha256 evidence",
+            )
+        }
+        WriteError::IdempotencyConflict => ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:idempotency-conflict",
+            "Idempotency Conflict",
+            "Idempotency-Key was reused with a different item_version_ref or payload_digest",
+        ),
+        WriteError::ServerReferenceConflict => ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:server-reference-conflict",
+            "Server Reference Conflict",
+            "server event reference was already used by another response event",
+        ),
+        WriteError::SnapshotRequiresCompleted(_) => ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:snapshot-requires-completed",
+            "Snapshot Requires Completed",
+            "response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete",
+        ),
+        WriteError::SessionMismatch => ResponseHttpResponse::problem(
+            409,
+            "urn:psychometrics-commons:problem:session-response-binding-mismatch",
+            "Session Response Binding Mismatch",
+            "the response ledger is not bound to the requested assessment session",
+        ),
+    }
+}
+
+struct ResponseWriteBody {
+    item_version_ref: String,
+    payload_digest: String,
+}
+
+fn parse_write_body(body: &str) -> Option<ResponseWriteBody> {
+    let fields = parse_string_object(body)?;
+    if fields.len() != 2 {
+        return None;
+    }
+    Some(ResponseWriteBody {
+        item_version_ref: fields.get("item_version_ref")?.clone(),
+        payload_digest: fields.get("payload_digest")?.clone(),
+    })
+}
+
+fn parse_string_object(body: &str) -> Option<HashMap<String, String>> {
+    let trimmed = body.trim();
+    let inner = trimmed.strip_prefix('{')?.strip_suffix('}')?;
+    let mut fields = HashMap::new();
+    let mut rest = inner.trim();
+    if rest.is_empty() {
+        return Some(fields);
+    }
+    loop {
+        let (key, after_key) = parse_json_string(rest)?;
+        let after_colon = after_key.trim_start().strip_prefix(':')?.trim_start();
+        let (value, after_value) = parse_json_string(after_colon)?;
+        if fields.insert(key, value).is_some() {
+            return None;
+        }
+        let after_value = after_value.trim_start();
+        if after_value.is_empty() {
+            return Some(fields);
+        }
+        rest = after_value.strip_prefix(',')?.trim_start();
+        if rest.is_empty() {
+            return None;
+        }
+    }
+}
+
+fn parse_json_string(input: &str) -> Option<(String, &str)> {
+    let rest = input.strip_prefix('"')?;
+    let mut decoded = String::new();
+    let mut chars = rest.char_indices();
+    while let Some((index, character)) = chars.next() {
+        match character {
+            '"' => return Some((decoded, &rest[index + 1..])),
+            '\\' => match chars.next()?.1 {
+                '"' => decoded.push('"'),
+                '\\' => decoded.push('\\'),
+                'n' => decoded.push('\n'),
+                'r' => decoded.push('\r'),
+                't' => decoded.push('\t'),
+                _ => return None,
+            },
+            character if character.is_control() => return None,
+            character => decoded.push(character),
+        }
+    }
+    None
+}
+
+fn event_body(session_ref: &str, event: &ResponseEvent) -> String {
+    format!(
+        "{{\"session_ref\":{},\"server_event_ref\":{},\"client_event_ref\":{},\"item_version_ref\":{},\"payload_digest\":{},\"sequence\":{}}}",
+        json_string(session_ref),
+        json_string(event.server_event_ref()),
+        json_string(event.client_event_ref()),
+        json_string(event.item_version_ref()),
+        json_string(event.payload_digest()),
+        event.sequence()
+    )
+}
+
+fn response_collection_session_ref(path: &str) -> Option<&str> {
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let (session_ref, tail) = rest.split_once('/')?;
+    (tail == "responses" && !session_ref.is_empty()).then_some(session_ref)
+}
+
+/// Return whether a path-extracted session reference survives transport hygiene.
+///
+/// Percent escapes and whitespace cannot survive a well-formed request target,
+/// yet the guard stays explicit so encoded or padded identities keep failing
+/// closed even if target parsing ever relaxes. Numeric-like identities are
+/// rejected by [`normalized_reference`].
+fn response_session_ref_is_transport_safe(session_ref: &str) -> bool {
+    !session_ref.contains('%')
+        && !session_ref.chars().any(char::is_whitespace)
+        && normalized_reference(session_ref) == Some(session_ref)
+}
+
+fn valid_idempotency_key(value: &str) -> Option<&str> {
+    let normalized = value.trim();
+    if normalized.is_empty() || normalized.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let numeric_like = normalized.chars().any(char::is_numeric)
+        && normalized
+            .chars()
+            .all(|character| character.is_numeric() || matches!(character, '+' | '-' | '.' | ','));
+    if numeric_like {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn single_header_value<'a>(request: &'a str, name: &str) -> Result<Option<&'a str>, ()> {
+    let headers = request
+        .split_once("\r\n\r\n")
+        .map_or(request, |(headers, _)| headers);
+    if !has_strict_crlf(headers) {
+        return Err(());
+    }
+
+    let mut found = None;
+    for line in headers.split("\r\n").skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        let Some((header_name, value)) = line.split_once(':') else {
+            return Err(());
+        };
+        if !valid_http_field_name(header_name) {
+            return Err(());
+        }
+        if header_name.eq_ignore_ascii_case(name) {
+            if found.is_some() {
+                return Err(());
+            }
+            found = Some(value.trim_matches(&[' ', '\t'][..]));
+        }
+    }
+    Ok(found)
+}
+
+fn has_strict_crlf(headers: &str) -> bool {
+    let bytes = headers.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' => {
+                if bytes.get(index + 1) != Some(&b'\n') {
+                    return false;
+                }
+                index += 2;
+            }
+            b'\n' => return false,
+            _ => index += 1,
+        }
+    }
+    true
+}
+
+fn valid_http_field_name(header_name: &str) -> bool {
+    !header_name.is_empty()
+        && header_name
+            .bytes()
+            .all(|byte| HTTP_FIELD_NAME_BYTES.contains(&byte))
+}
+
+fn request_body(request: &str) -> Option<&str> {
+    let (headers, body) = request.split_once("\r\n\r\n")?;
+    if single_header_value(headers, "transfer-encoding")
+        .ok()?
+        .is_some()
+    {
+        return None;
+    }
+    let content_length = single_header_value(headers, "content-length")
+        .ok()??
+        .parse::<usize>()
+        .ok()?;
+    if body.len() != content_length {
+        return None;
+    }
+    Some(&body[..content_length])
+}
+
+fn parse_request_line(request: &str) -> Option<(&str, &str)> {
+    let line = request.lines().next()?;
+    let mut parts = line.split_whitespace();
+    let method = parts.next()?;
+    let target = parts.next()?;
+    let version = parts.next()?;
+    if !version.starts_with("HTTP/") || parts.next().is_some() {
+        return None;
+    }
+    Some((method, target))
+}
+
+fn split_target(target: &str) -> (&str, &str) {
+    target.split_once('?').unwrap_or((target, ""))
+}
+
+fn json_string(value: &str) -> String {
+    let mut encoded = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            '\n' => encoded.push_str("\\n"),
+            '\r' => encoded.push_str("\\r"),
+            '\t' => encoded.push_str("\\t"),
+            character if character.is_control() => {
+                let _ = write!(encoded, "\\u{:04x}", u32::from(character));
+            }
+            character => encoded.push(character),
+        }
+    }
+    encoded.push('"');
+    encoded
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::{
+        has_strict_crlf, json_string, request_body, response_collection_session_ref,
+        response_session_authorized, response_session_ref_is_transport_safe, single_header_value,
+        split_target, valid_http_field_name, valid_idempotency_key, write_problem,
+        ResponseHttpRuntime, ResponseWriteAuthority,
+    };
+    use crate::authorization::{AuthorizationContext, ProductRole};
+    use crate::participant::ParticipantRecord;
+    use crate::response::WriteError;
+    use crate::session::{AssessmentSession, SessionState};
+
+    #[test]
+    fn helpers_cover_paths_escapes_and_identity_guards() {
+        assert_eq!(
+            response_collection_session_ref("/v1/sessions/ses_one/responses"),
+            Some("ses_one")
+        );
+        assert_eq!(
+            response_collection_session_ref("/v1/sessions/ses_one/commands"),
+            None
+        );
+        assert_eq!(response_collection_session_ref("/v1/sessions"), None);
+        assert_eq!(json_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
+        assert_eq!(json_string("a\n\r\t"), "\"a\\n\\r\\t\"");
+        assert_eq!(json_string("\u{0001}"), "\"\\u0001\"");
+        assert_eq!(
+            split_target("/v1/sessions/ses_one/responses?x=1"),
+            ("/v1/sessions/ses_one/responses", "x=1")
+        );
+        assert_eq!(valid_idempotency_key("idem_ok"), Some("idem_ok"));
+        assert_eq!(valid_idempotency_key("42"), None);
+        assert_eq!(valid_idempotency_key("   "), None);
+        assert_eq!(valid_idempotency_key("idem spaced key"), None);
+        assert!(valid_http_field_name("Content-Length"));
+        assert!(!valid_http_field_name(""));
+        assert!(single_header_value("POST / HTTP/1.1\r\n: value\r\n\r\n", "host").is_err());
+        assert_eq!(
+            request_body("POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"),
+            Some("{}")
+        );
+        assert!(!has_strict_crlf("A: b\rX"));
+    }
+
+    #[test]
+    fn session_ref_guard_rejects_escapes_whitespace_aliases_and_numeric_identity() {
+        assert!(response_session_ref_is_transport_safe(
+            "ses_opaque_identity"
+        ));
+        assert!(!response_session_ref_is_transport_safe("%20ses_padded"));
+        assert!(!response_session_ref_is_transport_safe("ses\u{00a0}padded"));
+        assert!(!response_session_ref_is_transport_safe("42"));
+    }
+
+    #[test]
+    fn write_problem_maps_every_error_to_its_stable_problem() {
+        let cases = [
+            (
+                WriteError::SessionNotActive(SessionState::Scoring),
+                409,
+                "urn:psychometrics-commons:problem:session-not-active",
+                "Session Not Active",
+                "Activate the session before posting responses",
+            ),
+            (
+                WriteError::InvalidReference,
+                400,
+                "urn:psychometrics-commons:problem:invalid-reference",
+                "Invalid Reference",
+                "response identity references must use exact opaque non-numeric spelling",
+            ),
+            (
+                WriteError::EmptyReference,
+                400,
+                "urn:psychometrics-commons:problem:invalid-payload-digest",
+                "Invalid Payload Digest",
+                "payload_digest must be canonical lowercase sha256 evidence",
+            ),
+            (
+                WriteError::InvalidPayloadDigest,
+                400,
+                "urn:psychometrics-commons:problem:invalid-payload-digest",
+                "Invalid Payload Digest",
+                "payload_digest must be canonical lowercase sha256 evidence",
+            ),
+            (
+                WriteError::IdempotencyConflict,
+                409,
+                "urn:psychometrics-commons:problem:idempotency-conflict",
+                "Idempotency Conflict",
+                "Idempotency-Key was reused with a different item_version_ref or payload_digest",
+            ),
+            (
+                WriteError::ServerReferenceConflict,
+                409,
+                "urn:psychometrics-commons:problem:server-reference-conflict",
+                "Server Reference Conflict",
+                "server event reference was already used by another response event",
+            ),
+            (
+                WriteError::SnapshotRequiresCompleted(SessionState::Scoring),
+                409,
+                "urn:psychometrics-commons:problem:snapshot-requires-completed",
+                "Snapshot Requires Completed",
+                "response snapshots are created after POST /v1/sessions/{session_ref}/commands Complete",
+            ),
+            (
+                WriteError::SessionMismatch,
+                409,
+                "urn:psychometrics-commons:problem:session-response-binding-mismatch",
+                "Session Response Binding Mismatch",
+                "the response ledger is not bound to the requested assessment session",
+            ),
+        ];
+        for (error, status, type_uri, title, detail) in cases {
+            let response = write_problem(error);
+            assert_eq!(response.status(), status, "{type_uri}");
+            assert_eq!(response.content_type(), "application/problem+json");
+            assert!(response.body().contains(type_uri), "{type_uri}");
+            assert!(response.body().contains(title), "{type_uri}");
+            assert!(response.body().contains(detail), "{type_uri}");
+        }
+    }
+
+    #[test]
+    fn empty_runtime_reports_zero_events_and_accepts_cursor_rebinding() {
+        let mut runtime = ResponseHttpRuntime::new(Vec::new(), Vec::new(), "evt_seed");
+        assert_eq!(runtime.event_count("ses_unknown"), 0);
+        runtime.replace_next_server_event_ref(String::from("evt_rebound"));
+        assert_eq!(runtime.event_count("ses_unknown"), 0);
+    }
+
+    #[test]
+    fn response_authorization_rejects_a_foreign_participant_before_scope_creation() {
+        let session = AssessmentSession::from_persisted_created(
+            "ses_response_http_authorization",
+            "ptc_response_http_authorization",
+            "release_response_http_authorization",
+            "version_response_http_authorization",
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "en-US",
+            1_000,
+        )
+        .unwrap();
+        let foreign_participant = ParticipantRecord::new_anonymous(
+            "ptc_response_http_authorization_foreign",
+            "tenant_response_http_authorization",
+            1_001,
+        )
+        .unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_response_http_authorization",
+            "subject_response_http_authorization",
+            Some("ptc_response_http_authorization"),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let authority = ResponseWriteAuthority::Authenticated(&actor);
+
+        assert!(!response_session_authorized(
+            &authority,
+            &foreign_participant,
+            &session
+        ));
+    }
+}

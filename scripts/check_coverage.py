@@ -37,8 +37,75 @@ def validate_kind(totals: Mapping[str, Any], kind: str) -> str:
     return f"{kind} coverage: PASS ({covered}/{count}, 100%)"
 
 
+def validate_lcov_kind(path: Path, kind: str) -> str:
+    """Validate merged LCOV records without counting duplicate instantiations."""
+    if kind not in {"lines", "branches"}:
+        raise ValueError(f"unsupported LCOV coverage kind: {kind}")
+    record_prefix = "DA:" if kind == "lines" else "BRDA:"
+    count = 0
+    covered = 0
+    source: str | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith("SF:"):
+            if source is not None:
+                raise ValueError("LCOV source records must end before another source starts")
+            source = line[3:]
+            if not source:
+                raise ValueError("LCOV source records must name a file")
+        elif line == "end_of_record":
+            if source is None:
+                raise ValueError("LCOV end records must follow a source record")
+            source = None
+        elif line.startswith(record_prefix):
+            if source is None:
+                raise ValueError(f"LCOV {kind} record is outside a source record")
+            fields = line[len(record_prefix) :].split(",")
+            if kind == "lines":
+                if len(fields) < 2:
+                    raise ValueError("LCOV line records must contain a line and hit count")
+                try:
+                    line_number = int(fields[0])
+                    hits = int(fields[1])
+                except ValueError as error:
+                    raise ValueError("LCOV line records must contain integer values") from error
+                if line_number < 0 or hits < 0:
+                    raise ValueError("LCOV line numbers and hit counts cannot be negative")
+            else:
+                if len(fields) != 4:
+                    raise ValueError("LCOV branch records must contain four fields")
+                try:
+                    line_number = int(fields[0])
+                except ValueError as error:
+                    raise ValueError("LCOV branch records must contain an integer line") from error
+                if line_number < 0:
+                    raise ValueError("LCOV branch line numbers cannot be negative")
+                if fields[3] == "-":
+                    hits = 0
+                else:
+                    try:
+                        hits = int(fields[3])
+                    except ValueError as error:
+                        raise ValueError(
+                            "LCOV branch records must contain an integer hit count"
+                        ) from error
+                    if hits < 0:
+                        raise ValueError("LCOV branch hit counts cannot be negative")
+            count += 1
+            covered += int(hits > 0)
+    if source is not None:
+        raise ValueError("LCOV report ended before the source record was closed")
+    if count == 0:
+        raise ValueError(f"LCOV report does not contain {kind} records")
+    if covered != count:
+        raise ValueError(f"{kind} coverage is incomplete: {covered}/{count}")
+    return f"{kind} coverage: PASS ({covered}/{count}, 100%)"
+
+
 def validate_report(path: Path, kinds: Sequence[str]) -> list[str]:
     """Validate all requested coverage kinds in a report."""
+    if path.suffix == ".lcov":
+        return [validate_lcov_kind(path, kind) for kind in kinds]
     totals = load_totals(path)
     return [validate_kind(totals, kind) for kind in kinds]
 
