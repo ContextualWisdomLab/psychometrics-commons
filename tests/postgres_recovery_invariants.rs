@@ -3,7 +3,8 @@
 //! This is deliberately narrower than a production backup-service claim. It rebuilds a clean
 //! schema from the repository migration chain, streams recovery-critical rows through `PostgreSQL`
 //! `COPY ... FORMAT BINARY`, restores them into that clean schema, and then proves that immutable
-//! provenance, tenant-scoped deduplication, and in-flight fencing evidence still behave correctly.
+//! provenance, tenant-scoped deduplication, audit immutability, and in-flight fencing evidence still
+//! behave correctly.
 
 use postgres::{error::SqlState, Client, NoTls};
 use std::fs;
@@ -98,6 +99,14 @@ fn seed_recovery_critical_state(client: &mut Client) {
              ) VALUES (
                 'snapshot_recovery_alpha', 1, 'response_recovery_alpha',
                 'item_version_recovery_alpha', '{DIGEST_A}'
+             );
+             INSERT INTO {SOURCE_SCHEMA}.audit_evidence_record (
+                audit_event_ref, tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
+                outcome_code, evidence_digest, occurred_at_unix_ms
+             ) VALUES (
+                'audit_event_recovery_alpha', 'tenant_recovery_alpha', 'operator_recovery_alpha',
+                'recovery_acceptance', 'verify_restore_invariants', 'restore_exercise_alpha',
+                'succeeded', '{DIGEST_B}', 15000
              );"
         ))
         .expect("recovery fixture should satisfy all protected-main persistence constraints");
@@ -207,6 +216,69 @@ fn assert_restored_evidence(client: &mut Client) {
         "response_recovery_alpha"
     );
     assert_eq!(restored_snapshot.get::<_, String>(3), DIGEST_A);
+
+    let restored_audit = client
+        .query_one(
+            &format!(
+                "SELECT tenant_ref, actor_ref, purpose_code, action_code, resource_ref,
+                        outcome_code, evidence_digest, occurred_at_unix_ms
+                 FROM {RESTORED_SCHEMA}.audit_evidence_record
+                 WHERE audit_event_ref = 'audit_event_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect("immutable audit evidence should survive restore");
+    assert_eq!(restored_audit.get::<_, String>(0), "tenant_recovery_alpha");
+    assert_eq!(
+        restored_audit.get::<_, String>(1),
+        "operator_recovery_alpha"
+    );
+    assert_eq!(restored_audit.get::<_, String>(2), "recovery_acceptance");
+    assert_eq!(
+        restored_audit.get::<_, String>(3),
+        "verify_restore_invariants"
+    );
+    assert_eq!(restored_audit.get::<_, String>(4), "restore_exercise_alpha");
+    assert_eq!(restored_audit.get::<_, String>(5), "succeeded");
+    assert_eq!(restored_audit.get::<_, String>(6), DIGEST_B);
+    assert_eq!(restored_audit.get::<_, i64>(7), 15000);
+}
+
+fn assert_restored_audit_controls(client: &mut Client) {
+    let direct_delete = client
+        .execute(
+            &format!(
+                "DELETE FROM {RESTORED_SCHEMA}.audit_evidence_record
+                 WHERE audit_event_ref = 'audit_event_recovery_alpha'"
+            ),
+            &[],
+        )
+        .expect_err("restored audit evidence must remain append-only outside bounded retention");
+    let database_error = direct_delete
+        .as_db_error()
+        .expect("restored audit deletion denial must come from the database trigger boundary");
+    assert_eq!(
+        database_error.code(),
+        &SqlState::OBJECT_NOT_IN_PREREQUISITE_STATE
+    );
+
+    let public_execute: bool = client
+        .query_one(
+            &format!(
+                "SELECT has_function_privilege(
+                    'public',
+                    '{RESTORED_SCHEMA}.expire_audit_evidence_before(text,bigint)',
+                    'EXECUTE'
+                 )"
+            ),
+            &[],
+        )
+        .expect("restored retention privilege should remain inspectable")
+        .get(0);
+    assert!(
+        !public_execute,
+        "restore must not broaden audit-retention execution to PUBLIC"
+    );
 }
 
 fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
@@ -254,7 +326,7 @@ fn assert_restored_tenant_scoped_deduplication(client: &mut Client) {
 }
 
 #[test]
-fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
+fn clean_restore_preserves_provenance_deduplication_audit_and_fencing_state() {
     let mut client = connect_client();
     client
         .query_one("SELECT pg_advisory_lock($1)", &[&DATABASE_TEST_LOCK_KEY])
@@ -270,6 +342,7 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
         "integration_consumption",
         "response_snapshot",
         "response_snapshot_entry",
+        "audit_evidence_record",
     ];
     let backups: Vec<(&str, Vec<u8>)> = tables
         .iter()
@@ -282,6 +355,7 @@ fn clean_restore_preserves_provenance_deduplication_and_fencing_state() {
     }
 
     assert_restored_evidence(&mut client);
+    assert_restored_audit_controls(&mut client);
     assert_restored_tenant_scoped_deduplication(&mut client);
 
     client

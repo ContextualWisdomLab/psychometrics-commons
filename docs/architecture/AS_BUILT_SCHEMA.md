@@ -1,14 +1,14 @@
 # As-Built PostgreSQL Schema Map
 
 - Status: Normative evidence map
-- Date: 2026-08-14
-- Protected-main baseline: `cc5850a0d1eacbbf16d03075534fce460a8286e6`
+- Date: 2026-08-27
+- Protected-main baseline: `09534ef52c9307ce0dc559e9d908ebd715c641a1`
 
 This document records which portions of the logical ERD have executable PostgreSQL migrations and adapters. It does **not** promote active-PR DDL or target entities to protected-main truth. `ERD.md` remains the normative logical model; this file is the physical/as-built maturity companion required once migrations exist. Status terms follow `docs/TRACEABILITY.md`: **Implemented** means evidence exists on the named protected-main baseline, **Active PR** means evidence exists only on an open PR, and **Target** means required behavior not yet implemented on that baseline.
 
 ## Protected-main physical schema
 
-Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, and instrument releases. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
+Protected main contains executable PostgreSQL 18 persistence subsets for integration delivery, scoring-job state, instrument releases, and longitudinal observation evidence. Each listed subset has an owning adapter and real PostgreSQL contract evidence on or before the named protected-main baseline. These are bounded persistence slices, not claims that the complete product lifecycle is deployed or GA-ready.
 
 | Physical object | Logical ownership | Protected-main maturity |
 |---|---|---|
@@ -18,7 +18,10 @@ Protected main contains executable PostgreSQL 18 persistence subsets for integra
 | `scoring_job_state` | scoring | Implemented subset |
 | `instrument_release` | instrument publication | Implemented subset |
 | `integration_consumption` | integration | Implemented subset |
+| `longitudinal_observation` | longitudinal orchestration/evidence | Implemented subset via merged #248 |
+| `longitudinal_membership_share` | longitudinal membership evidence | Implemented subset via merged #248 |
 | `assessment_session` | session | **Active PR** #218 (not protected-main truth) |
+| `audit_evidence_record` | product audit/security evidence | **Active PR** #406 (not protected-main truth) |
 
 The protected-main integration identity is source- and tenant-scoped. A physical implementation must continue to preserve the stronger logical tenant/resource, replay, and crash-safety invariants in ADR-0014 and ADR-0015.
 
@@ -26,9 +29,9 @@ The protected-main integration identity is source- and tenant-scoped. A physical
 
 PR #218 (`migrations/0014_assessment_session.sql`, `migrations/0016_assessment_session_command.sql`, and `src/postgres_assessment_session.rs`) persist and load one assessment-session identity bound to a published locale-specific release, plus append-only command history. New sessions start only through `created_session_for_start` / `start_created_assessment_session` / `start_created_assessment_session_from_stored_release`. Durable start locks `instrument_release` with `SELECT … FOR UPDATE` so a stale in-memory Published object cannot insert after persist Suspend or Retire. First insert through `persist_assessment_session` takes the same lock, so a reconstituted Created aggregate cannot insert after that later persist. When that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate so a concurrent retry after the first insert commits cannot turn a later Suspend or Retire into a false unpublished failure. Exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire. The slice is **Active PR**, not protected-main truth. It stores participant, release, version, digest, locale, current state, and creation time. Exact replay is idempotent. Rebinding any stored field or command evidence, or persisting a shorter command history than already stored, fails closed so a stale Activate-only worker cannot rewind Pause/Resume. Command persist locks the `assessment_session` header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load restores created identity without asking whether the release still accepts new sessions, then replays commands so Activate/Pause/Resume survive restart. Isolation is the global opaque `session_ref` primary key; this slice does not add `tenant_ref` because the domain `AssessmentSession` aggregate does not carry tenant. Persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` (`src/session_http.rs`, `openapi/sessions.yaml`) sit on this start path. Command HTTP remains outside this slice. #205 is the unlocked-peek first-insert-seal predecessor; #209 is the weaker NotFound-allows-insert competitor; #198 is the exact start-replay predecessor; #180 is the stored-publication lock predecessor; #188 is the in-memory replay predecessor that still lacks the store lock; #153 is the in-memory-start predecessor; #164 is the unlocked stored-load predecessor; #146 is the header-lock predecessor; #129 is the sequential stale-prefix predecessor; #125 is the command-history predecessor that still rewinds on a stale shorter persist; #109 is the persist-and-load predecessor.
 
-## Active PR longitudinal-observation physical schema
+## Protected-main longitudinal-observation physical schema
 
-PR #248 (`migrations/0031_longitudinal_observation.sql` and `src/postgres_longitudinal_observation.rs`) is **Active PR / IMPLEMENTED_ON_ACTIVE_PR**, not protected-main truth. It maps the logical `longitudinal_observation_record` semantics in `ERD.md` onto two product-owned PostgreSQL 18 relations without moving Gyeot collection or TEPP temporal/multilevel/multiple-membership analysis into this repository.
+Merged PR #248 (`migrations/0031_longitudinal_observation.sql` and `src/postgres_longitudinal_observation.rs`) is an **Implemented subset** on protected main `09534ef52c9307ce0dc559e9d908ebd715c641a1`. It maps the logical `longitudinal_observation_record` semantics in `ERD.md` onto two product-owned PostgreSQL 18 relations without moving Gyeot collection or TEPP temporal/multilevel/multiple-membership analysis into this repository.
 
 - `longitudinal_observation` is the immutable parent record. Its opaque observation, tenant, enrollment, source-system, and source-observation references preserve the logical record identity and source provenance; validity, source-recorded, platform-received, and durable-ingestion clocks remain separate; civil-time/UTC-offset and clock-anomaly evidence are retained rather than collapsed.
 - `longitudinal_membership_share` is the immutable one-to-many membership relation owned by one observation record. Each opaque membership-context reference carries an integer share, and the migration defers the aggregate invariant that one observation's shares total exactly 10,000 basis points until transaction completion.
@@ -89,6 +92,16 @@ The protected-main slice persists:
 - fail-closed digest/identity rebinding and unreachable lifecycle rewind.
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
+
+## Active PR audit-evidence physical schema
+
+PR #406 adds purpose-bound audit evidence as **Active PR** implementation only. `migrations/0040_audit_evidence_record.sql` and `src/postgres_audit.rs` define and own `audit_evidence_record`; `migrations/0041_audit_evidence_retention.sql` and `src/postgres_audit_retention.rs` add a deployment-authorized retention primitive without choosing a universal retention duration or granting execution to PUBLIC.
+
+The active slice persists only minimized audit metadata: opaque audit-event, tenant, actor, and resource references; stable purpose/action/outcome codes; a canonical lowercase SHA-256 digest binding separately retained supporting evidence; and the server-authoritative event time. Raw assessment responses, credentials, reflective text, and provider payloads are outside this table. Rows are append-only under ordinary `UPDATE`, `DELETE`, and `TRUNCATE`; exact replay is idempotent and conflicting replay fails closed. Caller reads require both tenant and audit-event identity so a cross-tenant miss does not become an existence oracle.
+
+The retention migration installs a tenant-scoped cutoff operation, rejects invalid tenants and non-positive/future cutoffs, revokes PUBLIC execution, and only opens the otherwise append-only delete trigger while the security-definer routine is executing. Deployments remain responsible for explicitly granting that routine to an approved maintenance authority and for choosing lawful retention/legal-hold policy. PR #406 also extends clean-schema binary-COPY recovery acceptance so restored audit provenance and append-only/retention boundaries are exercised. This is repository-level recovery evidence only: it is not a deployed backup service, measured SLO/RPO/RTO, or certification claim.
+
+The fixed-schema retention tests are serialized with a PostgreSQL session advisory lock on the active branch so concurrent Cargo/test processes sharing `TEST_DATABASE_URL` cannot destroy each other's schema. The lock has a bounded acquisition timeout and a second-session visibility regression. This test-fixture reliability hardening is evidence for the active slice, not a production locking requirement.
 
 ## Logical-to-physical mapping rule
 

@@ -14,6 +14,7 @@ erDiagram
     tenant_account ||--o{ assessment_participant : owns
     tenant_account ||--o{ instrument_definition : owns
     tenant_account ||--o{ data_rights_request : scopes
+    tenant_account ||--o{ audit_evidence_record : scopes
 
     instrument_definition ||--|{ instrument_version : versions
     item_definition ||--|{ item_version : versions
@@ -68,6 +69,19 @@ erDiagram
       string tenant_ref PK
       string tenant_status
       timestamp created_at
+    }
+
+    audit_evidence_record {
+      string audit_event_ref PK
+      string tenant_ref FK
+      string actor_ref
+      string purpose_code
+      string action_code
+      string resource_ref
+      string outcome_code
+      string evidence_digest
+      int occurred_at_unix_ms
+      timestamp recorded_at
     }
 
     instrument_definition {
@@ -448,6 +462,7 @@ erDiagram
 The target ERD deliberately includes several logical entities that are not yet physical tables:
 
 - `instrument_release` is the locale-specific publication identity already owned by `src/instrument.rs`. Physical `migrations/0006_instrument_release.sql` persists that one-row aggregate (immutable manifest columns plus `publication_state`); HTTP publication transport remains Target.
+- `audit_evidence_record` is the product-owned logical audit record for purpose-bound privileged-action, authorization-denial, governance, and operator evidence. **Active PR #406** carries `migrations/0040_audit_evidence_record.sql`, bounded retention in `0041`, and dedicated-owner hardening in `0042`; this remains `IMPLEMENTED_ON_ACTIVE_PR`, not protected-main truth. The record binds an opaque tenant/actor/resource identity, stable purpose/action/outcome codes, a canonical evidence digest, and occurrence/recording time. Ordinary records are append-only; deletion is permitted only through the separately authorized, policy-selected retention capability and must never be represented as record mutation.
 - `data_rights_request` and `data_rights_propagation_state` are the first durable export/deletion slice. Protected main persists requested-state identity plus local propagation and processing evidence. **Active PR #77** adds terminal `completion_evidence_ref` / `completed_at_unix_ms` fields and immutable `data_rights_retained_scope_evidence` child rows for deletion scopes that must remain retained; this is not protected-main truth until #77 is integrated. Dependent-system execution remains Target.
 - Physical `assessment_session` exists only on Active PR #218 (`migrations/0014_assessment_session.sql`): Created identity (participant, release, version, digest, locale, creation time) plus a current-state projection. New sessions start only from a stored published release locked in the same transaction; first insert through `persist_assessment_session` takes the same lock; when that lock finds a missing or unpublished release, persist still classifies an exact stored Created row as duplicate; exact replay of an already stored start or Created row still returns the original session after a later persist Suspend or Retire; reconstitution is load, not start. Physical `assessment_session_command` (`migrations/0016_assessment_session_command.sql`) stores append-only command history so later states reload by replaying Activate/Pause/Resume. A shorter persist than already stored fails closed and does not rewind that projection. Command persist locks the header row with `SELECT … FOR UPDATE` before inserting or counting commands. Load reconstitutes created identity without re-checking current publication eligibility. Persist-backed HTTP create/reload sits on this start path. Protected main still has the `src/session.rs` aggregate only.
 - `item_delivery_event` reflects the already-merged `src/item_delivery.rs` domain primitive; durable persistence/API orchestration is still Target.
@@ -483,6 +498,7 @@ Once semantically published/frozen, the following are append-only or superseded 
 - `result_snapshot`;
 - `consent_snapshot`;
 - `participant_identity_link` history;
+- `audit_evidence_record`, except for separately authorized policy-governed retention expiry that removes eligible records without rewriting them;
 - terminal data-rights completion evidence and `data_rights_retained_scope_evidence` rows once recorded;
 - accepted `longitudinal_observation_record` evidence, with corrections represented by explicit supersession/version policy rather than silent overwrite;
 - approved `dataset_snapshot`;
@@ -496,6 +512,7 @@ A physical schema must enforce equivalents of the following constraints:
 
 | Constraint | Purpose |
 |---|---|
+| unique `audit_event_ref` | immutable audit-event identity; conflicting replay cannot rewrite prior evidence |
 | unique `(session_ref, delivery_sequence)` | authoritative item-presentation order |
 | unique `delivery_event_ref` | no delivery evidence identity reuse |
 | unique `(session_ref, client_event_ref)` | response replay idempotency |
