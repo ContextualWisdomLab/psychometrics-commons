@@ -8,6 +8,7 @@
 //! contracts rather than reimplemented here.
 
 pub mod account_link;
+pub mod account_link_write;
 pub mod anonymous_authorization;
 pub mod anonymous_credential;
 pub mod anonymous_session;
@@ -39,6 +40,7 @@ pub mod postgres_instrument_release;
 pub mod postgres_integration;
 pub mod postgres_item_delivery;
 pub mod postgres_longitudinal_observation;
+pub mod postgres_participant_identity_link;
 pub mod postgres_response_snapshot;
 pub mod postgres_result_snapshot;
 pub mod postgres_scoring_job;

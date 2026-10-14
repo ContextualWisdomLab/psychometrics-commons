@@ -90,6 +90,18 @@ The protected-main slice persists:
 
 The slice does **not** persist publication-event history, bound scientific evidence records, HTTP publication transport, or session-creation integration. Those remain Target unless separately evidenced on protected main.
 
+## Active PR participant identity-link physical schema
+
+PR #206 adds hosted write/recover/unlink commands in `src/account_link_write.rs` on top of `migrations/0022_participant_identity_link.sql` and `src/postgres_participant_identity_link.rs`. Prefer #206 over #176 for write/recover/unlink and #158 for store-wide restore reconcile. Keep #202 as the inspect-line unlink vehicle. Do not merge #176, #160, #147, #133, #124, or #114. The slice is **Active PR**, not protected-main truth. It stores:
+
+- immutable `assessment_participant` identity (`participant_ref`, `tenant_ref`, `created_at_unix_ms`);
+- append-only `participant_identity_link` rows for accepted dual-proof account links;
+- append-only `participant_identity_link_end` rows that end a specific historical link without editing it;
+- derived `current_participant_identity_link` projection enforcing one current link per participant and one current issuer-scoped subject per tenant;
+- composite foreign keys so a link-end or current projection cannot point at another participant's link.
+
+Exact replay is idempotent and reconciles the derived current projection so a missing or stale unique enforcer is restored or cleared. Conflicting event identity fails closed. Reload reconstructs the domain `ParticipantRecord` so a buyer who linked an anonymous assessment to an account still sees that link after restart. A returning account recovers the same `participant_ref` from unterminated issuer-scoped history even when the derived current projection is missing. Hosted write/recover/unlink commands authorize both current proofs before persist, recover from a still-valid authenticated account proof, and end a matching current binding from that proof. After load, recover keeps the participant only when the current tenant, issuer, and subject still match that proof. Hosted unlink reloads stored history before authorization so a stale in-memory record cannot end a rebound current binding. HTTP account-link transport and live Keyverse verification remain Target.
+
 ## Logical-to-physical mapping rule
 
 A logical entity is classified as physical only when all of the following exist on the named protected-main baseline:

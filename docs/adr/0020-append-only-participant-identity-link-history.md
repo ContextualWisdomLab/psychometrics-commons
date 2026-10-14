@@ -19,13 +19,13 @@ Active PR #29 (`fix: scope participant account links by identity issuer`) adds t
 
 A nullable current subject link on a participant projection is therefore useful as an application view, but it is insufficient as the future physical persistence model. In-place replacement would lose who linked or unlinked an account, when the relationship changed, why it changed, and which historical sessions/results were valid under which operational identity context. It would also make identity recovery vulnerable to accidental historical rewrites and would encourage coupling product records to an identity-provider object lifecycle.
 
-This ADR is a mixture of current and target state. Protected main provides stable participant identity plus a fail-closed subject-link primitive. PR #29 provides issuer-scoped first-link behavior on an active branch. Append-only persistence, unlink/relink/recovery transport, and operational evidence remain target behavior until corresponding source, migrations, tests, and release evidence are merged.
+This ADR is a mixture of current and target state. Protected main provides stable participant identity plus an issuer-scoped fail-closed first-link primitive, including dual-proof authorization at the application boundary. Append-only persistence is Active PR work. HTTP unlink/relink/recovery transport, live Keyverse token verification, and backup/restore evidence remain target behavior until corresponding source, migrations, tests, and release evidence are merged.
 
 ### Implementation status
 
-- `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; optional first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link.
-- `IMPLEMENTED_ON_ACTIVE_PR`: PR #29 adds opaque `identity_issuer` binding and issuer-aware replay equality to the first-link domain primitive.
-- `PLANNED`: append-only identity-link persistence, durable transport, unlink/relink/recovery lifecycle, concurrency arbitration, data-rights execution, backup/restore evidence, and live Keyverse verification.
+- `IMPLEMENTED_ON_PROTECTED_MAIN`: stable product-owned `participant_ref`; issuer-scoped first subject link; distinct proof references; exact-replay idempotency; conflicting replay rejection; no silent second link; dual-proof authorization in `src/account_link.rs`.
+- `IMPLEMENTED_ON_ACTIVE_PR`: PR #206 adds hosted dual-proof write/recover/unlink commands in `src/account_link_write.rs` on the append-only persist/reload path, keeps a recovered participant only when the current tenant/issuer/subject still match the proof, and ends that binding from a still-valid current proof. PR #158 adds store-wide restore reconcile of the derived current projection. Prefer #206 over #176 for write/recover/unlink and #158 for restore reconcile. Keep #202 as the inspect-line unlink vehicle. Do not merge #176, #160, #147, #133, #124, or #114.
+- `PLANNED`: durable HTTP transport, unlink/relink HTTP commands, concurrency arbitration beyond the participant row lock, data-rights execution, backup/restore evidence, and live Keyverse verification.
 
 ## Decision
 
@@ -160,7 +160,7 @@ Before account-link persistence is considered GA-complete, exact-head evidence m
 - security tests for account-link/recovery takeover and cross-tenant access;
 - exact deployment-profile recovery evidence before any GA/SLO/RPO/RTO claim involving this persistence.
 
-Protected main satisfies only the domain-level stable first-link portion of this decision and does not yet bind issuer. PR #29 implements issuer-scoped first-link validation/storage/replay on an active branch. Persistence, transport, recovery, unlink/relink, concurrency, and audit evidence remain target work until separately implemented, reviewed, and merged.
+Protected main satisfies the domain-level issuer-scoped first-link portion of this decision, including dual-proof authorization. Active PR persist must apply each link and then its matching ends in one transaction so a restart can write a complete unlink+relink aggregate. The hosted write/recover/unlink commands authorize both proofs before persist, recover a returning account from a still-valid authenticated proof, and end a matching current binding from that proof. After load, recover keeps that participant only when the current tenant, issuer, and subject still match the proof so unlink+relink cannot hand back a rebound identity. Hosted unlink reloads stored history before authorization so a stale in-memory record cannot end a rebound current binding. HTTP transport, live Keyverse verification, and backup/restore evidence remain target work until separately implemented, reviewed, and merged.
 
 ## Alternatives considered
 
@@ -205,7 +205,7 @@ Until persistence/transport are implemented, protected main provides only the st
 ## Follow-up work
 
 - Psychometrics Commons: implement the physical append-only identity-link migration and repository transaction boundary.
-- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence.
+- Psychometrics Commons: add unlink/relink/recovery commands with explicit idempotency, authority, and audit evidence. Dual-proof persist, returning-account recover, and hosted unlink commands exist on Active PR #206, including post-load current-binding rejection and fail-closed rebound unlink; HTTP unlink/relink transport remains open.
 - Psychometrics Commons: add Keyverse adapter contract without direct database coupling.
 - Psychometrics Commons: integrate data-rights propagation and restricted research-linkage separation tests.
 - Psychometrics Commons: add transaction/concurrency/crash/backup/restore and public-release leakage tests.
@@ -227,11 +227,18 @@ Any reversal requires a superseding ADR and an explicit migration/rollback or ro
 
 - Product requirements: `docs/PRD.md` anonymous participation, optional account linking, research contribution, and data-rights requirements.
 - Technical requirements: `docs/TRD.md` identity, tenant authorization, consent/data-rights, persistence, and integration contracts.
-- Protected-main domain evidence: `src/participant.rs` and its contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`; this baseline does not yet bind issuer.
-- Active-PR domain evidence: PR #29 adds issuer-scoped first-link validation/storage/replay and remains `IMPLEMENTED_ON_ACTIVE_PR` until merged.
+- Protected-main domain evidence: `src/participant.rs`, `src/account_link.rs`, and their contract tests on the protected-main baseline named by `docs/TRACEABILITY.md`.
+- Active-PR persistence evidence: PR #206 `migrations/0022_participant_identity_link.sql`, `src/postgres_participant_identity_link.rs`, and `src/account_link_write.rs` remain `IMPLEMENTED_ON_ACTIVE_PR` until merged.
 - Logical data view: `docs/architecture/ERD.md`.
 - Behavioral view: `docs/architecture/UML.md`.
 - Security/privacy views: `docs/architecture/SECURITY_AND_DATA.md`, `docs/THREAT_MODEL.md`.
 - Operations/recovery: ADR-0017 and `docs/OPERABILITY.md`.
 - Maturity/status mapping: `docs/TRACEABILITY.md` and `docs/ROADMAP.md`.
-- Machine-readable transport and physical-schema artifacts: none claimed until corresponding implementation exists.
+- Machine-readable transport artifacts: none claimed until a hosted identity-link API exists.
+- Physical-schema artifacts: Active PR `migrations/0022_participant_identity_link.sql` is not protected-main truth.
+
+## References
+
+International Organization for Standardization & International Electrotechnical Commission. (2019). *IT security and privacy—A framework for identity management—Part 1: Terminology and concepts* (ISO/IEC 24760-1:2019).
+
+National Institute of Standards and Technology. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). https://doi.org/10.6028/NIST.SP.800-63-4
