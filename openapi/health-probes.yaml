@@ -1,0 +1,130 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons operator health probes
+  version: 0.1.0
+  description: >
+    As-built operator liveness and readiness probes. These operations expose a
+    RuntimeHealthSnapshot. They are not public product APIs and do not claim
+    measured availability SLOs.
+paths:
+  /live:
+    get:
+      operationId: getLive
+      summary: Process liveness
+      description: >
+        Returns 200 when the process is live and 503 when it is not. Optional
+        capability outages do not change liveness.
+      responses:
+        "200":
+          description: Process is live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSnapshot"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "503":
+          description: Process is not live.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSnapshot"
+  /ready:
+    get:
+      operationId: getReady
+      summary: Operation-scoped readiness
+      description: >
+        Returns 200 only when the process is live, backlog and integrity accept
+        new work, and every named capability can accept new work. Unknown
+        required capabilities fail closed.
+      parameters:
+        - name: capability
+          in: query
+          required: false
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+          description: Opaque required capability references for this operation.
+      responses:
+        "200":
+          description: New work for the named capabilities is safe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSnapshot"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "503":
+          description: New state-changing work is not safe.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthSnapshot"
+components:
+  schemas:
+    HealthSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - live
+        - ready
+        - backlog_health
+        - data_integrity_health
+        - capabilities
+      properties:
+        live:
+          type: boolean
+        ready:
+          type: boolean
+        backlog_health:
+          type: string
+          enum: [within_bounds, stalled, unknown]
+        data_integrity_health:
+          type: string
+          enum: [verified, incompatible, unknown]
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityHealth"
+    CapabilityHealth:
+      type: object
+      additionalProperties: false
+      required: [capability_ref, state, accepts_new_work]
+      properties:
+        capability_ref:
+          type: string
+        state:
+          type: string
+          enum: [available, degraded, unavailable, unknown]
+        accepts_new_work:
+          type: boolean
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          enum:
+            - urn:psychometrics-commons:problem:bad-request
+            - urn:psychometrics-commons:problem:not-found
+            - urn:psychometrics-commons:problem:method-not-allowed
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

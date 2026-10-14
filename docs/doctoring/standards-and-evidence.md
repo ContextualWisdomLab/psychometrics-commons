@@ -31,6 +31,16 @@ Product consequences:
 - timing accommodations are part of instrument-version evidence when timing can affect the response process;
 - automated accessibility checks are supplemented by manual and assistive-technology acceptance testing.
 
+## Operator HTTP
+
+RFC 9110 defines HTTP request-target and origin-server authority. The first process surface binds an explicit listen address from `HEALTH_LISTEN_ADDR` or platform `PORT` and answers only GET `/live` and GET `/ready`. It is not a public assessment origin and must not invent routes or echo request/store text.
+
+Product consequences:
+
+- operators set an unpadded listen address or port before the process starts;
+- liveness remains independent of store I/O;
+- unsupported methods and paths use RFC 9457 problem types, not `about:blank`.
+
 ## Digital identity and federation
 
 NIST SP 800-63 Revision 4 is the current NIST Digital Identity Guidelines suite. The final Revision 4 was published in July 2025 and supersedes Revision 3. The suite covers identity proofing, authentication, authenticator management, federation, assertions, security/privacy, and customer-experience considerations.
@@ -153,6 +163,10 @@ American Educational Research Association, American Psychological Association, &
 Browne, W. J., Goldstein, H., & Rasbash, J. (2001). Multiple membership multiple classification (MMMC) models. *Statistical Modelling, 1*(2), 103–124. https://doi.org/10.1177/1471082X0100100202
 
 Curran, P. J., & Bauer, D. J. (2011). The disaggregation of within-person and between-person effects in longitudinal models of change. *Annual Review of Psychology, 62*, 583–619. https://doi.org/10.1146/annurev.psych.093008.100356
+
+Eddy, W. (Ed.). (2022). *Transmission Control Protocol (TCP)* (RFC 9293). Internet Engineering Task Force. https://doi.org/10.17487/RFC9293
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP Semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
 
 Hamaker, E. L., & Wichers, M. (2017). No time like the present: Discovering the hidden dynamics in intensive longitudinal data. *Current Directions in Psychological Science, 26*(1), 10–15. https://doi.org/10.1177/0963721416666518
 

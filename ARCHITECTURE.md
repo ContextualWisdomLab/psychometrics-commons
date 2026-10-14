@@ -84,6 +84,7 @@ research_contribution
 tenant_authorization
 integration_outbox
 integration_inbox
+health_probes
 ```
 
 Splitting a module into a separate service later must not change its domain semantics or bypass existing versioned contracts.

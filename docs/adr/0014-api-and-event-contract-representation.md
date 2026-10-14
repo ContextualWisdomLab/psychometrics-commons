@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`) exists on Active PR #232 and is not protected-main truth; remaining public/admin families and durable external event transport are still unimplemented on protected main
+- Current/as-built status: persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`) is on protected main; remaining public/admin families and durable external event transport are still unimplemented; operator GET `/live` and GET `/ready` probes exist only on Active PR #247 (successor to #132) with `openapi/health-probes.yaml`; that same PR binds a process from `HEALTH_LISTEN_ADDR` or `PORT`, keeps serving after a dropped probe, answers `/live` without store I/O even when `DATABASE_URL` is down, and observes `observe_postgres_operational_snapshot` only for `/ready` without exposing driver errors
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 
@@ -253,6 +253,12 @@ A future major transport change may supersede this ADR if OpenAPI/AsyncAPI no lo
 ## References
 
 Bray, T. (Ed.). (2017). *The JavaScript Object Notation (JSON) Data Interchange Format* (RFC 8259). Internet Engineering Task Force. https://doi.org/10.17487/RFC8259
+
+Eddy, W. (Ed.). (2022). *Transmission Control Protocol (TCP)* (RFC 9293). Internet Engineering Task Force. https://doi.org/10.17487/RFC9293
+
+Fielding, R., Nottingham, M., & Reschke, J. (Eds.). (2022). *HTTP Semantics* (RFC 9110). Internet Engineering Task Force. https://doi.org/10.17487/RFC9110
+
+Kubernetes Authors. (2024). *Configure liveness, readiness and startup probes*. Kubernetes Documentation. https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 
 Rundgren, A., Jordan, B., & Erdtman, S. (2020). *JSON Canonicalization Scheme (JCS)* (RFC 8785). Internet Engineering Task Force. https://doi.org/10.17487/RFC8785
 
