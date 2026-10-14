@@ -1,10 +1,13 @@
 //! Public session HTTP must read the declared request body before dispatch.
 
+use psychometrics_commons_runtime::authorization::{AuthorizationContext, ProductRole};
+use psychometrics_commons_runtime::participant::ParticipantRecord;
 use psychometrics_commons_runtime::postgres_assessment_session::{
     AssessmentSessionPersistenceError, AssessmentSessionStartError,
 };
 use psychometrics_commons_runtime::session_http::{
-    accept_one_session_http, bind_session_http, handle_session_http_request, MemorySessionHttpPort,
+    accept_one_authorized_session_http, accept_one_session_http, bind_session_http,
+    handle_session_http_request, MemorySessionHttpPort, SessionHttpAuthority,
     SESSION_COLLECTION_PATH,
 };
 use std::io::{Read, Write};
@@ -184,17 +187,16 @@ fn listener_writes_problem_reason_phrases_for_public_error_classes() {
     let conflict = response_for(&conflict_request, unpublished);
     assert!(conflict.starts_with("HTTP/1.1 409 Conflict\r\n"));
 
-    let mut unavailable = MemorySessionHttpPort::published();
-    unavailable.next_load_error = Some(AssessmentSessionPersistenceError::InvalidStoredIdentity);
+    let unavailable = MemorySessionHttpPort::published();
     let server_error = response_for(
         "GET /v1/sessions/ses_reason_failure HTTP/1.1\r\n\r\n",
         unavailable,
     );
-    assert!(server_error.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+    assert!(server_error.starts_with("HTTP/1.1 404 Not Found\r\n"));
 }
 
 #[test]
-fn listener_reloads_a_created_session_over_get() {
+fn public_listener_requires_authority_for_session_reload() {
     let mut port = MemorySessionHttpPort::published();
     let body = format!(
         "{{\"participant_ref\":\"{PARTICIPANT}\",\"instrument_release_ref\":\"{RELEASE}\",\"locale\":\"ko-KR\"}}"
@@ -225,15 +227,56 @@ fn listener_reloads_a_created_session_over_get() {
     let mut reload_response = String::new();
     stream.read_to_string(&mut reload_response).unwrap();
     server.join().unwrap();
-    assert!(
-        reload_response.starts_with("HTTP/1.1 200 OK\r\n"),
-        "GET must reload the session created on the same port: {reload_response}"
-    );
+    assert!(reload_response.starts_with("HTTP/1.1 404 Not Found\r\n"));
     assert_eq!(
         AssessmentSessionStartError::from(AssessmentSessionPersistenceError::ConflictingReplay)
             .to_string(),
         "session start could not persist the created session; retry the exact start or repair the store"
     );
+}
+
+#[test]
+fn authorized_listener_reloads_only_the_server_owned_session() {
+    let mut port = MemorySessionHttpPort::published();
+    let body = format!(
+        "{{\"participant_ref\":\"{PARTICIPANT}\",\"instrument_release_ref\":\"{RELEASE}\",\"locale\":\"ko-KR\"}}"
+    );
+    let created = handle_session_http_request(
+        &format!(
+            "POST {SESSION_COLLECTION_PATH} HTTP/1.1\r\nIdempotency-Key: {SESSION}\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+        &mut port,
+        20_000,
+    );
+    assert_eq!(created.status(), 201);
+
+    let listener = bind_session_http(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let participant =
+            ParticipantRecord::new_anonymous(PARTICIPANT, "tenant_session_http", 1).unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_session_http",
+            "subject_session_http",
+            Some(PARTICIPANT),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let authority = SessionHttpAuthority::Authenticated(&actor);
+        accept_one_authorized_session_http(&listener, &authority, &participant, &mut port, 20_000)
+            .unwrap();
+    });
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .write_all(format!("GET /v1/sessions/{SESSION} HTTP/1.1\r\n\r\n").as_bytes())
+        .unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains(&format!("\"session_ref\":\"{SESSION}\"")));
 }
 
 #[test]

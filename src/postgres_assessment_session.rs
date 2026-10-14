@@ -740,16 +740,65 @@ pub fn load_assessment_session(
     transaction: &mut Transaction<'_>,
     session_ref: &str,
 ) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
+    load_assessment_session_filtered(transaction, session_ref, None)
+}
+
+/// Load one created assessment session only when it belongs to the supplied participant.
+///
+/// The participant reference is the server-owned resource binding used by the
+/// authorized session HTTP boundary. A non-canonical participant alias fails
+/// closed, and a different owner is indistinguishable from a missing session.
+///
+/// # Errors
+///
+/// Returns [`AssessmentSessionPersistenceError`] for unsupported isolation, a
+/// malformed session or participant reference, an invalid stored identity, or
+/// a database failure.
+pub fn load_assessment_session_for_participant(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    participant_ref: &str,
+) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
+    load_assessment_session_filtered(transaction, session_ref, Some(participant_ref))
+}
+
+fn load_assessment_session_filtered(
+    transaction: &mut Transaction<'_>,
+    session_ref: &str,
+    participant_ref: Option<&str>,
+) -> Result<Option<AssessmentSession>, AssessmentSessionPersistenceError> {
     require_read_committed(transaction)?;
     let session_ref = normalized_reference(session_ref)
         .ok_or(AssessmentSessionPersistenceError::InvalidReference)?;
-    let row = match transaction.query_opt(
-        "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
-                instrument_release_content_digest, locale, session_state,
-                created_at_unix_ms
-         FROM assessment_session WHERE session_ref = $1",
-        &[&session_ref],
-    ) {
+    let participant_ref = match participant_ref {
+        Some(value) => {
+            let normalized = normalized_reference(value)
+                .ok_or(AssessmentSessionPersistenceError::InvalidReference)?;
+            if normalized != value {
+                return Err(AssessmentSessionPersistenceError::InvalidReference);
+            }
+            Some(value)
+        }
+        None => None,
+    };
+    let row = match participant_ref {
+        Some(value) => transaction.query_opt(
+            "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
+                    instrument_release_content_digest, locale, session_state,
+                    created_at_unix_ms
+             FROM assessment_session
+             WHERE session_ref = $1 AND participant_ref = $2",
+            &[&session_ref, &value],
+        ),
+        None => transaction.query_opt(
+            "SELECT participant_ref, instrument_release_ref, instrument_version_ref,
+                    instrument_release_content_digest, locale, session_state,
+                    created_at_unix_ms
+             FROM assessment_session WHERE session_ref = $1",
+            &[&session_ref],
+        ),
+    };
+    let row = match row {
         Ok(row) => row,
         Err(error) => return Err(AssessmentSessionPersistenceError::from(error)),
     };
@@ -1016,7 +1065,8 @@ fn require_read_committed(
 mod tests {
     use super::{
         apply_assessment_session_migration, created_session_for_start_from_published_snapshot,
-        first_insert_seal_allows_exact_replay, load_assessment_session, persist_assessment_session,
+        first_insert_seal_allows_exact_replay, load_assessment_session,
+        load_assessment_session_for_participant, persist_assessment_session,
         persist_assessment_session_commands, published_snapshot_matches_session,
         reject_stale_command_prefix, start_created_assessment_session,
         start_created_assessment_session_from_stored_release, stored_start_identity_matches,
@@ -2315,6 +2365,14 @@ mod tests {
         );
         assert_eq!(replayed.session_ref(), started.session_ref());
         assert!(matches!(
+            load_assessment_session_for_participant(
+                &mut transaction,
+                "ses_library_stored_start",
+                " ptc_eb1b318917d24ca0ac5153c37ff696c7",
+            ),
+            Err(AssessmentSessionPersistenceError::InvalidReference)
+        ));
+        assert!(matches!(
             start_created_assessment_session_from_stored_release(
                 &mut transaction,
                 "ses_library_stored_start",
@@ -2329,6 +2387,11 @@ mod tests {
         ));
         transaction.commit().unwrap();
 
+        assert_corrupt_stored_identity_is_rejected(&mut client);
+        assert_missing_participant_column_is_rejected(&mut client);
+    }
+
+    fn assert_corrupt_stored_identity_is_rejected(client: &mut Client) {
         client
             .batch_execute(
                 "ALTER TABLE assessment_session \
@@ -2351,7 +2414,9 @@ mod tests {
             Err(AssessmentSessionPersistenceError::InvalidStoredIdentity)
         ));
         transaction.rollback().unwrap();
+    }
 
+    fn assert_missing_participant_column_is_rejected(client: &mut Client) {
         client
             .execute(
                 "UPDATE instrument_release SET publication_state = 'suspended' WHERE release_ref = $1",
