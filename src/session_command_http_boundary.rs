@@ -1,0 +1,748 @@
+//! Hardened HTTP/1.1 framing and authorization boundary for participant session commands.
+//!
+//! The command implementation owns application semantics. This boundary waits
+//! for the declared body, rejects ambiguous framing and duplicate client-command
+//! identities, verifies exact participant/session authority, and only then
+//! dispatches a state-changing request. Possession of an opaque session reference
+//! is never sufficient authorization.
+
+#[allow(dead_code)]
+#[path = "session_command_http.rs"]
+mod implementation;
+
+pub use implementation::{
+    bind_session_command_http, SessionCommandHttpResponse, SessionCommandHttpRuntime,
+    SESSION_COMMAND_HTTP_IO_TIMEOUT, SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES,
+};
+
+use crate::anonymous_authorization::authorize_anonymous_session_command;
+use crate::anonymous_credential::AnonymousCredential;
+use crate::anonymous_session::AnonymousSessionContext;
+use crate::authorization::{
+    authorize, AuthorizationContext, ProductPermission, ResourceKind, ResourceScope,
+};
+use crate::participant::ParticipantRecord;
+use crate::session::AssessmentSession;
+use std::io::{self, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::time::{Duration, Instant};
+
+const HTTP_FIELD_NAME_BYTES: &[u8] =
+    b"!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~";
+
+/// Server-verified authority allowed to attempt one participant session command.
+///
+/// The embedding host verifies network authentication or an anonymous bearer
+/// proof before constructing one of these variants. This boundary then rechecks
+/// exact tenant, participant, session, expiry, and current anonymous credential
+/// evidence against server-owned records before lifecycle mutation. Raw bearer
+/// secrets never enter this type.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum SessionCommandAuthority<'a> {
+    /// Authenticated product context already verified by the host identity boundary.
+    Authenticated(&'a AuthorizationContext),
+    /// Verified anonymous-session snapshot plus its current credential record.
+    Anonymous {
+        /// Previously verified anonymous-session context.
+        context: &'a AnonymousSessionContext,
+        /// Current server-side credential evidence, including revocation state.
+        credential: &'a AnonymousCredential,
+        /// Positive current time from the trusted server clock.
+        now_unix_ms: u64,
+    },
+}
+
+/// Classify one raw HTTP/1.1 request without granting mutation authority.
+///
+/// Syntax, route, framing, and public-command errors retain their normal problem
+/// responses. A syntactically valid state-changing POST is evaluated against an
+/// empty runtime and therefore receives the same 404 response as an unknown
+/// session without touching the supplied runtime. Embedding hosts must call
+/// [`handle_authorized_session_command_http_request`] after verifying the caller.
+#[must_use]
+pub fn handle_session_command_http_request(
+    request: &str,
+    _runtime: &mut SessionCommandHttpRuntime,
+) -> SessionCommandHttpResponse {
+    classify_without_session_state(request)
+}
+
+/// Apply one raw HTTP/1.1 participant session command with verified authority.
+///
+/// `participant` must be the server-owned participant record corresponding to
+/// the request. Authenticated authority is checked with
+/// [`ProductPermission::ManageOwnSession`]. Anonymous authority must match the
+/// current credential and exact participant/session binding. Missing, foreign,
+/// expired, or revoked authority deliberately receives the same 404 response as
+/// an unknown session so this write route is not a session-existence oracle.
+#[must_use]
+pub fn handle_authorized_session_command_http_request(
+    request: &str,
+    authority: &SessionCommandAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> SessionCommandHttpResponse {
+    let classified = classify_without_session_state(request);
+    if classified.status() != 404 {
+        return classified;
+    }
+    let Some(session_ref) = authorized_command_session_ref(request) else {
+        return classified;
+    };
+    let Some(session) = runtime.session(session_ref) else {
+        return classified;
+    };
+    if !session_command_authorized(authority, participant, session) {
+        return classified;
+    }
+    implementation::handle_session_command_http_request(request, runtime)
+}
+
+fn classify_without_session_state(request: &str) -> SessionCommandHttpResponse {
+    let mut empty_runtime = SessionCommandHttpRuntime::new(Vec::new());
+    implementation::handle_session_command_http_request(request, &mut empty_runtime)
+}
+
+fn authorized_command_session_ref(request: &str) -> Option<&str> {
+    let line = request.lines().next()?;
+    let mut parts = line.split_whitespace();
+    if parts.next()? != "POST" {
+        return None;
+    }
+    let target = parts.next()?;
+    let version = parts.next()?;
+    if !version.starts_with("HTTP/") || parts.next().is_some() {
+        return None;
+    }
+    let path = target.split_once('?').map_or(target, |(path, _)| path);
+    let rest = path.strip_prefix("/v1/sessions/")?;
+    let (session_ref, tail) = rest.split_once('/')?;
+    (tail == "commands" && !session_ref.is_empty()).then_some(session_ref)
+}
+
+fn session_command_authorized(
+    authority: &SessionCommandAuthority<'_>,
+    participant: &ParticipantRecord,
+    session: &AssessmentSession,
+) -> bool {
+    if participant.participant_ref() != session.participant_ref() {
+        return false;
+    }
+    ResourceScope::participant_owned(
+        ResourceKind::AssessmentSession,
+        participant.tenant_ref(),
+        participant.participant_ref(),
+        session.session_ref(),
+    )
+    .is_ok_and(|resource| match authority {
+        SessionCommandAuthority::Authenticated(actor) => {
+            authorize(actor, &resource, ProductPermission::ManageOwnSession).is_ok()
+        }
+        SessionCommandAuthority::Anonymous {
+            context,
+            credential,
+            now_unix_ms,
+        } => {
+            credential.authorizes_session_context_at(context, *now_unix_ms)
+                && authorize_anonymous_session_command(context, participant, session, *now_unix_ms)
+                    .is_ok()
+        }
+    })
+}
+
+/// Accept one TCP connection and classify one fully framed request without mutation authority.
+///
+/// A valid participant command receives the same 404 response as an unknown
+/// session. Hosted writers should use [`accept_one_authorized_session_command_http`].
+///
+/// # Errors
+///
+/// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, oversized,
+/// incomplete, or multi-request framing; [`io::ErrorKind::TimedOut`] when the
+/// overall request deadline expires; or the underlying accept/read/write error.
+pub fn accept_one_session_command_http(
+    listener: &TcpListener,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> io::Result<()> {
+    let (mut stream, _) = listener.accept()?;
+    let deadline = Instant::now() + SESSION_COMMAND_HTTP_IO_TIMEOUT;
+    stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
+    let request = read_request_or_respond_bad_request(&mut stream, deadline)?;
+    let response = handle_session_command_http_request(&request, runtime);
+    write_http_response(&mut stream, &response)
+}
+
+/// Accept one TCP connection and serve one authorized participant session command.
+///
+/// The supplied authority and participant record are server-owned values from the
+/// embedding host. The request is framed before authorization and mutation.
+///
+/// # Errors
+///
+/// Returns [`io::ErrorKind::InvalidData`] for malformed, ambiguous, oversized,
+/// incomplete, or multi-request framing; [`io::ErrorKind::TimedOut`] when the
+/// overall request deadline expires; or the underlying accept/read/write error.
+pub fn accept_one_authorized_session_command_http(
+    listener: &TcpListener,
+    authority: &SessionCommandAuthority<'_>,
+    participant: &ParticipantRecord,
+    runtime: &mut SessionCommandHttpRuntime,
+) -> io::Result<()> {
+    let (mut stream, _) = listener.accept()?;
+    let deadline = Instant::now() + SESSION_COMMAND_HTTP_IO_TIMEOUT;
+    stream.set_write_timeout(Some(SESSION_COMMAND_HTTP_IO_TIMEOUT))?;
+    let request = read_request_or_respond_bad_request(&mut stream, deadline)?;
+    let response =
+        handle_authorized_session_command_http_request(&request, authority, participant, runtime);
+    write_http_response(&mut stream, &response)
+}
+
+fn read_request_or_respond_bad_request(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> io::Result<String> {
+    match read_http_request(stream, deadline) {
+        Ok(request) => Ok(request),
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {
+            let response = implementation::SessionCommandHttpResponse::framing_error();
+            write_http_response(stream, &response)?;
+            Err(error)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn read_http_request(stream: &mut TcpStream, deadline: Instant) -> io::Result<String> {
+    let mut buffer = vec![0_u8; SESSION_COMMAND_HTTP_MAX_REQUEST_BYTES];
+    let mut filled = 0;
+    loop {
+        reject_full_request_buffer(filled, buffer.len())?;
+        stream.set_read_timeout(Some(remaining_request_timeout(deadline)?))?;
+        let read = stream
+            .read(&mut buffer[filled..])
+            .map_err(normalize_read_error)?;
+        if read == 0 {
+            return Err(incomplete_request_error());
+        }
+        filled += read;
+        let Some(header_offset) = buffer[..filled]
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+        else {
+            continue;
+        };
+        let body_start = header_offset + 4;
+        reject_non_crlf_header_lines(&buffer[..body_start])?;
+        let headers = std::str::from_utf8(&buffer[..body_start])
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        reject_transfer_encoding(headers)?;
+        let _ = single_header_value(headers, "idempotency-key")?;
+        let expected = match single_header_value(headers, "content-length")? {
+            Some(value) => declared_request_end(body_start, value)?,
+            None => body_start,
+        };
+        reject_oversized_request(expected, buffer.len())?;
+        if filled < expected {
+            continue;
+        }
+        if filled > expected {
+            return Err(trailing_request_bytes_error());
+        }
+        filled = expected;
+        break;
+    }
+    String::from_utf8(buffer[..filled].to_vec())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn remaining_request_timeout(deadline: Instant) -> io::Result<Duration> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        Err(request_deadline_error())
+    } else {
+        Ok(remaining)
+    }
+}
+
+fn normalize_read_error(error: io::Error) -> io::Error {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    ) {
+        request_deadline_error()
+    } else {
+        error
+    }
+}
+
+fn request_deadline_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "session-command HTTP request exceeded the overall read deadline",
+    )
+}
+
+fn incomplete_request_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session-command HTTP request ended before one complete frame was received",
+    )
+}
+
+fn trailing_request_bytes_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session-command HTTP request contains bytes beyond one framed request",
+    )
+}
+
+fn reject_non_crlf_header_lines(header_bytes: &[u8]) -> io::Result<()> {
+    let mut index = 0;
+    while index < header_bytes.len() {
+        match header_bytes[index] {
+            b'\r' => {
+                if header_bytes.get(index + 1) != Some(&b'\n') {
+                    return Err(malformed_header_field_error());
+                }
+                index += 2;
+            }
+            b'\n' => return Err(malformed_header_field_error()),
+            _ => index += 1,
+        }
+    }
+    Ok(())
+}
+
+fn single_header_value<'a>(headers: &'a str, name: &str) -> io::Result<Option<&'a str>> {
+    let mut found = None;
+    for line in headers.lines().skip(1) {
+        if line.is_empty() {
+            break;
+        }
+        let Some((header_name, value)) = line.split_once(':') else {
+            return Err(malformed_header_field_error());
+        };
+        reject_invalid_header_name(header_name)?;
+        if !header_name.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        if found.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "session-command HTTP request contains a duplicate singleton header",
+            ));
+        }
+        found = Some(value.trim_matches(&[' ', '\t'][..]));
+    }
+    Ok(found)
+}
+
+fn reject_invalid_header_name(header_name: &str) -> io::Result<()> {
+    if header_name.is_empty()
+        || !header_name
+            .bytes()
+            .all(|byte| HTTP_FIELD_NAME_BYTES.contains(&byte))
+    {
+        Err(malformed_header_field_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn malformed_header_field_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "session-command HTTP request contains a malformed header field",
+    )
+}
+
+fn reject_transfer_encoding(headers: &str) -> io::Result<()> {
+    if single_header_value(headers, "transfer-encoding")?.is_some() {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "session-command HTTP listener does not support Transfer-Encoding",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn reject_full_request_buffer(filled: usize, capacity: usize) -> io::Result<()> {
+    if filled == capacity {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "session-command HTTP request exceeded the accepted size",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn reject_oversized_request(expected: usize, capacity: usize) -> io::Result<()> {
+    if expected > capacity {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "session-command HTTP request exceeded the accepted size",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn invalid_content_length_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "invalid session-command HTTP Content-Length",
+    )
+}
+
+fn declared_request_end(body_start: usize, content_length: &str) -> io::Result<usize> {
+    if content_length.is_empty() || !content_length.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid_content_length_error());
+    }
+    let content_length = content_length
+        .parse::<usize>()
+        .map_err(|_| invalid_content_length_error())?;
+    body_start.checked_add(content_length).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "session-command HTTP request exceeded the accepted size",
+        )
+    })
+}
+
+fn write_http_response(
+    stream: &mut impl Write,
+    response: &SessionCommandHttpResponse,
+) -> io::Result<()> {
+    let allow = if response.status() == 405 {
+        "Allow: POST\r\n"
+    } else {
+        ""
+    };
+    let header = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\nCache-Control: no-store\r\n{allow}Connection: close\r\n\r\n",
+        status = response.status(),
+        reason = reason_phrase(response.status()),
+        content_type = response.content_type(),
+        len = response.body().len()
+    );
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(response.body().as_bytes())
+}
+
+const fn reason_phrase(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        400 => "Bad Request",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        _ => "Error",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        authorized_command_session_ref, declared_request_end, normalize_read_error,
+        read_http_request, read_request_or_respond_bad_request, reason_phrase,
+        reject_full_request_buffer, reject_invalid_header_name, reject_non_crlf_header_lines,
+        reject_oversized_request, reject_transfer_encoding, remaining_request_timeout,
+        session_command_authorized, single_header_value, SessionCommandAuthority,
+    };
+    use crate::authorization::{AuthorizationContext, ProductRole};
+    use crate::participant::ParticipantRecord;
+    use crate::session::AssessmentSession;
+    use std::io::{self, Read, Write};
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn authorization_target_parser_accepts_only_exact_post_command_routes() {
+        assert_eq!(
+            authorized_command_session_ref("POST /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"),
+            Some("ses_one")
+        );
+        assert_eq!(
+            authorized_command_session_ref(
+                "POST /v1/sessions/ses_one/commands?trace=1 HTTP/1.1\r\n\r\n"
+            ),
+            Some("ses_one")
+        );
+        assert_eq!(
+            authorized_command_session_ref("GET /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"),
+            None
+        );
+        assert_eq!(
+            authorized_command_session_ref("POST /v1/sessions/ses_one/responses HTTP/1.1\r\n\r\n"),
+            None
+        );
+        assert_eq!(authorized_command_session_ref("GARBAGE\r\n"), None);
+        assert_eq!(
+            authorized_command_session_ref("POST /v1/sessions/ses_one/commands SMTP/1.0\r\n\r\n"),
+            None
+        );
+        assert_eq!(
+            authorized_command_session_ref(
+                "POST /v1/sessions/ses_one/commands HTTP/1.1 extra\r\n\r\n"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn singleton_and_header_syntax_helpers_fail_closed() {
+        let plain = "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nHost: example.test\r\n\r\n";
+        assert_eq!(single_header_value(plain, "content-length").unwrap(), None);
+        assert!(reject_transfer_encoding(plain).is_ok());
+
+        let one = "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nContent-Length: \t2 \t\r\n\r\n{}";
+        assert_eq!(
+            single_header_value(one, "content-length").unwrap(),
+            Some("2")
+        );
+
+        for duplicate in [
+            "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}",
+            "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nIdempotency-Key: idem_one\r\nIdempotency-Key: idem_two\r\n\r\n",
+        ] {
+            let name = if duplicate.contains("Content-Length") {
+                "content-length"
+            } else {
+                "idempotency-key"
+            };
+            assert_eq!(
+                single_header_value(duplicate, name).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+
+        let malformed = "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nBroken Header\r\n\r\n";
+        assert_eq!(
+            single_header_value(malformed, "content-length")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        let transfer =
+            "POST /v1/sessions/ses_one/commands HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+        assert_eq!(
+            reject_transfer_encoding(transfer).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(reject_invalid_header_name("Content-Length").is_ok());
+        assert_eq!(
+            reject_invalid_header_name("").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            reject_invalid_header_name("Content Length")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(reject_non_crlf_header_lines(b"A: b\r\n\r\n").is_ok());
+        assert_eq!(
+            reject_non_crlf_header_lines(b"A: b\n\n")
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            reject_non_crlf_header_lines(b"A: b\rX").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn request_bounds_deadline_and_length_helpers_cover_both_sides() {
+        assert!(reject_full_request_buffer(1, 2).is_ok());
+        assert_eq!(
+            reject_full_request_buffer(2, 2).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(reject_oversized_request(2, 2).is_ok());
+        assert_eq!(
+            reject_oversized_request(3, 2).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(declared_request_end(10, "2").unwrap(), 12);
+        assert_eq!(
+            declared_request_end(10, "").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            declared_request_end(10, "2x").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            declared_request_end(usize::MAX, "1").unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(remaining_request_timeout(Instant::now() + Duration::from_secs(1)).is_ok());
+        assert_eq!(
+            remaining_request_timeout(
+                Instant::now()
+                    .checked_sub(Duration::from_millis(1))
+                    .expect("the current instant must be after one millisecond ago"),
+            )
+            .unwrap_err()
+            .kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            normalize_read_error(io::Error::new(io::ErrorKind::TimedOut, "timeout")).kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            normalize_read_error(io::Error::new(io::ErrorKind::WouldBlock, "block")).kind(),
+            io::ErrorKind::TimedOut
+        );
+        assert_eq!(
+            normalize_read_error(io::Error::other("boom")).kind(),
+            io::ErrorKind::Other
+        );
+        assert_eq!(reason_phrase(200), "OK");
+        assert_eq!(reason_phrase(400), "Bad Request");
+        assert_eq!(reason_phrase(404), "Not Found");
+        assert_eq!(reason_phrase(405), "Method Not Allowed");
+        assert_eq!(reason_phrase(409), "Conflict");
+        assert_eq!(reason_phrase(418), "Error");
+    }
+
+    #[test]
+    fn session_authorization_rejects_a_foreign_participant_before_scope_creation() {
+        let session = AssessmentSession::from_persisted_created(
+            "ses_boundary_authorization",
+            "ptc_boundary_authorization",
+            "release_boundary_authorization",
+            "version_boundary_authorization",
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "en-US",
+            1_000,
+        )
+        .unwrap();
+        let foreign_participant = ParticipantRecord::new_anonymous(
+            "ptc_boundary_authorization_foreign",
+            "tenant_boundary_authorization",
+            1_001,
+        )
+        .unwrap();
+        let actor = AuthorizationContext::new(
+            "tenant_boundary_authorization",
+            "subject_boundary_authorization",
+            Some("ptc_boundary_authorization"),
+            &[ProductRole::Participant],
+        )
+        .unwrap();
+        let authority = SessionCommandAuthority::Authenticated(&actor);
+
+        assert!(!session_command_authorized(
+            &authority,
+            &foreign_participant,
+            &session
+        ));
+    }
+
+    fn start_request_reader() -> (TcpStream, thread::JoinHandle<io::Result<String>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_http_request(&mut stream, Instant::now() + Duration::from_secs(1))
+        });
+        (TcpStream::connect(address).unwrap(), server)
+    }
+
+    #[test]
+    fn request_reader_rejects_eof_before_a_complete_frame() {
+        let (mut client, server) = start_request_reader();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1")
+            .unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "session-command HTTP request ended before one complete frame was received"
+        );
+    }
+
+    #[test]
+    fn request_boundary_writes_a_problem_for_invalid_framing() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            read_request_or_respond_bad_request(
+                &mut stream,
+                Instant::now() + Duration::from_secs(1),
+            )
+        });
+        let mut client = TcpStream::connect(address).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1")
+            .unwrap();
+        client.shutdown(Shutdown::Write).unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(response.contains("urn:psychometrics-commons:problem:bad-request"));
+    }
+
+    #[test]
+    fn request_boundary_propagates_non_framing_read_errors() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = TcpStream::connect(address).unwrap();
+        let (mut server_stream, _) = listener.accept().unwrap();
+
+        let error =
+            read_request_or_respond_bad_request(&mut server_stream, Instant::now()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+        client.shutdown(Shutdown::Both).unwrap();
+    }
+
+    #[test]
+    fn request_reader_waits_for_a_split_header_delimiter() {
+        let (mut client, server) = start_request_reader();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1")
+            .unwrap();
+        thread::sleep(Duration::from_millis(20));
+        client.write_all(b"\r\n\r\n").unwrap();
+
+        assert_eq!(
+            server.join().unwrap().unwrap(),
+            "POST /v1/sessions/ses_one/commands HTTP/1.1\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn request_reader_rejects_bytes_after_the_declared_frame() {
+        let (mut client, server) = start_request_reader();
+        client
+            .write_all(b"POST /v1/sessions/ses_one/commands HTTP/1.1\r\nContent-Length: 0")
+            .unwrap();
+        thread::sleep(Duration::from_millis(20));
+        client.write_all(b"\r\n\r\nextra").unwrap();
+
+        let error = server.join().unwrap().unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            error.to_string(),
+            "session-command HTTP request contains bytes beyond one framed request"
+        );
+    }
+}

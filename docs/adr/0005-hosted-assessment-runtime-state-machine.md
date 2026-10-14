@@ -30,6 +30,8 @@ Terminal alternatives: `expired`, `cancelled`, `invalidated`.
 
 Only the runtime may transition session state. Clients request commands; they do not submit the target state directly.
 
+Public HTTP `POST /v1/sessions/{session_ref}/commands` is an Active PR in-process family for Activate, Pause, Resume, Complete, and Cancel. It is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Scoring and operator commands stay off this route.
+
 ## Response-event contract
 
 Each response event contains:
@@ -105,6 +107,8 @@ Runtime tables are private to Psychometrics Commons. Downstream consumers receiv
 Revisit the storage implementation if event volume demands a different backend, but retain state semantics, idempotency, immutable snapshots, and outbox guarantees.
 
 ## References
+
+Nottingham, M., Wilde, E., & Dalal, S. (2023). *Problem Details for HTTP APIs* (RFC 9457). Internet Engineering Task Force. https://doi.org/10.17487/RFC9457
 
 Fowler, M. (2005, December 12). *Event sourcing*. https://martinfowler.com/eaaDev/EventSourcing.html
 
