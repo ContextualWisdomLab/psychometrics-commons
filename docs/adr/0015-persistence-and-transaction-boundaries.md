@@ -61,6 +61,7 @@ Every supported minor version is tested through the same real-database migration
 |---|---|
 | `instrument_publication` | `instrument_definition`, `instrument_version`, `instrument_item`, item/version references |
 | `assessment_session` | `assessment_participant`, `assessment_session` |
+| `item_delivery` | `item_delivery_ledger`, `item_delivery_event` |
 | `response_event` | `response_event`, `response_snapshot`, `response_snapshot_entry` |
 | `scoring_dispatch` | `scoring_job`, scoring attempt/evidence records |
 | `result_snapshot` | `result_snapshot`, narrative/result-access metadata |
@@ -93,7 +94,7 @@ The scoring worker is not called inside this transaction.
 
 A scoring result is persisted with exact request/version/provenance evidence and result-snapshot creation in a local transaction. Any downstream narrative/report/release effect is represented by local durable work/outbox evidence rather than a distributed transaction.
 
-A scoring worker that does not already know the next job identity claims the oldest due queued or retry-scheduled `scoring_job_state` row under `READ COMMITTED` with `FOR UPDATE SKIP LOCKED` (PostgreSQL Global Development Group, 2026a, 2026b). The claim returns the stored `scoring_request_ref` and fencing lease, or `None` when no job is due. Two concurrent pollers cannot both receive the same row. A retry-scheduled row is skipped until its persisted due time. The worker is still not invoked inside the session-completion transaction.
+A scoring worker that does not already know the next job identity claims the oldest due queued or retry-scheduled `scoring_job_state` row under `READ COMMITTED` with `FOR UPDATE SKIP LOCKED` (PostgreSQL Global Development Group, 2026b, 2026c). The claim returns the stored `scoring_request_ref` and fencing lease, or `None` when no job is due. Two concurrent pollers cannot both receive the same row. A retry-scheduled row is skipped until its persisted due time. The worker is still not invoked inside the session-completion transaction.
 
 ### Integration outbox enqueue
 
@@ -115,6 +116,10 @@ An inbox row that merely proves receipt is never marked `completed` before the r
 ### Consent and data rights
 
 Consent decisions and data-rights lifecycle events are append-only evidence. External propagation of deletion/export/research changes is asynchronous and reconciled; local state never claims an external effect completed until evidence exists.
+
+### Item-delivery restart reload
+
+Active item-delivery reload reconstructs a persisted `item_delivery_ledger` after process restart. The adapter requires `READ COMMITTED`, takes `FOR SHARE` on the session ledger header, and reconstructs events by stored `delivery_sequence`. A missing session is absent rather than an empty delivery list. A header that exists for a different tenant fails closed instead of looking like a new assessment. A sequence gap or an item outside the stored allowed set fails closed so a restarted runtime cannot skip or re-present items. Whitespace-padded tenant, session, release, item, or event aliases fail closed in `ItemDeliveryLedger::from_persisted` / `restore_persisted_event`, `persist_item_delivery_ledger`, and `load_item_delivery_ledger` instead of trimming into another identity. `persist_item_delivery_ledger` does not take `FOR UPDATE` on the header, so the share lock does not by itself hide a concurrent persist append. HTTP item delivery remains outside this slice.
 
 ## Concurrency and idempotency
 
@@ -305,10 +310,14 @@ The physical database technology or decomposition may change if scale, residency
 
 ## References
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL 18 documentation*.
+International Organization for Standardization. (2023). *Systems and software engineering — Systems and software Quality Requirements and Evaluation (SQuaRE) — Product quality model* (ISO/IEC 25010:2023).
 
-PostgreSQL Global Development Group. (2026). *PostgreSQL versioning policy*.
+National Institute of Standards and Technology. (2020). *Security and privacy controls for information systems and organizations* (NIST Special Publication 800-53 Rev. 5). https://doi.org/10.6028/NIST.SP.800-53r5
 
-PostgreSQL Global Development Group. (2026a). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+PostgreSQL Global Development Group. (2026a). *PostgreSQL 18 documentation*. https://www.postgresql.org/docs/18/
 
-PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+PostgreSQL Global Development Group. (2026b). *SELECT*. https://www.postgresql.org/docs/18/sql-select.html
+
+PostgreSQL Global Development Group. (2026c). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
+
+PostgreSQL Global Development Group. (2026d). *PostgreSQL versioning policy*. https://www.postgresql.org/support/versioning/

@@ -22,7 +22,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|---|
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
+| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs` plus `migrations/0004_item_delivery_evidence.sql` / `src/postgres_item_delivery.rs` persist on later protected main; HTTP delivery orchestration remains Target. Active reload reconstructs by stored `delivery_sequence` and fails closed on a gap, foreign tenant, or padded session alias |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance, `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence, and protected-main request-bound external adapter `src/scoring_engine.rs`; live fast-mlsirm execution remains Target |
@@ -59,7 +59,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|
 | Server-authoritative session state | TRD §5 | `src/session.rs` + session contract tests, including published-release/locale binding at creation and protected-main persist-backed `POST /v1/sessions` / `GET /v1/sessions/{session_ref}` | Command HTTP, tenant isolation, and complete response/item flow remain missing |
 | Only Active accepts responses | TRD §5–6 | `SessionState::accepts_responses` + response tests | transport-level rejection test |
-| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests | durable uniqueness/order/API integration |
+| Item delivery sequence is positive and evidence-safe | TRD §5–7 | `src/item_delivery.rs` + item-delivery domain tests; `src/postgres_item_delivery.rs` persist plus Active PR restart reload by contiguous `delivery_sequence` | API delivery orchestration |
 | Conflicting idempotency replay fails closed | TRD §6 | `src/response.rs` | DB uniqueness/concurrency test |
 | Snapshot requires Completed state | TRD §5–6 | `src/response.rs` | transaction atomicity test with persistence |
 | Scoring uses durable snapshot identity | TRD §8 | `src/scoring.rs` requires a canonical SHA-256 engine-artifact digest and protected-main `src/scoring_engine.rs` rejects mismatched request/result provenance | live fast-mlsirm adapter + retry/outbox integration |
@@ -121,6 +121,7 @@ src/lib.rs
 ├── integration_publisher.rs  # product-owned immutable integration-event publishing boundary (merged)
 ├── integration_delivery.rs  # verified publisher-to-fenced-persistence handoff (merged #264)
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
+├── postgres_item_delivery.rs  # PostgreSQL item-delivery persist and restart reload
 ├── longitudinal_observation.rs  # longitudinal clocks, identity, and membership-share evidence
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
@@ -155,7 +156,9 @@ migrations/
 ├── 0001_integration_delivery.sql through 0007_result_snapshot.sql
 ├── 0010_response_snapshot.sql through 0016_assessment_session_command.sql
 ├── 0018_data_rights_processing_start.sql
-└── 0019_inbox_claim_expiry_guard.sql
+├── 0019_inbox_claim_expiry_guard.sql
+├── 0024_data_rights_completion.sql
+└── 0031_longitudinal_observation.sql
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
@@ -178,6 +181,8 @@ Closed-unmerged #220 public research-fixture identity-column rejection is no lon
 Merged #231 personal result export is protected-main domain evidence. `ResultExport::from_snapshot` copies the stored construct scores, standard errors, dispositions, owner `participant_ref`, and version provenance into a JSON document and a human-readable report. Approved limitation text is required so the report cannot imply diagnosis, employment fitness, or a type score. Padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains. The snapshot is not mutated. HTTP `POST /v1/results/{result_ref}/exports` remains Target/active #256. Do not fold unrelated persistence into this domain slice.
 
 Merged #225 anonymous-session resource authorization compares the verified actor to the supplied participant tenant/owner and session and applies a lifecycle command only after that check. The command entry point does not accept a caller-built `ResourceScope` and does not claim the aggregates were store-loaded. Persist/reload of `assessment_participant` remains Target. Append-only identity-link history persistence remains a later slice. HTTP transport remains outside this slice. Persist-backed session HTTP, exclusive outbox delivery leases, longitudinal observation clocks/membership, and claim-next scoring-job poll are already on protected main.
+
+**Active PR** #224 item-delivery reload is not protected-main truth until an unchanged reviewed/check-clean head is integrated. Prefer #224 over #216, #186, and #110. `load_item_delivery_ledger` reconstructs one tenant-bound ledger from `item_delivery_ledger` / `item_delivery_event` under `READ COMMITTED` after `FOR SHARE` on the header. Reconstruct uses stored `delivery_sequence` order. A sequence gap, an item outside the stored allowed set, a foreign tenant, or a whitespace-padded tenant/session/release/item/event alias fails closed instead of inventing, skipping, trimming into another identity, or re-presenting items. `persist_item_delivery_ledger` also rejects a padded tenant or session alias before write. Domain reconstruction uses exact stored spelling. This does not add HTTP item delivery.
 
 ## 5. ADR traceability by concern
 
