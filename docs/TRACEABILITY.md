@@ -22,7 +22,7 @@ An active PR, architecture document, conversation decision, or scheduler plan is
 |---|---|---|---|---|
 | Anonymous core assessment | PRD §3.1, §9.1 | TRD §5, §10; UML anonymous sequence | ADR-0002, ADR-0003, ADR-0005 | Session lifecycle primitives implemented, including creation bound to one published locale-specific release; anonymous credential/HTTP flow is Target |
 | Pause/resume | PRD §3.1, §9.1 | TRD §5 | ADR-0005 | **Implemented** in `src/session.rs` with fail-closed transitions |
-| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs`; persistence/API delivery orchestration is Target |
+| Sequence-aware item delivery evidence | PRD §3.1, §9 | TRD §5–7 | ADR-0005, ADR-0010 | **Implemented** domain primitive in `src/item_delivery.rs` plus `migrations/0004_item_delivery_evidence.sql` / `src/postgres_item_delivery.rs`; durable `instrument_version_ref` pin is Active PR; HTTP delivery orchestration remains Target |
 | Idempotent response events | PRD §9.2 | TRD §6 | ADR-0005, ADR-0010 | **Implemented** in `src/response.rs` with canonical SHA-256 payload-digest identity; persistence adapter is Target |
 | Immutable response snapshot before scoring | PRD §9.3 | TRD §5–8 | ADR-0005, ADR-0010 | **Implemented** domain semantics in `src/response.rs` |
 | Version-pinned scoring | PRD §9.4, §10 | TRD §8 | ADR-0004, ADR-0010 | **Implemented** reusable product-side scoring dispatch contract in `src/scoring.rs` with canonical SHA-256 engine-artifact digest provenance, `migrations/0011_scoring_request.sql` / `src/postgres_scoring_request.rs` request-identity persistence, and protected-main request-bound external adapter `src/scoring_engine.rs`; live fast-mlsirm execution remains Target |
@@ -121,6 +121,7 @@ src/lib.rs
 ├── integration_publisher.rs  # product-owned immutable integration-event publishing boundary (merged)
 ├── integration_delivery.rs  # verified publisher-to-fenced-persistence handoff (merged #264)
 ├── item_delivery.rs  # sequence-aware delivery evidence without confidential response data
+├── postgres_item_delivery.rs  # PostgreSQL tenant-bound item-delivery ledger persistence
 ├── longitudinal_observation.rs  # longitudinal clocks, identity, and membership-share evidence
 ├── narrative.rs      # deterministic Personality Style identity/key
 ├── participant.rs    # stable participant identity + issuer-scoped optional Keyverse account link
@@ -155,12 +156,17 @@ migrations/
 ├── 0001_integration_delivery.sql through 0007_result_snapshot.sql
 ├── 0010_response_snapshot.sql through 0016_assessment_session_command.sql
 ├── 0018_data_rights_processing_start.sql
-└── 0019_inbox_claim_expiry_guard.sql
+├── 0019_inbox_claim_expiry_guard.sql
+├── 0024_data_rights_completion.sql
+├── 0031_longitudinal_observation.sql
+└── 0032_item_delivery_instrument_version.sql (**Active PR**)  # renumbered from 0020; 0020 is reserved by open PR #284
 ```
 
 Still-Target logical modules/adapters include remaining product aggregate persistence/repositories, remaining public/admin HTTP and event transports, live fast-mlsirm/Keyverse/Gyeot/TEPP/semantic-data-portal adapters, research-release staging, deterministic narrative mapping, longitudinal enrollment persistence, participant identity-link history persistence, runtime health transports/metrics, and Measurement Workbench orchestration.
 
 ### Active implementation work that is not protected-main truth
+
+**Active PR** item-delivery `instrument_version_ref` persistence is not protected-main truth until an unchanged reviewed/check-clean head is integrated. `ItemDeliveryLedger` copies the published instrument version from the release manifest, `migrations/0032_item_delivery_instrument_version.sql` stores that identity on `item_delivery_ledger`, and exact persist replay fails closed when a caller rebinds version under a reused digest. Session-authority item-set pinning and ledger reload after restart remain separate lanes. HTTP delivery transport remains Target.
 
 Merged #249 `authorize_result_export_read` is protected-main delivery-guard evidence in `src/result_export_authorization.rs`: it authorizes the stored participant/result with existing `ReadOwnResult` (ADR-0010 export provenance; ADR-0003 tenant-bound authorization) and then requires the export's `result_snapshot_ref` and copied `participant_ref` to match that exact immutable snapshot. Cross-tenant callers fail closed with the ordinary result-authorization denial before export-binding details are evaluated. No new permission or persistence was introduced; authorized HTTP transport ships through merged #256.
 Merged #231 personal result export is protected-main domain evidence. `ResultExport::from_snapshot` copies the stored construct scores, standard errors, dispositions, owner `participant_ref`, and version provenance into a JSON document and a human-readable report. Approved limitation text is required so the report cannot imply diagnosis, employment fitness, or a type score. Padded export aliases are rejected at this boundary without rewriting shared reference trimming used by consent and other domains. The snapshot is not mutated. Do not fold unrelated persistence into this domain slice.

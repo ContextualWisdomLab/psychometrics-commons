@@ -64,9 +64,9 @@ fn insert_ledger(client: &mut Client, tenant_ref: &str, session_ref: &str) {
     client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
-             ) VALUES ($1, $2, 'release_big_five_ko_v1', \
+                 tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                 release_content_digest, locale, allowed_item_version_refs\
+             ) VALUES ($1, $2, 'release_big_five_ko_v1', 'instrument_version_ko_v1', \
                  'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
                  'ko-KR', ARRAY['item_version_001'])",
             &[&tenant_ref, &session_ref],
@@ -147,9 +147,10 @@ fn ledger_and_event_rows_require_explicit_tenant_scope() {
     let invalid_ledger_tenant = client
         .execute(
             "INSERT INTO item_delivery_ledger (\
-                 tenant_ref, session_ref, instrument_release_ref, release_content_digest, locale, \
-                 allowed_item_version_refs\
+                 tenant_ref, session_ref, instrument_release_ref, instrument_version_ref, \
+                 release_content_digest, locale, allowed_item_version_refs\
              ) VALUES ('12', 'session_tenant_scope', 'release_big_five_ko_v1', \
+                 'instrument_version_ko_v1', \
                  'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', \
                  'ko-KR', ARRAY['item_version_001'])",
             &[],

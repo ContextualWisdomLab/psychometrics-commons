@@ -120,6 +120,7 @@ impl Error for ItemDeliveryError {}
 pub struct ItemDeliveryLedger {
     session_ref: String,
     instrument_release_ref: String,
+    instrument_version_ref: String,
     release_content_digest: String,
     locale: String,
     allowed_item_version_refs: Vec<String>,
@@ -129,9 +130,10 @@ pub struct ItemDeliveryLedger {
 impl ItemDeliveryLedger {
     /// Create an empty item-delivery ledger from one exact immutable release manifest.
     ///
-    /// Release identity, content digest, locale, and allowed item versions are copied
-    /// from the validated manifest as one unit. This prevents callers from composing
-    /// an apparently valid ledger from references that belong to different releases.
+    /// Release identity, instrument version, content digest, locale, and allowed item
+    /// versions are copied from the validated manifest as one unit. This prevents
+    /// callers from composing an apparently valid ledger from references that belong
+    /// to different releases.
     /// The session reference must already use its exact canonical spelling; this
     /// boundary rejects padded aliases instead of silently trimming them.
     ///
@@ -147,6 +149,7 @@ impl ItemDeliveryLedger {
         Ok(Self {
             session_ref: session_ref.to_owned(),
             instrument_release_ref: manifest.release_ref().to_owned(),
+            instrument_version_ref: manifest.instrument_version_ref().to_owned(),
             release_content_digest: manifest.content_digest().to_owned(),
             locale: manifest.locale().to_owned(),
             allowed_item_version_refs: manifest.item_version_refs().to_vec(),
@@ -164,6 +167,12 @@ impl ItemDeliveryLedger {
     #[must_use]
     pub fn instrument_release_ref(&self) -> &str {
         &self.instrument_release_ref
+    }
+
+    /// Return the immutable instrument-version reference pinned by this ledger.
+    #[must_use]
+    pub fn instrument_version_ref(&self) -> &str {
+        &self.instrument_version_ref
     }
 
     /// Return the canonical digest of the immutable release content.
