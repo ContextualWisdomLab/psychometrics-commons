@@ -72,7 +72,8 @@ pub enum PublicationEvidenceStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum InstrumentReleaseError {
-    /// A required reference was blank or numeric-like instead of opaque.
+    /// A required reference was blank, numeric-like, or not already in canonical form.
+    /// References with surrounding whitespace are rejected instead of being trimmed.
     InvalidReference,
     /// The release has no item versions.
     EmptyItemSet,
@@ -913,7 +914,12 @@ fn normalize_unique_references(
 }
 
 fn required_reference(reference: &str) -> Result<&str, InstrumentReleaseError> {
-    normalized_reference(reference).ok_or(InstrumentReleaseError::InvalidReference)
+    let normalized =
+        normalized_reference(reference).ok_or(InstrumentReleaseError::InvalidReference)?;
+    if normalized != reference {
+        return Err(InstrumentReleaseError::InvalidReference);
+    }
+    Ok(reference)
 }
 
 pub(crate) fn valid_sha256_digest(digest: &str) -> bool {
