@@ -64,3 +64,19 @@ Missing locale content blocks session creation for that locale rather than mixin
 ## Reversal conditions
 
 Specific locales or comparison claims may be expanded or restricted as evidence changes. The requirement to version translated instruments and validate intended comparisons remains.
+
+## Standards basis
+
+Cross-language comparison and a shared norm are score-interpretation claims. The *Standards for Educational and Psychological Testing* require fairness and validity evidence before such comparisons are offered, and they require that score reporting not imply a use the evidence does not support (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014). Kane (2013) treats an unsupported cross-locale interpretation as a failed interpretation/use argument.
+
+Differential item functioning (DIF) and measurement-invariance evaluation use item-response-theory methods (Embretson & Reise, 2000; Lord, 1980). This product versions locale-specific instruments and consumes invariance/DIF evidence from `fast-mlsirm`; it does not reimplement those kernels.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Embretson, S. E., & Reise, S. P. (2000). *Item response theory for psychologists*. Lawrence Erlbaum Associates.
+
+Kane, M. T. (2013). Validating the interpretations and uses of test scores. *Journal of Educational Measurement, 50*(1), 1–73. https://doi.org/10.1111/jedm.12000
+
+Lord, F. M. (1980). *Applications of item response theory to practical testing problems*. Lawrence Erlbaum Associates.

@@ -8,6 +8,10 @@ This document converts broad quality goals into **stimulus → environment → r
 
 ## 1. Scientific correctness and reproducibility
 
+### Standards basis
+
+Scientific-correctness scenarios in this section follow the *Standards for Educational and Psychological Testing* on validity, reliability/precision, fairness, and score reporting (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014). Score replay, fail-closed scientific failure, and historical result stability are product controls that keep Kane's (2013) interpretation/use argument attached to the exact pinned artifacts rather than to a later narrative or substitute score.
+
 ### QA-SCI-01 — Score replay
 
 - **Stimulus:** Recompute a published result from the exact immutable response snapshot and pinned AssessmentSpec/scoring/calibration/norm/engine artifacts.
@@ -263,3 +267,9 @@ A material unresolved trade-off requires an ADR.
 ## 15. Release use
 
 The release process converts applicable scenarios into measured gates. A scenario that has no implemented surface yet remains target architecture and cannot be reported as a passing control. GA deployment-profile commitments are populated only when the actual topology/workload/recovery mechanisms exist and have current evidence.
+
+## 16. References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Kane, M. T. (2013). Validating the interpretations and uses of test scores. *Journal of Educational Measurement, 50*(1), 1–73. https://doi.org/10.1111/jedm.12000

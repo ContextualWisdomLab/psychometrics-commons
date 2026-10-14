@@ -86,3 +86,13 @@ If consent verification is unavailable, optional research processing fails close
 ## Reversal conditions
 
 Revisit individual retention or withdrawal mechanics when a deployment's law or ethics approval imposes stricter requirements. The separation of service and research purposes remains mandatory.
+
+## Standards basis
+
+Purpose-specific consent and research separation follow the *Standards for Educational and Psychological Testing* on fairness and the rights of test takers, including informed consent and control over how results and identifiable data are used (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014). Using an assessment must not silently enroll a person in research. Optional research contribution cannot be a condition of receiving the core personal result unless that processing is required for the intended use and disclosed.
+
+This ADR does not treat a privacy-management-system edition number as a substitute for those testing-standards obligations. Deployment-specific law or ethics approval may impose stricter retention or withdrawal mechanics; it does not collapse service processing and research contribution into one bundled consent.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/

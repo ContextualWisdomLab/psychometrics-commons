@@ -249,3 +249,21 @@ Costs:
 ## Reversal conditions
 
 The evidence classes/policy language will evolve with instruments and scientific standards. The principle that product publication requires exact-version, intended-use-appropriate, auditable scientific/content/right evidence and cannot be satisfied by a narrative/admin assertion remains unless superseded by a stronger validated governance model.
+
+## Standards basis
+
+Publication and score-interpretation gates exist because a technically valid manifest is not scientific validity. The *Standards for Educational and Psychological Testing* require validity, reliability/precision, fairness, and score-reporting evidence appropriate to the claimed use (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014). Kane (2013) is the interpretation/use argument: an operator label or narrative cannot convert unknown or failed evidence into a supported score use.
+
+Recovery, DIF/invariance, linking, and scoreability evidence are item-response-theory and measurement methods (Embretson & Reise, 2000; Lord, 1980). Numerical evidence is produced by `fast-mlsirm`. When a release uses the upstream multilevel latent-space item-response model, that engine is Jeon et al. (2021) as consumed through `fast-mlsirm`; this product does not reimplement it.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Embretson, S. E., & Reise, S. P. (2000). *Item response theory for psychologists*. Lawrence Erlbaum Associates.
+
+Jeon, M., Jin, I. H., Schweinberger, M., & Baugh, S. (2021). Mapping unobserved item-respondent interactions: A latent space item response model with interaction map. *Psychometrika, 86*(2), 378–403. https://doi.org/10.1007/s11336-021-09776-z
+
+Kane, M. T. (2013). Validating the interpretations and uses of test scores. *Journal of Educational Measurement, 50*(1), 1–73. https://doi.org/10.1111/jedm.12000
+
+Lord, F. M. (1980). *Applications of item response theory to practical testing problems*. Lawrence Erlbaum Associates.

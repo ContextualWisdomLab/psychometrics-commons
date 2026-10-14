@@ -190,3 +190,21 @@ Costs:
 ## Reversal conditions
 
 If empirical evidence shows the narrative mapping is harmful, misleading, or adds no user value, the style layer can be retired while retaining continuous results. A future validated categorical instrument could be added only as its own independently measured construct, not as a silent reinterpretation of Big Five.
+
+## Standards basis
+
+Continuous Big Five and facet scores remain the measurement source of truth because validity and score reporting attach to the intended interpretation of those scores, not to a later presentation label (American Educational Research Association [AERA], American Psychological Association [APA], & National Council on Measurement in Education [NCME], 2014; Kane, 2013). Personality Style is a versioned presentation mapping. It is not a latent trait, and an LLM may not decide or alter the numeric result.
+
+Those numeric scores come from the pinned `fast-mlsirm` item-response-theory kernel (Embretson & Reise, 2000; Lord, 1980). When that kernel is the upstream multilevel latent-space item-response implementation, the scientific source is Jeon et al. (2021). This product does not reimplement that model.
+
+## References
+
+American Educational Research Association, American Psychological Association, & National Council on Measurement in Education. (2014). *Standards for educational and psychological testing*. American Educational Research Association. https://www.testingstandards.net/
+
+Embretson, S. E., & Reise, S. P. (2000). *Item response theory for psychologists*. Lawrence Erlbaum Associates.
+
+Jeon, M., Jin, I. H., Schweinberger, M., & Baugh, S. (2021). Mapping unobserved item-respondent interactions: A latent space item response model with interaction map. *Psychometrika, 86*(2), 378–403. https://doi.org/10.1007/s11336-021-09776-z
+
+Kane, M. T. (2013). Validating the interpretations and uses of test scores. *Journal of Educational Measurement, 50*(1), 1–73. https://doi.org/10.1111/jedm.12000
+
+Lord, F. M. (1980). *Applications of item response theory to practical testing problems*. Lawrence Erlbaum Associates.
