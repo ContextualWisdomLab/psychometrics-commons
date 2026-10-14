@@ -359,6 +359,7 @@ GET    /v1/sessions/{session_ref}
 POST   /v1/sessions/{session_ref}/responses
 POST   /v1/sessions/{session_ref}/commands
 GET    /v1/results/{result_ref}
+HEAD   /v1/results/{result_ref}
 POST   /v1/results/{result_ref}/exports
 POST   /v1/consents
 POST   /v1/research-contributions
@@ -366,6 +367,8 @@ POST   /v1/research-contributions/{contribution_ref}/withdrawals
 POST   /v1/data-rights/exports
 POST   /v1/data-rights/deletions
 ```
+
+The immutable result-read family treats `HEAD` as the metadata-only companion to `GET`; method rejection for that resource advertises `Allow: GET, HEAD` without changing result authorization or scientific content.
 
 All state-changing public requests require an idempotency key or a resource-specific equivalent.
 
