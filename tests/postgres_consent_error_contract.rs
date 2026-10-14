@@ -28,6 +28,10 @@ fn persistence_errors_expose_stable_messages_and_database_sources() {
             ConsentPersistenceError::UnsupportedIsolationLevel,
             "consent persistence requires read committed isolation",
         ),
+        (
+            ConsentPersistenceError::CorruptHistory,
+            "stored consent events cannot reconstruct a valid ledger",
+        ),
     ] {
         assert_eq!(error.to_string(), expected_message);
         assert!(std::error::Error::source(&error).is_none());
