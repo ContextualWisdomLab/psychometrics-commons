@@ -79,9 +79,22 @@ Public or controlled release bundles must not contain:
 
 - Keyverse subject identifiers;
 - `assessment_participant_ref` or other operational participant references;
+- hosted product-resource references such as assessment session, result, response, item-delivery, or scoring-request references that link research rows back to operational lifecycle records;
 - restricted linkage identifiers/keys;
-- service authentication identifiers/tokens;
+- service authentication identifiers/tokens or cookie/session credential material;
 - internal object-store or database credentials/locations that bypass access policy.
+
+Before packaging a public fixture, call `scan_public_release_fixture`.
+
+- Give the scanner the columns that the fixture will publish. Column names must use the service's ASCII schema grammar; non-ASCII aliases fail closed.
+- Give the scanner the product-authorized restricted-identity inventory for the represented people. Blank placeholders are ignored, but every nonblank identity entry must already be an exact valid opaque reference; a malformed nonblank entry makes the inventory unavailable rather than serving as clean-release evidence.
+- The scanner rejects governance/product identity columns, operational product-resource references, restricted linkage-key aliases, authentication/credential/internal-location columns, session-cookie/HTTP-cookie credential columns, structured cells it cannot inspect safely, and restricted identity values embedded anywhere in otherwise flat text.
+- Unicode default-ignorable formatting characters cannot be inserted into an otherwise matching restricted identity to make it publishable; the scanner rechecks the visible value after removing those characters.
+- Credential matching is intentionally conservative: normalized credential markers such as `token`, `secret`, `password`, and `credential` fail closed even inside a longer column word such as `tokenized_score`; a credential-shaped prefix such as `key_research_participant_ref` also fails closed. Rename a benign alias or establish a separately reviewed contract instead of weakening this boundary ad hoc. Cookie governance metadata such as consent status or policy version is not blanket-rejected merely for containing the word `cookie`.
+- If every restricted-identity inventory category is empty or blank, the scanner fails closed. Missing inventory is not clean release evidence.
+- The separately governed `research_participant_ref` namespace remains allowed unless a restricted-identity or credential namespace is prepended to it.
+
+This product boundary must not query Keyverse, a linkage service, or another service's application database to supplement missing inventory.
 
 ## 5. Research staging projection
 
@@ -288,6 +301,7 @@ As implementation grows, tests include:
 - non-opted-in contribution cannot enter snapshot;
 - withdrawn contribution excluded from future eligible snapshots;
 - operational/Keyverse/linkage identifiers fail release validation;
+- operational hosted-resource references cannot link released research rows back to product session/result/response/delivery/scoring records;
 - variable outside consent/research scope fails closed;
 - manifest digest/release-ID conflict rejected;
 - codebook/variable dictionary matches actual columns/types/categories;
