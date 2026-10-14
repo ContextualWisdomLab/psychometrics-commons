@@ -351,6 +351,7 @@ sequenceDiagram
     A->>DB: commit Completed + immutable response snapshot + outbox
     A-->>P: completion durable; scoring pending
 
+    Note over DB: Active PR #194 reloads the version pin after restart before scoring dispatch
     W->>F: submit pinned scoring request
     F--xW: unavailable / retryable transport failure
     W->>DB: record typed retryable job failure + bounded retry schedule
