@@ -130,6 +130,25 @@ impl AccountLinkEvent {
     pub const fn linked_at_unix_ms(&self) -> u64 {
         self.linked_at_unix_ms
     }
+
+    /// Rebuild one stored link event after persistence load.
+    pub(crate) fn from_stored(
+        link_event_ref: String,
+        issuer_ref: String,
+        subject_ref: String,
+        anonymous_proof_ref: String,
+        authenticated_proof_ref: String,
+        linked_at_unix_ms: u64,
+    ) -> Self {
+        Self {
+            link_event_ref,
+            issuer_ref,
+            subject_ref,
+            anonymous_proof_ref,
+            authenticated_proof_ref,
+            linked_at_unix_ms,
+        }
+    }
 }
 
 /// Immutable audit evidence that a previously current identity link ended.
@@ -169,6 +188,21 @@ impl AccountLinkEndEvent {
     #[must_use]
     pub const fn ended_at_unix_ms(&self) -> u64 {
         self.ended_at_unix_ms
+    }
+
+    /// Rebuild one stored link-end event after persistence load.
+    pub(crate) fn from_stored(
+        link_end_event_ref: String,
+        linked_event_ref: String,
+        evidence_ref: String,
+        ended_at_unix_ms: u64,
+    ) -> Self {
+        Self {
+            link_end_event_ref,
+            linked_event_ref,
+            evidence_ref,
+            ended_at_unix_ms,
+        }
     }
 }
 
