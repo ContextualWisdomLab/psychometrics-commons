@@ -68,7 +68,43 @@ const fn is_default_ignorable_identifier_character(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::normalized_reference;
+    use super::{is_default_ignorable_identifier_character, normalized_reference};
+
+    fn assessment_session_default_ignorable_ranges() -> Vec<(u32, u32)> {
+        let migration = include_str!("../migrations/0014_assessment_session.sql");
+        let alias_index = migration
+            .find("AS is_default_ignorable")
+            .expect("assessment-session migration must name the default-ignorable classifier");
+        let classifier_prefix = &migration[..alias_index];
+        let literal_start = classifier_prefix
+            .rfind("'{")
+            .expect("default-ignorable classifier must use an int4multirange literal")
+            + 2;
+        let literal_end = classifier_prefix
+            .rfind("}'::int4multirange")
+            .expect("default-ignorable classifier must terminate its int4multirange literal");
+
+        migration[literal_start..literal_end]
+            .split("),")
+            .map(|raw_range| {
+                let raw_range = raw_range
+                    .trim()
+                    .strip_prefix('[')
+                    .expect("default-ignorable ranges must have inclusive lower bounds")
+                    .trim_end_matches(')');
+                let (start, end) = raw_range
+                    .split_once(',')
+                    .expect("default-ignorable ranges must contain lower and upper bounds");
+                (
+                    start
+                        .parse::<u32>()
+                        .expect("default-ignorable lower bound must be an integer"),
+                    end.parse::<u32>()
+                        .expect("default-ignorable upper bound must be an integer"),
+                )
+            })
+            .collect()
+    }
 
     #[test]
     fn opaque_references_reject_embedded_control_characters() {
@@ -94,6 +130,23 @@ mod tests {
             "participant\u{e0001}_account",
         ] {
             assert_eq!(normalized_reference(reference), None, "{reference:?}");
+        }
+    }
+
+    #[test]
+    fn assessment_session_sql_default_ignorable_ranges_match_the_real_rust_guard() {
+        let sql_ranges = assessment_session_default_ignorable_ranges();
+
+        for character in (0u32..=0x0010_FFFF).filter_map(char::from_u32) {
+            let code_point = u32::from(character);
+            let sql_classifies_default_ignorable = sql_ranges
+                .iter()
+                .any(|(start, end)| *start <= code_point && code_point < *end);
+            assert_eq!(
+                sql_classifies_default_ignorable,
+                is_default_ignorable_identifier_character(character),
+                "assessment-session SQL/Rust default-ignorable drift at U+{code_point:04X}"
+            );
         }
     }
 

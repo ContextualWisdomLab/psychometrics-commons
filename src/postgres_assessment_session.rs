@@ -2332,7 +2332,7 @@ mod tests {
         client
             .batch_execute(
                 "ALTER TABLE assessment_session \
-                     DROP CONSTRAINT assessment_session_participant_ref_check; \
+                     DROP CONSTRAINT assessment_session_participant_ref_format_check; \
                  INSERT INTO assessment_session (\
                      session_ref, participant_ref, instrument_release_ref, \
                      instrument_version_ref, instrument_release_content_digest, \
