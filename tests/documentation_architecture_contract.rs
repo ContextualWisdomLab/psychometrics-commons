@@ -284,6 +284,42 @@ fn traceability_distinguishes_current_implementation_from_targets() {
 }
 
 #[test]
+fn item_delivery_openapi_lists_only_implemented_item_delivery_operations() {
+    let openapi = read_required(&repository_root().join("openapi/item-deliveries.yaml"));
+    assert!(
+        openapi.contains("openapi: 3.2.0"),
+        "item-delivery OpenAPI must pin OpenAPI 3.2.0"
+    );
+    assert!(
+        repository_root()
+            .join("src/item_delivery_http.rs")
+            .is_file(),
+        "item-delivery OpenAPI requires the matching HTTP transport"
+    );
+    for implemented in [
+        "/v1/sessions/{session_ref}/item-deliveries",
+        "operationId: recordItemDelivery",
+        "operationId: listItemDeliveries",
+    ] {
+        assert!(
+            openapi.contains(implemented),
+            "item-delivery OpenAPI must include {implemented}"
+        );
+    }
+    for unimplemented in [
+        "/v1/responses",
+        "/v1/results",
+        "/v1/scoring",
+        "createSession",
+    ] {
+        assert!(
+            !openapi.contains(unimplemented),
+            "item-delivery OpenAPI must not advertise {unimplemented}"
+        );
+    }
+}
+
+#[test]
 fn required_architecture_decisions_are_indexed() {
     let index = read_required(&repository_root().join("docs/adr/README.md"));
 

@@ -1,0 +1,185 @@
+openapi: 3.2.0
+info:
+  title: Psychometrics Commons public item-delivery API
+  version: 0.1.0
+  description: >
+    As-built public item-delivery record and exact-identity reload. These
+    operations record that one published item version was shown to an Active
+    in-process session. They do not select or calibrate items, persist ledgers
+    across process restart, or expose response, scoring, or result families.
+paths:
+  /v1/sessions/{session_ref}/item-deliveries:
+    post:
+      operationId: recordItemDelivery
+      summary: Record one item delivery
+      description: >
+        Records that one item version from the session's bound published release
+        was shown. The server assigns a monotonic sequence. An exact, unpadded,
+        non-duplicate Idempotency-Key replay that matches delivery_ref returns
+        the original event; the request must use application/json.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque in-process session reference.
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Opaque replay key; must exactly match delivery_ref.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ItemDeliveryRecordRequest"
+      responses:
+        "201":
+          description: Delivery was accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDeliveryEvent"
+        "200":
+          description: Exact idempotent replay of a previous delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDeliveryEvent"
+        "400":
+          $ref: "#/components/responses/Problem"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+        "409":
+          $ref: "#/components/responses/Problem"
+        "415":
+          $ref: "#/components/responses/Problem"
+    get:
+      operationId: listItemDeliveries
+      summary: Reload delivered items for one session
+      description: >
+        Returns the in-process server-ordered item-delivery ledger so a client
+        can resume the same session. The response includes the bound release
+        digest, lifecycle state, and exact allowed item-version set. This
+        in-process route has no tenant authentication or capability-URL
+        authority; hosted authorization remains a separate family.
+      parameters:
+        - name: session_ref
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Opaque in-process session reference.
+      responses:
+        "200":
+          description: Ledger exists in this process.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ItemDeliveryLedger"
+        "404":
+          $ref: "#/components/responses/Problem"
+        "405":
+          $ref: "#/components/responses/Problem"
+components:
+  schemas:
+    ItemDeliveryRecordRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - delivery_ref
+        - item_version_ref
+        - presentation_context_ref
+      properties:
+        delivery_ref:
+          type: string
+        item_version_ref:
+          type: string
+        presentation_context_ref:
+          type: string
+        selection_evidence_ref:
+          type: string
+    ItemDeliveryEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - instrument_release_ref
+        - locale
+        - delivery_ref
+        - item_version_ref
+        - presentation_context_ref
+        - sequence
+      properties:
+        session_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        locale:
+          type: string
+        delivery_ref:
+          type: string
+        item_version_ref:
+          type: string
+        presentation_context_ref:
+          type: string
+        selection_evidence_ref:
+          type: string
+        sequence:
+          type: integer
+          minimum: 1
+    ItemDeliveryLedger:
+      type: object
+      additionalProperties: false
+      required:
+        - session_ref
+        - instrument_release_ref
+        - release_content_digest
+        - locale
+        - session_state
+        - allowed_item_version_refs
+        - events
+      properties:
+        session_ref:
+          type: string
+        instrument_release_ref:
+          type: string
+        release_content_digest:
+          type: string
+        locale:
+          type: string
+        session_state:
+          type: string
+        allowed_item_version_refs:
+          type: array
+          items:
+            type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ItemDeliveryEvent"
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+  responses:
+    Problem:
+      description: Safe RFC 9457 problem details without raw request or store errors.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

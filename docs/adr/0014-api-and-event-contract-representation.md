@@ -6,7 +6,7 @@
 - Scope: Psychometrics Commons public/admin HTTP APIs, product-owned durable domain events, errors, schema/version negotiation
 - Supersedes: none
 - Superseded by: none
-- Current/as-built status: persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`) exists on Active PR #232 and is not protected-main truth; remaining public/admin families and durable external event transport are still unimplemented on protected main
+- Current/as-built status: public/admin HTTP transport and durable external event transport are not yet protected-main truth; current Rust domain contracts are transport-neutral. Persist-backed session create/reload HTTP (`POST /v1/sessions`, `GET /v1/sessions/{session_ref}`, `openapi/sessions.yaml`) is on Active PR #232, and item-delivery HTTP (`POST`/`GET` `/v1/sessions/{session_ref}/item-deliveries` plus `openapi/item-deliveries.yaml`) is on Active PR #197; both require unchanged reviewed/check-clean heads before integration.
 - Target status: every implemented HTTP/event surface has an exact versioned machine-readable as-built contract and deterministic integrity/idempotency semantics
 - Migration status: no deployed HTTP/event transport requires migration yet; the first implementation must introduce the contract in the same or prerequisite PR
 

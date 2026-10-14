@@ -75,6 +75,17 @@ Product consequences:
 - higher-impact AI changes require an impact/risk assessment proportional to intended use and affected participants;
 - model/prompt/provider drift is observable and does not silently alter historical results.
 
+## Public HTTP contracts
+
+Implemented public HTTP families use HTTP Semantics (RFC 9110) for method, target, and status behavior; Problem Details for HTTP APIs (RFC 9457) for fail-closed machine-readable errors; and OpenAPI Specification 3.2.0 as the as-built contract vocabulary. A contract may list only operations the corresponding transport actually serves.
+
+Product consequences:
+
+- state-changing item-delivery records require an opaque `Idempotency-Key` that matches `delivery_ref`;
+- unknown methods, numeric public identifiers, unpublished item versions, and inactive sessions fail closed with `application/problem+json`;
+- problem details never echo raw request bodies, SQL, or provider text;
+- `openapi/item-deliveries.yaml` is the as-built contract for this family and must not advertise session create, response, scoring, or result operations.
+
 ## Temporal and provenance evidence
 
 Longitudinal observations distinguish validity time from source-recorded time,
@@ -175,6 +186,12 @@ PostgreSQL Global Development Group. (2026a). *SELECT*. https://www.postgresql.o
 PostgreSQL Global Development Group. (2026b). *Transaction isolation*. https://www.postgresql.org/docs/18/transaction-iso.html
 
 Temoshok, D., Proud-Madruga, D., Choong, Y.-Y., Galluzzo, R., Gupta, S., LaSalle, C., Lefkovitz, N., & Regenscheid, A. (2025). *Digital identity guidelines* (NIST Special Publication 800-63-4). National Institute of Standards and Technology. https://doi.org/10.6028/NIST.SP.800-63-4
+
+Internet Engineering Task Force. (2022). *HTTP semantics* (RFC 9110). https://www.rfc-editor.org/rfc/rfc9110
+
+Internet Engineering Task Force. (2023). *Problem details for HTTP APIs* (RFC 9457). https://www.rfc-editor.org/rfc/rfc9457
+
+OpenAPI Initiative. (2025). *OpenAPI Specification v3.2.0*. https://spec.openapis.org/oas/v3.2.0
 
 World Wide Web Consortium. (2024). *Web Content Accessibility Guidelines (WCAG) 2.2* (W3C Recommendation, 12 December 2024). https://www.w3.org/TR/WCAG22/
 

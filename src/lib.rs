@@ -24,6 +24,8 @@ pub mod integration;
 pub mod integration_delivery;
 pub mod integration_publisher;
 pub mod item_delivery;
+#[path = "item_delivery_http_boundary.rs"]
+pub mod item_delivery_http;
 pub mod localized_result_report;
 pub mod longitudinal_observation;
 pub mod narrative;
