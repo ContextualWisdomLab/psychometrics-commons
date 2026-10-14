@@ -152,6 +152,13 @@ fn assert_field_rejects(client: &mut Client, field: SnapshotField, constraint: &
         "\u{00a0}opaque_alpha",
         "\u{2003}opaque_alpha\u{2003}",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ]
     .into_iter()
     .enumerate()
@@ -229,6 +236,13 @@ fn consent_array_and_observation_construct_share_the_rust_reference_boundary() {
         "\u{00a0}opaque_alpha",
         "\u{2003}opaque_alpha\u{2003}",
         "opaque_\u{0001}_alpha",
+        "opaque_\u{00ad}_alpha",
+        "opaque_\u{200b}_alpha",
+        "opaque_\u{200d}_alpha",
+        "opaque_\u{2060}_alpha",
+        "opaque_\u{fe0f}_alpha",
+        "opaque_\u{feff}_alpha",
+        "opaque_\u{e0001}_alpha",
     ];
 
     for (index, invalid_ref) in invalid_references.into_iter().enumerate() {
@@ -271,7 +285,7 @@ fn migration_reapplication_revalidates_existing_result_rows() {
         )
         .unwrap();
     let mut refs = SnapshotRefs::valid("upgrade_guard");
-    refs.result = "½".to_owned();
+    refs.result = "result_\u{200b}_historical".to_owned();
     insert_snapshot(&mut client, &refs, &["consent_snapshot_service"])
         .expect("the deliberately weakened historical CHECK should admit the regression row");
 
