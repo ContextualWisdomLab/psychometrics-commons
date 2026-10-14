@@ -19,6 +19,12 @@ Evidence status uses these meanings:
 
 The authority order is accepted/superseding ADR → PRD/TRD → measurement, AI, and research governance → quality/security/compliance/risk constraints → architecture views → machine-readable contracts → code, migrations, tests, and operational evidence. A lower layer cannot promote a target into shipped behavior.
 
+### Active PR #422 runtime-coverage RCA (2026-09-27)
+
+Exact head `a15db5621a4898d7caf6b6583175f5db9f8c79e1` failed Runtime CI run `33217956321`: production line coverage job `99005726274` reported `13,109/13,110`, and production branch coverage job `99005726054` reported `1,689/1,690`. Both named `src/postgres_instrument_catalog.rs`; format, lint, tests, rustdoc, Security, SAST, SBOM, and provenance succeeded on the same head. The detailed `llvm-cov` evidence showed the `GenericClient` catalog functions instantiated independently in `postgres_instrument_startable_catalog.rs` and `postgres_instrument_startable_catalog_pagination.rs`: the ordinary catalog binary exercised the non-pagination path while the pagination binary exercised the cursor and bounded-page paths. Counting both partial monomorphizations left one line and branch uncovered even though the complete PostgreSQL behavior matrix existed.
+
+The smallest owner repair keeps every real PostgreSQL case and compiles pagination as a module of the catalog integration target, producing one complete monomorphization rather than weakening or excluding the 100% gate. This remains **Active PR** evidence until the repaired exact head completes Runtime CI line and branch coverage plus the other required checks; queued or pending results are not passing evidence.
+
 ## Observed protected-main baseline
 
 The evaluated head contains a Rust product-runtime library with PostgreSQL adapters and three as-built HTTP families (session, result read/export):

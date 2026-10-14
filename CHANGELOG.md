@@ -73,6 +73,7 @@ All notable product and architecture changes are recorded here. Releases use imm
 
 ### Fixed
 
+- Runtime coverage now compiles bounded startable-instrument pagination and catalog acceptance in one integration-test target. This preserves the PostgreSQL scenarios while preventing duplicate `GenericClient` monomorphizations from reporting one uncovered line and branch despite the combined cases exercising both paths.
 - Stale shorter assessment-session command history now fails closed instead of rewinding the current-state projection, so a later Pause/Resume still reloads after a rejected Activate-only persist.
 - Same-enrollment longitudinal ingest now keeps a later iOS copy and a later Android ping as distinct source identities instead of treating them as a rewrite of the first row.
 - Outbox delivery-lease expiry recovery now classifies liveness from the PostgreSQL clock, so a future caller timestamp cannot steal a still-live exclusive lease.

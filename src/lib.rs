@@ -35,6 +35,7 @@ pub mod postgres_data_rights_completion;
 pub mod postgres_data_rights_processing;
 pub mod postgres_health;
 pub mod postgres_inbox_consumption;
+pub mod postgres_instrument_catalog;
 pub mod postgres_instrument_release;
 pub mod postgres_integration;
 pub mod postgres_item_delivery;
