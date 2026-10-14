@@ -5,7 +5,7 @@
 //! Instead, it verifies the ADR-0018 canonical style-assignment identity and renders only the
 //! localized interpretation units selected by an approved, separately versioned mapping.
 
-use crate::narrative::{StyleAssignmentIdentity, StyleAssignmentKey};
+use crate::narrative::{ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentKey};
 use crate::reference::normalized_reference;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -151,6 +151,7 @@ impl DeterministicNarrativeBundle<'_> {
         selection: &ApprovedStyleSelection<'_>,
     ) -> Result<RenderedNarrative, NarrativeFallbackError> {
         self.validate()?;
+        validate_canonical_assignment_identity(identity)?;
         let assignment_key = identity
             .assignment_key()
             .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
@@ -261,6 +262,28 @@ fn validate_interpretation_selection(
             return Err(NarrativeFallbackError::DuplicateReference);
         }
         seen.push(unit_ref);
+    }
+    Ok(())
+}
+
+fn validate_canonical_assignment_identity(
+    identity: &StyleAssignmentIdentity<'_>,
+) -> Result<(), NarrativeFallbackError> {
+    if let ScoreIdentity::ScoreProfileRef(reference) = identity.score_identity {
+        required_canonical_reference(reference)
+            .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
+    }
+    for reference in [
+        identity.instrument_version_ref,
+        identity.scoring_version_ref,
+        identity.style_mapping_version_ref,
+    ] {
+        required_canonical_reference(reference)
+            .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
+    }
+    if let Some(reference) = identity.norm_version_ref {
+        required_canonical_reference(reference)
+            .map_err(|_| NarrativeFallbackError::InvalidIdentity)?;
     }
     Ok(())
 }

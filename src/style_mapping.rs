@@ -20,7 +20,8 @@
 //! in `docs/adr/0018-continuous-scores-and-narrative-separation.md`.
 
 use crate::deterministic_narrative::ApprovedStyleSelection;
-use crate::narrative::{StyleAssignmentIdentity, StyleAssignmentKey};
+use crate::narrative::{ScoreIdentity, StyleAssignmentIdentity, StyleAssignmentKey};
+use crate::reference::normalized_reference;
 use crate::scoring::{ObservationDisposition, ScoreObservation};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -198,6 +199,7 @@ pub fn assign_personality_style(
     identity: &StyleAssignmentIdentity<'_>,
     observations: &[ScoreObservation],
 ) -> Result<AssignedPersonalityStyle, StyleMappingError> {
+    validate_canonical_assignment_identity(identity)?;
     if identity.style_mapping_version_ref != STYLE_MAPPING_VERSION_V1 {
         return Err(StyleMappingError::UnsupportedMappingVersion);
     }
@@ -254,6 +256,33 @@ pub fn assign_personality_style(
         adjacent_style_refs: adjacent.iter().map(|pole| pole.style_ref).collect(),
         interpretation_unit_refs,
     })
+}
+
+fn validate_canonical_assignment_identity(
+    identity: &StyleAssignmentIdentity<'_>,
+) -> Result<(), StyleMappingError> {
+    if let ScoreIdentity::ScoreProfileRef(reference) = identity.score_identity {
+        require_canonical_identity_reference(reference)?;
+    }
+    for reference in [
+        identity.instrument_version_ref,
+        identity.scoring_version_ref,
+        identity.style_mapping_version_ref,
+    ] {
+        require_canonical_identity_reference(reference)?;
+    }
+    if let Some(reference) = identity.norm_version_ref {
+        require_canonical_identity_reference(reference)?;
+    }
+    Ok(())
+}
+
+fn require_canonical_identity_reference(reference: &str) -> Result<(), StyleMappingError> {
+    if normalized_reference(reference) == Some(reference) {
+        Ok(())
+    } else {
+        Err(StyleMappingError::InvalidIdentity)
+    }
 }
 
 fn required_scored_observation<'a>(
