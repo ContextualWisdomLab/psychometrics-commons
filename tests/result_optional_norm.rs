@@ -1,5 +1,8 @@
 //! Result provenance preserves the intentional absence of a norm version.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -47,7 +50,13 @@ fn result_snapshot_preserves_absent_norm_without_inventing_provenance() {
         vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
     )
     .unwrap();
+    let session = common::scoring_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
     let snapshot = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {

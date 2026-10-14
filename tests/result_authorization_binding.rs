@@ -1,5 +1,8 @@
 //! Regression tests for result reads bound to authoritative participant ownership.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -60,7 +63,13 @@ fn result_snapshot(participant_ref: &str) -> ResultSnapshot {
     )
     .unwrap();
 
+    let scoring_session = common::scoring_session(
+        scoring_request.session_ref(),
+        participant_ref,
+        scoring_request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &scoring_session,
         &scoring_request,
         &scoring_result,
         ResultSnapshotInput {

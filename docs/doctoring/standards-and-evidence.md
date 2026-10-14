@@ -18,7 +18,8 @@ Product consequences:
 - precision/uncertainty is not hidden behind a point estimate;
 - translated forms and group comparisons require evidence appropriate to the intended comparison;
 - automated or AI-assisted components do not become the source of numeric truth without the same validation obligations as other scoring mechanisms;
-- correlation with another score is supporting evidence at most, not proof of accuracy or validity.
+- correlation with another score is supporting evidence at most, not proof of accuracy or validity;
+- a personal result is published only after response collection is closed and scoring has begun for that exact session, so a Created, Active, cancelled, or already-released session cannot receive a score (American Educational Research Association et al., 2014).
 
 ## Web accessibility
 

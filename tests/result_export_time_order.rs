@@ -1,5 +1,8 @@
 //! Personal result exports preserve causal time ordering with their source result.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -59,7 +62,13 @@ fn snapshot() -> ResultSnapshot {
     )
     .unwrap();
 
+    let scoring = common::scoring_session(
+        request.session_ref(),
+        "participant_export_time_order",
+        request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &scoring,
         &request,
         &result,
         ResultSnapshotInput {

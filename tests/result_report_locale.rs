@@ -12,6 +12,9 @@ use psychometrics_commons_runtime::scoring::{
 use psychometrics_commons_runtime::session::SessionState;
 use std::error::Error;
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -76,7 +79,13 @@ fn result_snapshot() -> ResultSnapshot {
         ],
     )
     .unwrap();
+    let scoring_session = common::scoring_session(
+        request.session_ref(),
+        "participant_locale_alpha",
+        request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &scoring_session,
         &request,
         &result,
         ResultSnapshotInput {

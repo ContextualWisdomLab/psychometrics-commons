@@ -1,5 +1,8 @@
 //! Fail-first regressions for scoring provenance binding and exact reference identity.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -98,12 +101,18 @@ fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract
         vec![ScoreObservation::scored("construct_ref", 1.0, None).unwrap()],
     )
     .unwrap();
+    let session = common::scoring_session(
+        request.session_ref(),
+        "participant_ref",
+        request.instrument_version_ref(),
+    );
 
     assert_eq!(result.scoring_result_ref(), "scoring_result_ref");
     assert_eq!(result.engine_artifact_digest(), ENGINE_DIGEST);
     assert_eq!(result.observations()[0].construct_ref(), "construct_ref");
 
     let duplicate = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {
@@ -119,6 +128,7 @@ fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract
     assert_eq!(duplicate, ResultSnapshotError::DuplicateConsentSnapshot);
 
     let self_supersession = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {
@@ -134,6 +144,7 @@ fn result_identity_and_consent_comparisons_keep_their_own_normalization_contract
     assert_eq!(self_supersession, ResultSnapshotError::SelfSupersession);
 
     let normalized = ResultSnapshot::new(
+        &session,
         &request,
         &result,
         ResultSnapshotInput {

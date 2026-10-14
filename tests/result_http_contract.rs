@@ -1,5 +1,8 @@
 //! Contract tests for authorized immutable result retrieval over HTTP.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[path = "response_support/mod.rs"]
 mod response_support;
 
@@ -80,7 +83,13 @@ fn result_snapshot_with_provenance(
     )
     .unwrap();
 
+    let scoring_session = common::scoring_session(
+        scoring_request.session_ref(),
+        participant_ref,
+        scoring_request.instrument_version_ref(),
+    );
     ResultSnapshot::new(
+        &scoring_session,
         &scoring_request,
         &scoring_result,
         ResultSnapshotInput {
